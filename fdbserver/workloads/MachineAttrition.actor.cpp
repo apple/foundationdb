@@ -140,7 +140,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				else
 					kt = ISimulator::RebootAndDelete;
 			}
-			TraceEvent("Assassination").detailext("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
+			TraceEvent("Assassination").detail("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
 
 			g_simulator.killDataCenter( target, kt );
 		} else {
@@ -176,7 +176,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detailext("ZoneId", targetMachine.zoneId())
+					.detail("ZoneId", targetMachine.zoneId())
 					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
 					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
 					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);

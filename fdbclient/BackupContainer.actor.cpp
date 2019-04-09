@@ -1380,7 +1380,7 @@ public:
 				m_bucket = kv.second;
 				continue;
 			}
-			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", printable(kv.first)).detail("Value", printable(kv.second));
+			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", kv.first).detail("Value", kv.second);
 			IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", kv.first.c_str());
 			throw backup_invalid_url();
 		}

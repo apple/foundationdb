@@ -203,9 +203,9 @@ StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", printable(mutation.param1)).detail("Value", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
 	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", printable(mutation.param1)).detail("KeyEnd", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 	else
 		return false;
 	const char* type =
@@ -223,7 +223,7 @@ bool debugMutation( const char* context, Version version, MutationRef const& mut
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
 	if (keys.contains(debugKey) || keys.contains(debugKey2)) {
 		debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end) );
-		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", printable(keys.begin)).detail("KeyEnd", printable(keys.end));
+		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return true;
 	} else
 		return false;

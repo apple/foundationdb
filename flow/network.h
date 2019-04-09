@@ -80,6 +80,8 @@ enum {
 
 class Void;
 
+template<class T> class Optional;
+
 struct IPAddress {
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
 	// only the first 32bits are relevant and rest are initialized to
@@ -144,6 +146,13 @@ private:
 	} addr;
 };
 
+template<>
+struct Traceable<IPAddress> : std::true_type {
+	static std::string toString(const IPAddress& value) {
+		return value.toString();
+	}
+};
+
 struct NetworkAddress {
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
 	IPAddress ip;
@@ -189,6 +198,13 @@ struct NetworkAddress {
 		} else {
 			serializer(ar, ip, port, flags);
 		}
+	}
+};
+
+template<>
+struct Traceable<NetworkAddress> : std::true_type {
+	static std::string toString(const NetworkAddress& value) {
+		return value.toString();
 	}
 };
 

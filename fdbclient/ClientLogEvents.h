@@ -81,7 +81,7 @@ namespace FdbClientLogEvents {
 		Key key;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", printable(key));
+			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", key);
 		}
 	};
 
@@ -102,7 +102,7 @@ namespace FdbClientLogEvents {
 		Key endKey;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
+			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", startKey).detail("EndKey", endKey);
 		}
 	};
 
@@ -124,11 +124,11 @@ namespace FdbClientLogEvents {
 
 		void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
+				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
@@ -154,7 +154,7 @@ namespace FdbClientLogEvents {
 		Key key;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", printable(key));
+			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", key);
 		}
 	};
 
@@ -174,7 +174,7 @@ namespace FdbClientLogEvents {
 		Key endKey;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
+			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", startKey).detail("EndKey", endKey);
 		}
 	};
 
@@ -194,11 +194,11 @@ namespace FdbClientLogEvents {
 
 		void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
+				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {

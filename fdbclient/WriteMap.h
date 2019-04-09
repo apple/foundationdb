@@ -543,8 +543,8 @@ private:
 		iterator it( this );
 		it.skip(allKeys.begin);
 		while( it.beginKey() < allKeys.end ) {
-			TraceEvent("WriteMapDump").detail("Begin", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("End", printable(it.endKey().toStandaloneStringRef()))
+			TraceEvent("WriteMapDump").detail("Begin", it.beginKey().toStandaloneStringRef())
+				.detail("End", it.endKey())
 				.detail("Cleared", it.is_cleared_range())
 				.detail("Conflicted", it.is_conflict_range())
 				.detail("Operation", it.is_operation())

@@ -66,13 +66,6 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
-  sqlite/btree.h
-  sqlite/hash.h
-  sqlite/sqlite3.h
-  sqlite/sqlite3ext.h
-  sqlite/sqliteInt.h
-  sqlite/sqliteLimit.h
-  sqlite/sqlite3.amalgamation.c
   Status.actor.cpp
   Status.h
   StorageMetrics.actor.h
@@ -177,6 +170,18 @@ set(FDBSERVER_SRCS
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 
+set(SQLITE_SRCS
+  sqlite/btree.h
+  sqlite/hash.h
+  sqlite/sqlite3.h
+  sqlite/sqlite3ext.h
+  sqlite/sqliteInt.h
+  sqlite/sqliteLimit.h
+  sqlite/sqlite3.amalgamation.c)
+
+add_library(sqlite ${SQLITE_SRCS})
+target_compile_definitions(sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
+
 set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
 set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
 if(WITH_JAVA_WORKLOAD)
@@ -189,7 +194,7 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient)
+target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
 if(WITH_JAVA_WORKLOAD)
   if(NOT JNI_FOUND)
     message(SEND_ERROR "Trying to build Java workload but couldn't find JNI")

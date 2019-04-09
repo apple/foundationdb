@@ -212,7 +212,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", printable(StringRef(t->first)));
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", t->first);
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;

@@ -842,8 +842,8 @@ ACTOR Future<Void> commitBatch(
 
 //				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
 //					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
-//						.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", printable(logRangeMutation.first))
-//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", printable(backupMutation.param1));
+//						.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
 //				}
 			}
 		}

@@ -1211,7 +1211,7 @@ int SQLiteDB::checkAllPageChecksums() {
 	Statement *jm = new Statement(*this, "PRAGMA journal_mode");
 	ASSERT( jm->nextRow() );
 	if (jm->column(0) != LiteralStringRef("wal")){
-		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", printable(jm->column(0)));
+		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm->column(0));
 		ASSERT( false );
 	}
 	delete jm;
@@ -1337,7 +1337,7 @@ void SQLiteDB::open(bool writable) {
 	Statement jm(*this, "PRAGMA journal_mode");
 	ASSERT( jm.nextRow() );
 	if (jm.column(0) != LiteralStringRef("wal")){
-		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", printable(jm.column(0)));
+		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT( false );
 	}
 

@@ -1381,6 +1381,21 @@ struct MetricHandle {
 	Reference<T> ref;
 };
 
+template<class T>
+struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
+	static std::string toString(const MetricHandle<T>& value) {
+		return Traceable<typename T::ValueType>::toString(value.getValue());
+	}
+};
+
+template<class T>
+struct SpecialTraceMetricType<MetricHandle<T>> : SpecialTraceMetricType<typename T::ValueType> {
+	using parent = SpecialTraceMetricType<typename T::ValueType>;
+	static auto getValue(const MetricHandle<T>& value) -> decltype(parent::getValue(value.getValue())) {
+		return parent::getValue(value.getValue());
+	}
+};
+
 typedef MetricHandle<Int64Metric> Int64MetricHandle;
 typedef MetricHandle<VersionMetric> VersionMetricHandle;
 typedef MetricHandle<BoolMetric> BoolMetricHandle;

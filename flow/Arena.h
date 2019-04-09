@@ -33,6 +33,7 @@
 #include <limits>
 #include <set>
 #include <type_traits>
+#include <sstream>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -421,6 +422,13 @@ private:
 	bool valid;
 };
 
+template<class T>
+struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Optional<T>& value) {
+		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
+	}
+};
+
 //#define STANDALONE_ALWAYS_COPY
 
 template <class T>
@@ -559,16 +567,9 @@ public:
 	}
 
 	std::string toString() const { return std::string( (const char*)data, length ); }
-	std::string printable() const {
-		std::string s;
-		for (int i = 0; i<length; i++) {
-			uint8_t b = (*this)[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
-		}
-		return s;
-	}
+
+	static bool isPrintable(char c) { return c > 32 && c < 127; }
+	inline std::string printable() const;
 
 	std::string toHexString(int limit = -1) const {
 		if(limit < 0)
@@ -651,6 +652,35 @@ private:
 	int length;
 };
 #pragma pack( pop )
+
+template<>
+struct TraceableString<StringRef> {
+	static const char* begin(StringRef value) {
+		return reinterpret_cast<const char*>(value.begin());
+	}
+
+	static bool atEnd(const StringRef& value, const char* iter) {
+		return iter == reinterpret_cast<const char*>(value.end());
+	}
+
+	static std::string toString(const StringRef& value) {
+		return value.toString();
+	}
+};
+
+template<>
+struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
+
+inline std::string StringRef::printable() const {
+	return Traceable<StringRef>::toString(*this);
+}
+
+template<class T>
+struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Standalone<T>& value) {
+		return Traceable<T>::toString(value);
+	}
+};
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
 
@@ -859,6 +889,26 @@ private:
 		m_capacity = requiredCapacity;
 	}
 };
+
+template<class T>
+struct Traceable<VectorRef<T>> {
+	constexpr static bool value = Traceable<T>::value;
+
+	static std::string toString(const VectorRef<T>& value) {
+		std::stringstream ss;
+		bool first = true;
+		for (const auto& v : value) {
+			if (first) {
+				first = false;
+			} else {
+				ss << ' ';
+			}
+			ss << Traceable<T>::toString(v);
+		}
+		return ss.str();
+	}
+};
+
 template <class Archive, class T>
 inline void load( Archive& ar, VectorRef<T>& value ) {
 	// FIXME: range checking for length, here and in other serialize code

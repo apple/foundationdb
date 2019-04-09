@@ -106,7 +106,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString()).detail("Server", serverKeysDecodeServer(m.param1))
-						.detail("TagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
+						.detail("TagKey", serverTagKeyFor( serverKeysDecodeServer(m.param1) )).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
 
 					toCommit->addTag( decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ) );
 					toCommit->addTypedMessage(privatized);
@@ -151,7 +151,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
-						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("ToCommit", toCommit!=NULL);
+						TraceEvent("MutationRequiresRestart", dbgid)
+							.detail("M", m.toString())
+							.detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
+							.detail("ToCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
 				}
@@ -230,8 +233,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					// Log the modification
-					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", printable(m.param1))
-						.detail("LogRangeBegin", printable(logRangeBegin)).detail("LogRangeEnd", printable(logRangeEnd));
+					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", m.param1)
+						.detail("LogRangeBegin", logRangeBegin).detail("LogRangeEnd", logRangeEnd);
 				}
 			}
 			else if (m.param1.startsWith(globalKeysPrefix)) {
@@ -383,8 +386,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				KeyRangeRef commonLogRange(range & logRangesRange);
 
 				TraceEvent("LogRangeClear")
-					.detail("RangeBegin", printable(range.begin)).detail("RangeEnd", printable(range.end))
-					.detail("IntersectBegin", printable(commonLogRange.begin)).detail("IntersectEnd", printable(commonLogRange.end));
+					.detail("RangeBegin", range.begin).detail("RangeEnd", range.end)
+					.detail("IntersectBegin", commonLogRange.begin).detail("IntersectEnd", commonLogRange.end);
 
 				// Remove the key range from the vector, if defined
 				if (vecBackupKeys) {
@@ -406,9 +409,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						// Decode the log destination and key value
 						logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);
 
-						TraceEvent("LogRangeErase").detail("AffectedKey", printable(logRangeAffected.key)).detail("AffectedValue", printable(logRangeAffected.value))
-							.detail("LogKeyBegin", printable(logKeyBegin)).detail("LogKeyEnd", printable(logKeyEnd))
-							.detail("LogDestination", printable(logDestination));
+						TraceEvent("LogRangeErase").detail("AffectedKey", logRangeAffected.key).detail("AffectedValue", logRangeAffected.value)
+							.detail("LogKeyBegin", logKeyBegin).detail("LogKeyEnd", logKeyEnd)
+							.detail("LogDestination", logDestination);
 
 						// Identify the locations to place the backup key
 						auto logRanges = vecBackupKeys->modify(KeyRangeRef(logKeyBegin, logKeyEnd));
