@@ -39,7 +39,7 @@ struct IDisk {
 enum class DiskType {
 	Normal,
 	Slow,
-	Dead,
+	Never,
 	Empty,
 	EBS
 };
