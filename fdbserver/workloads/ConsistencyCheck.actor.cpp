@@ -288,7 +288,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 			catch(Error &e)
 			{
-				if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
+				if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
+				    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_process_behind)
 					TraceEvent("ConsistencyCheck_Retry").error(e); // FIXME: consistency check does not retry in this case
 				else
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
@@ -387,6 +388,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
 		state Key endKey = allKeys.end.withPrefix(keyServersPrefix);
 		state int i = 0;
+		state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
 		for ( ; i < shards.size(); i++) {
@@ -466,11 +468,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 						keyLocations.push_back_deep(keyLocations.arena(), currentLocations.end()[-1]);
 				}
 				catch (Error& e) {
-					//If we failed because of a version problem, then retry
-					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
-					else
-						throw;
+					state Error err = e;
+					wait(onErrorTr.onError(err));
+					TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(err);
 				}
 			}
 		}
@@ -713,6 +713,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int64_t totalReadAmount = 0;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
+				state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 				//Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop
@@ -933,11 +934,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 					catch(Error &e)
 					{
-						//If we failed because of a version problem, then retry
-						if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(e);
-						else
-							throw;
+						state Error err = e;
+						wait(onErrorTr.onError(err));
+						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
 				}
 

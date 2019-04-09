@@ -32,7 +32,7 @@
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
   <Product Name='$(var.Title)'
-           Id='{1A6617BB-F6FE-48AE-B5FA-161D7BA3D9CD}'
+           Id='{1F036D0A-3560-4A5C-BD40-F1B254876257}'
            UpgradeCode='{A95EA002-686E-4164-8356-C715B7F8B1C8}'
            Version='$(var.Version)'
            Manufacturer='$(var.Manufacturer)'

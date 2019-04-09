@@ -1810,7 +1810,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 			}
 		}
 	} catch( Error &e ) {
-		if( begin.getKey() != keys.begin && ( e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ) ) {
+		if( begin.getKey() != keys.begin && ( e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_process_behind ) ) {
 			if( e.code() == error_code_transaction_too_old )
 				*isTooOld = true;
 			output.more = true;
@@ -2014,8 +2014,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
 						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
 					}
-				} else if (e.code() == error_code_future_version) {
-					TEST(true); // fetchKeys got future_version, so there must be a huge storage lag somewhere.  Keep trying.
+				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
+					TEST(true); // fetchKeys got future_version or process_behind, so there must be a huge storage lag somewhere.  Keep trying.
 				} else {
 					throw;
 				}

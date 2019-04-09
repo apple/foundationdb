@@ -448,9 +448,14 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 			}
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
-				throw;
-			tr = Transaction(cx);
+			if (e.code() == error_code_transaction_too_old) {
+				// We are using this transaction until it's too old and then resetting to a fresh one,
+				// so we don't need to delay.
+				tr.fullReset();
+			}
+			else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
@@ -539,9 +544,14 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
-				throw;
-			wait(tr.onError(e));
+			if (e.code() == error_code_transaction_too_old) {
+				// We are using this transaction until it's too old and then resetting to a fresh one,
+				// so we don't need to delay.
+				tr.fullReset();
+			}
+			else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
