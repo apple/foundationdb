@@ -216,15 +216,6 @@ struct Traceable<UID> : std::true_type {
 	}
 };
 
-template<class S>
-struct IsTraceableString : std::false_type {};
-
-template<>
-struct IsTraceableString<std::string> : std::false_type {};
-
-template<>
-struct IsTraceableString<const char*> : std::false_type {};
-
 template<class Str>
 struct TraceableString {
 	static auto begin(const Str& value) -> decltype(value.begin()) {
