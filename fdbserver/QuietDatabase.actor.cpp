@@ -96,7 +96,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 		TraceEventFields md = wait( timeoutError(distributorWorker.eventLogRequest.getReply(
 			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
 		int64_t dataInFlight;
-		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
+		sscanf(md.getValue("TotalBytes").c_str(), "%ld", &dataInFlight);
 		return dataInFlight;
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id()).error(e).detail("Reason", "Failed to extract DataInFlight");
@@ -118,8 +118,8 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %ld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %ld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
@@ -239,11 +239,11 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
 		int64_t inQueue;
-		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
+		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%ld", &inQueue);
 
 		if(reportInFlight) {
 			int64_t inFlight;
-			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%lld", &inFlight);
+			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%ld", &inFlight);
 			inQueue += inFlight;
 		}
 
@@ -281,16 +281,16 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			int64_t healthyMachineTeamCount;
 			int64_t desiredMachineTeamNumber;
 			int64_t maxMachineTeamNumber;
-			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld",
+			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%ld", &currentTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%ld", &desiredTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%ld", &maxTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%ld",
 			       &currentMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld",
+			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%ld",
 			       &healthyMachineTeamCount);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld",
+			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%ld",
 			       &desiredMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%ld", &maxMachineTeamNumber);
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {

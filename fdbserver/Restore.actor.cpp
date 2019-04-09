@@ -1931,7 +1931,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 	}
 
 	if (!rd->files.empty()) {
-		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", rd->files.size());
+		printf("[WARNING] global files are not empty! files.size() is %d. We forcely clear files\n", rd->files.size());
 		rd->files.clear();
 	}
 
@@ -2069,13 +2069,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				param.removePrefix = removePrefix;
 				param.mutationLogPrefix = mutationLogPrefix;
 				if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < rd->files[curFileIndex].fileSize) ) {
-					printf("[ERROR] param: length:%d offset:%d fileSize:%d for %dth file:%s\n",
+					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %dlth file:%s\n",
 							param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
 							rd->files[curFileIndex].toString().c_str());
 				}
 
 
-				printf("[Sampling][File:%d] filename:%s offset:%d blockSize:%d filesize:%d loadSize:%dB sampleIndex:%d\n",
+				printf("[Sampling][File:%ld] filename:%s offset:%ld blockSize:%ld filesize:%ld loadSize:%dB sampleIndex:%ld\n",
 						curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
 						rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize,
 						loadSizeB, sampleIndex);
@@ -2149,7 +2149,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			rd->cmdID = checkpointCMDUID;
 			curFileIndex = checkpointCurFileIndex;
 			curFileOffset = checkpointCurFileOffset;
-			printf("[Sampling][Waring] Retry at CMDID:%s curFileIndex:%d\n", rd->cmdID.toString().c_str(), curFileIndex);
+			printf("[Sampling][Waring] Retry at CMDID:%s curFileIndex:%ld\n", rd->cmdID.toString().c_str(), curFileIndex);
 		}
 	}
 
@@ -2346,7 +2346,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 				for (auto &loaderID : loaderIDs) {
 					while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
 						// NOTE: && rd->files[curFileIndex].cursor >= rd->files[curFileIndex].fileSize
-						printf("[INFO] File %d:%s filesize:%d skip the file\n", curFileIndex,
+						printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 								rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
 						curFileIndex++;
 					}
@@ -2369,7 +2369,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					param.removePrefix = removePrefix;
 					param.mutationLogPrefix = mutationLogPrefix;
 					if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < rd->files[curFileIndex].fileSize) ) {
-						printf("[ERROR] param: length:%d offset:%d fileSize:%d for %dth filename:%s\n",
+						printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth filename:%s\n",
 								param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
 								rd->files[curFileIndex].fileName.c_str());
 					}
@@ -2385,7 +2385,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 					RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 
-					printf("[CMD] Loading fileIndex:%d fileInfo:%s loadingParam:%s on node %s\n",
+					printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
 							curFileIndex, rd->files[curFileIndex].toString().c_str(), 
 							param.toString().c_str(), nodeID.toString().c_str()); // VERY USEFUL INFO
 
@@ -2556,7 +2556,6 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Database cx = cx_input;
 	state RestoreInterface interf;
 	interf.initEndpoints();
-	interf.initNodeID();
 	state Optional<RestoreInterface> leaderInterf;
 	//Global data for the worker
 	state Reference<RestoreData> rd = Reference<RestoreData>(new RestoreData());
@@ -3004,12 +3003,12 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					isRange = rd->allFiles[curBackupFilesEndIndex].isRange;
 					validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
 					curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
-					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%d curBackupFilesEndIndex:%d, files.size:%d\n",
+					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:ld, files.size:%d\n",
 						restoreBatchIndex, endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
 				}
 				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= rd->allFiles.size() )  {
 					if ( curBackupFilesEndIndex >= rd->allFiles.size() && curWorkloadSize <= 0 ) {
-						printf("Restore finishes: curBackupFilesEndIndex:%d, allFiles.size:%d, curWorkloadSize:%.2f\n",
+						printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%d, curWorkloadSize:%.2f\n",
 								curBackupFilesEndIndex, rd->allFiles.size(), curWorkloadSize);
 						break;
 					}

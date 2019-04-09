@@ -138,7 +138,6 @@ struct RestoreInterface {
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
 
-	void initNodeID() { nodeID = setRole.getEndpoint().token; }
 	UID id() const { return nodeID; } //cmd.getEndpoint().token;
 
 	NetworkAddress address() const { return setRole.getEndpoint().addresses.address; }
@@ -159,6 +158,8 @@ struct RestoreInterface {
 		applyToDB.getEndpoint( TaskClusterController ); 
 		
 		initVersionBatch.getEndpoint( TaskClusterController ); 
+
+		nodeID = g_random->randomUniqueID();
 	}
 
 	template <class Ar>
