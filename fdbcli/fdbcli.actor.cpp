@@ -964,9 +964,6 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
-			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message
-			//     which would be the same error message if the catch block was hit
-			bool success = false;
 			try {
 				outputString += "\n  FoundationDB processes - ";
 				if (statusObjCluster.get("processes", processesMap)) {

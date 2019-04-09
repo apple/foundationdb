@@ -250,7 +250,6 @@ public:
 	{
 		bool	bComplete = true;
 		int		nItemsLeft = _mutableEntryArray.size();
-		int		nExceptions = exceptionArray.size();
 
 		while (nRandomItems > 0)
 		{

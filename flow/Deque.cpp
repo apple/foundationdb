@@ -55,7 +55,6 @@ TEST_CASE("/flow/Deque/queue") {
 
 TEST_CASE("/flow/Deque/max_size") {
 	Deque<uint8_t> q;
-	double begin = timer();
 	for (int i = 0; i < 10; i++)
 		q.push_back(i);
 	q.pop_front();

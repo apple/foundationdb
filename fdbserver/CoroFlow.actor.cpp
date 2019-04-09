@@ -279,8 +279,7 @@ ACTOR void coroSwitcher( Future<Void> what, int taskID, Coro* coro ) {
 void CoroThreadPool::waitFor( Future<Void> what ) {
 	ASSERT (current_coro != main_coro);
 	if (what.isReady()) return;
-	Coro* c = current_coro;
-	double t = now();
+	//double t = now();
 	coroSwitcher( what, g_network->getCurrentTask(), current_coro );
 	Coro_switchTo_( swapCoro(main_coro), main_coro );
 	//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)

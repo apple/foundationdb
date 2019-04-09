@@ -1193,7 +1193,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("ServerInfo").detail("Size", server_info.size());
 		for (auto& server : server_info) {
-			const UID& uid = server.first;
 			TraceEvent("ServerInfo")
 			    .detail("ServerInfoIndex", i++)
 			    .detail("ServerID", server.first.toString())
@@ -1316,7 +1315,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// return number of added machine teams
 	int addBestMachineTeams(int targetMachineTeamsToBuild) {
 		int addedMachineTeams = 0;
-		int totalServerIndex = 0;
 		int machineTeamsToBuild = 0;
 
 		ASSERT(targetMachineTeamsToBuild >= 0);
@@ -1829,7 +1827,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	ACTOR static Future<Void> buildTeams( DDTeamCollection* self ) {
 		state int desiredTeams;
 		int serverCount = 0;
-		int uniqueDataCenters = 0;
 		int uniqueMachines = 0;
 		std::set<Optional<Standalone<StringRef>>> machines;
 
@@ -3853,7 +3850,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
-	int result = collection->addTeamsBestOf(30, desiredTeams, maxTeams);
+	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 	ASSERT(collection->sanityCheckTeams() == true);
 
@@ -3879,7 +3876,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	}
 
 	collection->addBestMachineTeams(30); // Create machine teams to help debug
-	int result = collection->addTeamsBestOf(30, desiredTeams, maxTeams);
+	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
 	if (collection) delete (collection);
@@ -3964,7 +3961,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	int resultMachineTeams = collection->addBestMachineTeams(10);
+	collection->addBestMachineTeams(10);
 	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 	if (collection->machineTeams.size() != 10 || result != 8) {

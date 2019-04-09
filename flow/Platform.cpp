@@ -1499,7 +1499,6 @@ static void enableLargePages() {
 }
 
 static void *allocateInternal(size_t length, bool largePages) {
-	void *block = NULL;
 
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT|MEM_RESERVE;

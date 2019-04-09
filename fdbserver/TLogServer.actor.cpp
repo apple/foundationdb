@@ -260,10 +260,6 @@ static Version decodeTagMessagesKey( StringRef key ) {
 	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
 }
 
-static Version decodeTagMessageRefsKey( StringRef key ) {
-	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessageRefsKey(key), Unversioned() ) );
-}
-
 struct SpilledData {
 	SpilledData() = default;
 	SpilledData(Version version, IDiskQueue::location start, uint32_t length, uint32_t mutationBytes)

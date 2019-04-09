@@ -761,7 +761,7 @@ struct RawCursor {
 				int fragmentedWaste = kv.key.size() * (fragments - 1);
 
 				// Total bytes used for the fragmented case
-				int fragmentedTotal = kv.expectedSize() + fragmentedWaste;
+				//int fragmentedTotal = kv.expectedSize() + fragmentedWaste;
 
 				// Calculate bytes saved by having extra key instances stored vs the original partial overflow page bytes.
 				int savings = unfragmentedWaste - fragmentedWaste;

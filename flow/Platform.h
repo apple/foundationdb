@@ -386,7 +386,7 @@ size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
-}; // namespace platform
+} // namespace platform
 
 #ifdef __linux__
 typedef struct {

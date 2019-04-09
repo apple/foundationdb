@@ -895,7 +895,7 @@ int main(int argc, char* argv[]) {
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
-		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
+		bool buggifyEnabled = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
 		Optional<Standalone<StringRef>> dcId;
 		ProcessClass processClass = ProcessClass( ProcessClass::UnsetClass, ProcessClass::CommandLineSource );
