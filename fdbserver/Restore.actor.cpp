@@ -2604,6 +2604,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	//we are not the leader, so put our interface in the agent list
 	if(leaderInterf.present()) {
+		// Initialize the node's UID
+		rd->localNodeStatus.nodeID = interf.id();
 
 		// Step: Find other worker's interfaces
 		// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their interfaces into DB before we can read the interface.
