@@ -85,6 +85,9 @@ struct NeverDisk : public IDisk, public ReferenceCounted<NeverDisk> {
 struct EmptyDisk : public NormalDisk, public ReferenceCounted<EmptyDisk> {
     void addref() override { ReferenceCounted<EmptyDisk>::addref(); };
     void delref() override { ReferenceCounted<EmptyDisk>::delref(); }
+
+    EmptyDisk(int64_t iops, int64_t bandwidth) : NormalDisk(iops, bandwidth) {}
+
     Future<int> override read(int h, void* data, int length) {
         memset(data, 0, length);
         return length;
@@ -114,6 +117,8 @@ Reference<IDisk> createSimulatedDisk(DiskType diskType) {
             return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS / 1e3, FLOW_KNOBS->SIM_DISK_BANDWIDTH / 1e3));
         case DiskType::Dead:
             return Reference<IDisk>(new NeverDisk());
+        case DiskType::Empty:
+            return Reference<IDisk>(new EmptyDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
         case DiskType::EBS:
             return Reference<IDisk>(new EBSDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
         default:
