@@ -1503,52 +1503,64 @@ ACTOR Future<Void> tLogCommit(
 		state int err = 0;
 		state Future<int> cmdErr;
 		auto uidStr = execArg.getBinaryArgValue("uid");
-		if (!g_network->isSimulated()) {
-			// get the bin path
-			auto snapBin = execArg.getBinaryPath();
-			auto dataFolder = "path=" + self->dataFolder;
-			TraceEvent("TLogSnapCommand").detail("CmdLine", param2.toString()).detail("FolderPath", dataFolder);
-			vector<std::string> paramList;
-			paramList.push_back(snapBin);
-			// user passed arguments
-			auto listArgs = execArg.getBinaryArgs();
-			for (auto elem : listArgs) {
-				paramList.push_back(elem);
-			}
-			// additional arguments
-			paramList.push_back(dataFolder);
-			const char* version = FDB_VT_VERSION;
-			std::string versionString = "version=";
-			versionString += version;
-			paramList.push_back(versionString);
-			std::string roleString = "role=tlog";
-			paramList.push_back(roleString);
-			cmdErr = spawnProcess(snapBin, paramList, 3.0);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-		} else {
-			// copy the entire directory
-			state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
-			state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
-			vector<std::string> paramList;
-			std::string mkdirBin = "/bin/mkdir";
-			paramList.push_back(mkdirBin);
-			paramList.push_back(tLogFolderTo);
-			cmdErr = spawnProcess(mkdirBin, paramList, 3.0, true);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-			if (err == 0) {
+		state UID execUID = UID::fromString(uidStr);
+		state bool otherRoleExeced = false;
+		// TLog is special, we need to exec at the execVersion.
+		// If storage on the same process has initiated the exec then wait for it to
+		// finish and hold the tlog at the execVersion
+		while (isExecOpInProgress(execUID)) {
+			wait(delay(0.1));
+			otherRoleExeced = true;
+		}
+		if (!otherRoleExeced) {
+			setExecOpInProgress(execUID);
+			if (!g_network->isSimulated()) {
+				// get the bin path
+				auto snapBin = execArg.getBinaryPath();
+				auto dataFolder = "path=" + self->dataFolder;
 				vector<std::string> paramList;
-				std::string cpBin = "/bin/cp";
-				paramList.clear();
-				paramList.push_back(cpBin);
-				paramList.push_back("-a");
-				paramList.push_back(tLogFolderFrom);
-				paramList.push_back(tLogFolderTo);
-				cmdErr = spawnProcess(cpBin, paramList, 3.0);
+				paramList.push_back(snapBin);
+				// user passed arguments
+				auto listArgs = execArg.getBinaryArgs();
+				for (auto elem : listArgs) {
+					paramList.push_back(elem);
+				}
+				// additional arguments
+				paramList.push_back(dataFolder);
+				const char* version = FDB_VT_VERSION;
+				std::string versionString = "version=";
+				versionString += version;
+				paramList.push_back(versionString);
+				std::string roleString = "role=tlog";
+				paramList.push_back(roleString);
+				cmdErr = spawnProcess(snapBin, paramList, 3.0);
 				wait(success(cmdErr));
 				err = cmdErr.get();
+			} else {
+				// copy the entire directory
+				state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
+				state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
+				vector<std::string> paramList;
+				std::string mkdirBin = "/bin/mkdir";
+				paramList.push_back(mkdirBin);
+				paramList.push_back(tLogFolderTo);
+				cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+				wait(success(cmdErr));
+				err = cmdErr.get();
+				if (err == 0) {
+					vector<std::string> paramList;
+					std::string cpBin = "/bin/cp";
+					paramList.clear();
+					paramList.push_back(cpBin);
+					paramList.push_back("-a");
+					paramList.push_back(tLogFolderFrom);
+					paramList.push_back(tLogFolderTo);
+					cmdErr = spawnProcess(cpBin, paramList, 3.0);
+					wait(success(cmdErr));
+					err = cmdErr.get();
+				}
 			}
+			clearExecOpInProgress(execUID);
 		}
 		TraceEvent("TLogCommitExecTraceTLog")
 		    .detail("UidStr", uidStr)
