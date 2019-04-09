@@ -38,7 +38,18 @@ struct NormalDisk : public IDisk, public ReferenceCounted<NormalDisk> {
 	void addref() override { ReferenceCounted<NormalDisk>::addref(); }
 	void delref() override { ReferenceCounted<NormalDisk>::delref(); }
     Future<Void> override waitUntilDiskReady(int64_t size, bool sync) {
-        return waitUntilDiskReady(size, sync, 1);
+        if (g_simulator.connectionFailuresDisableDuration > 1e4)
+            return delay(0.0001);
+        if (nextOperation < now()) nextOperation = now();
+        nextOperation += (1 / iops) + (size / bandwidth);
+
+        double randomLatency;
+        if (sync) {
+            randomLatency = .005 + g_random->random01() * (BUGGIFY ? 1.0 : 0.010);
+        } else
+            randomLatency = 10 * g_random->random01() / iops;
+
+        return delayUntil(nextOperation + randomLatency);
     }
     Future<int> override read(int h, void* data, int length) {
         return _read(h, data, static_cast<unsigned int>(length));
@@ -51,21 +62,6 @@ protected:
     double nextOperation;
     const int64_t iops;
     const int64_t bandwidth;
-
-    Future<Void> override waitUntilDiskReady(int64_t size, bool sync, int numIops) {
-        if (g_simulator.connectionFailuresDisableDuration > 1e4)
-            return delay(0.0001);
-        if (nextOperation < now()) nextOperation = now();
-        nextOperation += (numIops / iops) + (size / bandwidth);
-
-        double randomLatency;
-        if (sync) {
-            randomLatency = .005 + g_random->random01() * (BUGGIFY ? 1.0 : 0.010);
-        } else
-            randomLatency = 10 * g_random->random01() / iops;
-
-        return delayUntil(nextOperation + randomLatency);
-    }
 };
 
 struct NeverDisk : public IDisk, public ReferenceCounted<NeverDisk> {
@@ -94,21 +90,6 @@ struct EmptyDisk : public NormalDisk, public ReferenceCounted<EmptyDisk> {
     }
 };
 
-struct EBSDisk : public NormalDisk, public ReferenceCounted<EBSDisk> {
-    static const int constexpr blockSize = 4096;
-    static const double constexpr epochLength = 1.0;
-
-    EBSDisk(int64_t iops, int64_t bandwidth) : NormalDisk(iops, bandwidth) {}
-
-    void addref() override { ReferenceCounted<EBSDisk>::addref(); }
-    void delref() override { ReferenceCounted<EBSDisk>::delref(); }
-
-    Future<Void> waitUntilDiskReady(int64_t size, bool sync) {
-        int numIops = (size % blockSize) ? (size / blockSize + 1) : (size / blockSize);
-        return NormalDisk::waitUntilDiskReady(size, sync, numIops);
-    }
-};
-
 Reference<IDisk> createSimulatedDisk(DiskType diskType) {
     switch(diskType) {
         case DiskType::Normal:
@@ -119,8 +100,6 @@ Reference<IDisk> createSimulatedDisk(DiskType diskType) {
             return Reference<IDisk>(new NeverDisk());
         case DiskType::Empty:
             return Reference<IDisk>(new EmptyDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
-        case DiskType::EBS:
-            return Reference<IDisk>(new EBSDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
         default:
             return Reference<IDisk>();
     }

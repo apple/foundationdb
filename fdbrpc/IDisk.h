@@ -40,8 +40,7 @@ enum class DiskType {
 	Normal,
 	Slow,
 	Never,
-	Empty,
-	EBS
+	Empty
 };
 
 Reference<IDisk> createSimulatedDisk(DiskType diskType);
