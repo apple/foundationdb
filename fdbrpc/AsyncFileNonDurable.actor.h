@@ -160,9 +160,6 @@ private:
 	//If true is sent, then writes will be durable.  If false, then they may not be durable.
 	Promise<bool> startSyncPromise;
 
-	//The performance parameters of the simulated disk
-	Reference<DiskParameters> diskParameters;
-
 	//Set to true the first time sync is called on the file
 	bool hasBeenSynced;
 
@@ -174,7 +171,7 @@ private:
 
 	ActorCollection reponses; //cannot call getResult on this actor collection, since the actors will be on different processes
 
-	AsyncFileNonDurable(const std::string& filename, Reference<IAsyncFile> file, Reference<DiskParameters> diskParameters, NetworkAddress openedAddress) 
+	AsyncFileNonDurable(const std::string& filename, Reference<IAsyncFile> file, NetworkAddress openedAddress)
 		: openedAddress(openedAddress), pendingModifications(uint64_t(-1)), approximateSize(0), reponses(false) {
 
 		//This is only designed to work in simulation
@@ -184,7 +181,6 @@ private:
 		//TraceEvent("AsyncFileNonDurable_Create", id).detail("Filename", filename);
 		this->file = file;
 		this->filename = filename;
-		this->diskParameters = diskParameters;
 		maxWriteDelay = 5.0;
 		hasBeenSynced = false;
 
@@ -196,7 +192,7 @@ public:
 	static std::map<std::string, Future<Void>> filesBeingDeleted;
 
 	//Creates a new AsyncFileNonDurable which wraps the provided IAsyncFile
-	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename, std::string actualFilename, Future<Reference<IAsyncFile>> wrappedFile, Reference<DiskParameters> diskParameters) {
+	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename, std::string actualFilename, Future<Reference<IAsyncFile>> wrappedFile) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state int currentTaskID = g_network->getCurrentTask();
 		state Future<Void> shutdown = success(currentProcess->shutdownSignal.getFuture());
@@ -221,7 +217,7 @@ public:
 					throw io_error().asInjectedFault();
 			}
 
-			state Reference<AsyncFileNonDurable> nonDurableFile( new AsyncFileNonDurable(filename, file, diskParameters, currentProcess->address) );
+			state Reference<AsyncFileNonDurable> nonDurableFile( new AsyncFileNonDurable(filename, file, currentProcess->address) );
 
 			//Causes the approximateSize member to be set
 			state Future<int64_t> sizeFuture = nonDurableFile->size();
@@ -429,7 +425,7 @@ private:
 			if(BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
-				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, length) || self->killed.getFuture());
+				priorModifications.push_back(waitUntilDiskReady(length) || self->killed.getFuture());
 
 			wait(waitForAll(priorModifications));
 
@@ -551,7 +547,7 @@ private:
 			if(BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
-				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, 0) || self->killed.getFuture());
+				priorModifications.push_back(waitUntilDiskReady(0) || self->killed.getFuture());
 
 			wait(waitForAll(priorModifications));
 
@@ -597,7 +593,7 @@ private:
 
 		if(durable) {
 			self->hasBeenSynced = true;
-			wait(waitUntilDiskReady(self->diskParameters, 0, true) || self->killed.getFuture());
+			wait(waitUntilDiskReady(0, true) || self->killed.getFuture());
 		}
 
 		wait(self->checkKilled(self, durable ? "Sync" : "Kill"));

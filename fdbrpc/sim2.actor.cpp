@@ -415,8 +415,7 @@ public:
 
 	static bool should_poll() { return false; }
 
-	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode,
-													Reference<DiskParameters> diskParameters = Reference<DiskParameters>(new DiskParameters(25000, 150000000)), bool delayOnWrite = true ) {
+	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, bool delayOnWrite = true ) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state int currentTaskID = g_network->getCurrentTask();
 
@@ -454,7 +453,7 @@ public:
 			}
 
 			platform::makeTemporary(open_filename.c_str());
-			SimpleFile *simpleFile = new SimpleFile( h, diskParameters, delayOnWrite, filename, open_filename, flags );
+			SimpleFile *simpleFile = new SimpleFile( h, delayOnWrite, filename, open_filename, flags );
 			state Reference<IAsyncFile> file = Reference<IAsyncFile>( simpleFile );
 			wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
 			return file;
@@ -501,9 +500,6 @@ public:
 private:
 	int h;
 
-	//Performance parameters of simulated disk
-	Reference<DiskParameters> diskParameters;
-
 	std::string filename, actualFilename;
 	int flags;
 	UID dbgId;
@@ -512,8 +508,8 @@ private:
 	//This is to support AsyncFileNonDurable, which issues its own delays for writes and truncates
 	bool delayOnWrite;
 
-	SimpleFile(int h, Reference<DiskParameters> diskParameters, bool delayOnWrite, const std::string& filename, const std::string& actualFilename, int flags)
-		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(g_random->randomUniqueID()), flags(flags) {}
+	SimpleFile(int h, bool delayOnWrite, const std::string& filename, const std::string& actualFilename, int flags)
+		: h(h), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(g_random->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion( int flags ) {
 		int outFlags = O_BINARY;
@@ -533,7 +529,7 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFR1 %s %s %s %d %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
 
-		wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(length));
+		wait(waitUntilDiskReady(length));
 
 		if( _lseeki64( self->h, offset, SEEK_SET ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
@@ -569,7 +565,7 @@ private:
 		}
 
 		if(self->delayOnWrite)
-			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(data.size()));;
+			wait(waitUntilDiskReady(data.size()));
 
 		if( _lseeki64( self->h, offset, SEEK_SET ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
@@ -605,7 +601,7 @@ private:
 			fprintf( randLog, "SFT1 %s %s %s %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
 		if(self->delayOnWrite)
-			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0));
+			wait(waitUntilDiskReady(0));
 
 		if( _chsize( self->h, (long) size ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6);
@@ -627,7 +623,7 @@ private:
 			fprintf( randLog, "SFC1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
 		if(self->delayOnWrite)
-			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0, true));
+			wait(waitUntilDiskReady(0, true));
 
 		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -659,7 +655,7 @@ private:
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0));
+		wait(waitUntilDiskReady(0));
 
 		int64_t pos = _lseeki64( self->h, 0L, SEEK_END );
 		if( pos == -1 ) {
@@ -1728,20 +1724,8 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 }
 
 //Simulates delays for performing operations on disk
-Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
-	if(g_simulator.connectionFailuresDisableDuration > 1e4)
-		return delay(0.0001);
-
-	if( diskParameters->nextOperation < now() ) diskParameters->nextOperation = now();
-	diskParameters->nextOperation += ( 1.0 / diskParameters->iops ) + ( size / diskParameters->bandwidth );
-
-	double randomLatency;
-	if(sync) {
-		randomLatency = .005 + g_random->random01() * (BUGGIFY ? 1.0 : .010);
-	} else
-		randomLatency = 10 * g_random->random01() / diskParameters->iops;
-
-	return delayUntil( diskParameters->nextOperation + randomLatency );
+Future<Void> waitUntilDiskReady( int64_t size, bool sync ) {
+	return g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(size, sync);
 }
 
 #if defined(_WIN32)
@@ -1790,9 +1774,7 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 					return f;
 				}
 			}
-			//Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.  This way, they can both keep up with the time to start the next operation
-			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
-			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
+			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, false));
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );
 		if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)

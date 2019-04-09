@@ -335,17 +335,8 @@ extern ISimulator* g_pSimulator;
 
 void startNewSimulator();
 
-//Parameters used to simulate disk performance
-struct DiskParameters : ReferenceCounted<DiskParameters> {
-	double nextOperation;
-	int64_t iops;
-	int64_t bandwidth;
-
-	DiskParameters(int64_t iops, int64_t bandwidth) : nextOperation(0), iops(iops), bandwidth(bandwidth) { }
-};
-
 //Simulates delays for performing operations on disk
-extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int64_t size, bool sync = false);
+extern Future<Void> waitUntilDiskReady(int64_t size, bool sync = false);
 
 
 class Sim2FileSystem : public IAsyncFileSystem {
