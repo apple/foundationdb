@@ -745,25 +745,6 @@ struct AddressExclusion {
 	}
 };
 
-template <>
-struct scalar_traits<AddressExclusion> : std::true_type {
-	using ip_traits = scalar_traits<uint32_t>;
-	using port_traits = scalar_traits<int>;
-	constexpr static size_t size = ip_traits::size + port_traits::size;
-	static void save(uint8_t* buf, const AddressExclusion& value) {
-		ip_traits::save(buf, value.ip);
-		port_traits::save(buf + ip_traits::size, value.port);
-	}
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t* buf, AddressExclusion& value, Context& context) {
-		ip_traits::load<Context>(buf, value.ip, context);
-		port_traits::load<Context>(buf + ip_traits::size, value.port, context);
-	}
-};
-
 static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }

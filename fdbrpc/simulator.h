@@ -69,12 +69,12 @@ public:
 		double fault_injection_p1, fault_injection_p2;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
-					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-            : name(name), locality(locality), startingClass(startingClass), useObjectSerializer(useObjectSerializer),
-              addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-              network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-              rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-              fault_injection_r(0), machine(0), cleared(false) {}
+					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder, bool useObjectSerializer )
+			: name(name), locality(locality), startingClass(startingClass), useObjectSerializer(useObjectSerializer),
+			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
+			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
+			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+			  fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 

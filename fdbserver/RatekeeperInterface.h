@@ -26,6 +26,7 @@
 #include "fdbrpc/Locality.h"
 
 struct RatekeeperInterface {
+	constexpr static FileIdentifier file_identifier = 5983305;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	RequestStream<struct HaltRatekeeperRequest> haltRatekeeper;
@@ -52,6 +53,7 @@ struct RatekeeperInterface {
 };
 
 struct GetRateInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9068521;
 	UID requesterID;
 	int64_t totalReleasedTransactions;
 	int64_t batchReleasedTransactions;
@@ -69,6 +71,7 @@ struct GetRateInfoRequest {
 };
 
 struct GetRateInfoReply {
+	constexpr static FileIdentifier file_identifier = 7845006;
 	double transactionRate;
 	double batchTransactionRate;
 	double leaseDuration;
@@ -81,6 +84,7 @@ struct GetRateInfoReply {
 };
 
 struct HaltRatekeeperRequest {
+	constexpr static FileIdentifier file_identifier = 6997218;
 	UID requesterID;
 	ReplyPromise<Void> reply;
 

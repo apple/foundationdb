@@ -79,6 +79,7 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 
 
 struct TLogSet {
+	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
@@ -136,17 +137,23 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
-			tLogVersion = TLogVersion::V2;
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
+			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
 		} else {
-			serializer(ar, tLogVersion);
+			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+				tLogVersion = TLogVersion::V2;
+			} else {
+				serializer(ar, tLogVersion);
+			}
+			ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
 		}
-		ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
 	}
 };
 
 struct OldTLogConf {
+	constexpr static FileIdentifier file_identifier = 16233772;
 	std::vector<TLogSet> tLogs;
 	Version epochEnd;
 	int32_t logRouterTags;
@@ -188,6 +195,7 @@ enum class LogSystemType {
 BINARY_SERIALIZABLE(LogSystemType);
 
 struct LogSystemConfig {
+	constexpr static FileIdentifier file_identifier = 16360847;
 	LogSystemType logSystemType;
 	std::vector<TLogSet> tLogs;
 	int32_t logRouterTags;

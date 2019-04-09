@@ -252,6 +252,7 @@ struct TxnStateRequest {
 
 struct GetHealthMetricsRequest
 {
+	constexpr static FileIdentifier file_identifier = 11403900;
 	ReplyPromise<struct GetHealthMetricsReply> reply;
 	bool detailed;
 
@@ -266,6 +267,7 @@ struct GetHealthMetricsRequest
 
 struct GetHealthMetricsReply
 {
+	constexpr static FileIdentifier file_identifier = 11544290;
 	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 

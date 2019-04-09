@@ -26,6 +26,7 @@
 #include <memory>
 #include <functional>
 #include <vector>
+#include <variant>
 
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
@@ -174,6 +175,25 @@ struct struct_like_traits : std::false_type {
 
 	template <class Context>
 	static void done(Member&, Context&);
+};
+
+template <class... Alternatives>
+struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
+	using Member = std::variant<Alternatives...>;
+	using alternatives = pack<Alternatives...>;
+	static uint8_t index(const Member& variant) { return variant.index(); }
+	static bool empty(const Member& variant) { return false; }
+
+	template <int i>
+	static const index_t<i, alternatives>& get(const Member& variant) {
+		return std::get<index_t<i, alternatives>>(variant);
+	}
+
+	template <size_t i, class Alternative>
+	static const void assign(Member& member, const Alternative& a) {
+		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
+		member = a;
+	}
 };
 
 

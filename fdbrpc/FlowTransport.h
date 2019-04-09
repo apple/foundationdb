@@ -81,8 +81,8 @@ public:
 			}
 		} else {
 			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-				addresses.resize(1);
-				serializer(ar, addresses[0], token);
+				addresses.secondaryAddress = Optional<NetworkAddress>();
+				serializer(ar, addresses.address, token);
 			} else {
 				serializer(ar, addresses, token);
 				if (ar.isDeserializing) {
@@ -169,8 +169,6 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
-
-	void loadedEndpoint(Endpoint&);
 
 private:
 	class TransportData* self;

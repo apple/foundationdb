@@ -76,6 +76,7 @@ struct WorkerInterface {
 };
 
 struct WorkerDetails {
+	constexpr static FileIdentifier file_identifier = 9973980;
 	WorkerInterface interf;
 	ProcessClass processClass;
 	bool degraded;
@@ -178,6 +179,7 @@ struct InitializeDataDistributorRequest {
 };
 
 struct InitializeRatekeeperRequest {
+	constexpr static FileIdentifier file_identifier = 6416816;
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 

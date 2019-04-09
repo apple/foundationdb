@@ -349,6 +349,7 @@ inline void save( Archive& ar, const Arena& p ) {
 template <class T>
 class Optional {
 public:
+	static constexpr FileIdentifier file_identifier = (0x10 << 24) | FileIdentifierFor<T>::value;
 	Optional() : valid(false) {}
 	Optional(const Optional<T>& o) : valid(o.valid) {
 		if (valid) new (&value) T(o.get());
@@ -440,6 +441,24 @@ template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
 	static std::string toString(const Optional<T>& value) {
 		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
+    }
+};
+
+struct union_like_traits<Optional<T>> : std::true_type {
+	using Member = Optional<T>;
+	using alternatives = pack<T>;
+	static uint8_t index(const Member& variant) { return 0; }
+	static bool empty(const Member& variant) { return !variant.present(); }
+
+	template <int i>
+	static const T& get(const Member& variant) {
+		static_assert(i == 0);
+		return variant.get();
+	}
+
+	template <size_t i>
+	static const void assign(Member& member, const T& t) {
+		member = t;
 	}
 };
 

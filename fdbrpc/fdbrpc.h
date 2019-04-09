@@ -181,14 +181,14 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 	template<class Archiver>
 	static void serialize(Archiver& ar, ReplyPromise<T>& p) {
 		if constexpr (Archiver::isDeserializing) {
-			Endpoint endpoint;
-			serializer(ar, endpoint);
+			UID token;
+			serializer(ar, token);
+			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
 			p = ReplyPromise<T>(endpoint);
 			networkSender(p.getFuture(), endpoint);
 		} else {
-			const auto& ep = p.getEndpoint();
+			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
-			ASSERT(!ep.getPrimaryAddress().isValid() || ep.getPrimaryAddress().isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
 		}
 	}
 };
@@ -422,7 +422,6 @@ struct serializable_traits<RequestStream<T>> : std::true_type {
 		if constexpr (Archiver::isDeserializing) {
 			Endpoint endpoint;
 			serializer(ar, endpoint);
-			FlowTransport::transport().loadedEndpoint(endpoint);
 			stream = RequestStream<T>(endpoint);
 		} else {
 			const auto& ep = stream.getEndpoint();
