@@ -1871,8 +1871,6 @@ ACTOR Future<Void>
 snapHelper(StorageServer* data, MutationRef m, Version ver)
 {
 	state std::string cmd = m.param1.toString();
-	int len = m.param2.size();
-
 	if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
 		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
 		return Void();
@@ -1881,55 +1879,66 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 	state std::string uidStr = execArg.getBinaryArgValue("uid");
 	state int err = 0;
 	state Future<int> cmdErr;
+	state UID execUID = UID::fromString(uidStr);
+	bool otherRoleExeced = false;
 
-	if (!g_network->isSimulated() || cmd != execSnap) {
-		// get bin path
-		auto binPath = execArg.getBinaryPath();
-		auto dataFolder = "path=" + data->folder;
-		vector<std::string> paramList;
-		paramList.push_back(binPath);
-		// get user passed arguments
-		auto listArgs = execArg.getBinaryArgs();
-		execArg.dbgPrint();
-		for (auto elem : listArgs) {
-			paramList.push_back(elem);
-		}
-		// get additional arguments
-		paramList.push_back(dataFolder);
-		const char* version = FDB_VT_VERSION;
-		std::string versionString = "version=";
-		versionString += version;
-		paramList.push_back(versionString);
-		std::string roleString = "role=storage";
-		paramList.push_back(roleString);
-		cmdErr = spawnProcess(binPath, paramList, 3.0);
-		wait(success(cmdErr));
-		err = cmdErr.get();
-	} else {
-		// copy the files
-		std::string folder = abspath(data->folder);
-		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr;
-		vector<std::string> paramList;
-		std::string mkdirBin = "/bin/mkdir";
+	// other TLog or storage has initiated the exec, so we can skip
+	if (isExecOpInProgress(execUID)) {
+		otherRoleExeced = true;
+	}
 
-		paramList.push_back(mkdirBin);
-		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, 3.0, true);
-		wait(success(cmdErr));
-		err = cmdErr.get();
-		if (err == 0) {
+	if (!otherRoleExeced) {
+		setExecOpInProgress(execUID);
+		if (!g_network->isSimulated() || cmd != execSnap) {
+			// get bin path
+			auto binPath = execArg.getBinaryPath();
+			auto dataFolder = "path=" + data->folder;
 			vector<std::string> paramList;
-			std::string cpBin = "/bin/cp";
-			paramList.clear();
-			paramList.push_back(cpBin);
-			paramList.push_back("-a");
-			paramList.push_back(folderFrom);
-			paramList.push_back(folderTo);
-			cmdErr = spawnProcess(cpBin, paramList, 3.0);
+			paramList.push_back(binPath);
+			// get user passed arguments
+			auto listArgs = execArg.getBinaryArgs();
+			execArg.dbgPrint();
+			for (auto elem : listArgs) {
+				paramList.push_back(elem);
+			}
+			// get additional arguments
+			paramList.push_back(dataFolder);
+			const char* version = FDB_VT_VERSION;
+			std::string versionString = "version=";
+			versionString += version;
+			paramList.push_back(versionString);
+			std::string roleString = "role=storage";
+			paramList.push_back(roleString);
+			cmdErr = spawnProcess(binPath, paramList, 3.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
+		} else {
+			// copy the files
+			std::string folder = abspath(data->folder);
+			state std::string folderFrom = folder + "/.";
+			state std::string folderTo = folder + "-snap-" + uidStr;
+			vector<std::string> paramList;
+			std::string mkdirBin = "/bin/mkdir";
+
+			paramList.push_back(mkdirBin);
+			paramList.push_back(folderTo);
+			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+			wait(success(cmdErr));
+			err = cmdErr.get();
+			if (err == 0) {
+				vector<std::string> paramList;
+				std::string cpBin = "/bin/cp";
+				paramList.clear();
+				paramList.push_back(cpBin);
+				paramList.push_back("-a");
+				paramList.push_back(folderFrom);
+				paramList.push_back(folderTo);
+				cmdErr = spawnProcess(cpBin, paramList, 3.0);
+				wait(success(cmdErr));
+				err = cmdErr.get();
+			}
 		}
+		clearExecOpInProgress(execUID);
 	}
 	auto tokenStr = "ExecTrace/storage/" + uidStr;
 	TraceEvent te = TraceEvent("ExecTraceStorage");
