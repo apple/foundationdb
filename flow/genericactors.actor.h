@@ -1101,6 +1101,7 @@ Future<T> tagError( Future<Void> future, Error e) {
 	throw e;
 }
 
+//If the future is ready, yields and returns. Otherwise, returns when future is set.
 template <class T>
 Future<T> orYield( Future<T> f ) {
 	if(f.isReady()) {
