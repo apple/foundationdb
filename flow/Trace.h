@@ -137,7 +137,7 @@ struct DynamicEventMetric;
 
 template<class IntType>
 char base16Char(IntType c) {
-	switch (c) {
+	switch ((c % 16 + 16) % 16) {
 		case 0:
 			return '0';
 		case 1:
@@ -325,8 +325,8 @@ struct TraceableStringImpl : std::true_type {
 			} else {
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char((*iter / 16) % 16));
-				result.push_back(base16Char(*iter % 16));
+				result.push_back(base16Char(*iter / 16));
+				result.push_back(base16Char(*iter));
 			}
 		}
 		return result;
