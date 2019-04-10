@@ -1027,7 +1027,7 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 			int pos = rd->files[i].fileName.find_last_of("/");
 			std::string fileName = rd->files[i].fileName.substr(pos);
 			printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
-			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%n", &beginVersion, &endVersion, &blockSize, &len);
+			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%ln", &beginVersion, &endVersion, &blockSize, &len);
 			printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
 		}
 		ASSERT(beginVersion <= endVersion);
@@ -1282,7 +1282,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
  	//TraceEvent("ReadLogFileFinish").detail("LogFileName", fileName);
 
 
- 	printf("Parse log file:%s readOffset:%d readLen:%d\n", fileName.c_str(), readOffset, readLen);
+ 	printf("Parse log file:%s readOffset:%d readLen:%ld\n", fileName.c_str(), readOffset, readLen);
  	//TODO: NOTE: decodeLogFileBlock() should read block by block! based on my serial version. This applies to decode range file as well
  	state Standalone<VectorRef<KeyValueRef>> data = wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
  	//state Standalone<VectorRef<MutationRef>> data = wait(fileBackup::decodeLogFileBlock_MX(inFile, readOffset, readLen)); //Decode log file
@@ -1987,7 +1987,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 		totalBackupSizeB += rd->files[i].fileSize;
 	}
 	sampleB = std::max((int) (samplePercent * totalBackupSizeB), 10 * 1024 * 1024); // The minimal sample size is 10MB
-	printf("Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d\n", rd->describeNode().c_str(),
+	printf("Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%ld\n", rd->describeNode().c_str(),
 			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB);
 
 	// Step: Distribute sampled file blocks to loaders to sample the mutations
@@ -2008,13 +2008,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			cmdReplies.clear();
 
 			printf("[Sampling] Node:%s We will sample the workload among %ld backup files.\n", rd->describeNode().c_str(), rd->files.size());
-			printf("[Sampling] Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d, loadSize:%dB sampleIndex:%d\n", rd->describeNode().c_str(),
+			printf("[Sampling] Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%ld, loadSize:%dB sampleIndex:%ld\n", rd->describeNode().c_str(),
 				totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB, loadSizeB, sampleIndex);
 			for (auto &loaderID : loaderIDs) {
 				// Find the sample file
 				while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
 					// NOTE: && rd->files[curFileIndex].cursor >= rd->files[curFileIndex].fileSize
-					printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
+					printf("[Sampling] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 							rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
 					curFileOffset = 0;
 					curFileIndex++;
@@ -2023,7 +2023,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				while ( loadSizeB / sampleB < sampleIndex && curFileIndex < rd->files.size() ) {
 					if (rd->files[curFileIndex].fileSize == 0) {
 						// NOTE: && rd->files[curFileIndex].cursor >= rd->files[curFileIndex].fileSize
-						printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
+						printf("[Sampling] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 								rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
 						curFileIndex++;
 						curFileOffset = 0;
@@ -2068,13 +2068,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				param.removePrefix = removePrefix;
 				param.mutationLogPrefix = mutationLogPrefix;
 				if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < rd->files[curFileIndex].fileSize) ) {
-					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %dlth file:%s\n",
+					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth file:%s\n",
 							param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
 							rd->files[curFileIndex].toString().c_str());
 				}
 
 
-				printf("[Sampling][File:%ld] filename:%s offset:%ld blockSize:%ld filesize:%ld loadSize:%dB sampleIndex:%ld\n",
+				printf("[Sampling][File:%ld] filename:%s offset:%ld blockSize:%ld filesize:%ld loadSize:%ldB sampleIndex:%ld\n",
 						curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
 						rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize,
 						loadSizeB, sampleIndex);
@@ -2167,12 +2167,12 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			numKeyRanges = rep.keyRangeNum;
 
 			if (numKeyRanges <= 0 || numKeyRanges >= applierIDs.size() ) {
-				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%d) from other phases. applierIDs.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, applierIDs.size());
+				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%ld) from other phases. applierIDs.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, applierIDs.size());
 				continue;
 			}
 
 			if ( numKeyRanges < applierIDs.size() ) {
-				printf("[WARNING][Sampling] numKeyRanges:%d < appliers number:%d. %d appliers will not be used!\n",
+				printf("[WARNING][Sampling] numKeyRanges:%d < appliers number:%ld. %ld appliers will not be used!\n",
 						numKeyRanges, applierIDs.size(), applierIDs.size() - numKeyRanges);
 			}
 
@@ -2538,7 +2538,6 @@ ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
  	printf("Now apply KVOps to DB. start...\n");
- 	printf("DB lock status:%d\n");
  	tr->reset();
  	wait(checkDatabaseLock(tr, uid));
 	wait(tr->commit());
@@ -2963,7 +2962,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					isRange = rd->allFiles[curBackupFilesEndIndex].isRange;
 					validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
 					curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
-					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:ld, files.size:%ld\n",
+					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld, files.size:%ld\n",
 						restoreBatchIndex, (long long) endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
 				}
 				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= rd->allFiles.size() )  {
@@ -3354,7 +3353,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	bool concatenated = false;
 
 	if ( logRangeMutationFirstLength < 0 ) {
-		printf("[ERROR]!!! logRangeMutationFirstLength:%d < 0, key_input.size:%ld\n", logRangeMutationFirstLength, key_input.size());
+		printf("[ERROR]!!! logRangeMutationFirstLength:%ld < 0, key_input.size:%ld\n", logRangeMutationFirstLength, key_input.size());
 	}
 
 	if ( debug_verbose ) {
@@ -3855,7 +3854,8 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 	ASSERT( param.blockSize > 0 );
 	//state std::vector<Future<Void>> fileParserFutures;
 	if (param.offset % param.blockSize != 0) {
-		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder:%ld\n",
+				param.offset, param.blockSize, param.offset % param.blockSize);
 	}
 
 	ASSERT( param.offset + param.blockSize >= param.length ); // We only sample one data block or less (at the end of the file) of a file.
@@ -3957,7 +3957,7 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 		keyRangeLowerBounds = _calculateAppliersKeyRanges(rd, req.numAppliers); // keyRangeIndex is the number of key ranges requested
 		rd->keyRangeLowerBounds = keyRangeLowerBounds;
 	}
-	printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%d\n",
+	printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%ld\n",
 			rd->cmdID.toString().c_str(), rd->describeNode().c_str(), keyRangeLowerBounds.size());
 	req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));
 	//rd->processedCmd[req.cmdID] = 1; // We should not skip this command in the following phase. Otherwise, the handler in other phases may return a wrong number of appliers
@@ -3977,7 +3977,7 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 	}
 	
 	if ( req.applierIndex < 0 || req.applierIndex >= keyRangeLowerBounds.size() ) {
-		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%d\n",
+		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%ld\n",
 				rd->describeNode().c_str(), req.applierIndex,  keyRangeLowerBounds.size());
 	}
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
@@ -4051,7 +4051,8 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	ASSERT( param.blockSize > 0 );
 	//state std::vector<Future<Void>> fileParserFutures;
 	if (param.offset % param.blockSize != 0) {
-		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder:%ld\n",
+				param.offset, param.blockSize, param.offset % param.blockSize);
 	}
 	for (j = param.offset; j < param.length; j += param.blockSize) {
 		readOffset = j;
@@ -4095,7 +4096,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	readOffset = 0;
 	readOffset = param.offset;
 
-	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File Node: %s, role: %s, loading param:%s\n",
+	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File role: %s, loading param:%s\n",
 								rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 								getRoleStr(rd->localNodeStatus.role).c_str(),
 								param.toString().c_str());
@@ -4103,7 +4104,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 
 	//Note: handle duplicate message delivery
 	if (rd->processedFiles.find(param.filename) != rd->processedFiles.end()) {
-		printf("[WARNING] Node:%s CMDUID file:%s is delivered more than once! Reply directly without loading the file\n",
+		printf("[WARNING] Node:%s CMDUID:%s file:%s is delivered more than once! Reply directly without loading the file\n",
 				rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 				param.filename.c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
@@ -4114,7 +4115,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	printf("[INFO][Loader] Node:%s CMDUID:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.url.toString().c_str());
-	printf("[INFO][Loader] Node:%s CMDUID:%s filename:%s blockSize:%d\n",
+	printf("[INFO][Loader] Node:%s CMDUID:%s filename:%s blockSize:%ld\n",
 			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.filename.c_str(), param.blockSize);
 
@@ -4125,7 +4126,8 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	ASSERT( param.blockSize > 0 );
 	//state std::vector<Future<Void>> fileParserFutures;
 	if (param.offset % param.blockSize != 0) {
-		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder:%ld\n",
+				param.offset, param.blockSize, param.offset % param.blockSize);
 	}
 	for (j = param.offset; j < param.length; j += param.blockSize) {
 		readOffset = j;
@@ -4257,7 +4259,7 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 
  	if ( debug_verbose ) {
 		TraceEvent("ApplyKVOPsToDB").detail("MapSize", rd->kvOps.size());
-		printf("ApplyKVOPsToDB num_of_version:%d\n", rd->kvOps.size());
+		printf("ApplyKVOPsToDB num_of_version:%ld\n", rd->kvOps.size());
  	}
  	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = rd->kvOps.begin();
  	state int count = 0;
