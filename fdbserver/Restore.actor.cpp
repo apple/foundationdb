@@ -1149,17 +1149,23 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
  	state int64_t readOffset = readOffset_input;
  	state int64_t readLen = readLen_input;
 
-	printf("[VERBOSE_DEBUG] Parse range file and get mutations 1, bc:%lx\n", bc.getPtr());
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Parse range file and get mutations 1, bc:%lx\n", bc.getPtr());
+	}
  	//MX: the set of key value version is rangeFile.version. the key-value set in the same range file has the same version
  	Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
 
-	printf("[VERBOSE_DEBUG] Parse range file and get mutations 2\n");
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Parse range file and get mutations 2\n");
+	}
  	state Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
 
-	printf("[VERBOSE_DEBUG] Parse range file and get mutations 3\n");
-	int tmpi = 0;
-	for (tmpi = 0; tmpi < blockData.size(); tmpi++) {
-		printf("\t[VERBOSE_DEBUG] mutation: key:%s value:%s\n", blockData[tmpi].key.toString().c_str(), blockData[tmpi].value.toString().c_str());
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Parse range file and get mutations 3\n");
+		int tmpi = 0;
+		for (tmpi = 0; tmpi < blockData.size(); tmpi++) {
+			printf("\t[VERBOSE_DEBUG] mutation: key:%s value:%s\n", blockData[tmpi].key.toString().c_str(), blockData[tmpi].value.toString().c_str());
+		}
 	}
 	 
 
@@ -1179,20 +1185,26 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 	 // The blockData's first and last entries are metadata, not the real data
  	int rangeStart = 1; //1
  	int rangeEnd = blockData.size() -1; //blockData.size() - 1 // Q: the rangeStart and rangeEnd is [,)?
-	printf("[VERBOSE_DEBUG] Range file decoded blockData\n");
-	for (auto& data : blockData ) {
-		printf("\t[VERBOSE_DEBUG] data key:%s val:%s\n", data.key.toString().c_str(), data.value.toString().c_str());
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Range file decoded blockData\n");
+		for (auto& data : blockData ) {
+			printf("\t[VERBOSE_DEBUG] data key:%s val:%s\n", data.key.toString().c_str(), data.value.toString().c_str());
+		}
 	}
 
  	// Slide start forward, stop if something in range is found
 	// Move rangeStart and rangeEnd until they is within restoreRange
  	while(rangeStart < rangeEnd && !restoreRange.contains(blockData[rangeStart].key)) {
-		printf("[VERBOSE_DEBUG] rangeStart:%d key:%s is not in the range:%s\n", rangeStart, blockData[rangeStart].key.toString().c_str(), restoreRange.toString().c_str());
+		if ( debug_verbose ) {
+			printf("[VERBOSE_DEBUG] rangeStart:%d key:%s is not in the range:%s\n", rangeStart, blockData[rangeStart].key.toString().c_str(), restoreRange.toString().c_str());
+		}
 		++rangeStart;
 	 }
  	// Side end backward, stop if something in range is found
  	while(rangeEnd > rangeStart && !restoreRange.contains(blockData[rangeEnd - 1].key)) {
-		printf("[VERBOSE_DEBUG] (rangeEnd:%d - 1) key:%s is not in the range:%s\n", rangeEnd, blockData[rangeStart].key.toString().c_str(), restoreRange.toString().c_str());
+		if ( debug_verbose ) {
+			printf("[VERBOSE_DEBUG] (rangeEnd:%d - 1) key:%s is not in the range:%s\n", rangeEnd, blockData[rangeStart].key.toString().c_str(), restoreRange.toString().c_str());
+		}
 		--rangeEnd;
 	 }
 
@@ -3586,7 +3598,9 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 				state MutationRef kvm;
 				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 					kvm = kvOp->second[mIndex];
-					printf("[VERBOSE_DEBUG] mutation to sent to applier, mutation:%s\n", kvm.toString().c_str());
+					if ( debug_verbose ) {
+						printf("[VERBOSE_DEBUG] mutation to sent to applier, mutation:%s\n", kvm.toString().c_str());
+					}
 					// Send the mutation to applier
 					if (isRangeMutation(kvm)) {
 						// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
@@ -3603,7 +3617,9 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 							applierCmdInterf = rd->workers_interface[applierID];
 
 							rd->cmdID.nextCmd();
-							printf("[VERBOSE_DEBUG] mutation:%s\n", mutation.toString().c_str());
+							if ( debug_verbose ) { 
+								printf("[VERBOSE_DEBUG] mutation:%s\n", mutation.toString().c_str());
+							}
 							cmdReplies.push_back(applierCmdInterf.sendMutation.getReply(
 									RestoreSendMutationRequest(rd->cmdID, commitVersion, mutation)));
 
@@ -3702,7 +3718,9 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 					kvm = kvOp->second[mIndex];
 					rd->cmdID.nextCmd();
-					printf("[VERBOSE_DEBUG] send mutation to applier, mutation:%s\n", kvm.toString().c_str());
+					if ( debug_verbose ) {
+						printf("[VERBOSE_DEBUG] send mutation to applier, mutation:%s\n", kvm.toString().c_str());
+					}
 					cmdReplies.push_back(applierCmdInterf.sendSampleMutation.getReply(
 							RestoreSendMutationRequest(rd->cmdID, commitVersion, kvm)));
 					packMutationNum++;
@@ -4235,11 +4253,13 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	state int numMutations = 0;
 
 	//ASSERT(req.cmdID.phase == RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-	printf("[VERBOSE_DEBUG] Node:%s receive mutation:%s\n", rd->describeNode().c_str(), req.mutation.toString().c_str());
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Node:%s receive mutation:%s\n", rd->describeNode().c_str(), req.mutation.toString().c_str());
+	}
 	// Handle duplicat cmd
 	if ( rd->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
+		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
+		//printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
 		return Void();
 	}
@@ -4364,7 +4384,9 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 			//		Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue,
 			//		ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP
 
-			printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
+			if ( debug_verbose ) {
+				printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
+			}
  			loop {
  				try {
 					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
