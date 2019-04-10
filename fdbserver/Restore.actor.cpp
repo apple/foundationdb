@@ -1027,8 +1027,8 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 			int pos = rd->files[i].fileName.find_last_of("/");
 			std::string fileName = rd->files[i].fileName.substr(pos);
 			printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
-			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%u%n", &beginVersion, &endVersion, &blockSize, &len);
-			printf("\t[File:%d] Log filename:%s produces beginVersion:%lld endVersion:%lld\n",i, fileName.c_str(), beginVersion, endVersion);
+			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%n", &beginVersion, &endVersion, &blockSize, &len);
+			printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
 		}
 		ASSERT(beginVersion <= endVersion);
 		rd->allFiles.push_back(rd->files[i]);
@@ -3023,7 +3023,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					curBackupFilesEndIndex++;
 				} else if (!validVersion && curWorkloadSize >= loadBatchSizeThresholdB) {
 					// Now: just move to the next file. We will eventually find a valid version but load more than loadBatchSizeThresholdB
-					printf("[WARNING] The loading batch size will be larger than expected! curBatchSize:%.2fB, expectedBatchSize:%2.fB, endVersion:%lld\n",
+					printf("[WARNING] The loading batch size will be larger than expected! curBatchSize:%.2fB, expectedBatchSize:%2.fB, endVersion:%ld\n",
 							curWorkloadSize, loadBatchSizeThresholdB, endVersion);
 					curBackupFilesEndIndex++;
 					//TODO: Roll back to find a valid version
@@ -3132,10 +3132,10 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
 		if ( debug_verbose ) {
-			printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", prefix.c_str(), val_length_decode, val.size());
+			printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
 		}
 	}
 
@@ -3187,9 +3187,9 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
-		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", prefix.c_str(), val_length_decode, val.size());
+		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
 	}
 
 	// Get the mutation header
@@ -3222,10 +3222,10 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 void printKVOps(Reference<RestoreData> rd) {
 	std::string typeStr = "MSet";
 	TraceEvent("PrintKVOPs").detail("MapSize", rd->kvOps.size());
-	printf("PrintKVOPs num_of_version:%d\n", rd->kvOps.size());
+	printf("PrintKVOPs num_of_version:%ld\n", rd->kvOps.size());
 	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		TraceEvent("PrintKVOPs\t").detail("Version", it->first).detail("OpNum", it->second.size());
-		printf("PrintKVOPs Version:%08lx num_of_ops:%ld\n",  it->first, it->second.size());
+		printf("PrintKVOPs Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
 		for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
 			if (  m->type >= MutationRef::Type::SetValue && m->type <= MutationRef::Type::MAX_ATOMIC_OP )
 				typeStr = typeString[m->type];
@@ -3303,9 +3303,9 @@ void registerBackupMutation(Reference<RestoreData> rd, Standalone<StringRef> val
 	printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", file_version);
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n",  val_length_decode, val.size());
+		printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n",  val_length_decode, val.size());
 	} else {
-		printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", val_length_decode, val.size());
+		printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
 	}
 
 	// Get the mutation header
@@ -3778,7 +3778,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfi
 		.detail("TaskInstance", (uint64_t)this);
 
 
-	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
+	return format("Tag: %s  UID: %s  State: %s  Blocks: %ld/%ld  BlocksInProgress: %ld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
 					tag.get().c_str(),
 					uid.toString().c_str(),
 					status.get().toString().c_str(),
@@ -3901,7 +3901,7 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 	printf("[Sampling][Loader] Node:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(),
 			param.url.toString().c_str());
-	printf("[Sampling][Loader] Node:%s filename:%s blockSize:%d\n",
+	printf("[Sampling][Loader] Node:%s filename:%s blockSize:%ld\n",
 			rd->describeNode().c_str(),
 			param.filename.c_str(), param.blockSize);
 
@@ -3912,7 +3912,8 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 	ASSERT( param.blockSize > 0 );
 	//state std::vector<Future<Void>> fileParserFutures;
 	if (param.offset % param.blockSize != 0) {
-		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder:%ld\n",
+			param.offset, param.blockSize, param.offset % param.blockSize);
 	}
 	ASSERT( param.offset + param.blockSize >= param.length ); // Assumption: Only sample one data block or less
 	for (j = param.offset; j < param.length; j += param.blockSize) {
@@ -4429,7 +4430,7 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 			if (e.code() != error_code_io_timeout) {
 				fprintf(stderr, "[ERROR] Loader handle received request:%s timeout\n", requestTypeStr.c_str());
 			} else {
-				fprintf(stderr, "[ERROR] Loader handle received request error. error code:%d, error message:%s\n",
+				fprintf(stderr, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
 						requestTypeStr.c_str(), e.code(), e.what());
 			}
 		}
