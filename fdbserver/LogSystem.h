@@ -30,6 +30,8 @@
 #include "fdbrpc/Replication.h"
 
 struct DBCoreState;
+struct TLogSet;
+struct CoreTLogSet;
 
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
@@ -50,6 +52,8 @@ public:
 	std::vector<std::vector<int>> satelliteTagLocations;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
+	LogSet(const TLogSet& tlogSet);
+	LogSet(const CoreTLogSet& coreSet);
 
 	std::string logRouterString() {
 		std::string result;
