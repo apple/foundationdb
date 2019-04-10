@@ -255,15 +255,13 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					if (m.param1 == lastEpochEndKey) {
-						for (auto t : allTags)
-							toCommit->addTag(t);
+						toCommit->addTags(allTags);
 						toCommit->addTypedMessage(LogProtocolMessage());
 					}
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					for (auto t : allTags)
-						toCommit->addTag(t);
+					toCommit->addTags(allTags);
 					toCommit->addTypedMessage(privatized);
 				}
 			}

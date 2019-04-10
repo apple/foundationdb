@@ -45,6 +45,7 @@ struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
 	Version epochEnd;
+	std::set<int8_t> pseudoLocalities;
 
 	OldLogData() : epochEnd(0), logRouterTags(0) {}
 };
@@ -113,6 +114,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
+	std::set<int8_t> pseudoLocalities;
 
 	// new members
 	Future<Void> rejoins;
@@ -180,6 +182,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(useRecoveredAt) {
 			logSystem->recoveredAt = lsConf.recoveredAt;
 		}
+		logSystem->pseudoLocalities = lsConf.pseudoLocalities;
 		for (const TLogSet& tLogSet : lsConf.tLogs) {
 			if (!excludeRemote || tLogSet.isLocal) {
 				Reference<LogSet> logSet(new LogSet(tLogSet));
@@ -1473,6 +1476,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 				logSystem->remoteLogsWrittenToCoreState = true;
 				logSystem->stopped = true;
+				logSystem->pseudoLocalities = prevState.pseudoLocalities;
 
 				outLogSystem->set(logSystem);
 			}
@@ -1782,8 +1786,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(configuration.usableRegions > 1) {
 			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,recr.tLogs.size()));
 			logSystem->expectedLogSets++;
-		} else {
-			logSystem->logRouterTags = 0;
+			logSystem->pseudoLocalities.insert(tagLocalityLogRouter);
 		}
 
 		logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
@@ -1829,11 +1832,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->oldLogData[0].tLogs = oldLogSystem->tLogs;
 			logSystem->oldLogData[0].epochEnd = oldLogSystem->knownCommittedVersion + 1;
 			logSystem->oldLogData[0].logRouterTags = oldLogSystem->logRouterTags;
+			logSystem->oldLogData[0].pseudoLocalities = oldLogSystem->pseudoLocalities;
 		}
-
-		for(int i = 0; i < oldLogSystem->oldLogData.size(); i++) {
-			logSystem->oldLogData.push_back(oldLogSystem->oldLogData[i]);
-		}
+		logSystem->oldLogData.insert(logSystem->oldLogData.end(), oldLogSystem->oldLogData.begin(), oldLogSystem->oldLogData.end());
 
 		logSystem->tLogs[0]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;
@@ -1930,8 +1931,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state std::vector<Future<Void>> recoveryComplete;
 
 		if(region.satelliteTLogReplicationFactor > 0) {
-			std::vector<Tag> satelliteTags;
-			satelliteTags.push_back(txsTag);
+			std::vector<Tag> satelliteTags(1, txsTag);
 
 			state vector<Future<TLogInterface>> satelliteInitializationReplies;
 			vector< InitializeTLogRequest > sreqs( recr.satelliteTLogs.size() );

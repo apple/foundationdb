@@ -699,8 +699,7 @@ ACTOR Future<Void> commitBatch(
 
 					if (debugMutation("ProxyCommit", commitVersion, m))
 						TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-					for (auto& tag : tags)
-						toCommit.addTag(tag);
+					toCommit.addTags(tags);
 					toCommit.addTypedMessage(m);
 				}
 				else if (m.type == MutationRef::ClearRange) {
@@ -723,8 +722,7 @@ ACTOR Future<Void> commitBatch(
 							uniquify(tags);
 						}
 						
-						for (auto& tag : tags)
-							toCommit.addTag(tag);
+						toCommit.addTags(tags);
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
@@ -744,8 +742,7 @@ ACTOR Future<Void> commitBatch(
 						}
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						for (auto& tag : allSources)
-							toCommit.addTag(tag);
+						toCommit.addTags(allSources);
 					}
 					toCommit.addTypedMessage(m);
 				}
@@ -836,8 +833,7 @@ ACTOR Future<Void> commitBatch(
 				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
 					
 				auto& tags = self->tagsForKey(backupMutation.param1);
-				for (auto& tag : tags)
-					toCommit.addTag(tag);
+				toCommit.addTags(tags);
 				toCommit.addTypedMessage(backupMutation);
 
 //				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {

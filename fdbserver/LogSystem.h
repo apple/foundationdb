@@ -21,6 +21,9 @@
 #ifndef FDBSERVER_LOGSYSTEM_H
 #define FDBSERVER_LOGSYSTEM_H
 
+#include <set>
+#include <vector>
+
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -50,6 +53,7 @@ public:
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
 	std::vector<std::vector<int>> satelliteTagLocations;
+	std::set<int8_t> pseudoLocalities;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 	LogSet(const TLogSet& tlogSet);
@@ -726,6 +730,11 @@ struct LogPushData : NonCopyable {
 	// addTag() adds a tag for the *next* message to be added
 	void addTag( Tag tag ) {
 		next_message_tags.push_back( tag );
+	}
+
+	template<class T>
+	void addTags(T tags) {
+		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
 	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
