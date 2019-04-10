@@ -64,7 +64,8 @@ enum class RestoreCommandEnum {Init = 0,
 		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,//17
 		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //19
 		Loader_Notify_Appler_To_Apply_Mutation,
-		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done}; //22
+		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done,
+		Finish_Restore}; //22
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
 // Restore command's UID. uint64_t part[2];
@@ -133,6 +134,8 @@ struct RestoreInterface {
 
 	RequestStream<RestoreSimpleRequest> setWorkerInterface;
 
+	RequestStream<RestoreSimpleRequest> finishRestore;
+
 	// ToDelete
 //	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
 //	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
@@ -159,7 +162,10 @@ struct RestoreInterface {
 		sendMutation.getEndpoint( TaskClusterController ); 
 		applyToDB.getEndpoint( TaskClusterController ); 
 		
-		initVersionBatch.getEndpoint( TaskClusterController ); 
+		initVersionBatch.getEndpoint( TaskClusterController );
+
+		setWorkerInterface.getEndpoint( TaskClusterController ); 
+		finishRestore.getEndpoint( TaskClusterController ); 
 
 		nodeID = g_random->randomUniqueID();
 	}
@@ -168,7 +174,8 @@ struct RestoreInterface {
 	void serialize( Ar& ar ) {
 		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
-				loadRangeFile, loadLogFile, sendMutation, applyToDB, initVersionBatch);
+				loadRangeFile, loadLogFile, sendMutation, applyToDB, initVersionBatch, setWorkerInterface,
+				finishRestore);
 	}
 };
 

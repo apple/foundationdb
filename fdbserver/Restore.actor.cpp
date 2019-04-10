@@ -1149,12 +1149,14 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
  	state int64_t readOffset = readOffset_input;
  	state int64_t readLen = readLen_input;
 
+	printf("[VERBOSE_DEBUG] Parse range file and get mutations 1, bc:%lx\n", bc.getPtr());
  	//MX: the set of key value version is rangeFile.version. the key-value set in the same range file has the same version
- 	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
+ 	Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
 
+	printf("[VERBOSE_DEBUG] Parse range file and get mutations 2\n");
  	state Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
 
-	printf("[VERBOSE_DEBUG] Parse range file and get mutations\n");
+	printf("[VERBOSE_DEBUG] Parse range file and get mutations 3\n");
 	int tmpi = 0;
 	for (tmpi = 0; tmpi < blockData.size(); tmpi++) {
 		printf("\t[VERBOSE_DEBUG] mutation: key:%s value:%s\n", blockData[tmpi].key.toString().c_str(), blockData[tmpi].value.toString().c_str());
@@ -1453,11 +1455,9 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 					// Save the RestoreInterface for the later operations
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
+				req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 				break;
 			}
-			wait( delay(5.0) );
-			req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-			break;
 		} catch( Error &e ) {
 			printf("[WARNING] Node:%s setWorkerInterface() transaction error:%s\n", rd->describeNode().c_str(), e.what());
 			wait( tr.onError(e) );
@@ -1616,7 +1616,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
 
-			printf("Node:%s waits on replies time out. Current phase: Set_Role, Retry all commands.\n", rd->describeNode().c_str());
+			printf("Node:%s waits on replies time out. Current phase: setWorkerInterface, Retry all commands.\n", rd->describeNode().c_str());
 		}
 	}
 
@@ -2645,9 +2645,9 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	if(leaderInterf.present()) {
 		// Initialize the node's UID
 		//rd->localNodeStatus.nodeID = interf.id();
-
-
 		wait( workerCore(rd, interf, cx) );
+		// Exit after restore
+		return Void();
 	}
 
 	//we are the leader
@@ -3075,6 +3075,38 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 
 
 			printf("Finish my restore now!\n");
+			// Make restore workers quit
+			state std::vector<UID> workersIDs = getWorkerIDs(rd);
+			state std::vector<Future<RestoreCommonReply>> cmdReplies;
+			loop {
+				try {
+					cmdReplies.clear();
+					rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
+					for (auto &nodeID : workersIDs) {
+						rd->cmdID.nextCmd();
+						ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
+						RestoreInterface &interf = rd->workers_interface[nodeID];
+						cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
+					}
+
+					if (!cmdReplies.empty()) {
+						//std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+						std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+						cmdReplies.clear();
+					}
+					printf("All restore workers have quited\n");
+
+					break;
+				} catch(Error &e) {
+					printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+					if(e.code() != error_code_restore_duplicate_tag) {
+						wait(tr->onError(e));
+					}
+				}
+				
+			}
+
+
 			// MX: Unlock DB after restore
 			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
 			printf("Finish restore cleanup. Start\n");
@@ -4028,7 +4060,7 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 			rd->describeNode().c_str(), req.applierIndex, getHexString(keyRangeLowerBounds[req.applierIndex]).c_str());
 
 	KeyRef lowerBound = keyRangeLowerBounds[req.applierIndex];
-	KeyRef upperBound = req.applierIndex < keyRangeLowerBounds.size() ? keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
+	KeyRef upperBound = (req.applierIndex + 1) < keyRangeLowerBounds.size() ? keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
 
 	req.reply.send(GetKeyRangeReply(interf.id(), req.cmdID, req.applierIndex, lowerBound, upperBound));
 
@@ -4063,13 +4095,11 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	readLen = 0;
 	readOffset = 0;
 	readOffset = param.offset;
-	//ASSERT(req.cmd == RestoreCommandEnum::Assign_Loader_Range_File);
 
-	// printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, role: %s, loading param:%s\n",
-	// 		rd->describeNode().c_str(), req.cmdID.toString().c_str(),
-	// 		getRoleStr(rd->localNodeStatus.role).c_str(),
-	// 		param.toString().c_str());
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase); // NOTE: Very useful to catch subtle bugs that cause inconsistent restored data!
+	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, role: %s, loading param:%s\n",
+			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
+			getRoleStr(rd->localNodeStatus.role).c_str(),
+			param.toString().c_str());
 
 	//Note: handle duplicate message delivery
 	if (rd->processedFiles.find(param.filename) != rd->processedFiles.end()) {
@@ -4080,7 +4110,7 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 		return Void();
 	}
 
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(param.url.toString());
+	bc = IBackupContainer::openContainer(param.url.toString());
 	// printf("[INFO] Node:%s CMDUID:%s open backup container for url:%s\n",
 	// 		rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 	// 		param.url.toString().c_str());
@@ -4099,7 +4129,9 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	for (j = param.offset; j < param.length; j += param.blockSize) {
 		readOffset = j;
 		readLen = std::min<int64_t>(param.blockSize, param.length - j);
+		printf("[DEBUG_TMP] _parseRangeFileToMutationsOnLoader starts\n");
 		wait( _parseRangeFileToMutationsOnLoader(rd, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
+		printf("[DEBUG_TMP] _parseRangeFileToMutationsOnLoader ends\n");
 		++beginBlock;
 	}
 
@@ -4153,7 +4185,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		return Void();
 	}
 
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(param.url.toString());
+	bc = IBackupContainer::openContainer(param.url.toString());
 	printf("[INFO][Loader] Node:%s CMDUID:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.url.toString().c_str());
@@ -4452,10 +4484,12 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					actors.add( handleSendMutationRequest(req, rd, ri) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(ri.applyToDB.getFuture()) ) {
+					requestTypeStr = "applyToDB";
 					actors.add( handleApplyToDBRequest(req, rd, ri, cx) );
 				}
 
 				when ( RestoreVersionBatchRequest req = waitNext(ri.initVersionBatch.getFuture()) ) {
+					requestTypeStr = "initVersionBatch";
 					wait(handleVersionBatchRequest(req, rd, ri));
 				}
 
@@ -4464,6 +4498,14 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their interfaces into DB before we can read the interface.
 					// TODO: Wait until all workers have registered their interface.
 					wait( setWorkerInterface(req, rd, ri, cx) );
+				}
+
+				when ( RestoreSimpleRequest req = waitNext(ri.finishRestore.getFuture()) ) {
+					// Destroy the worker at the end of the restore
+					printf("Node:%s finish restore and exit\n", rd->describeNode().c_str());
+					req.reply.send( RestoreCommonReply(ri.id(), req.cmdID) );
+					wait( delay(1.0) );
+					return Void();
 				}
 			}
 
