@@ -1457,6 +1457,7 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 			}
 			wait( delay(5.0) );
 			req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+			break;
 		} catch( Error &e ) {
 			printf("[WARNING] Node:%s setWorkerInterface() transaction error:%s\n", rd->describeNode().c_str(), e.what());
 			wait( tr.onError(e) );
@@ -1585,8 +1586,44 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 	ASSERT( numAppliers > 0 );
 
 	printf("Node:%s finish configure roles\n", rd->describeNode().c_str());
+
+	// Ask each restore worker to share its restore interface
+	loop {
+		try {
+			wait(delay(1.0));
+			index = 0;
+			std::vector<Future<RestoreCommonReply>> cmdReplies;
+			for(auto& cmdInterf : agents) {
+				role = rd->globalNodeStatus[index].role;
+				nodeID = rd->globalNodeStatus[index].nodeID;
+				rd->cmdID.nextCmd();
+				printf("[CMD:%s] Node:%s setWorkerInterface for node (index=%d uid=%s)\n", 
+						rd->cmdID.toString().c_str(), rd->describeNode().c_str(),
+						index, nodeID.toString().c_str());
+				cmdReplies.push_back( cmdInterf.setWorkerInterface.getReply(RestoreSimpleRequest(rd->cmdID)) );
+				index++;
+			}
+			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+			printf("[setWorkerInterface] Finished\n");
+
+			break;
+		} catch (Error &e) {
+			// TODO: Handle the command reply timeout error
+			if (e.code() != error_code_io_timeout) {
+				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
+			} else {
+				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+						rd->cmdID.toString().c_str(), e.code(), e.what());
+			}
+
+			printf("Node:%s waits on replies time out. Current phase: Set_Role, Retry all commands.\n", rd->describeNode().c_str());
+		}
+	}
+
+
 	return Void();
 }
+
 
 
 
@@ -2087,7 +2124,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
-				printf("[Sampling][CMD] Node:%s Loading %s on node %s\n", rd->describeNode().c_str(), param.toString().c_str(), nodeID.toString().c_str());
+				printf("[Sampling][CMD] Node:%s Loading %s on node %s\n", 
+						rd->describeNode().c_str(), param.toString().c_str(), nodeID.toString().c_str());
 
 				rd->cmdID.nextCmd(); // The cmd index is the i^th file (range or log file) to be processed
 				if (!rd->files[curFileIndex].isRange) {
@@ -2097,7 +2135,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				} else {
 					cmdType = RestoreCommandEnum::Sample_Range_File;
 					rd->cmdID.setPhase(RestoreCommandEnum::Sample_Range_File);
-					cmdReplies.push_back( cmdInterf.sampleLogFile.getReply(RestoreLoadFileRequest(rd->cmdID, param)) );
+					cmdReplies.push_back( cmdInterf.sampleRangeFile.getReply(RestoreLoadFileRequest(rd->cmdID, param)) );
 				}
 				
 				printf("[Sampling] Master cmdType:%d cmdUID:%s isRange:%d destinationNode:%s\n", 
@@ -2118,7 +2156,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			printf("[Sampling] Wait for %ld loaders to accept the cmd Sample_Range_File or Sample_Log_File\n", cmdReplies.size());
 
 			if ( !cmdReplies.empty() ) {
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+				//TODO: change to getAny. NOTE: need to keep the still-waiting replies
+				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
+				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
@@ -2622,6 +2662,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	rd->localNodeStatus.init(RestoreRole::Master);
 	rd->localNodeStatus.nodeID = interf.id();
 	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
+	// Configure roles for each worker and ask them to share their restore interface
 	wait( configureRoles(rd, cx) );
 
 	state int restoreId = 0;
@@ -4347,6 +4388,7 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 }
 
 ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Database cx) {
+	state ActorCollection actors(false);
 	state double lastLoopTopTime;
 	loop {
 		
@@ -4368,12 +4410,12 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				when ( RestoreLoadFileRequest req = waitNext(ri.sampleRangeFile.getFuture()) ) {
 					requestTypeStr = "sampleRangeFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
-					wait(handleSampleRangeFileRequest(req, rd, ri));
+					actors.add( handleSampleRangeFileRequest(req, rd, ri) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(ri.sampleLogFile.getFuture()) ) {
 					requestTypeStr = "sampleLogFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
-					wait(handleSampleLogFileRequest(req, rd, ri));
+					actors.add( handleSampleLogFileRequest(req, rd, ri) );
 				}
 				when ( RestoreGetApplierKeyRangeRequest req = waitNext(ri.getApplierKeyRangeRequest.getFuture()) ) {
 					requestTypeStr = "getApplierKeyRangeRequest";
@@ -4386,12 +4428,12 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				when ( RestoreLoadFileRequest req = waitNext(ri.loadRangeFile.getFuture()) ) {
 					requestTypeStr = "loadRangeFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
-					wait(handleLoadRangeFileRequest(req, rd, ri));
+					actors.add( handleLoadRangeFileRequest(req, rd, ri) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(ri.loadLogFile.getFuture()) ) {
 					requestTypeStr = "loadLogFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
-					wait(handleLoadLogFileRequest(req, rd, ri));
+					actors.add( handleLoadLogFileRequest(req, rd, ri) );
 				}
 
 				when ( RestoreCalculateApplierKeyRangeRequest req = waitNext(ri.calculateApplierKeyRange.getFuture()) ) {
@@ -4402,15 +4444,15 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				when ( RestoreSendMutationRequest req = waitNext(ri.sendSampleMutation.getFuture()) ) {
 					requestTypeStr = "sendSampleMutation";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
-					wait(handleSendSampleMutationRequest(req, rd, ri));
+					actors.add( handleSendSampleMutationRequest(req, rd, ri));
 				}
 				when ( RestoreSendMutationRequest req = waitNext(ri.sendMutation.getFuture()) ) {
 					requestTypeStr = "sendMutation";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
-					wait(handleSendMutationRequest(req, rd, ri));
+					actors.add( handleSendMutationRequest(req, rd, ri) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(ri.applyToDB.getFuture()) ) {
-					wait(handleApplyToDBRequest(req, rd, ri, cx));
+					actors.add( handleApplyToDBRequest(req, rd, ri, cx) );
 				}
 
 				when ( RestoreVersionBatchRequest req = waitNext(ri.initVersionBatch.getFuture()) ) {
