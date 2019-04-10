@@ -131,6 +131,8 @@ struct RestoreInterface {
 
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 
+	RequestStream<RestoreSimpleRequest> setWorkerInterface;
+
 	// ToDelete
 //	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
 //	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier

@@ -1435,7 +1435,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 }
 
 
-ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> rd, Database cx) {
+ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<RestoreData> rd, RestoreInterface interf, Database cx) {
  	state Transaction tr(cx);
 
 	state vector<RestoreInterface> agents; // agents is cmdsInterf
@@ -1456,12 +1456,14 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> rd, Database cx) {
 				break;
 			}
 			wait( delay(5.0) );
+			req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		} catch( Error &e ) {
 			printf("[WARNING] Node:%s setWorkerInterface() transaction error:%s\n", rd->describeNode().c_str(), e.what());
 			wait( tr.onError(e) );
 		}
 		printf("[WARNING] Node:%s setWorkerInterface should always succeed in the first loop! Something goes wrong!\n", rd->describeNode().c_str());
 	};
+
 
 	return Void();
  }
@@ -2602,12 +2604,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	//we are not the leader, so put our interface in the agent list
 	if(leaderInterf.present()) {
 		// Initialize the node's UID
-		rd->localNodeStatus.nodeID = interf.id();
+		//rd->localNodeStatus.nodeID = interf.id();
 
-		// Step: Find other worker's interfaces
-		// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their interfaces into DB before we can read the interface.
-		// TODO: Wait until all workers have registered their interface.
-		wait( setWorkerInterface(rd, cx) );
 
 		wait( workerCore(rd, interf, cx) );
 	}
@@ -3606,6 +3604,8 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 	//printAppliersKeyRange(rd);
 
+	ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+
 	state RestoreInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
 	state UID applierID = rd->masterApplier;
 	state int packMutationNum = 0;
@@ -4412,6 +4412,15 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				when ( RestoreVersionBatchRequest req = waitNext(ri.initVersionBatch.getFuture()) ) {
 					wait(handleVersionBatchRequest(req, rd, ri));
 				}
+
+				when ( RestoreSimpleRequest req = waitNext(ri.setWorkerInterface.getFuture()) ) {
+					// Step: Find other worker's interfaces
+					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their interfaces into DB before we can read the interface.
+					// TODO: Wait until all workers have registered their interface.
+					wait( setWorkerInterface(req, rd, ri, cx) );
+				}
+
+				
 
 			}
 
