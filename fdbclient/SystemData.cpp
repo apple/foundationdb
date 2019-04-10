@@ -692,7 +692,7 @@ const Key restoreStatusKeyFor ( StringRef statusType) {
 
 const Value restoreStatusValue( double const& val ) {
 	BinaryWriter wr(IncludeVersion());
-	wr << (long) val;
+	wr << StringRef(std::to_string(val));
 	return wr.toValue();
 }
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");

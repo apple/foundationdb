@@ -93,7 +93,7 @@ public:
 
 	std::string toString() const;
 
-	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase; cmdID == r.cmdID; }
+	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase && cmdID == r.cmdID; }
 	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdID != r.cmdID; }
 	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdID < r.cmdID); }
 
@@ -542,7 +542,7 @@ struct RestoreNodeStatus {
 		} else if ( newRole == RestoreRole::Applier) {
 			applierState = ApplierState::Ready;
 		} else if ( newRole == RestoreRole::Master) {
-			masterState == MasterState::Ready;
+			masterState = MasterState::Ready;
 		}
 		lastStart = 0;
 		totalExecTime = 0;

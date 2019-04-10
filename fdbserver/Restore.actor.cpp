@@ -2148,6 +2148,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			rd->cmdID = checkpointCMDUID;
 			curFileIndex = checkpointCurFileIndex;
 			curFileOffset = checkpointCurFileOffset;
+			allLoadReqsSent = false;
 			printf("[Sampling][Waring] Retry at CMDID:%s curFileIndex:%ld\n", rd->cmdID.toString().c_str(), curFileIndex);
 		}
 	}
@@ -4422,9 +4423,6 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					// TODO: Wait until all workers have registered their interface.
 					wait( setWorkerInterface(req, rd, ri, cx) );
 				}
-
-				
-
 			}
 
 		} catch (Error &e) {
