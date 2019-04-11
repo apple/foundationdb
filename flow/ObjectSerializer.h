@@ -106,7 +106,7 @@ public:
 		auto allocator = [this, &allocations](size_t size_) {
 			++allocations;
 			size = size_;
-			data = new uint8_t[size];
+			data = new (arena) uint8_t[size];
 			return data;
 		};
 		auto res = save_members(allocator, file_identifier, items...);
@@ -122,7 +122,19 @@ public:
 		return StringRef(data, size);
 	}
 
+	Standalone<StringRef> toString() const {
+		return Standalone<StringRef>(toStringRef(), arena);
+	}
+
+	template <class Item>
+	static Standalone<StringRef> toValue(Item const& item) {
+		ObjectWriter writer;
+		writer.serialize(item);
+		return writer.toString();
+	}
+
 private:
+	Arena arena;
 	uint8_t* data = nullptr;
 	int size = 0;
 };

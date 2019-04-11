@@ -881,7 +881,9 @@ struct LoadSaveHelper {
 	auto save(const U& message, Writer& writer, const VTableSet*) {
 		constexpr auto size = scalar_traits<U>::size;
 		std::array<uint8_t, size> result = {};
-		scalar_traits<U>::save(&result[0], message);
+		if constexpr (size > 0) {
+			scalar_traits<U>::save(&result[0], message);
+		}
 		return result;
 	}
 

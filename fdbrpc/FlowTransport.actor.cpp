@@ -541,8 +541,7 @@ TransportData::~TransportData() {
 	}
 }
 
-ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket,
-                          bool useFlatbuffers) {
+ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
 	int priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskReadSocket || !inReadSocket) {
 		wait( delay(0, priority) );
@@ -554,7 +553,9 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			if (useFlatbuffers) {
+			if (g_network->useObjectSerializer()) {
+				StringRef data = reader.arenaReadAll();
+				ASSERT(data.size() > 8);
 				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
 				receiver->receive(objReader);
 			} else {
@@ -652,7 +653,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(removeFlags(peerProtocolVersion)));
+		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(currentProtocolVersion));
 		UID token;
 		reader >> token;
 
@@ -669,7 +670,8 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 				transport->warnAlwaysForLargePacket = false;
 		}
 
-		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true, hasObjectSerializerFlag(peerProtocolVersion));
+		ASSERT(!reader.empty());
+		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true);
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -693,7 +695,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool incompatiblePeerCounted = false;
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
-	state uint64_t peerProtocolVersion = 0;
+	state uint64_t peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
 	if (peer == nullptr) {
@@ -731,7 +733,8 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if( (pkt.protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
+						if(g_network->useObjectSerializer() != hasObjectSerializerFlag(pkt.protocolVersion) ||
+						   (removeFlags(pkt.protocolVersion) & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -778,8 +781,8 @@ ACTOR static Future<Void> connectionReader(
 						unprocessed_begin += connectPacketSize;
 						expectConnectPacket = false;
 
-						peerProtocolVersion = protocolVersion;
 						if (peer != nullptr) {
+							peerProtocolVersion = protocolVersion;
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing")
 							    .suppressFor(1.0)
@@ -791,7 +794,9 @@ ACTOR static Future<Void> connectionReader(
 								incompatiblePeerCounted = true;
 							}
 							ASSERT( pkt.canonicalRemotePort == peerAddress.port );
+							onConnected.send(peer);
 						} else {
+							peerProtocolVersion = protocolVersion;
 							if (pkt.canonicalRemotePort) {
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
@@ -1032,8 +1037,8 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
 
-		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false,
-		        g_network->useObjectSerializer());
+		ASSERT(copy.size() > 0);
+		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
 
 		return (PacketID)NULL;
 	} else {

@@ -65,7 +65,9 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ASSERT(ar.isDeserializing || uniqueID != UID());
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.isDeserializing || uniqueID != UID());
+		}
 		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
 		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
 	}

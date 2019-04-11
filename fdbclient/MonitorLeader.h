@@ -43,24 +43,26 @@ Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& conn
 template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-	                        const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
-		return asyncDeserialize(serializedInfo, outKnownLeader);
+							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
+		return asyncDeserialize(serializedInfo, outKnownLeader, g_network->useObjectSerializer());
 	}
 };
 
 Future<Void> asyncDeserializeClusterInterface(const Reference<AsyncVar<Value>>& serializedInfo,
-                                              const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
+											  const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
 
 template <>
 struct LeaderDeserializer<ClusterInterface> {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-	                        const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader) {
+							const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader) {
 		return asyncDeserializeClusterInterface(serializedInfo, outKnownLeader);
 	}
 };
 
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
+Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
+						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
+						   Reference<AsyncVar<int>> connectedCoordinatorsNum) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
 	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo, connectedCoordinatorsNum );

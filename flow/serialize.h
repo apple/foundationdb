@@ -725,6 +725,7 @@ struct MakeSerializeSource : ISerializeSource {
 		if (useObjectSerializer) {
 			ObjectWriter writer;
 			writer.serialize(get());
+			w.serializeBytes(writer.toStringRef());
 		} else {
 			static_cast<T const*>(this)->serialize(w);
 		}

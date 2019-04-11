@@ -120,9 +120,13 @@ struct IPAddress {
 			bool v6 = isV6();
 			serializer(ar, v6);
 			if (v6) {
-				serializer(ar, std::get<IPAddressStore>(addr));
+				IPAddressStore store;
+				serializer(ar, store);
+				addr = store;
 			} else {
-				serializer(ar, std::get<uint32_t>(addr));
+				uint32_t res;
+				serializer(ar, res);
+				addr = res;
 			}
 		}
 	}

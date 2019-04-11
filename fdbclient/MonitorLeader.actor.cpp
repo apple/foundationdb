@@ -515,10 +515,10 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 }
 
 ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
-                                                    Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
+													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
-	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
+		new AsyncVar<Optional<ClusterControllerClientInterface>>{});
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, g_network->useObjectSerializer());
 	loop {
 		choose {
 			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
