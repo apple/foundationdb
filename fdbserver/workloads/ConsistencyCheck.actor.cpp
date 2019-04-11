@@ -584,7 +584,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
-		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
@@ -915,7 +916,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
 						if(rateLimitForThisRound > 0)
 						{
-								wait(rateLimiter->getAllowance(totalReadAmount));
+							wait(rateLimiter->getAllowance(totalReadAmount));
+							// Set ratelimit to max allowed if current round has been going on for a while
+							if(now() - rateLimiterStartTime > 1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME && rateLimitForThisRound != self->rateLimitMax) {
+								rateLimitForThisRound = self->rateLimitMax;
+								rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+								rateLimiterStartTime = now();
+								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound").detail("RateLimit", rateLimitForThisRound);
+							}
 						}
 						bytesReadInRange += totalReadAmount;
 						bytesReadInthisRound += totalReadAmount;
