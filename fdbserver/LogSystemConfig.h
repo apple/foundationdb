@@ -55,6 +55,8 @@ protected:
 	Optional<Interface> iface;
 };
 
+class LogSet;
+
 struct TLogSet {
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
@@ -68,6 +70,7 @@ struct TLogSet {
 	std::vector<std::vector<int>> satelliteTagLocations;
 
 	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
+	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
 		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(), locality);

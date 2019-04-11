@@ -87,6 +87,23 @@ LogSet::LogSet(const CoreTLogSet& coreSet) :
 	}
 }
 
+TLogSet::TLogSet(const LogSet& rhs) :
+	tLogWriteAntiQuorum(rhs.tLogWriteAntiQuorum),
+	tLogReplicationFactor(rhs.tLogReplicationFactor),
+	tLogLocalities(rhs.tLogLocalities), tLogVersion(rhs.tLogVersion),
+	tLogPolicy(rhs.tLogPolicy), isLocal(rhs.isLocal), locality(rhs.locality),
+	startVersion(rhs.startVersion),
+	satelliteTagLocations(rhs.satelliteTagLocations)
+{
+	for (const auto& tlog : rhs.logServers) {
+		tLogs.push_back(tlog->get());
+	}
+
+	for (const auto& logRouter : rhs.logRouters) {
+		logRouters.push_back(logRouter->get());
+	}
+}
+
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	UID dbgid;
 	LogSystemType logSystemType;
@@ -995,59 +1012,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.recruitmentID = recruitmentID;
 		logSystemConfig.stopped = stopped;
 		logSystemConfig.recoveredAt = recoveredAt;
-		for( int i = 0; i < tLogs.size(); i++ ) {
-			Reference<LogSet> logSet = tLogs[i];
-			if(logSet->isLocal || remoteLogsWrittenToCoreState) {
-				logSystemConfig.tLogs.push_back(TLogSet());
-				TLogSet& log = logSystemConfig.tLogs.back();
-				log.tLogVersion = logSet->tLogVersion;
-				log.tLogWriteAntiQuorum = logSet->tLogWriteAntiQuorum;
-				log.tLogReplicationFactor = logSet->tLogReplicationFactor;
-				log.tLogPolicy = logSet->tLogPolicy;
-				log.tLogLocalities = logSet->tLogLocalities;
-				log.isLocal = logSet->isLocal;
-				log.locality = logSet->locality;
-				log.startVersion = logSet->startVersion;
-				log.satelliteTagLocations = logSet->satelliteTagLocations;
-
-				for( int i = 0; i < logSet->logServers.size(); i++ ) {
-					log.tLogs.push_back(logSet->logServers[i]->get());
-				}
-
-				for( int i = 0; i < logSet->logRouters.size(); i++ ) {
-					log.logRouters.push_back(logSet->logRouters[i]->get());
-				}
+		for (const Reference<LogSet>& logSet : tLogs) {
+			if (logSet->isLocal || remoteLogsWrittenToCoreState) {
+				logSystemConfig.tLogs.push_back(TLogSet(*logSet));
 			}
 		}
 
 		if(!recoveryCompleteWrittenToCoreState.get()) {
-			for( int i = 0; i < oldLogData.size(); i++ ) {
+			for (const auto& oldData : oldLogData) {
 				logSystemConfig.oldTLogs.push_back(OldTLogConf());
 
-				logSystemConfig.oldTLogs[i].tLogs.resize(oldLogData[i].tLogs.size());
-				for( int j = 0; j < oldLogData[i].tLogs.size(); j++ ) {
-					TLogSet& log = logSystemConfig.oldTLogs[i].tLogs[j];
-					Reference<LogSet> logSet = oldLogData[i].tLogs[j];
-					log.tLogVersion = logSet->tLogVersion;
-					log.tLogWriteAntiQuorum = logSet->tLogWriteAntiQuorum;
-					log.tLogReplicationFactor = logSet->tLogReplicationFactor;
-					log.tLogPolicy = logSet->tLogPolicy;
-					log.tLogLocalities = logSet->tLogLocalities;
-					log.isLocal = logSet->isLocal;
-					log.locality = logSet->locality;
-					log.startVersion = logSet->startVersion;
-					log.satelliteTagLocations = logSet->satelliteTagLocations;
-
-					for( int i = 0; i < logSet->logServers.size(); i++ ) {
-						log.tLogs.push_back(logSet->logServers[i]->get());
-					}
-
-					for( int i = 0; i < logSet->logRouters.size(); i++ ) {
-						log.logRouters.push_back(logSet->logRouters[i]->get());
-					}
+				for (const Reference<LogSet>& logSet : oldData.tLogs) {
+					logSystemConfig.oldTLogs.back().tLogs.push_back(TLogSet(*logSet));
 				}
-				logSystemConfig.oldTLogs[i].logRouterTags = oldLogData[i].logRouterTags;
-				logSystemConfig.oldTLogs[i].epochEnd = oldLogData[i].epochEnd;
+				logSystemConfig.oldTLogs.back().logRouterTags = oldData.logRouterTags;
+				logSystemConfig.oldTLogs.back().epochEnd = oldData.epochEnd;
 			}
 		}
 		return logSystemConfig;
