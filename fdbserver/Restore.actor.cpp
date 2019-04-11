@@ -3104,13 +3104,18 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 				}
 			}
 
-
+			wait( delay(5.0) );
 			printf("Finish my restore now!\n");
 			// Make restore workers quit
 			state std::vector<UID> workersIDs = getWorkerIDs(rd);
 			state std::vector<Future<RestoreCommonReply>> cmdReplies;
+			state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
 			loop {
 				try {
+					tryNum++;
+					if (tryNum >= 3) {
+						break;
+					}
 					cmdReplies.clear();
 					rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
 					for (auto &nodeID : workersIDs) {
@@ -3121,8 +3126,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					}
 
 					if (!cmdReplies.empty()) {
-						//std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-						std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+						std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
+						//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
 						cmdReplies.clear();
 					}
 					printf("All restore workers have quited\n");
@@ -3134,7 +3139,6 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 						wait(tr->onError(e));
 					}
 				}
-				
 			}
 
 
