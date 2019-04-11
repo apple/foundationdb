@@ -113,6 +113,7 @@ Fixes only impacting 6.1.0+
 ---------------------------
 
 * The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
+* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
 
 Earlier release notes
 ---------------------
