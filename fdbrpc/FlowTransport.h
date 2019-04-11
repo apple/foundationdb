@@ -143,6 +143,9 @@ public:
 	// Makes PacketID "unreliable" (either the data or a connection close event will be delivered
 	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
 
+	Reference<AsyncVar<bool>> getDegraded();
+	// This async var will be set to true when the process cannot connect to a public network address that the failure monitor thinks is healthy.
+
 	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection = true );// { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();

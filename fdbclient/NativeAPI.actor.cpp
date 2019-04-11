@@ -222,6 +222,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("NotCommitted", cx->transactionsNotCommitted)
 			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
 			.detail("ResourceConstrained", cx->transactionsResourceConstrained)
+			.detail("ProcessBehind", cx->transactionsProcessBehind)
 			.detail("MeanLatency", cx->latencies.mean())
 			.detail("MedianLatency", cx->latencies.median())
 			.detail("Latency90", cx->latencies.percentile(0.90))
@@ -513,7 +514,7 @@ DatabaseContext::DatabaseContext(
 	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
+	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
@@ -1487,8 +1488,9 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache( key );
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
-			} else if( e.code() == error_code_watch_cancelled ) {
-				TEST( true ); // Too many watches on the storage server, poll for changes instead
+			} else if( e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind ) {
+				TEST( e.code() == error_code_watch_cancelled ); // Too many watches on the storage server, poll for changes instead
+				TEST( e.code() == error_code_process_behind ); // The storage servers are all behind
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if ( e.code() == error_code_timed_out ) { //The storage server occasionally times out watches in case it was cancelled
 				TEST( true ); // A watch timed out
@@ -3030,7 +3032,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 	if (e.code() == error_code_not_committed ||
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
-		e.code() == error_code_proxy_memory_limit_exceeded)
+		e.code() == error_code_proxy_memory_limit_exceeded ||
+		e.code() == error_code_process_behind)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3038,6 +3041,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsMaybeCommitted++;
 		if (e.code() == error_code_proxy_memory_limit_exceeded)
 			cx->transactionsResourceConstrained++;
+		if (e.code() == error_code_process_behind)
+			cx->transactionsProcessBehind++;
 
 		double backoff = getBackoff(e.code());
 		reset();

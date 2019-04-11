@@ -661,6 +661,11 @@ You can now remove old client library versions from your clients. This is only t
 Version-specific notes on upgrading
 ===================================
 
+Upgrading from 6.1.x
+--------------------
+
+Upgrades from 6.1.x will keep all your old data and configuration settings. 
+
 Upgrading from 6.0.x
 --------------------
 

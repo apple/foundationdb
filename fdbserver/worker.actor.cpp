@@ -650,7 +650,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
-	state Reference<AsyncVar<bool>> degraded( new AsyncVar<bool>(false) );
+	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
@@ -677,7 +677,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		}
 	}
 
-	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->TLOG_DEGRADED_RESET_INTERVAL, false));
+	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
