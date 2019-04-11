@@ -261,9 +261,7 @@ struct _IncludeVersion {
 };
 struct _AssumeVersion {
 	uint64_t v;
-	explicit _AssumeVersion( uint64_t version ) : v(version) {
-		ASSERT( version >= minValidProtocolVersion );
-	}
+	explicit _AssumeVersion( uint64_t version );
 	template <class Ar> void write( Ar& ar ) { ar.setProtocolVersion(v); }
 	template <class Ar> void read( Ar& ar ) { ar.setProtocolVersion(v); }
 };
@@ -546,13 +544,7 @@ public:
 	static const int isDeserializing = 1;
 	typedef BinaryReader READER;
 
-	const void* readBytes( int bytes ) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT( e <= end );
-		begin = e;
-		return b;
-	}
+	const void* readBytes( int bytes );
 
 	const void* peekBytes( int bytes ) {
 		ASSERT( begin + bytes <= end );
