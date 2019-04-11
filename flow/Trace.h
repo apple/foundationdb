@@ -269,11 +269,11 @@ struct TraceableString<char[S]> {
 	}
 
 	static bool atEnd(const char* value, const char* iter) {
-		return iter - value == S;
+		return iter - value == S - 1; // Exclude trailing \0 byte
 	}
 
 	static std::string toString(const char* value) {
-		return std::string(value, S);
+		return std::string(value, S - 1); // Exclude trailing \0 byte
 	}
 };
 
