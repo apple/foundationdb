@@ -294,7 +294,7 @@ struct TraceableString<char*> {
 
 template<class T>
 struct TraceableStringImpl : std::true_type {
-	static constexpr bool isPrintable(char c) { return c > 32 && c < 127; }
+	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
 
 	template<class Str>
 	static std::string toString(Str&& value) {
