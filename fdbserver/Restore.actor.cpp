@@ -738,6 +738,8 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	// For master applier
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
 
+	bool inProgressApplyToDB = false;
+
 	// Command id to record the progress
 	CMDUID cmdID;
 
@@ -2537,7 +2539,6 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 	loop {
 		try {
-
 			rd->cmdID.initPhase( RestoreCommandEnum::Apply_Mutation_To_DB );
 			for (auto& nodeID : appliers) {
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
@@ -2550,6 +2551,8 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 			printf("[INFO] %ld appliers finished applying mutations to DB\n", appliers.size());
 
 			cmdReplies.clear();
+
+			wait(delay(5.0));
 
 			break;
 		} catch (Error &e) {
@@ -2570,6 +2573,9 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 
 
 void sanityCheckMutationOps(Reference<RestoreData> rd) {
+	if (rd->kvOps.empty())
+		return;
+
 	if ( isKVOpsSorted(rd) ) {
  		printf("[CORRECT] KVOps is sorted by version\n");
  	} else {
@@ -3065,6 +3071,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 							status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
 
 					wait( registerStatus(cx, status) );
+					printf("-----[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
+						curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
 
 					curBackupFilesBeginIndex = curBackupFilesEndIndex + 1;
 					curBackupFilesEndIndex++;
@@ -4343,26 +4351,41 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
+	// Wait in case the  applyToDB request was delivered twice;
+	while (rd->inProgressApplyToDB) {
+		wait(delay(5.0));
+	}
+	rd->inProgressApplyToDB = true;
+	rd->processedCmd[req.cmdID] = 1;
+
 	if ( rd->isCmdProcessed(req.cmdID) ) {
 		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
 
+	if (rd->kvOps.empty()) {
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+		rd->processedCmd[req.cmdID] = 1;
+		return Void();
+	}
+
 	sanityCheckMutationOps(rd);
 
- 	if ( debug_verbose ) {
+ 	if ( debug_verbose == false ) {
 		TraceEvent("ApplyKVOPsToDB").detail("MapSize", rd->kvOps.size());
 		printf("ApplyKVOPsToDB num_of_version:%ld\n", rd->kvOps.size());
  	}
  	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = rd->kvOps.begin();
  	state int count = 0;
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state int numVersion = 0;
  	for ( ; it != rd->kvOps.end(); ++it ) {
-
+		 numVersion++;
  		if ( debug_verbose ) {
 			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
  		}
-		//printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n", it->first, it->second.size());
+		printf("ApplyKVOPsToDB numVersion:%d Version:%08lx num_of_ops:%d, \n", numVersion, it->first, it->second.size());
 
 
  		state MutationRef m;
@@ -4387,9 +4410,10 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 			if ( debug_verbose ) {
 				printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
 			}
+			printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
+			
  			loop {
  				try {
-					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
  					tr->reset();
  					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
  					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4436,7 +4460,8 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
  	printf("Node:%s ApplyKVOPsToDB number of kv mutations:%d\n", rd->describeNode().c_str(), count);
 
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-	rd->processedCmd[req.cmdID] = 1;
+	printf("rd->processedCmd size:%d req.cmdID:%s\n", rd->processedCmd.size(), req.cmdID.toString().c_str());
+	rd->inProgressApplyToDB = false;
 
  	return Void();
 }
