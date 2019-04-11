@@ -4289,24 +4289,27 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 
 	// Wait in case the  applyToDB request was delivered twice;
 	while (rd->inProgressApplyToDB) {
+		printf("[DEBUG] NODE:%s inProgressApplyToDB wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
-	rd->inProgressApplyToDB = true;
-
+	
 	if ( rd->isCmdProcessed(req.cmdID) ) {
 		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		//req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
 
+	rd->inProgressApplyToDB = true;
+
+	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (rd->kvOps.empty()) {
 		printf("Node:%s kvOps is empty. No-op for apply to DB\n", rd->describeNode().c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		rd->processedCmd[req.cmdID] = 1;
+		rd->inProgressApplyToDB = false;
 		return Void();
 	}
-
-	rd->processedCmd[req.cmdID] = 1;
+	
 	sanityCheckMutationOps(rd);
 
  	if ( debug_verbose ) {
@@ -4397,6 +4400,7 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	printf("rd->processedCmd size:%d req.cmdID:%s\n", rd->processedCmd.size(), req.cmdID.toString().c_str());
+	rd->processedCmd[req.cmdID] = 1;
 	rd->inProgressApplyToDB = false;
 
  	return Void();
