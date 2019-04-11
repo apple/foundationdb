@@ -70,6 +70,7 @@ set(FLOW_SRCS
   network.cpp
   network.h
   serialize.h
+  serialize.cpp
   stacktrace.amalgamation.cpp
   stacktrace.h
   version.cpp)

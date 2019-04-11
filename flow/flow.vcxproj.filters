@@ -35,6 +35,7 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="stacktrace.amalgamation.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
+    <ClCompile Include="serialize.cpp" />
     <ClCompile Include="XmlTraceLogFormatter.cpp" />
     <ClCompile Include="FileTraceLogWriter.cpp" />
   </ItemGroup>
