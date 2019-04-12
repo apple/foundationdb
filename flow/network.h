@@ -117,36 +117,34 @@ struct IPAddress {
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, addr);
 		} else {
-			bool v6 = isV6();
-			serializer(ar, v6);
-			if (v6) {
-				IPAddressStore store;
-				serializer(ar, store);
-				addr = store;
+			if (Ar::isDeserializing) {
+				bool v6;
+				serializer(ar, v6);
+				if (v6) {
+					IPAddressStore store;
+					serializer(ar, store);
+					addr = store;
+				} else {
+					uint32_t res;
+					serializer(ar, res);
+					addr = res;
+				}
 			} else {
-				uint32_t res;
-				serializer(ar, res);
-				addr = res;
+				bool v6 = isV6();
+				serializer(ar, v6);
+				if (v6) {
+					auto res = toV6();
+					serializer(ar, res);
+				} else {
+					auto res = toV4();
+					serializer(ar, res);
+				}
 			}
 		}
 	}
 
 private:
 	std::variant<uint32_t, IPAddressStore> addr;
-};
-
-template<>
-struct vector_like_traits<IPAddress::IPAddressStore> : std::true_type {
-	using type = IPAddress::IPAddressStore;
-	using value_type = uint8_t;
-	using iterator = typename type::const_iterator;
-	using insert_iterator = typename type::iterator;
-
-	static size_t num_entries(const type&) { return 16; }
-	template <class Context>
-	static void reserve(type&, size_t, Context&) {}
-	static insert_iterator insert(type& value) { return value.begin(); }
-	static iterator begin(const type& value) { return value.begin(); }
 };
 
 template<>

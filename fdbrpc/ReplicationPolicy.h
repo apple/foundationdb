@@ -50,6 +50,7 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 		Reference<IReplicationPolicy> refThis(this);
 		serializeReplicationPolicy(ar, refThis);
 		refThis->delref_no_destroy();
@@ -104,7 +105,9 @@ struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
 	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results);
 	template <class Ar>
-	void serialize(Ar& ar) {}
+	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
+	}
 	virtual void deserializationDone() {}
 	virtual void attributeKeys(std::set<std::string>* set) const override { return; }
 };
@@ -125,6 +128,7 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 		serializer(ar, _attribKey, _count);
 		serializeReplicationPolicy(ar, _policy);
 	}
@@ -201,6 +205,7 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 		int count = _policies.size();
 		serializer(ar, count);
 		_policies.resize(count);
@@ -227,140 +232,6 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 protected:
 	std::vector<Reference<IReplicationPolicy>> _policies;
 	std::vector<Reference<IReplicationPolicy>> _sortedPolicies;
-};
-
-extern int testReplication();
-
-#define POLICY_CONSTRUCTION_WRAPPER(t)                                                                                 \
-	template <>                                                                                                        \
-	struct object_construction<t*> {                                                                                   \
-		using type = t*;                                                                                               \
-		type obj;                                                                                                      \
-                                                                                                                       \
-		object_construction() : obj(new t()) {}                                                                        \
-		object_construction(object_construction&& other) : obj(other.obj) { other.obj = nullptr; }                     \
-		object_construction(const object_construction& other) : obj() {}                                               \
-                                                                                                                       \
-		object_construction& operator=(object_construction&& other) {                                                  \
-			if (obj != nullptr) {                                                                                      \
-				delete obj;                                                                                            \
-			}                                                                                                          \
-			obj = other.obj;                                                                                           \
-			other.obj = nullptr;                                                                                       \
-			return *this;                                                                                              \
-		}                                                                                                              \
-                                                                                                                       \
-		object_construction& operator=(const object_construction& other) {                                             \
-			if (obj != nullptr) {                                                                                      \
-				delete obj;                                                                                            \
-			}                                                                                                          \
-			obj = new t(*other.obj);                                                                                   \
-			return *this;                                                                                              \
-		}                                                                                                              \
-                                                                                                                       \
-		type& get() { return obj; }                                                                                    \
-		const type& get() const { return obj; }                                                                        \
-		type move() {                                                                                                  \
-			auto res = obj;                                                                                            \
-			obj = nullptr;                                                                                             \
-			return res;                                                                                                \
-		}                                                                                                              \
-	};
-
-template <>
-struct object_construction<Reference<IReplicationPolicy>> {
-	using type = Reference<IReplicationPolicy>;
-	type _impl;
-
-	object_construction() : _impl(new PolicyOne()){};
-
-	type& get() { return _impl; }
-	const type& get() const { return _impl; }
-
-	type move() { return std::move(_impl); }
-};
-
-POLICY_CONSTRUCTION_WRAPPER(PolicyOne);
-POLICY_CONSTRUCTION_WRAPPER(PolicyAcross);
-POLICY_CONSTRUCTION_WRAPPER(PolicyAnd);
-
-template <>
-struct FileIdentifierFor<Reference<IReplicationPolicy>> {
-	static constexpr FileIdentifier value = 14695621;
-};
-
-template <>
-struct serializable_traits<PolicyOne*> : std::true_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, PolicyOne*& p) {}
-};
-
-template <>
-struct serializable_traits<PolicyAcross*> : std::true_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, PolicyAcross*& p) {
-		::serializer(ar, p->_count, p->_attribKey, p->_policy);
-	}
-};
-
-template <>
-struct serializable_traits<PolicyAnd*> : std::true_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, PolicyAnd*& p) {
-		::serializer(ar, p->_policies);
-	}
-};
-
-template <>
-struct serializable_traits<Reference<IReplicationPolicy>> : std::true_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, Reference<IReplicationPolicy>& policy) {
-		::serializer(ar, policy.changePtrUnsafe());
-	}
-};
-
-template <>
-struct union_like_traits<IReplicationPolicy*> : std::true_type {
-	using Member = IReplicationPolicy*;
-	using alternatives = pack<PolicyOne*, PolicyAcross*, PolicyAnd*>;
-
-	static uint8_t index(const Member& policy) {
-		if (policy->name() == "One") {
-			return 0;
-		} else if (policy->name() == "And") {
-			return 2;
-		} else {
-			return 1;
-		}
-	}
-
-	static bool empty(const Member& policy) { return policy == nullptr; }
-
-	template <int i>
-	static const index_t<i, alternatives>& get(IReplicationPolicy* const& member) {
-		if constexpr (i == 0) {
-			return reinterpret_cast<PolicyOne* const&>(member);
-		} else if constexpr (i == 1) {
-			return reinterpret_cast<PolicyAcross* const&>(member);
-		} else {
-			return reinterpret_cast<PolicyAnd* const&>(member);
-		}
-	}
-
-	template <int i, class Alternative>
-	static const void assign(Member& policy, const Alternative& impl) {
-		if (policy != nullptr) {
-			policy->delref();
-		}
-		policy = impl;
-	}
-
-	template <class Context>
-	static void done(Member& policy, Context&) {
-		if (policy != nullptr) {
-			policy->deserializationDone();
-		}
-	}
 };
 
 template <class Ar>
@@ -402,5 +273,26 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 		}
 	}
 }
+
+template <>
+struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
+	static WriteRawMemory save(const Reference<IReplicationPolicy>& value) {
+		BinaryWriter writer(IncludeVersion());
+		serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
+		std::unique_ptr<uint8_t[]> memory(new uint8_t[writer.getLength()]);
+		memcpy(memory.get(), writer.getData(), writer.getLength());
+		return std::make_pair<OwnershipErasedPtr<const uint8_t>, size_t>(ownedPtr(const_cast<const uint8_t*>(memory.release())), writer.getLength());
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
+		StringRef str(buf, sz);
+		BinaryReader reader(str, IncludeVersion());
+		serializeReplicationPolicy(reader, value);
+	}
+};
+
 
 #endif

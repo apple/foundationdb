@@ -123,6 +123,21 @@ struct vector_like_traits<std::vector<T, Alloc>> : std::true_type {
 	static iterator begin(const Vec& v) { return v.begin(); }
 };
 
+template<class T, size_t N>
+struct vector_like_traits<std::array<T, N>> : std::true_type {
+	using Vec = std::array<T, N>;
+	using value_type = typename Vec::value_type;
+	using iterator = typename Vec::const_iterator;
+	using insert_iterator = typename Vec::iterator;
+
+	static size_t num_entries(const Vec& v) { return N; }
+	template <class Context>
+	static void reserve(Vec& v, size_t size, Context&) {
+	}
+	static insert_iterator insert(Vec& v) { return v.begin(); }
+	static iterator begin(const Vec& v) { return v.begin(); }
+};
+
 template <class Key, class T, class Compare, class Allocator>
 struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type {
 	using Vec = std::map<Key, T, Compare, Allocator>;

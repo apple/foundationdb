@@ -1026,10 +1026,6 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			copy = wr.toStringRef();
 		} else {
 			BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
-			// we don't need to send using an object writer here. This is a loopback delivery
-			// and therefore it is guaranteed that both versions will have exactly the
-			// same structures - so the backwards compatability capabilities are never needed
-			// here.
 			what.serializeBinaryWriter(wr);
 			copy = wr.toValue();
 		}
