@@ -4313,7 +4313,14 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				fprintf(stdout, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
 						requestTypeStr.c_str(), e.code(), e.what());
 			}
+
+			if ( requestTypeStr.find("[Init]") != std::string::npos ) {
+				printf("Exit due to error at requestType:%s", requestTypeStr.c_str());
+				break;
+			}
 		}
 	}
+
+	return Void();
 }
 
