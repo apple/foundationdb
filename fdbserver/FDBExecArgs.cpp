@@ -1,16 +1,15 @@
 #include "fdbserver/FDBExecArgs.h"
-#include <flow/Trace.h>
-#include <flow/flow.h>
+#include "flow/Trace.h"
+#include "flow/flow.h"
 
-ExecCmdValueString::ExecCmdValueString(std::string const& pCmdValueString) {
+ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
 	cmdValueString = pCmdValueString;
 	parseCmdValue();
 }
 
-void ExecCmdValueString::setCmdValueString(std::string const& pCmdValueString) {
+void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 	// reset everything
-	binaryPath = "";
-	binaryArgs.clear();
+	binaryPath = StringRef();
 	keyValueMap.clear();
 
 	// set the new cmdValueString
@@ -20,20 +19,20 @@ void ExecCmdValueString::setCmdValueString(std::string const& pCmdValueString) {
 	parseCmdValue();
 }
 
-std::string ExecCmdValueString::getCmdValueString() {
-	return cmdValueString;
+StringRef ExecCmdValueString::getCmdValueString() {
+	return cmdValueString.toString();
 }
 
-std::string ExecCmdValueString::getBinaryPath() {
+StringRef ExecCmdValueString::getBinaryPath() {
 	return binaryPath;
 }
 
-std::vector<std::string> ExecCmdValueString::getBinaryArgs() {
+VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() {
 	return binaryArgs;
 }
 
-std::string ExecCmdValueString::getBinaryArgValue(const std::string& key) {
-	std::string res;
+StringRef ExecCmdValueString::getBinaryArgValue(StringRef key) {
+	StringRef res;
 	if (keyValueMap.find(key) != keyValueMap.end()) {
 		res = keyValueMap[key];
 	}
@@ -41,20 +40,20 @@ std::string ExecCmdValueString::getBinaryArgValue(const std::string& key) {
 }
 
 void ExecCmdValueString::parseCmdValue() {
+	StringRef param = this->cmdValueString;
+	const uint8_t* ptr = param.begin();
 	int p = 0;
 	int pSemiColon = 0;
-	std::string const& param = this->cmdValueString;
 	{
 		// get the binary path
-		pSemiColon = param.find_first_of(':', p);
-		if (pSemiColon == param.npos) {
-			pSemiColon = param.size();
+		while (*(ptr + pSemiColon) != ':' && (ptr + pSemiColon) < param.end()) {
+			pSemiColon++;
 		}
 		this->binaryPath = param.substr(p, pSemiColon - p);
 	}
 
 	// no arguments provided
-	if (pSemiColon >= param.size() - 1) {
+	if ((ptr + pSemiColon) >= param.end()) {
 		return;
 	}
 
@@ -63,26 +62,27 @@ void ExecCmdValueString::parseCmdValue() {
 	{
 		// extract the arguments
 		for (; p <= param.size();) {
-			int pComma = param.find_first_of(',', p);
-			if (pComma == param.npos) {
-				pComma = param.size();
+			int pComma = p;
+			while (*(ptr + pComma) != ',' && (ptr + pComma) < param.end()) {
+				pComma++;
 			}
-			std::string token = param.substr(p, pComma - p);
-			this->binaryArgs.push_back(token);
+			StringRef token = param.substr(p, pComma - p);
+			this->binaryArgs.push_back(this->binaryArgs.arena(), token);
 			{
 				// parse the token to get key,value
 				int idx = 0;
-				int pEqual = token.find_first_of('=', idx);
-				if (pEqual == token.npos) {
-					pEqual = token.size();
+				int pEqual = 0;
+				const uint8_t* tokenPtr = token.begin();
+				while (*(tokenPtr + pEqual) != '='
+					   && (tokenPtr + pEqual) < token.end()) {
+					pEqual++;
 				}
-				std::string key = token.substr(idx, pEqual - idx);
-
-				std::string value;
+				StringRef key = token.substr(idx, pEqual - idx);
+				StringRef value;
 				if (pEqual < token.size() - 1) {
 					value = token.substr(pEqual + 1);
 				}
-				keyValueMap.insert(std::pair<std::string, std::string>(key, value));
+				keyValueMap.insert(std::pair<StringRef, StringRef>(key, value));
 			}
 			p = pComma + 1;
 		}
@@ -93,12 +93,12 @@ void ExecCmdValueString::parseCmdValue() {
 void ExecCmdValueString::dbgPrint() {
 	auto te = TraceEvent("ExecCmdValueString");
 
-	te.detail("CmdValueString", cmdValueString);
-	te.detail("BinaryPath", binaryPath);
+	te.detail("CmdValueString", cmdValueString.toString());
+	te.detail("BinaryPath", binaryPath.toString());
 
 	int i = 0;
 	for (auto elem : binaryArgs) {
-		te.detail(format("Arg", ++i).c_str(), elem);
+		te.detail(format("Arg", ++i).c_str(), elem.toString());
 	}
 	return;
 }

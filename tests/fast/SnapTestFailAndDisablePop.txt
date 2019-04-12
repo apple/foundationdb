@@ -32,7 +32,7 @@ testID=7
 snapCheck=true
 
 ; snapCreate with binary path that is not whitelisted
-testTitle=SnapCreateNotWhiteListedBinaryPath
+testTitle=SnapCreateNotWhitelistedBinaryPath
 testName=SnapTest
 numSnaps=1
 maxSnapDelay=3.0

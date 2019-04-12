@@ -1875,11 +1875,11 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
 		return Void();
 	}
-	ExecCmdValueString execArg(m.param2.toString());
-	state std::string uidStr = execArg.getBinaryArgValue("uid");
+	state ExecCmdValueString execArg(m.param2);
+	state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
 	state int err = 0;
 	state Future<int> cmdErr;
-	state UID execUID = UID::fromString(uidStr);
+	state UID execUID = UID::fromString(uidStr.toString());
 	bool otherRoleExeced = false;
 
 	// other TLog or storage has initiated the exec, so we can skip
@@ -1894,12 +1894,12 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 			auto binPath = execArg.getBinaryPath();
 			auto dataFolder = "path=" + data->folder;
 			vector<std::string> paramList;
-			paramList.push_back(binPath);
+			paramList.push_back(binPath.toString());
 			// get user passed arguments
 			auto listArgs = execArg.getBinaryArgs();
 			execArg.dbgPrint();
 			for (auto elem : listArgs) {
-				paramList.push_back(elem);
+				paramList.push_back(elem.toString());
 			}
 			// get additional arguments
 			paramList.push_back(dataFolder);
@@ -1909,14 +1909,14 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 			paramList.push_back(versionString);
 			std::string roleString = "role=storage";
 			paramList.push_back(roleString);
-			cmdErr = spawnProcess(binPath, paramList, 3.0);
+			cmdErr = spawnProcess(binPath.toString(), paramList, 3.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
 		} else {
 			// copy the files
 			std::string folder = abspath(data->folder);
 			state std::string folderFrom = folder + "/.";
-			state std::string folderTo = folder + "-snap-" + uidStr;
+			state std::string folderTo = folder + "-snap-" + uidStr.toString();
 			vector<std::string> paramList;
 			std::string mkdirBin = "/bin/mkdir";
 
@@ -1940,9 +1940,9 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		}
 		clearExecOpInProgress(execUID);
 	}
-	auto tokenStr = "ExecTrace/storage/" + uidStr;
+	auto tokenStr = "ExecTrace/storage/" + uidStr.toString();
 	TraceEvent te = TraceEvent("ExecTraceStorage");
-	te.detail("Uid", uidStr);
+	te.detail("Uid", uidStr.toString());
 	te.detail("Status", err);
 	te.detail("Role", "storage");
 	te.detail("Version", ver);

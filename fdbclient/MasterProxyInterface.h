@@ -301,16 +301,16 @@ struct GetHealthMetricsRequest
 
 struct ExecRequest {
 	Arena arena;
-	StringRef execPayLoad;
+	StringRef execPayload;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
-	ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
-	ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayLoad(exec), debugID(debugID) {}
+	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, execPayLoad, reply, arena, debugID);
+		serializer(ar, execPayload, reply, arena, debugID);
 	}
 };
 

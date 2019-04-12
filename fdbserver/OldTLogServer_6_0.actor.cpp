@@ -955,12 +955,14 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		TraceEvent("EnableTLogPlayAllIgnoredPops");
 		// use toBePopped and issue all the pops
 		state std::map<Tag, Version>::iterator it;
+		state vector<Future<Void>> ignoredPops;
 		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
 			TraceEvent("PlayIgnoredPop")
 				.detail("Tag", it->first.toString())
 				.detail("Version", it->second);
-			wait(tLogPopCore(self, it->first, it->second, logData));
+			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
 		}
+		wait(waitForAll(ignoredPops));
 		self->toBePopped.clear();
 
 		self->ignorePopRequest = false;
@@ -1319,6 +1321,8 @@ ACTOR Future<Void> tLogCommit(
 	// This property is useful for snapshot kind of operations which wants to
 	// take a snap of the disk image at a particular version (no data from
 	// future version to be included)
+	// NOTE: execOpCommitInProgress will not be set for exec commands which
+	// start with \xff
 	if (logData->execOpCommitInProgress) {
 		wait(logData->execOpHold.getFuture());
 	}
@@ -1383,17 +1387,19 @@ ACTOR Future<Void> tLogCommit(
 
 					TraceEvent(SevDebug, "TLogExecCommandType", self->dbgid).detail("Value", execCmd.toString());
 
-					execArg.setCmdValueString(param2.toString());
+					execArg.setCmdValueString(param2);
 					execArg.dbgPrint();
-					state std::string uidStr = execArg.getBinaryArgValue("uid");
-					execVersion = qe.version;
+					state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
+					if (!execCmd.startsWith(LiteralStringRef("\xff"))) {
+						execVersion = qe.version;
+					}
 					if (execCmd == execSnap) {
 						// validation check specific to snap request
 						std::string reason;
 						if (!self->ignorePopRequest) {
 							execVersion = invalidVersion;
 							reason = "SnapFailIgnorePopNotSet";
-						} else if (uidStr != self->ignorePopUid) {
+						} else if (uidStr.toString() != self->ignorePopUid) {
 							execVersion = invalidVersion;
 							reason = "SnapFailedDisableTLogUidMismatch";
 						}
@@ -1407,9 +1413,9 @@ ACTOR Future<Void> tLogCommit(
 
 							auto startTag = logData->allTags.begin();
 							std::string message = "ExecTrace/TLog/" + logData->allTags.begin()->toString();
-							"/" + uidStr;
+							"/" + uidStr.toString();
 							TraceEvent("ExecCmdSnapCreate")
-							    .detail("Uid", uidStr)
+							    .detail("Uid", uidStr.toString())
 							    .detail("Status", -1)
 							    .detail("Tag", logData->allTags.begin()->toString())
 							    .detail("Role", "TLog")
@@ -1417,30 +1423,28 @@ ACTOR Future<Void> tLogCommit(
 						}
 					}
 					if (execCmd == execDisableTLogPop) {
-						execVersion = invalidVersion;
 						self->ignorePopRequest = true;
 						if (self->ignorePopUid != "") {
 							TraceEvent(SevWarn, "TLogPopDisableonDisable")
 							    .detail("IgnorePopUid", self->ignorePopUid)
-							    .detail("UidStr", uidStr);
+							    .detail("UidStr", uidStr.toString());
 						}
-						self->ignorePopUid = uidStr;
+						self->ignorePopUid = uidStr.toString();
 						// ignorePopRequest will be turned off after 30 seconds
 						self->ignorePopDeadline = g_network->now() + 30.0;
 						TraceEvent("TLogExecCmdPopDisable")
 						    .detail("ExecCmd", execCmd.toString())
-						    .detail("UidStr", uidStr)
+						    .detail("UidStr", uidStr.toString())
 						    .detail("IgnorePopUid", self->ignorePopUid)
 						    .detail("IgnporePopRequest", self->ignorePopRequest)
 						    .detail("IgnporePopDeadline", self->ignorePopDeadline)
 						    .trackLatest("DisablePopTLog");
 					}
 					if (execCmd == execEnableTLogPop) {
-						execVersion = invalidVersion;
-						if (self->ignorePopUid != uidStr) {
+						if (self->ignorePopUid != uidStr.toString()) {
 							TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
 							    .detail("IgnorePopUid", self->ignorePopUid)
-							    .detail("UidStr", uidStr)
+							    .detail("UidStr", uidStr.toString())
 							    .trackLatest("TLogPopDisableEnableUidMismatch");
 						}
 
@@ -1460,7 +1464,7 @@ ACTOR Future<Void> tLogCommit(
 						self->ignorePopUid = "";
 						TraceEvent("TLogExecCmdPopEnable")
 						    .detail("ExecCmd", execCmd.toString())
-						    .detail("UidStr", uidStr)
+						    .detail("UidStr", uidStr.toString())
 						    .detail("IgnorePopUid", self->ignorePopUid)
 						    .detail("IgnporePopRequest", self->ignorePopRequest)
 						    .detail("IgnporePopDeadline", self->ignorePopDeadline)
@@ -1502,8 +1506,7 @@ ACTOR Future<Void> tLogCommit(
 	if ((execVersion != invalidVersion) && execVersion <= logData->queueCommittedVersion.get()) {
 		state int err = 0;
 		state Future<int> cmdErr;
-		auto uidStr = execArg.getBinaryArgValue("uid");
-		state UID execUID = UID::fromString(uidStr);
+		state UID execUID = UID::fromString(uidStr.toString());
 		state bool otherRoleExeced = false;
 		// TLog is special, we need to exec at the execVersion.
 		// If storage on the same process has initiated the exec then wait for it to
@@ -1519,11 +1522,11 @@ ACTOR Future<Void> tLogCommit(
 				auto snapBin = execArg.getBinaryPath();
 				auto dataFolder = "path=" + self->dataFolder;
 				vector<std::string> paramList;
-				paramList.push_back(snapBin);
+				paramList.push_back(snapBin.toString());
 				// user passed arguments
 				auto listArgs = execArg.getBinaryArgs();
 				for (auto elem : listArgs) {
-					paramList.push_back(elem);
+					paramList.push_back(elem.toString());
 				}
 				// additional arguments
 				paramList.push_back(dataFolder);
@@ -1533,13 +1536,13 @@ ACTOR Future<Void> tLogCommit(
 				paramList.push_back(versionString);
 				std::string roleString = "role=tlog";
 				paramList.push_back(roleString);
-				cmdErr = spawnProcess(snapBin, paramList, 3.0);
+				cmdErr = spawnProcess(snapBin.toString(), paramList, 3.0);
 				wait(success(cmdErr));
 				err = cmdErr.get();
 			} else {
 				// copy the entire directory
 				state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
-				state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
+				state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr.toString();
 				vector<std::string> paramList;
 				std::string mkdirBin = "/bin/mkdir";
 				paramList.push_back(mkdirBin);
@@ -1563,7 +1566,7 @@ ACTOR Future<Void> tLogCommit(
 			clearExecOpInProgress(execUID);
 		}
 		TraceEvent("TLogCommitExecTraceTLog")
-		    .detail("UidStr", uidStr)
+		    .detail("UidStr", uidStr.toString())
 		    .detail("Status", err)
 		    .detail("Tag", logData->allTags.begin()->toString())
 		    .detail("OldTagSize", logData->allTags.size())
@@ -1579,10 +1582,10 @@ ACTOR Future<Void> tLogCommit(
 			poppedTagVersion = tagv->popped;
 
 			int len = param2.size();
-			state std::string message = "ExecTrace/TLog/" + tagv->tag.toString() + "/" + uidStr;
+			state std::string message = "ExecTrace/TLog/" + tagv->tag.toString() + "/" + uidStr.toString();
 
 			TraceEvent te = TraceEvent(SevDebug, "TLogExecTraceDetailed");
-			te.detail("Uid", uidStr);
+			te.detail("Uid", uidStr.toString());
 			te.detail("Status", err);
 			te.detail("Role", "TLog");
 			te.detail("ExecCmd", execCmd.toString());

@@ -470,10 +470,10 @@ void initHelp() {
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
-	helpMap["snapshot"] = CommandHelp("snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...", "snapshot the database",
-	                                  "invokes binary provided in binary-path"
-	                                  "with the arg,value pairs on TLog, Storage and "
-	                                  "Coordinators nodes. uid is a reserved ARG key.");
+	helpMap["snapshot"] = CommandHelp(
+		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
+		"snapshot the database",
+		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",

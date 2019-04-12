@@ -2287,45 +2287,33 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	TEST(true); //NativeAPI atomic operation
 }
 
-ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayLoad, Optional<UID> debugID) {
+ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayload, Optional<UID> debugID) {
 	try {
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
 		}
 
-		loop {
-			state ExecRequest req(execPayLoad, debugID);
-			if (debugID.present()) {
-				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-				                      "NativeAPI.executeCoordinators.Inside loop");
-			}
-			choose {
-				when(wait(cx->onMasterProxiesChanged())) {
-					if (debugID.present()) {
-						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-						                      "NativeAPI.executeCoordinators."
-						                      "MasterProxyChangeDuringStart");
-					}
-				}
-				when(wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::execReq, req, cx->taskID))) {
-					if (debugID.present())
-						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-						                      "NativeAPI.executeCoordinators.After");
-					return Void();
-				}
-			}
+		state ExecRequest req(execPayload, debugID);
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.Inside loop");
 		}
+		wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::execReq, req, cx->taskID));
+		if (debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.After");
+		return Void();
 	} catch (Error& e) {
 		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
 		throw;
 	}
 }
 
-void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad) {
-	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayLoad.toString());
+void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayload) {
+	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayload.toString());
 
 	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
-	if (cmdPayLoad.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
+	if (cmdPayload.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
 
 	auto& req = tr;
 
@@ -2334,9 +2322,8 @@ void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad) {
 
 	auto& t = req.transaction;
 	auto r = singleKeyRange(cmdType, req.arena);
-	auto v = ValueRef(req.arena, cmdPayLoad);
+	auto v = ValueRef(req.arena, cmdPayload);
 	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
-	return;
 }
 
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
@@ -3319,7 +3306,6 @@ void enableClientInfoLogging() {
 
 ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
 	state Transaction tr(inputCx);
-	state Database testCx = inputCx;
 	state DatabaseContext* cx = inputCx.getPtr();
 	// remember the client ID before the snap operation
 	state UID preSnapClientUID = cx->clientInfo->get().id;
@@ -3330,36 +3316,37 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	    .detail("PreSnapClientUID", preSnapClientUID);
 
 	tr.debugTransaction(snapUID);
-	std::string snapString = "empty-binary:uid=" + snapUID.toString();
-	state Standalone<StringRef> uidPayLoad = makeString(snapString.size());
-	uint8_t* ptr = mutateString(uidPayLoad);
-	memcpy(ptr, ((uint8_t*)snapString.c_str()), snapString.size());
+	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef>
+		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
 	// disable popping of TLog
 	loop {
 		tr.reset();
 		try {
-			tr.execute(execDisableTLogPop, uidPayLoad);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			TraceEvent("DisableTLogPopFailed").detail("Error", e.what());
+			TraceEvent("DisableTLogPopFailed").error(e);
 			wait(tr.onError(e));
 		}
 	}
 
 	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
 
-	int p = snapCmd.toString().find_first_of(':', 0);
-	state std::string snapPayLoad;
-
-	if (p == snapCmd.toString().npos) {
-		snapPayLoad = snapCmd.toString() + ":uid=" + snapUID.toString();
-	} else {
-		snapPayLoad = snapCmd.toString() + ",uid=" + snapUID.toString();
+	const uint8_t* ptr = snapCmd.begin();
+	while (*ptr != ':' && ptr < snapCmd.end()) {
+		ptr++;
 	}
-	Standalone<StringRef> snapPayLoadRef = makeString(snapPayLoad.size());
-	uint8_t* ptr = mutateString(snapPayLoadRef);
-	memcpy(ptr, ((uint8_t*)snapPayLoad.c_str()), snapPayLoad.size());
+	state Standalone<StringRef> snapPayloadRef;
+	if (ptr == snapCmd.end()) {
+		snapPayloadRef =
+			snapCmd.withSuffix(LiteralStringRef(":uid=")).withSuffix(snapUIDRef);
+	} else {
+		snapPayloadRef =
+			snapCmd.withSuffix(LiteralStringRef(",uid=")).withSuffix(snapUIDRef);
+	}
 
 	// snap the storage and Tlogs
 	// if we retry the below command in failure cases with the same snapUID
@@ -3368,10 +3355,11 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	// failure cases and let the caller retry with different snapUID
 	try {
 		tr.reset();
-		tr.execute(execSnap, snapPayLoadRef);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.execute(execSnap, snapPayloadRef);
 		wait(tr.commit());
 	} catch (Error& e) {
-		TraceEvent("SnapCreateErroSnapTLogStorage").detail("Error", e.what());
+		TraceEvent("SnapCreateErroSnapTLogStorage").error(e);
 		throw;
 	}
 
@@ -3386,11 +3374,12 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	loop {
 		tr.reset();
 		try {
-			tr.execute(execEnableTLogPop, uidPayLoad);
+			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			TraceEvent("EnableTLogPopFailed").detail("Error", e.what());
+			TraceEvent("EnableTLogPopFailed").error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -3399,10 +3388,10 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 
 	// snap the coordinators
 	try {
-		Future<Void> exec = executeCoordinators(cx, snapPayLoad, snapUID);
+		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
 		wait(exec);
 	} catch (Error& e) {
-		TraceEvent("SnapCreateErrorSnapCoords").detail("Error", e.what());
+		TraceEvent("SnapCreateErrorSnapCoords").error(e);
 		throw;
 	}
 
