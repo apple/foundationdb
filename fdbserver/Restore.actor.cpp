@@ -3445,8 +3445,8 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 			}
 
 			if (!cmdReplies.empty()) {
-				//std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-				std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
 				cmdReplies.clear();
 			}
 			printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
@@ -3639,11 +3639,6 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 		printf("[DEBUG] NODE:%s sampleRangeFile wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
-	rd->setInProgressFlag(RestoreCommandEnum::Sample_Range_File);
-
-	printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
-			rd->describeNode().c_str(), param.toString().c_str());
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
 	// Handle duplicate, assuming cmdUID is always unique for the same workload
 	if ( rd->isCmdProcessed(req.cmdID) ) {
@@ -3651,6 +3646,10 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	} 
+
+	rd->setInProgressFlag(RestoreCommandEnum::Sample_Range_File);
+	printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
+			rd->describeNode().c_str(), param.toString().c_str());
 
 	// TODO: This can be expensive
 	state Reference<IBackupContainer> bc =  IBackupContainer::openContainer(param.url.toString());
@@ -3706,10 +3705,6 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 		printf("[DEBUG] NODE:%s sampleLogFile wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
-	rd->setInProgressFlag(RestoreCommandEnum::Sample_Log_File);
-
-	printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n", rd->describeNode().c_str(), param.toString().c_str());
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
 	// Handle duplicate message
 	if ( rd->isCmdProcessed(req.cmdID) ) {
@@ -3717,6 +3712,9 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
+
+	rd->setInProgressFlag(RestoreCommandEnum::Sample_Log_File);
+	printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n", rd->describeNode().c_str(), param.toString().c_str());
 
 	// TODO: Expensive operation
 	state Reference<IBackupContainer> bc =  IBackupContainer::openContainer(param.url.toString());
@@ -3850,13 +3848,6 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 		printf("[DEBUG] NODE:%s loadRangeFile wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
-	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
-
-
-	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, role: %s, loading param:%s\n",
-			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
-			getRoleStr(rd->localNodeStatus.role).c_str(),
-			param.toString().c_str());
 
 	//Note: handle duplicate message delivery
 	if (rd->processedFiles.find(param.filename) != rd->processedFiles.end() ||
@@ -3867,6 +3858,13 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 		req.reply.send(RestoreCommonReply(interf.id(),req.cmdID));
 		return Void();
 	}
+
+	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
+
+	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, role: %s, loading param:%s\n",
+			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
+			getRoleStr(rd->localNodeStatus.role).c_str(),
+			param.toString().c_str());
 
 	bc = IBackupContainer::openContainer(param.url.toString());
 	// printf("[INFO] Node:%s CMDUID:%s open backup container for url:%s\n",
@@ -3894,21 +3892,25 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	}
 
 	printf("[INFO][Loader] Node:%s CMDUID:%s finishes process Range file:%s\n",
-			rd->describeNode().c_str(), rd->cmdID.toString().c_str(),
+			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.filename.c_str());
 	// TODO: Send to applier to apply the mutations
 	// printf("[INFO][Loader] Node:%s CMDUID:%s will send range mutations to applier\n",
 	// 		rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 	wait( registerMutationsToApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
-
-	printf("[INFO][Loader] Node:%s CMDUID:%s send ack.\n",
-			rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-	//Send ack to master that loader has finished loading the data
-	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+	wait ( delay(1.0) );
+	
 	rd->processedFiles[param.filename] =  1;
 	rd->processedCmd[req.cmdID] = 1;
 
 	rd->clearInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
+	printf("[INFO][Loader] Node:%s CMDUID:%s clear inProgressFlag :%lx for Assign_Loader_Range_File.\n",
+			rd->describeNode().c_str(), req.cmdID.toString().c_str(), rd->inProgressFlag);
+
+	//Send ack to master that loader has finished loading the data
+	printf("[INFO][Loader] Node:%s CMDUID:%s send ack.\n",
+			rd->describeNode().c_str(), rd->cmdID.toString().c_str());
+	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 
 	return Void();
 
@@ -3936,15 +3938,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		printf("[DEBUG] NODE:%s loadLogFile wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
-	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
-
-
-	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File role: %s, loading param:%s\n",
-								rd->describeNode().c_str(), req.cmdID.toString().c_str(),
-								getRoleStr(rd->localNodeStatus.role).c_str(),
-								param.toString().c_str());
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
-
+	
 	//Note: handle duplicate message delivery
 	if (rd->processedFiles.find(param.filename) != rd->processedFiles.end()
 	   || rd->isCmdProcessed(req.cmdID)) {
@@ -3954,6 +3948,13 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
+
+	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
+
+	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File role: %s, loading param:%s\n",
+								rd->describeNode().c_str(), req.cmdID.toString().c_str(),
+								getRoleStr(rd->localNodeStatus.role).c_str(),
+								param.toString().c_str());
 
 	bc = IBackupContainer::openContainer(param.url.toString());
 	printf("[INFO][Loader] Node:%s CMDUID:%s open backup container for url:%s\n",
