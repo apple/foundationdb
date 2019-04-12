@@ -1561,7 +1561,6 @@ ACTOR Future<Void> masterProxyServerCore(
 						Standalone<VectorRef<MutationRef>> mutations;
 						std::vector<std::pair<MapPair<Key,ServerCacheInfo>,int>> keyInfoData;
 						vector<UID> src, dest;
-						Reference<StorageInfo> storageInfo;
 						ServerCacheInfo info;
 						for(auto &kv : data) {
 							if( kv.key.startsWith(keyServersPrefix) ) {
@@ -1571,30 +1570,14 @@ ACTOR Future<Void> masterProxyServerCore(
 									info.tags.clear();
 									info.src_info.clear();
 									info.dest_info.clear();
-									for(auto& id : src) {
-										auto cacheItr = commitData.storageCache.find(id);
-										if(cacheItr == commitData.storageCache.end()) {
-											storageInfo = Reference<StorageInfo>( new StorageInfo() );
-											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-											commitData.storageCache[id] = storageInfo;
-										} else {
-											storageInfo = cacheItr->second;
-										}
+									for (const auto& id : src) {
+										auto storageInfo = getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
 										info.src_info.push_back( storageInfo );
 									}
-									for(auto& id : dest) {
-										auto cacheItr = commitData.storageCache.find(id);
-										if(cacheItr == commitData.storageCache.end()) {
-											storageInfo = Reference<StorageInfo>( new StorageInfo() );
-											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-											commitData.storageCache[id] = storageInfo;
-										} else {
-											storageInfo = cacheItr->second;
-										}
+									for (const auto& id : dest) {
+										auto storageInfo = getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
 										info.dest_info.push_back( storageInfo );
