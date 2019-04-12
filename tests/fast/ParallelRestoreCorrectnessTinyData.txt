@@ -24,8 +24,8 @@ testTitle=BackupAndRestore
     simBackupAgents=BackupToFile
     backupRangesCount=-1
 
-;    testName=RandomClogging
-;    testDuration=90.0
+    testName=RandomClogging
+    testDuration=90.0
 	
 ;    testName=Rollback
 ;    meanDelay=90.0
