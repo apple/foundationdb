@@ -42,27 +42,31 @@
 
 const int min_num_workers = 3; //10; // TODO: This can become a configuration param later
 const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
-
-int FastRestore_Failure_Timeout = 3600; // seconds
+const int FastRestore_Failure_Timeout = 3600; // seconds
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
 
-bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input);
-Future<Void> registerMutationsToApplier(Reference<RestoreData> const& rd);
-Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> const& rd);
-Future<Void> sampleHandler(Reference<RestoreData> const& rd, RestoreInterface const& interf);
-Future<Void> receiveSampledMutations(Reference<RestoreData> const& rd, RestoreInterface const& interf);
+// Forward declaration
+ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd);
+ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd);
-
-//ACTOR Future<Void> applierCore( Reference<RestoreData> rd, RestoreInterface ri );
 ACTOR Future<Void> workerCore( Reference<RestoreData> rd, RestoreInterface ri, Database cx );
-static Future<Void> finishRestore(Database const& cx, Standalone<VectorRef<RestoreRequest>> const& restoreRequests); // Forward declaration
+
+ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request);
+ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
+
+bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input);
+void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input);
+void registerBackupMutationForAll(Version empty);
+bool isKVOpsSorted(Reference<RestoreData> rd);
+bool allOpsAreKnown(Reference<RestoreData> rd);
 void sanityCheckMutationOps(Reference<RestoreData> rd);
-void printRestorableFileSet(Optional<RestorableFileSet> files);
 void parseSerializedMutation(Reference<RestoreData> rd, bool isSampling = false);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
+// This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
+// TODO: Merge this struct with StringRefReader.
 struct StringRefReaderMX {
 	StringRefReaderMX(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e), str_size(s.size()) {}
 
@@ -107,20 +111,6 @@ struct StringRefReaderMX {
 };
 
 bool debug_verbose = false;
-
-
-////-- Restore code declaration START
-//TODO: Move to RestoreData
-//std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
-////std::map<Version, std::vector<MutationRef>> kvOps; //TODO: Must change to standAlone before run correctness test. otherwise, you will see the mutationref memory is corrupted
-//std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; //key is the unique identifier for a batch of mutation logs at the same version
-//std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most recent
-// MXX: Important: Can not use std::vector because you won't have the arena and you will hold the reference to memory that will be freed.
-// Use push_back_deep() to copy data to the standalone arena.
-//Standalone<VectorRef<MutationRef>> mOps;
-std::vector<MutationRef> mOps;
-
-
 void printGlobalNodeStatus(Reference<RestoreData>);
 
 
@@ -133,7 +123,6 @@ std::string getRoleStr(RestoreRole role) {
 	}
 	return RestoreRoleStr[(int)role];
 }
-
 
 const char *RestoreCommandEnumStr[] = {"Init",
 		"Set_Role", "Set_Role_Done",
@@ -158,6 +147,7 @@ template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { re
 
 // RestoreConfig copied from FileBackupAgent.actor.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing code
+// TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 class RestoreConfig : public KeyBackedConfig, public ReferenceCounted<RestoreConfig> {
 public:
 	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
@@ -216,6 +206,8 @@ public:
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
+	// NOTE: The struct RestoreFileFR can NOT be named RestoreFile, because compiler will get confused in linking which RestoreFile should be used.
+	// If we use RestoreFile, the compilation can succeed, but weird segmentation fault will happen.
 	struct RestoreFileFR {
 		Version version;
 		std::string fileName;
@@ -227,7 +219,6 @@ public:
 		int64_t cursor; //The start block location to be restored. All blocks before cursor have been scheduled to load and restore
 
 		Tuple pack() const {
-			//fprintf(stdout, "MyRestoreFile, filename:%s\n", fileName.c_str());
 			return Tuple()
 					.append(version)
 					.append(StringRef(fileName))
@@ -255,7 +246,6 @@ public:
 		bool operator<(const RestoreFileFR& rhs) const { return endVersion < rhs.endVersion; }
 
 		std::string toString() const {
-//			return "UNSET4TestHardness";
 			std::stringstream ss;
 			ss << "version:" << std::to_string(version) << " fileName:" << fileName  << " isRange:" << std::to_string(isRange)
 				   << " blockSize:" << std::to_string(blockSize) << " fileSize:" << std::to_string(fileSize)
@@ -569,7 +559,6 @@ void CMDUID::setBatch(int newBatchIndex) {
 	batch = newBatchIndex;
 }
 
-
 uint64_t CMDUID::getIndex() {
 	return cmdID;
 }
@@ -578,91 +567,8 @@ std::string CMDUID::toString() const {
 	return format("%04ld|%04ld|%016lld", batch, phase, cmdID);
 }
 
-std::string getPreviousCmdStr(RestoreCommandEnum curCmd) {
-	std::string ret = RestoreCommandEnumStr[(int) RestoreCommandEnum::Init];
-	switch (curCmd) {
-		case RestoreCommandEnum::Set_Role_Done:
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done];
-			break;
-		case RestoreCommandEnum::Sample_File_Done: // On each loader
-			ret = std::string(RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done]) + "|" 
-				+ RestoreCommandEnumStr[(int)RestoreCommandEnum::Assign_Loader_File_Done] + "|"
-				+ RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation];
-			break;
-		case RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done: // On each loader
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Sample_File_Done];
-			break;
-		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader: The end command for each version batch
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done];
-			break;
-		
-		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done];
-			break;
-		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Get_Applier_KeyRange_Done];
-			break;
-		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Assign_Applier_KeyRange_Done];
-			break;
-		case RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation: // On each applier
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done];
-			break; 
-		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done];
-			break;
-		
-		default:
-			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Init];
-			fprintf(stderr, "[ERROR] GetPreviousCmd Unknown curCmd:%d\n", curCmd);
-			break;
-	}
 
-	return ret;
-}
-
-bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd, RestoreCommandEnum receivedCmd) {
-	bool ret = false;
-	switch (curCmd) {
-		case RestoreCommandEnum::Set_Role_Done:
-			ret = (receivedCmd == RestoreCommandEnum::Set_Role_Done);
-			break;
-		case RestoreCommandEnum::Sample_File_Done: // On each loader
-			ret = (receivedCmd == RestoreCommandEnum::Set_Role_Done || receivedCmd == RestoreCommandEnum::Assign_Loader_File_Done || receivedCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
-			break;
-		case RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done: // On each loader
-			ret = (receivedCmd == RestoreCommandEnum::Sample_File_Done);
-			break;
-		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader: The end command for each version batch
-			ret = (receivedCmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done);
-			break;
-		
-		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
-			ret = (receivedCmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done);
-			break;
-		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
-			ret = (receivedCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done || receivedCmd == RestoreCommandEnum::Set_Role_Done || receivedCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
-			break;
-		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
-			ret = (receivedCmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done);
-			break;
-		case RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation: // On each applier
-			ret = (receivedCmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done);
-			break; 
-		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
-			ret = (receivedCmd == RestoreCommandEnum::Set_Role_Done || receivedCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
-			break;
-		
-		default:
-			fprintf(stderr, "[ERROR] GetPreviousCmd Unknown curCmd:%d\n", curCmd);
-			break;
-	}
-
-	return ret;
-
-}
-
-// DEBUG_FAST_RESTORE is not used any more
+// DEBUG_FAST_RESTORE is not used right now!
 #define DEBUG_FAST_RESTORE 1
 
 #ifdef DEBUG_FAST_RESTORE
@@ -698,33 +604,17 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	};
 	ApplierStatus applierStatus;
 
-	// LoadingState is a state machine, each state is set in the following event:
-	// Init: when master starts to collect all files before ask loaders to load data
-	// Assigned: when master sends out the loading cmd to loader to load a block of data
-	// Loading: when master receives the ack. responds from the loader about the loading cmd
-	// Applying: when master receives from applier that the applier starts to apply the results for the load cmd
-	// Done: when master receives from applier that the applier has finished applying the results for the load cmd
-	// When LoadingState becomes done, master knows the particular backup file block has been applied (restored) to DB
-	enum class LoadingState {Invalid = 0, Init = 1, Assigned, Loading, Applying, Done};
-	// TODO: RestoreStatus
-	// Information of the backup files to be restored, and the restore progress
-	struct LoadingStatus {
-		RestoreFileFR file;
-		int64_t start; // Starting point of the block in the file to load
-		int64_t length;// Length of block to load
-		LoadingState state; // Loading state of the particular file block
-		UID node; // The loader node ID that responsible for the file block
+	// TODO: Record loading progress for (i) operators to check the restore status; (ii) recovering from node fault in the middle of restore
 
-		explicit LoadingStatus() {}
-		explicit LoadingStatus(RestoreFileFR file, int64_t start, int64_t length, UID node): file(file), start(start), length(length), state(LoadingState::Init), node(node) {}
-	};
-	std::map<int64_t, LoadingStatus> loadingStatus; // first is the global index of the loading cmd, starting from 0
-
-	 //Loader's state to handle the duplicate delivery of loading commands
+	// Loader's state to handle the duplicate delivery of loading commands
 	std::map<std::string, int> processedFiles; //first is filename of processed file, second is not used
 	std::map<CMDUID, int> processedCmd;
+	bool inProgressApplyToDB = false;
+	uint32_t inProgressFlag = 0;
+	CMDUID cmdID; // Command id to record the progress
 
 
+	// Temporary variables to hold files and data to restore
 	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
 	std::vector<RestoreFileFR> files; // Backup files to be parsed and applied: range and log files in 1 version batch
 	std::map<Version, Version> forbiddenVersions; // forbidden version range [first, second)
@@ -735,15 +625,10 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; // Key is the unique identifier for a batch of mutation logs at the same version
 	std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Record the most recent
 
-	// For master applier
+	// For master applier to hold the lower bound of key ranges for each appliers
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
 
-	bool inProgressApplyToDB = false;
-	uint32_t inProgressFlag = 0;
-
-	// Command id to record the progress
-	CMDUID cmdID;
-
+	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.
 	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
 		int phase = (int) phaseEnum;
 		ASSERT(phase < 32);
@@ -809,21 +694,6 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	}
 };
 
-typedef RestoreData::LoadingStatus LoadingStatus;
-typedef RestoreData::LoadingState LoadingState;
-
-// Log error message when the command is unexpected
-// Use stdout so that correctness test won't report error.
-void logUnexpectedCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdID) {
-	fprintf(stdout, "[WARNING!] Node:%s Log Unexpected Cmd: CurrentCmd:%d(%s), Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%s\n",
-			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmdStr(current).c_str());
-}
-
-// Log  message when we receive a command from the old phase
-void logExpectedOldCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdID) {
-	fprintf(stdout, "[Warning] Node:%s Log Expected Old Cmd: CurrentCmd:%d(%s) Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%s\n",
-			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmdStr(current).c_str());
-}
 
 void printAppliersKeyRange(Reference<RestoreData> rd) {
 	printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
@@ -950,13 +820,6 @@ void printGlobalNodeStatus(Reference<RestoreData> rd) {
 	}
 }
 
-void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input);
-void registerBackupMutationForAll(Version empty);
-bool isKVOpsSorted(Reference<RestoreData> rd);
-bool allOpsAreKnown(Reference<RestoreData> rd);
-
-
-
 void printBackupFilesInfo(Reference<RestoreData> rd) {
 	printf("[INFO] The backup files for current batch to load and apply: num:%ld\n", rd->files.size());
 	for (int i = 0; i < rd->files.size(); ++i) {
@@ -1061,112 +924,10 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 
 
 //// --- Some common functions
-
-ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
-		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
-		Reference<RestoreConfig> restore_input) {
- 	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
-
- 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
-	wait(checkDatabaseLock(tr, uid));
-
- 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
- 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
- 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
- 	// Get old restore config for this tag
- 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
- 	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
- 	TraceEvent("PrepareRestoreMX").detail("OldUidAndAbortedPresent", oldUidAndAborted.present());
- 	if(oldUidAndAborted.present()) {
- 		if (oldUidAndAborted.get().first == uid) {
- 			if (oldUidAndAborted.get().second) {
- 				throw restore_duplicate_uid();
- 			}
- 			else {
- 				return Void();
- 			}
- 		}
-
- 		state Reference<RestoreConfig> oldRestore = Reference<RestoreConfig>(new RestoreConfig(oldUidAndAborted.get().first));
-
- 		// Make sure old restore for this tag is not runnable
- 		bool runnable = wait(oldRestore->isRunnable(tr));
-
- 		if (runnable) {
- 			throw restore_duplicate_tag();
- 		}
-
- 		// Clear the old restore config
- 		oldRestore->clear(tr);
- 	}
-
- 	KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
- 	Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
- 	if (existingRows.size() > 0) {
- 		throw restore_destination_not_empty();
- 	}
-
- 	// Make new restore config
- 	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
-
- 	// Point the tag to the new uid
-	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
- 	tag.set(tr, {uid, false});
-
- 	printf("[INFO] Open container for backup url:%s\n", backupURL.toString().c_str());
- 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
-
- 	// Configure the new restore
- 	restore->tag().set(tr, tagName.toString());
- 	restore->sourceContainer().set(tr, bc);
- 	restore->stateEnum().set(tr, ERestoreState::QUEUED);
- 	restore->restoreVersion().set(tr, restoreVersion);
- 	restore->restoreRange().set(tr, restoreRange);
- 	// this also sets restore.add/removePrefix.
- 	restore->initApplyMutations(tr, addPrefix, removePrefix);
-	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
-	restore_input = restore;
-	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
-
-
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
-	if(!restorable.present()) {
-		printf("[WARNING] restoreVersion:%ld (%lx) is not restorable!\n", restoreVersion, restoreVersion);
-		throw restore_missing_data();
-	}
-
-//	state std::vector<RestoreFileFR> files;
-	if (!rd->files.empty()) {
-		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", rd->files.size());
-		rd->files.clear();
-	}
-
-	printf("[INFO] Found backup files: num of range files:%d, num of log files:%d\n",
-			restorable.get().ranges.size(), restorable.get().logs.size());
- 	for(const RangeFile &f : restorable.get().ranges) {
-// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
- 		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
- 		rd->files.push_back(file);
- 	}
- 	for(const LogFile &f : restorable.get().logs) {
-// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
-		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
-		rd->files.push_back(file);
- 	}
-
-	return Void();
-
- }
-
- // MX: To revise the parser later
  ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<RestoreData> rd,
  									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
  									KeyRange restoreRange, Key addPrefix, Key removePrefix) {
-//	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx)); // Used to clear the range where the KV will be applied.
 
  	state int64_t readOffset = readOffset_input;
  	state int64_t readLen = readLen_input;
@@ -1174,7 +935,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 	if ( debug_verbose ) {
 		printf("[VERBOSE_DEBUG] Parse range file and get mutations 1, bc:%lx\n", bc.getPtr());
 	}
- 	//MX: the set of key value version is rangeFile.version. the key-value set in the same range file has the same version
+ 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
  	Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
 
 	if ( debug_verbose ) {
@@ -1189,7 +950,6 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 			printf("\t[VERBOSE_DEBUG] mutation: key:%s value:%s\n", blockData[tmpi].key.toString().c_str(), blockData[tmpi].value.toString().c_str());
 		}
 	}
-	 
 
  	// First and last key are the range for this file
  	state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -1268,7 +1028,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 
 		for(; i < iend; ++i) {
 			//MXX: print out the key value version, and operations.
-				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), version);
+			printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), version);
 // 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
 // 					.detail("Version", rangeFile.version).detail("Op", "set");
 ////				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
@@ -1304,7 +1064,6 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 
  }
 
-
  ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreData> rd,
  									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset, int64_t readLen,
@@ -1316,7 +1075,6 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
  	//TraceEvent("ReadLogFileStart").detail("LogFileName", fileName);
  	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
  	//TraceEvent("ReadLogFileFinish").detail("LogFileName", fileName);
-
 
  	printf("Parse log file:%s readOffset:%d readLen:%ld\n", fileName.c_str(), readOffset, readLen);
  	//TODO: NOTE: decodeLogFileBlock() should read block by block! based on my serial version. This applies to decode range file as well
@@ -1377,7 +1135,6 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 
 	return Void();
  }
-
 
  // Parse the kv pair (version, serialized_mutation), which are the results parsed from log file.
  void parseSerializedMutation(Reference<RestoreData> rd, bool isSampling) {
@@ -1503,12 +1260,10 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	return Void();
  }
 
-
-////--- Restore Functions for the master role
-//// --- Configure roles ---
-// Set roles (Loader or Applier) for workers
+// Set roles (Loader or Applier) for workers and ask all workers to share their interface
 // The master node's localNodeStatus has been set outside of this function
-ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
+// TODO: Split this function into two functions: set-role and share-worker-interface
+ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
 	state Transaction tr(cx);
 
 	state vector<RestoreInterface> agents; // agents is cmdsInterf
@@ -1642,7 +1397,6 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
 			if (e.code() != error_code_io_timeout) {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 			} else {
@@ -1658,9 +1412,6 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 	return Void();
 }
 
-
-
-
 void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers) {
 	printf("[INFO] appliers num:%ld\n", appliers.size());
 	int index = 0;
@@ -1669,7 +1420,6 @@ void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers) 
 	}
 }
 
-// MXNOTE: Refactor Done
 ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	//construct the key range for each applier
 	std::vector<KeyRef> lowerBounds;
@@ -1709,7 +1459,6 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 		appliers.insert(std::make_pair(applierIDs[i], keyRanges[i]));
 	}
 
-
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 	loop {
 		try {
@@ -1737,15 +1486,12 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
 			if (e.code() != error_code_io_timeout) {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 			} else {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
-			//fprintf(stdout, "[ERROR] WE STOP HERE FOR DEBUG\n");
-			//break;
 		}
 	}
 
@@ -1783,15 +1529,12 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
 			if (e.code() != error_code_io_timeout) {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 			} else {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
-			//fprintf(stdout, "[ERROR] WE STOP HERE FOR DEBUG\n");
-			//break;
 		}
 	}
 
@@ -1813,8 +1556,6 @@ std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreDat
 	int intervalLength = std::max(rd->numSampledMutations / numAppliers, 1); // minimal length is 1
 	int curCount = 0;
 	int curInterval = 0;
-
-
 
 	printf("[INFO] Node:%s calculateAppliersKeyRanges(): numSampledMutations:%d numAppliers:%d intervalLength:%d\n",
 			rd->describeNode().c_str(),
@@ -1848,8 +1589,6 @@ std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreDat
 	return lowerBounds;
 }
 
-//MXNOTE: Revise Done
-//DONE: collectRestoreRequests
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
 	state int restoreId = 0;
 	state int checkNum = 0;
@@ -1935,37 +1674,6 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 	return restoreRequests;
 }
 
-void printRestorableFileSet(Optional<RestorableFileSet> files) {
-
-	printf("[INFO] RestorableFileSet num_of_range_files:%ld num_of_log_files:%ld\n",
-			files.get().ranges.size(), files.get().logs.size());
-	int index = 0;
- 	for(const RangeFile &f : files.get().ranges) {
- 		printf("\t[INFO] [RangeFile:%d]:%s\n", index, f.toString().c_str());
- 		++index;
- 	}
- 	index = 0;
- 	for(const LogFile &f : files.get().logs) {
-		printf("\t[INFO], [LogFile:%d]:%s\n", index, f.toString().c_str());
-		++index;
- 	}
-
- 	return;
-}
-
-std::vector<RestoreFileFR> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
-	std::vector<RestoreFileFR> files;
-
- 	for(const RangeFile &f : fileSet.get().ranges) {
- 		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
- 	}
- 	for(const LogFile &f : fileSet.get().logs) {
- 		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
- 	}
-
- 	return files;
-}
-// MX: This function is refactored
 // NOTE: This function can now get the backup file descriptors
 ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
@@ -1978,7 +1686,6 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 	state Key removePrefix = request.removePrefix;
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
-	//state VectorRef<RestoreFileFR> files; // return result
 
 	ASSERT( lockDB == true );
 
@@ -2024,7 +1731,6 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 	return Void();
 }
 
-// MXNOTE: Revise Done
 // The manager that manage the control of sampling workload
 ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreRequest request, Reference<RestoreConfig> restoreConfig, int64_t sampleMB_input) {
 	state Key tagName = request.tagName;
@@ -2374,7 +2080,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 	printf("------[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds------\n", now() - startTimeSampling);
 
-
 	state double startTime = now();
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
@@ -2463,9 +2168,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					ASSERT( param.offset < rd->files[curFileIndex].fileSize );
 					rd->files[curFileIndex].cursor = rd->files[curFileIndex].cursor +  param.length;
 					UID nodeID = loaderID;
-					// record the loading status
-					LoadingStatus loadingStatus(rd->files[curFileIndex], param.offset, param.length, nodeID);
-					rd->loadingStatus.insert(std::make_pair(loadingCmdIndex, loadingStatus));
+					// TODO: record the loading status
 
 					ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 					RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
@@ -2522,7 +2225,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 								reps[i].toString().c_str());
 						finishedLoaderIDs.push_back(reps[i].id);
 						//int64_t repLoadingCmdIndex = reps[i].cmdIndex;
-						//rd->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
 					}
 					loaderIDs = finishedLoaderIDs;
 					checkpointCurFileIndex = curFileIndex; // Save the previous success point
@@ -2593,15 +2295,12 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
 			if (e.code() != error_code_io_timeout) {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 			} else {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
-			//fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
-			//break;
 		}
 	}
 
@@ -2641,10 +2340,6 @@ ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx,
 	return Void();
 
 }
-
-
-static Future<Version> processRestoreRequest(RestoreInterface const &interf, Reference<RestoreData> const &rd, Database const &cx, RestoreRequest const &request);
-
 
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Database cx = cx_input;
@@ -2740,7 +2435,10 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		}
 
 		// Step: Notify all restore requests have been handled by cleaning up the restore keys
-		wait( finishRestore(cx, restoreRequests) ); 
+		wait( delay(5.0) );
+		printf("Finish my restore now!\n");
+		//wait( finishRestore(rd) );
+		wait( finishRestore(rd, cx, restoreRequests) ); 
 
 		printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
 		TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
@@ -2759,7 +2457,41 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 	return Void();
 }
 
-ACTOR static Future<Void> finishRestore(Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests) {
+// ToDelete: If we can pass the correctness test
+ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests) {
+	// Make restore workers quit
+	state std::vector<UID> workersIDs = getWorkerIDs(rd);
+	state std::vector<Future<RestoreCommonReply>> cmdReplies;
+	state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
+	loop {
+		try {
+			tryNum++;
+			if (tryNum >= 3) {
+				break;
+			}
+			cmdReplies.clear();
+			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
+			for (auto &nodeID : workersIDs) {
+				rd->cmdID.nextCmd();
+				ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
+				RestoreInterface &interf = rd->workers_interface[nodeID];
+				cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
+			}
+
+			if (!cmdReplies.empty()) {
+				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
+				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+				cmdReplies.clear();
+			}
+			printf("All restore workers have quited\n");
+
+			break;
+		} catch(Error &e) {
+			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+		}
+	}
+
+	// Notify tester that the restore has finished
 	state ReadYourWritesTransaction tr3(cx);
 	loop {
 		try {
@@ -2839,7 +2571,7 @@ ACTOR static Future<Void> unlockDB(Reference<ReadYourWritesTransaction> tr, UID 
 };
 
 int restoreStatusIndex = 0;
- ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status) {
+ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status) {
  	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
@@ -2946,41 +2678,42 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIn
 	return Void();
 }
 
-ACTOR Future<Void> finishRestore(Reference<RestoreData> rd) {
-	// Make restore workers quit
-	state std::vector<UID> workersIDs = getWorkerIDs(rd);
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
-	loop {
-		try {
-			tryNum++;
-			if (tryNum >= 3) {
-				break;
-			}
-			cmdReplies.clear();
-			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
-			for (auto &nodeID : workersIDs) {
-				rd->cmdID.nextCmd();
-				ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
-				RestoreInterface &interf = rd->workers_interface[nodeID];
-				cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
-			}
+// TO delete if correctness passed
+// ACTOR Future<Void> finishRestore(Reference<RestoreData> rd) {
+// 	// Make restore workers quit
+// 	state std::vector<UID> workersIDs = getWorkerIDs(rd);
+// 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
+// 	state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
+// 	loop {
+// 		try {
+// 			tryNum++;
+// 			if (tryNum >= 3) {
+// 				break;
+// 			}
+// 			cmdReplies.clear();
+// 			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
+// 			for (auto &nodeID : workersIDs) {
+// 				rd->cmdID.nextCmd();
+// 				ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
+// 				RestoreInterface &interf = rd->workers_interface[nodeID];
+// 				cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
+// 			}
 
-			if (!cmdReplies.empty()) {
-				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
-				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
-				cmdReplies.clear();
-			}
-			printf("All restore workers have quited\n");
+// 			if (!cmdReplies.empty()) {
+// 				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
+// 				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+// 				cmdReplies.clear();
+// 			}
+// 			printf("All restore workers have quited\n");
 
-			break;
-		} catch(Error &e) {
-			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
-		}
-	}
+// 			break;
+// 		} catch(Error &e) {
+// 			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+// 		}
+// 	}
 
-	return Void();
-}
+// 	return Void();
+// }
 
 // MXTODO: Change name to restoreProcessor()
 ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request) {
@@ -3158,10 +2891,6 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					ASSERT( 0 ); // Never happend!
 				}
 			}
-
-			wait( delay(5.0) );
-			printf("Finish my restore now!\n");
-			wait( finishRestore(rd) );
 
 
 			// MX: Unlock DB after restore
@@ -3746,7 +3475,6 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 	printf("[Sampling] Node:%s registerMutationsToMaster() rd->masterApplier:%s, hasApplierInterface:%d\n",
 			rd->describeNode().c_str(), rd->masterApplier.toString().c_str(),
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
-	//printAppliersKeyRange(rd);
 
 	ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 

@@ -37,7 +37,6 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/TLSConnection.h"
 
@@ -982,7 +981,6 @@ static void printRestoreUsage(bool devhelp ) {
 	return;
 }
 
-
 static void printFastRestoreUsage(bool devhelp ) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s (start | status | abort | wait) [OPTIONS]\n\n", exeRestore.toString().c_str());
@@ -1171,7 +1169,7 @@ enumProgramExe	getProgramType(std::string programExe)
 		enProgramExe = EXE_RESTORE;
 	}
 
-		// Check if restore
+	// Check if restore
 	else if ((programExe.length() >= exeFastRestoreAgent.size())																		&&
 		(programExe.compare(programExe.length() - exeFastRestoreAgent.size(), exeFastRestoreAgent.size(), (const char*)exeFastRestoreAgent.begin()) == 0))
 	{
@@ -3738,7 +3736,7 @@ int main(int argc, char* argv[]) {
 
 // Fast Restore Functions
 
-////-------Restore Agent: Kick off the restore by sending the restore requests
+//------Restore Agent: Kick off the restore by sending the restore requests
 ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx, Key tagName, bool verbose) {
 	// MX: We should wait on all restore before proceeds
 	printf("Wait for restore to finish\n");

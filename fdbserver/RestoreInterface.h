@@ -26,7 +26,6 @@
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
-//#include "fdbclient/NativeAPI.h" //MX: Cannot have NativeAPI.h in this .h
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
@@ -38,7 +37,7 @@ BINARY_SERIALIZABLE( RestoreRole );
 
 
 // Timeout threshold in seconds for restore commands
-extern int FastRestore_Failure_Timeout;
+extern const int FastRestore_Failure_Timeout;
 
 struct RestoreCommonReply;
 struct GetKeyRangeReply;
@@ -406,36 +405,6 @@ struct GetKeyRangeNumberReply : RestoreCommonReply {
 	}
 };
 
-
-
-// ToDelete
-struct RestoreCommandReply {
-	UID id; // placeholder, which reply the worker's node id back to master
-	CMDUID cmdID;
-	int num; // num is the number of key ranges calculated for appliers
-	Standalone<KeyRef> lowerBound;
-
-	RestoreCommandReply() : id(UID()), cmdID(CMDUID()), num(0) {}
-	//explicit RestoreCommandReply(UID id) : id(id) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdID, int num) : id(id), cmdID(cmdID), num(num) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdID, KeyRef lowerBound) : id(id), cmdID(cmdID), lowerBound(lowerBound) {}
-
-	std::string toString() const {
-		std::stringstream ret;
-		ret << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString() 
-			<< " num:" << std::to_string(num) << " lowerBound:" << lowerBound.toHexString();
-		return ret.str();
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, id , cmdID , num , lowerBound);
-		//ar & id & cmdIndex & num & lowerBound;
-	}
-};
-
-
 struct RestoreRequest {
 	//Database cx;
 	int index;
@@ -471,15 +440,15 @@ struct RestoreRequest {
 	void serialize(Ar& ar) {
 		serializer(ar, index , tagName , url ,  waitForComplete , targetVersion , verbose , range , addPrefix , removePrefix , lockDB , randomUid ,
 		testData , restoreRequests , reply);
-//		ar & index & tagName & url &  waitForComplete & targetVersion & verbose & range & addPrefix & removePrefix & lockDB & randomUid &
-//		testData & restoreRequests & reply;
 	}
 
 	std::string toString() const {
-		return "index:" + std::to_string(index) + " tagName:" + tagName.contents().toString() + " url:" + url.contents().toString()
-			   + " waitForComplete:" + std::to_string(waitForComplete) + " targetVersion:" + std::to_string(targetVersion)
-			   + " verbose:" + std::to_string(verbose) + " range:" + range.toString() + " addPrefix:" + addPrefix.contents().toString()
-			   + " removePrefix:" + removePrefix.contents().toString() + " lockDB:" + std::to_string(lockDB) + " randomUid:" + randomUid.toString();
+		std::stringstream ss;
+		ss <<  "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString() << " url:" << url.contents().toString()
+			   << " waitForComplete:" << std::to_string(waitForComplete) << " targetVersion:" << std::to_string(targetVersion)
+			   << " verbose:" << std::to_string(verbose) << " range:" << range.toString() << " addPrefix:" << addPrefix.contents().toString()
+			   << " removePrefix:" << removePrefix.contents().toString() << " lockDB:" << std::to_string(lockDB) << " randomUid:" << randomUid.toString();
+		return ss.str();
 	}
 };
 
@@ -493,17 +462,10 @@ struct RestoreReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, replyData);
-		//ar & replyData;
 	}
 };
 
-
-////--- Fast restore logic structure
-
-//std::vector<std::string> RestoreRoleStr; // = {"Master", "Loader", "Applier"};
-//int numRoles = RestoreRoleStr.size();
 std::string getRoleStr(RestoreRole role);
-
 
 struct RestoreNodeStatus {
 	// ConfigureKeyRange is to determine how to split the key range and apply the splitted key ranges to appliers
@@ -557,9 +519,6 @@ struct RestoreNodeStatus {
 	}
 
 };
-
-
-std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);

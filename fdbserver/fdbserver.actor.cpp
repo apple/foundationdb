@@ -1042,12 +1042,12 @@ int main(int argc, char* argv[]) {
 				case OPT_SEEDCONNSTRING:
 					seedConnString = args.OptionArg();
 					break;
-#ifdef __linux__
+	#ifdef __linux__
 				case OPT_FILESYSTEM: {
 					fileSystemPath = args.OptionArg();
 					break;
 				}
-#endif
+	#endif
 				case OPT_DATAFOLDER:
 					dataFolder = args.OptionArg();
 					break;
@@ -1123,7 +1123,7 @@ int main(int argc, char* argv[]) {
 					maxLogsSet = true;
 					break;
 				}
-#ifdef _WIN32
+	#ifdef _WIN32
 				case OPT_PARENTPID: {
 					auto pid_str = args.OptionArg();
 					int parent_pid = atoi(pid_str);
@@ -1146,7 +1146,7 @@ int main(int argc, char* argv[]) {
 				case OPT_NOBOX:
 					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 					break;
-#endif
+	#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
 					break;
