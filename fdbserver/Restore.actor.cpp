@@ -739,9 +739,28 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
 
 	bool inProgressApplyToDB = false;
+	uint32_t inProgressFlag = 0;
 
 	// Command id to record the progress
 	CMDUID cmdID;
+
+	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		inProgressFlag |= (1UL << phase);
+	}
+
+	void clearInProgressFlag(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		inProgressFlag &= ~(1UL << phase);
+	}
+
+	bool isInProgress(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		return (inProgressFlag & (1UL << phase));
+	}
 
 	RestoreRole getRole() {
 		return localNodeStatus.role;
@@ -2927,6 +2946,42 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIn
 	return Void();
 }
 
+ACTOR Future<Void> finishRestore(Reference<RestoreData> rd) {
+	// Make restore workers quit
+	state std::vector<UID> workersIDs = getWorkerIDs(rd);
+	state std::vector<Future<RestoreCommonReply>> cmdReplies;
+	state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
+	loop {
+		try {
+			tryNum++;
+			if (tryNum >= 3) {
+				break;
+			}
+			cmdReplies.clear();
+			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
+			for (auto &nodeID : workersIDs) {
+				rd->cmdID.nextCmd();
+				ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
+				RestoreInterface &interf = rd->workers_interface[nodeID];
+				cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
+			}
+
+			if (!cmdReplies.empty()) {
+				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
+				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
+				cmdReplies.clear();
+			}
+			printf("All restore workers have quited\n");
+
+			break;
+		} catch(Error &e) {
+			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+		}
+	}
+
+	return Void();
+}
+
 // MXTODO: Change name to restoreProcessor()
 ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
@@ -3106,49 +3161,25 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 
 			wait( delay(5.0) );
 			printf("Finish my restore now!\n");
-			// Make restore workers quit
-			state std::vector<UID> workersIDs = getWorkerIDs(rd);
-			state std::vector<Future<RestoreCommonReply>> cmdReplies;
-			state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
+			wait( finishRestore(rd) );
+
+
+			// MX: Unlock DB after restore
+			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
 			loop {
 				try {
-					tryNum++;
-					if (tryNum >= 3) {
-						break;
-					}
-					cmdReplies.clear();
-					rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
-					for (auto &nodeID : workersIDs) {
-						rd->cmdID.nextCmd();
-						ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
-						RestoreInterface &interf = rd->workers_interface[nodeID];
-						cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
-					}
-
-					if (!cmdReplies.empty()) {
-						std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
-						//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
-						cmdReplies.clear();
-					}
-					printf("All restore workers have quited\n");
-
+					printf("Finish restore cleanup. Start\n");
+					wait( unlockDB(tr_unlockDB, randomUid) );
+					printf("Finish restore cleanup. Done\n");
+					TraceEvent("ProcessRestoreRequest").detail("UnlockDB", "Done");
 					break;
 				} catch(Error &e) {
-					printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+					printf("[ERROR] At unlockDB. error code:%d message:%s. Retry...\n", e.code(), e.what());
 					if(e.code() != error_code_restore_duplicate_tag) {
 						wait(tr->onError(e));
 					}
 				}
 			}
-
-
-			// MX: Unlock DB after restore
-			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
-			printf("Finish restore cleanup. Start\n");
-			wait( unlockDB(tr_unlockDB, randomUid) );
-			printf("Finish restore cleanup. Done\n");
-
-			TraceEvent("ProcessRestoreRequest").detail("UnlockDB", "Done");
 
 			break;
 		} catch(Error &e) {
@@ -3876,6 +3907,12 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 	state int readLen = 0;
 	state int64_t readOffset = param.offset;
 
+	while (rd->isInProgress(RestoreCommandEnum::Sample_Range_File)) {
+		printf("[DEBUG] NODE:%s sampleRangeFile wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Sample_Range_File);
+
 	printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
 			rd->describeNode().c_str(), param.toString().c_str());
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
@@ -3885,9 +3922,7 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
-	} else {
-		rd->processedCmd[req.cmdID] = 1;
-	}
+	} 
 
 	// TODO: This can be expensive
 	state Reference<IBackupContainer> bc =  IBackupContainer::openContainer(param.url.toString());
@@ -3924,8 +3959,10 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 
 	//TODO: Send ack to master that loader has finished loading the data
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-	//rd->processedCmd[req.cmdID] = 1; // Record the processed comand to handle duplicate command
+	rd->processedCmd[req.cmdID] = 1; // Record the processed comand to handle duplicate command
 	//rd->kvOps.clear(); 
+
+	rd->clearInProgressFlag(RestoreCommandEnum::Sample_Range_File);
 
 	return Void();
 }
@@ -3936,6 +3973,13 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 	state int j = 0;
 	state int readLen = 0;
 	state int64_t readOffset = param.offset;
+
+	while (rd->isInProgress(RestoreCommandEnum::Sample_Log_File)) {
+		printf("[DEBUG] NODE:%s sampleLogFile wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Sample_Log_File);
+
 	printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n", rd->describeNode().c_str(), param.toString().c_str());
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
@@ -3944,8 +3988,6 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
-	} else {
-		rd->processedCmd[req.cmdID] = 1;
 	}
 
 	// TODO: Expensive operation
@@ -3986,6 +4028,8 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID)); // master node is waiting
 	rd->processedFiles.insert(std::make_pair(param.filename, 1));
 	rd->processedCmd[req.cmdID] = 1;
+
+	rd->clearInProgressFlag(RestoreCommandEnum::Sample_Log_File);
 
 	return Void();
 }
@@ -4074,6 +4118,13 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	readOffset = 0;
 	readOffset = param.offset;
 
+	while (rd->isInProgress(RestoreCommandEnum::Assign_Loader_Range_File)) {
+		printf("[DEBUG] NODE:%s loadRangeFile wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
+
+
 	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, role: %s, loading param:%s\n",
 			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			getRoleStr(rd->localNodeStatus.role).c_str(),
@@ -4088,9 +4139,6 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 		req.reply.send(RestoreCommonReply(interf.id(),req.cmdID));
 		return Void();
 	}
-
-	rd->processedFiles[param.filename] =  1;
-	rd->processedCmd[req.cmdID] = 1;
 
 	bc = IBackupContainer::openContainer(param.url.toString());
 	// printf("[INFO] Node:%s CMDUID:%s open backup container for url:%s\n",
@@ -4129,7 +4177,10 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 			rd->describeNode().c_str(), rd->cmdID.toString().c_str());
 	//Send ack to master that loader has finished loading the data
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-	
+	rd->processedFiles[param.filename] =  1;
+	rd->processedCmd[req.cmdID] = 1;
+
+	rd->clearInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
 
 	return Void();
 
@@ -4153,6 +4204,13 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	readOffset = 0;
 	readOffset = param.offset;
 
+	while (rd->isInProgress(RestoreCommandEnum::Assign_Loader_Log_File)) {
+		printf("[DEBUG] NODE:%s loadLogFile wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
+
+
 	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File role: %s, loading param:%s\n",
 								rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 								getRoleStr(rd->localNodeStatus.role).c_str(),
@@ -4165,12 +4223,9 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		printf("[WARNING] Node:%s CMDUID:%s file:%s is delivered more than once! Reply directly without loading the file\n",
 				rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 				param.filename.c_str());
-		//req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
-
-	rd->processedFiles[param.filename] =  1;
-	rd->processedCmd[req.cmdID] = 1;
 
 	bc = IBackupContainer::openContainer(param.url.toString());
 	printf("[INFO][Loader] Node:%s CMDUID:%s open backup container for url:%s\n",
@@ -4211,6 +4266,10 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	wait( registerMutationsToApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID)); // master node is waiting
+	rd->processedFiles[param.filename] =  1;
+	rd->processedCmd[req.cmdID] = 1;
+
+	rd->clearInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
 	
 	return Void();
 }
@@ -4220,18 +4279,23 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	state int numMutations = 0;
 
 	//ASSERT(req.cmdID.phase == RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-	if ( debug_verbose || true ) {
+	if ( debug_verbose ) {
 		printf("[VERBOSE_DEBUG] Node:%s receive mutation:%s\n", rd->describeNode().c_str(), req.mutation.toString().c_str());
 	}
+
+	// while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
+	// 	printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
+	// 	wait(delay(5.0));
+	// }
+	// rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+
 	// Handle duplicat cmd
 	if ( rd->isCmdProcessed(req.cmdID) ) {
 		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 		//printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
-		//req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
 		return Void();
 	}
-	// Avoid race condition when this actor is called twice on the same command
-	rd->processedCmd[req.cmdID] = 1;
 
 	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 	state uint64_t commitVersion = req.commitVersion;
@@ -4247,6 +4311,9 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	}
 
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+	// Avoid race condition when this actor is called twice on the same command
+	rd->processedCmd[req.cmdID] = 1;
+	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
 	return Void();
 }
@@ -4255,6 +4322,13 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 	state int numMutations = 0;
 	rd->numSampledMutations = 0;
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
+
+	// while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
+	// 	printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
+	// 	wait(delay(5.0));
+	// }
+	// rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
+
 	// Handle duplicate message
 	if (rd->isCmdProcessed(req.cmdID)) {
 		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
@@ -4283,6 +4357,8 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	rd->processedCmd[req.cmdID] = 1;
+
+	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
 
 	return Void();
 }
