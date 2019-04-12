@@ -244,15 +244,15 @@ struct ExecuteRequest {
 	ReplyPromise<Void> reply;
 
 	Arena arena;
-	StringRef execPayLoad;
+	StringRef execPayload;
 
-	ExecuteRequest(StringRef execPayLoad) : execPayLoad(execPayLoad) {}
+	ExecuteRequest(StringRef execPayload) : execPayload(execPayload) {}
 
-	ExecuteRequest() : execPayLoad() {}
+	ExecuteRequest() : execPayload() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply, execPayLoad, arena);
+		serializer(ar, reply, execPayload, arena);
 	}
 };
 
@@ -398,7 +398,7 @@ ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct Cl
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
                         std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
                         std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold,
-                        std::string whiteListBinPaths);
+                        std::string whitelistBinPaths);
 
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
@@ -418,7 +418,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db, std::string whiteListBinPaths);
+                                     Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,

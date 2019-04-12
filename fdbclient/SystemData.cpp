@@ -39,8 +39,8 @@ const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 // list of reserved exec commands
 const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent state of
                                                      // storage, TLog and coordinated state
-const StringRef execDisableTLogPop = LiteralStringRef("\xff/tldp"); // disable pop on TLog
-const StringRef execEnableTLogPop = LiteralStringRef("\xff/tlep"); // enable pop on TLog
+const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
+const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
 
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );

@@ -264,9 +264,9 @@ public:
 	// instead of setting a key and value on the DB, it executes the command
 	// that is passed in the value field.
 	// - cmdType can be used for logging purposes
-	// - cmdPayLoad contains the details of the command to be executed:
-	// format of the cmdPayLoad : <binary-path>:<arg1=val1>,<arg2=val2>...
-	void execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad);
+	// - cmdPayload contains the details of the command to be executed:
+	// format of the cmdPayload : <binary-path>:<arg1=val1>,<arg2=val2>...
+	void execute(const KeyRef& cmdType, const ValueRef& cmdPayload);
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation

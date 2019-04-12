@@ -82,11 +82,7 @@
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-<<<<<<< HEAD
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER };
-=======
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH };
->>>>>>> 2847e101... Allow only whitelisted binary path for exec op
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -119,7 +115,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NOBOX,                 "-q",                          SO_NONE },
 	{ OPT_NOBOX,                 "--no_dialog",                 SO_NONE },
 #endif
-<<<<<<< HEAD
 	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
 	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
@@ -165,52 +160,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
 	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
-=======
-	{ OPT_KVFILE,               "--kvfile",                    SO_REQ_SEP },
-	{ OPT_TESTFILE,             "-f",                          SO_REQ_SEP },
-	{ OPT_TESTFILE,             "--testfile",                  SO_REQ_SEP },
-	{ OPT_RESTARTING,           "-R",                          SO_NONE },
-	{ OPT_RESTARTING,           "--restarting",                SO_NONE },
-	{ OPT_RANDOMSEED,           "-s",                          SO_REQ_SEP },
-	{ OPT_RANDOMSEED,           "--seed",                      SO_REQ_SEP },
-	{ OPT_KEY,                  "-k",                          SO_REQ_SEP },
-	{ OPT_KEY,                  "--key",                       SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "-m",                          SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "--memory",                    SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "-M",                          SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "--storage_memory",            SO_REQ_SEP },
-	{ OPT_MACHINEID,            "-i",                          SO_REQ_SEP },
-	{ OPT_MACHINEID,            "--machine_id",                SO_REQ_SEP },
-	{ OPT_DCID,                 "-a",                          SO_REQ_SEP },
-	{ OPT_DCID,                 "--datacenter_id",             SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "-c",                          SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "--class",                     SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "-b",                          SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "--buggify",                   SO_REQ_SEP },
-	{ OPT_VERSION,              "-v",                          SO_NONE },
-	{ OPT_VERSION,              "--version",                   SO_NONE },
-	{ OPT_CRASHONERROR,         "--crash",                     SO_NONE },
-	{ OPT_NETWORKIMPL,          "-N",                          SO_REQ_SEP },
-	{ OPT_NETWORKIMPL,          "--network",                   SO_REQ_SEP },
-	{ OPT_NOBUFSTDOUT,          "--unbufferedout",             SO_NONE },
-	{ OPT_BUFSTDOUTERR,         "--bufferedout",               SO_NONE },
-	{ OPT_TRACECLOCK,           "--traceclock",                SO_REQ_SEP },
-	{ OPT_NUMTESTERS,           "--num_testers",               SO_REQ_SEP },
-	{ OPT_HELP,                 "-?",                          SO_NONE },
-	{ OPT_HELP,                 "-h",                          SO_NONE },
-	{ OPT_HELP,                 "--help",                      SO_NONE },
-	{ OPT_DEVHELP,              "--dev-help",                  SO_NONE },
-	{ OPT_KNOB,                 "--knob_",                     SO_REQ_SEP },
-	{ OPT_LOCALITY,             "--locality_",                 SO_REQ_SEP },
-	{ OPT_TESTSERVERS,          "--testservers",               SO_REQ_SEP },
-	{ OPT_TEST_ON_SERVERS,      "--testonservers",             SO_NONE },
-	{ OPT_METRICSCONNFILE,      "--metrics_cluster",           SO_REQ_SEP },
-	{ OPT_METRICSPREFIX,        "--metrics_prefix",            SO_REQ_SEP },
-	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
-	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,   "--trace_format",              SO_REQ_SEP },
-	{ OPT_WHITELIST_BINPATH,    "--whitelist_binpath",         SO_REQ_SEP },
->>>>>>> 2847e101... Allow only whitelisted binary path for exec op
+	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -966,7 +916,7 @@ int main(int argc, char* argv[]) {
 		const char *testFile = "tests/default.txt";
 		std::string kvFile;
 		std::string testServersStr;
-		std::string whiteListBinPaths;
+		std::string whitelistBinPaths;
 		std::vector<std::string> publicAddressStrs, listenAddressStrs;
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
@@ -1355,7 +1305,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case OPT_WHITELIST_BINPATH:
-					whiteListBinPaths = args.OptionArg();
+					whitelistBinPaths = args.OptionArg();
 					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
@@ -1781,7 +1731,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whiteListBinPaths, tlsOptions);
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, tlsOptions);
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1792,7 +1742,7 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whiteListBinPaths) );
+			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );

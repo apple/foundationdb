@@ -47,6 +47,7 @@
     <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
     <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ClCompile Include="Knobs.cpp" />
+    <ClCompile Include="FDBExecArgs.cpp" />
     <ActorCompiler Include="QuietDatabase.actor.cpp" />
     <ActorCompiler Include="networktest.actor.cpp" />
     <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
@@ -165,6 +166,7 @@
     </ActorCompiler>
     <ClInclude Include="DataDistributorInterface.h" />
     <ClInclude Include="DBCoreState.h" />
+    <ClInclude Include="FDBExecArgs.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="IKeyValueStore.h" />
     <ClInclude Include="IndirectShadowPager.h" />

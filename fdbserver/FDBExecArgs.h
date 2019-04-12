@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <Arena.h>
 
 // execute/snapshot command takes two arguments: <param1> <param2>
 // param1 - represents the command type/name
@@ -14,14 +15,14 @@
 class ExecCmdValueString {
 public: // ctor & dtor
 	ExecCmdValueString() {}
-	ExecCmdValueString(std::string const& cmdValueString);
+	explicit ExecCmdValueString(StringRef cmdValueString);
 
 public: // interfaces
-	std::string getBinaryPath();
-	std::vector<std::string> getBinaryArgs();
-	std::string getBinaryArgValue(std::string const& key);
-	void setCmdValueString(std::string const& cmdValueString);
-	std::string getCmdValueString(void);
+	StringRef getBinaryPath();
+	VectorRef<StringRef> getBinaryArgs();
+	StringRef getBinaryArgValue(StringRef key);
+	void setCmdValueString(StringRef cmdValueString);
+	StringRef getCmdValueString(void);
 
 public: // helper functions
 	void dbgPrint();
@@ -30,9 +31,9 @@ private: // functions
 	void parseCmdValue();
 
 private: // data
-	std::string cmdValueString;
-	std::vector<std::string> binaryArgs;
-	std::string binaryPath;
-	std::map<std::string, std::string> keyValueMap;
+	Standalone<StringRef> cmdValueString;
+	Standalone<VectorRef<StringRef>> binaryArgs;
+	StringRef binaryPath;
+	std::map<StringRef, StringRef> keyValueMap;
 };
 #endif

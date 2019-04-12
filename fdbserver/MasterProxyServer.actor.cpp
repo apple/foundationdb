@@ -39,13 +39,13 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include "fdbserver/FDBExecArgs.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbserver/FDBExecArgs.h"
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -233,7 +233,7 @@ struct ProxyCommitData {
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
 	bool popRemoteTxs;
-	vector<std::string> whiteListedBinPathVec;
+	vector<Standalone<StringRef>> whitelistedBinPathVec;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -415,7 +415,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 	}
 }
 
-void createWhiteListBinPathVec(const std::string& binPath, vector<std::string>& binPathVec) {
+void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
 	int p = 0;
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
 	for (; p < binPath.size(); ) {
@@ -423,8 +423,8 @@ void createWhiteListBinPathVec(const std::string& binPath, vector<std::string>& 
 		if (pComma == binPath.npos) {
 			pComma = binPath.size();
 		}
-		std::string token = binPath.substr(p, pComma - p);
-		TraceEvent(SevDebug, "BinPathItem").detail("Element", token);
+		Standalone<StringRef> token(binPath.substr(p, pComma - p));
+		TraceEvent(SevDebug, "BinPathItem").detail("Element", token.toString());
 		binPathVec.push_back(token);
 		p = pComma + 1;
 		while (binPath[p] == ' ' && p < binPath.size()) {
@@ -434,13 +434,12 @@ void createWhiteListBinPathVec(const std::string& binPath, vector<std::string>& 
 	return;
 }
 
-bool isWhiteListed(const vector<std::string>& binPathVec, const std::string& binPath) {
+bool isWhitelisted(vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
+	TraceEvent("BinPath").detail("Value", binPath.toString());
 	for (auto item : binPathVec) {
-		if (item == binPath) {
-			return true;
-		}
+		TraceEvent("Element").detail("Value", item.toString());
 	}
-	return false;
+	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
 ACTOR Future<Void> commitBatch(
@@ -782,12 +781,12 @@ ACTOR Future<Void> commitBatch(
 					state std::string param2 = m.param2.toString();
 					state ExecCmdValueString execArg(param2);
 					execArg.dbgPrint();
-					state std::string binPath = execArg.getBinaryPath();
-					state std::string uidStr = execArg.getBinaryArgValue("uid");
+					state StringRef binPath = execArg.getBinaryPath();
+					state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
 
 					if (m.param1 != execDisableTLogPop
 						&& m.param1 != execEnableTLogPop
-						&& !isWhiteListed(self->whiteListedBinPathVec, binPath)) {
+						&& !isWhitelisted(self->whitelistedBinPathVec, binPath)) {
 						TraceEvent("ExecTransactionNotPermitted")
 							.detail("TransactionNum", transactionNum);
 						committed[transactionNum] = ConflictBatch::TransactionNotPermitted;
@@ -805,16 +804,17 @@ ACTOR Future<Void> commitBatch(
 						// - all the storage nodes in a single region and
 						// - only to storage nodes in local region in multi-region setup
 						// step 1: get the DatabaseConfiguration
-						state DatabaseConfiguration conf;
-						Standalone<VectorRef<KeyValueRef>> results = wait( self->txnStateStore->readRange( configKeys ) );
-						conf.fromKeyValues(results);
+						auto result =
+							self->txnStateStore->readValue(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix)).get();
+						ASSERT(result.present());
+						state int usableRegions = atoi(result.get().toString().c_str());
+
 						// step 2: find the tag.id from locality info of the master
 						auto localityKey =
 							self->txnStateStore->readValue(tagLocalityListKeyFor(self->master.locality.dcId())).get();
 						int8_t locality = tagLocalityInvalid;
-						if (localityKey.present()) {
-							locality = decodeTagLocalityListValue(localityKey.get());
-						}
+						ASSERT(localityKey.present());
+						locality = decodeTagLocalityListValue(localityKey.get());
 
 						auto ranges = self->keyInfo.intersectingRanges(allKeys);
 						std::set<Tag> allSources;
@@ -825,40 +825,18 @@ ACTOR Future<Void> commitBatch(
 								.detail("Mutation", m.toString())
 								.detail("Version", commitVersion);
 
-						for (auto r : ranges) {
-							auto& tags = r.value().tags;
-							if (!tags.size()) {
-								for (auto info : r.value().src_info) {
-									if (info->tag.locality == locality) {
-										tags.push_back(info->tag);
-									}
-								}
-								for (auto info : r.value().dest_info) {
-									if (info->tag.locality == locality) {
-										tags.push_back(info->tag);
-									}
-								}
-								uniquify(tags);
+						std::vector<Tag> localTags;
+						auto tagKeys = self->txnStateStore->readRange(serverTagKeys).get();
+						for( auto& kv : tagKeys ) {
+							Tag t = decodeServerTagValue( kv.value );
+							if ((usableRegions > 1 && t.locality == locality)
+								|| (usableRegions == 1))  {
+								localTags.push_back(t);
 							}
-							std::vector<Tag> localTags;
-							for (auto t : tags) {
-								if ( (!conf.isValid())
-									|| (conf.usableRegions > 1 && t.locality == locality)
-									|| (conf.usableRegions == 1) ) {
-									// step 3: based on DatabaseConfiguration and locality
-									// information gathered in step 1 and step 2,
-									// - find all the relevant tags
-									localTags.push_back(t);
-								}
-							}
-							TraceEvent(SevDebug, "DebugTagInfo")
-								.detail("TagsSize", tags.size())
-								.detail("LocalTagsSize", localTags.size());
 							allSources.insert(localTags.begin(), localTags.end());
 						}
 
-
-						std::string tokenStr = "ExecTrace/Proxy/" + uidStr;
+						std::string tokenStr = "ExecTrace/Proxy/" + uidStr.toString();
 						auto te1 = TraceEvent("ProxyCommitTo", self->dbgid);
 						te1.detail("To", "all sources");
 						te1.detail("Mutation", m.toString());
@@ -880,7 +858,7 @@ ACTOR Future<Void> commitBatch(
 					UNREACHABLE();
 
 
-				auto& m = (*pMutations)[mutationNum];
+				// auto& m = (*pMutations)[mutationNum];
 
 				// Check on backing up key, if backup ranges are defined and a normal key
 				if (self->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey)) {
@@ -1481,12 +1459,12 @@ ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, GetHea
 	}
 }
 
-ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
 		state Optional<std::vector<OptionalInterface<TLogInterface>>> remoteLogs;
-		if(db->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-			for(auto& logSet : db->get().logSystemConfig.tLogs) {
+		if(self->db->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
+			for(auto& logSet : self->db->get().logSystemConfig.tLogs) {
 				if(!logSet.isLocal) {
 					remoteLogs = logSet.tLogs;
 					for(auto& tLog : logSet.tLogs) {
@@ -1501,12 +1479,12 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<Async
 		}
 
 		if(!remoteLogs.present()) {
-			wait(db->onChange());
+			wait(self->db->onChange());
 			continue;
 		}
 		self->popRemoteTxs = true;
 
-		state Future<Void> onChange = db->onChange();
+		state Future<Void> onChange = self->db->onChange();
 		loop {
 			state std::vector<Future<TLogQueuingMetricsReply>> replies;
 			for(auto &it : remoteLogs.get()) {
@@ -1545,7 +1523,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	LogEpoch epoch,
 	Version recoveryTransactionVersion,
 	bool firstProxy,
-	std::string whiteListBinPaths)
+	std::string whitelistBinPaths)
 {
 	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
@@ -1586,14 +1564,14 @@ ACTOR Future<Void> masterProxyServerCore(
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
-	createWhiteListBinPathVec(whiteListBinPaths, commitData.whiteListedBinPathVec);
+	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
 	// COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an estimate based on experiments and not an accurate one.
 	state int64_t commitBatchesMemoryLimit = std::min(SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT, static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
-	addActor.send(monitorRemoteCommitted(&commitData, commitData.db));
+	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
@@ -1678,7 +1656,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				                      "MasterProxyServer.masterProxyServerCore."
 				                      "ExecRequest");
 
-			TraceEvent("ExecRequest").detail("Payload", execReq.execPayLoad.toString());
+			TraceEvent("ExecRequest").detail("Payload", execReq.execPayload.toString());
 
 			// get the list of coordinators
 			state Optional<Value> coordinators = commitData.txnStateStore->readValue(coordinatorsKey).get();
@@ -1701,7 +1679,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				if (coordinatorsAddrSet.find(workers[i].interf.address()) != coordinatorsAddrSet.end()) {
 					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].interf.address());
 					try {
-						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 3.0));
+						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload)), 3.0));
 						++numSucc;
 					} catch (Error& e) {
 						TraceEvent("ExecReqFailed").detail("What", e.what());
@@ -1799,10 +1777,10 @@ ACTOR Future<Void> masterProxyServer(
 	MasterProxyInterface proxy,
 	InitializeMasterProxyRequest req,
 	Reference<AsyncVar<ServerDBInfo>> db,
-	std::string whiteListBinPaths)
+	std::string whitelistBinPaths)
 {
 	try {
-		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whiteListBinPaths);
+		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
 		loop choose{
 			when(wait(core)) { return Void(); }
 			when(wait(checkRemoved(db, req.recoveryCount, proxy))) {}
