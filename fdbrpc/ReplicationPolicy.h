@@ -255,7 +255,7 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 		} else if (name == LiteralStringRef("None")) {
 			policy = Reference<IReplicationPolicy>();
 		} else {
-			TraceEvent(SevError, "SerializingInvalidPolicyType").detailext("PolicyName", name);
+			TraceEvent(SevError, "SerializingInvalidPolicyType").detail("PolicyName", name);
 		}
 	} else {
 		std::string name = policy ? policy->name() : "None";

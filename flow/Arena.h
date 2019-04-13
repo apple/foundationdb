@@ -441,9 +441,10 @@ template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
 	static std::string toString(const Optional<T>& value) {
 		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
-    }
+	}
 };
 
+template<class T>
 struct union_like_traits<Optional<T>> : std::true_type {
 	using Member = Optional<T>;
 	using alternatives = pack<T>;
