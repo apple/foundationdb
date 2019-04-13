@@ -757,12 +757,16 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 	}
 	
 	Standalone<VectorRef<KeyValueRef>> options;
+	StringRef performQuiescent = LiteralStringRef("false");
+	if (doQuiescentCheck) {
+		performQuiescent = LiteralStringRef("true");
+	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), ValueRef(format("%s", LiteralStringRef(doQuiescentCheck ? "true" : "false").toString().c_str()))));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("quiescentWaitTimeout"), ValueRef(format("%f", quiescentWaitTimeout))));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("quiescentWaitTimeout"), ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
