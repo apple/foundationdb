@@ -73,20 +73,29 @@ struct Tag {
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
 
-template<>
-struct scalar_traits<Tag> : std::true_type {
-	using locality_trait = scalar_traits<decltype(std::declval<Tag>().locality)>;
-	using id_trait = scalar_traits<decltype(std::declval<Tag>().id)>;
-	constexpr static size_t size = locality_trait::size + id_trait::size;
-	static void save(uint8_t* out, const Tag& tag) {
-		locality_trait::save(out, tag.locality);
-		id_trait::save(out + id_trait::size, tag.id);
+template <>
+struct struct_like_traits<Tag> : std::true_type {
+	using Member = Tag;
+	using types = pack<uint16_t, int8_t>;
+
+	template <int i>
+	static const index_t<i, types>& get(const Member& m) {
+		if constexpr (i == 0) {
+			return m.id;
+		} else {
+			static_assert(i == 1);
+			return m.locality;
+		}
 	}
 
-	template <class Context>
-	static void load(const uint8_t* in, Tag& tag, Context& context) {
-		locality_trait::load(in, tag.locality, context);
-		id_trait::load(in + locality_trait::size, tag.id, context);
+	template <int i, class Type>
+	static const void assign(Member& m, const Type& t) {
+		if constexpr (i == 0) {
+			m.id = t;
+		} else {
+			static_assert(i == 1);
+			m.locality = t;
+		}
 	}
 };
 
