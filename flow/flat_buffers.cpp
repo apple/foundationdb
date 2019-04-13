@@ -507,4 +507,22 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/Standalone") {
+	Standalone<VectorRef<StringRef>> vecIn;
+	auto numElements = g_random->randomInt(1, 20);
+	for (int i = 0; i < numElements; ++i) {
+		auto str = g_random->randomAlphaNumeric(g_random->randomInt(0, 30));
+		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
+	}
+	Standalone<StringRef> value = ObjectWriter::toValue(vecIn);
+	ArenaObjectReader reader(value.arena(), value);
+	VectorRef<Standalone<StringRef>> vecOut;
+	reader.deserialize(vecOut);
+	ASSERT(vecOut.size() == vecIn.size());
+	for (int i = 0; i < vecOut.size(); ++i) {
+		ASSERT(vecOut[i] == vecIn[i]);
+	}
+	return Void();
+}
+
 } // namespace unit_tests

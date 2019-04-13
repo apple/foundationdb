@@ -514,7 +514,6 @@ public:
 		//T tmp;
 		//ar >> tmp;
 		//*this = tmp;
-		static_assert(!is_fb_function<Archive>);
 		serializer(ar, (*(T*)this), arena());
 	}
 
