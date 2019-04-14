@@ -569,11 +569,10 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
-	printf("  -S %s, --object-serializer %s\n"
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
 		   "                 Use object serializer for sending messages. The object serializer\n"
 		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
-		   "                 each other even if they don't have the same version\n",
-		   devhelp ? "ON|OFF|RANDOM" : "ON|OFF", devhelp ? "ON|OFF|RANDOM" : "ON|OFF");
+		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -931,7 +930,7 @@ int main(int argc, char* argv[]) {
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 		uint64_t rsssize = -1;
-		int useObjectSerializer = 0;
+		bool useObjectSerializer = false;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -1273,12 +1272,10 @@ int main(int argc, char* argv[]) {
 					std::string s = args.OptionArg();
 					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 					if (s == "on" || s == "true" || s == "1") {
-						useObjectSerializer = 1;
+						useObjectSerializer = true;
 					} else if (s == "off" || s == "false" || s == "0") {
-						useObjectSerializer = 0;
-					} else if (s == "random") {
-						useObjectSerializer = 2;
-					} else {
+						useObjectSerializer = false;
+					}  else {
 						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
@@ -1507,14 +1504,10 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator();
+			startNewSimulator(useObjectSerializer);
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			if (useObjectSerializer == 2) {
-				fprintf(stderr, "ERROR: 'random' for object serializer is only supported for simulation");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			g_network = newNet2(useThreadPool, true, useObjectSerializer == 1);
+			g_network = newNet2(useThreadPool, true, useObjectSerializer);
 			FlowTransport::createInstance(1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1662,7 +1655,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting, tlsOptions, useObjectSerializer );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
