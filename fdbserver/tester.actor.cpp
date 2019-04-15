@@ -731,6 +731,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 //Sets the database configuration by running the ChangeConfig workload
 ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface > testers, StringRef configMode) {
+	ASSERT(false);
 	state TestSpec spec;
 	Standalone<VectorRef<KeyValueRef>> options;
 	spec.title = LiteralStringRef("ChangeConfig");
