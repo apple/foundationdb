@@ -262,6 +262,8 @@ struct TraceableString<const char*> {
 	}
 };
 
+std::string traceableStringToString(const char* value, size_t S);
+
 template<size_t S>
 struct TraceableString<char[S]> {
 	static const char* begin(const char* value) {
@@ -269,12 +271,10 @@ struct TraceableString<char[S]> {
 	}
 
 	static bool atEnd(const char* value, const char* iter) {
-		return iter - value == S;
+		return iter - value == S - 1; // Exclude trailing \0 byte
 	}
 
-	static std::string toString(const char* value) {
-		return std::string(value, S);
-	}
+	static std::string toString(const char* value) { return traceableStringToString(value, S); }
 };
 
 template<>
@@ -294,7 +294,7 @@ struct TraceableString<char*> {
 
 template<class T>
 struct TraceableStringImpl : std::true_type {
-	static constexpr bool isPrintable(char c) { return c > 32 && c < 127; }
+	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
 
 	template<class Str>
 	static std::string toString(Str&& value) {
