@@ -1218,3 +1218,8 @@ void TraceEventFields::validateFormat() const {
 		}
 	}
 }
+
+std::string traceableStringToString(const char* value, size_t S) {
+	ASSERT_WE_THINK(value[S - 1] == '\0');
+	return std::string(value, S - 1); // Exclude trailing \0 byte
+}
