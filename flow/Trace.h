@@ -266,6 +266,7 @@ std::string traceableStringToString(const char* value, size_t S);
 
 template<size_t S>
 struct TraceableString<char[S]> {
+	static_assert(S > 0, "Only string literals are supported.");
 	static const char* begin(const char* value) {
 		return value;
 	}
