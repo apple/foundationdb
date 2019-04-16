@@ -175,8 +175,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 	loop {
 		if (i == results.size()) return Void();
 		try {
-			T r = wait( results[i] );
-			(void)r;
+			T r = wait(success(results[i]));
 		} catch (...) {
 		}
 		i++;
@@ -1032,8 +1031,7 @@ Future<Void> success( Future<T> of ) {
 ACTOR template <class T>
 Future<Void> ready( Future<T> f ) {
 	try {
-		T t = wait(f);
-		(void)t;
+		wait(success(f));
 	} catch (...) {
 	}
 	return Void();
