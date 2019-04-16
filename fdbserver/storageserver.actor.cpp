@@ -3472,12 +3472,13 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 
 				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 					req.reply.send(GetValueReply());
-				actors.add(self->readGuard(req , getValueQ));
+				else
+					actors.add(self->readGuard(req , getValueQ));
 			}
 			when( WatchValueRequest req = waitNext(ssi.watchValue.getFuture()) ) {
 				// TODO: fast load balancing?
 				// SOMEDAY: combine watches for the same key/value into a single watch
-				self->readGuard(req, watchValueQ);
+				actors.add(self->readGuard(req, watchValueQ));
 			}
 			when (GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
 				// Warning: This code is executed at extremely high priority (TaskLoadBalancedEndpoint), so downgrade before doing real work
