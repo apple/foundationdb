@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb/foundationdb-build:0.0.6
+    image: foundationdb/foundationdb-build:0.0.7
 
   build-setup: &build-setup
     <<: *common
@@ -58,7 +58,7 @@ services:
 
   snapshot-cmake: &snapshot-cmake
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DINSTALL_TARGET=RPM -DFDB_RELEASE=0 -DUSE_VALGRIND=0 /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb && make -j "$${MAKEJOBS}" packages && cpack; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DINSTALL_TARGET=RPM -DFDB_RELEASE=0 -DUSE_VALGRIND=0 /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb && make -j "$${MAKEJOBS}" packages preinstall && cpack; fi'
 
   prb-cmake:
     <<: *snapshot-cmake
