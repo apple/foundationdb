@@ -116,4 +116,4 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<LocalRatekeeperWorkload> CycleWorkloadFactory("LocalRatekeeper");
+WorkloadFactory<LocalRatekeeperWorkload> LocalRatekeeperWorkloadFactory("LocalRatekeeper");
