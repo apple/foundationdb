@@ -70,7 +70,6 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request, 
 
 ACTOR template <class T>
 Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> output ) {
-	state double start = now();
 	state Future<Void> end = delay( time );
 	loop choose {
 		when ( T t = wait( what ) ) { return t; }

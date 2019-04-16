@@ -749,7 +749,7 @@ public:
 		return f;
 	}
 	ACTOR static Future<Void> checkShutdown(Sim2 *self, int taskID) {
-		ISimulator::KillType kt = wait( self->getCurrentProcess()->shutdownSignal.getFuture() );
+		wait(success(self->getCurrentProcess()->shutdownSignal.getFuture()));
 		self->setCurrentTask(taskID);
 		return Void();
 	}
