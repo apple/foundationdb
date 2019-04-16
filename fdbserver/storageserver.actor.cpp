@@ -642,7 +642,7 @@ public:
 		auto rate = currentRate();
 		if (rate < 0.999 && g_random->random01() > rate) {
 			//request.error = future_version();
-			sendErrorWithPenalty(request.reply, future_version(), getPenalty());
+			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			return Void();
 		}
 		return fun(this, request);
