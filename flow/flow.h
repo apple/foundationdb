@@ -50,9 +50,8 @@
 using namespace std::rel_ops;
 
 #define TEST(condition)                                                                                                \
-	if (!(condition))                                                                                                  \
-		;                                                                                                              \
-	else {                                                                                                             \
+	if (!(condition)) {                                                                                                \
+	} else {                                                                                                           \
 		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
 		                                  .detail("File", __FILE__)                                                    \
 		                                  .detail("Line", __LINE__)                                                    \
