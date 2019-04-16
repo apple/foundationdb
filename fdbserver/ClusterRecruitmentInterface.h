@@ -71,23 +71,6 @@ struct ClusterControllerFullInterface {
 	}
 };
 
-struct RecruitFromConfigurationRequest {
-	constexpr static FileIdentifier file_identifier = 2023046;
-	DatabaseConfiguration configuration;
-	bool recruitSeedServers;
-	int maxOldLogRouters;
-	ReplyPromise< struct RecruitFromConfigurationReply > reply;
-
-	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
-		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
-
-	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
-	}
-};
-
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
 	vector<WorkerInterface> tLogs;
@@ -107,6 +90,34 @@ struct RecruitFromConfigurationReply {
 	}
 };
 
+struct RecruitFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 2023046;
+	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
+	int maxOldLogRouters;
+	ReplyPromise< struct RecruitFromConfigurationReply > reply;
+
+	RecruitFromConfigurationRequest() {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
+		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
+	}
+};
+
+struct RecruitRemoteFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 9091392;
+	vector<WorkerInterface> remoteTLogs;
+	vector<WorkerInterface> logRouters;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, remoteTLogs, logRouters);
+	}
+};
+
 struct RecruitRemoteFromConfigurationRequest {
 	constexpr static FileIdentifier file_identifier = 3235995;
 	DatabaseConfiguration configuration;
@@ -121,17 +132,6 @@ struct RecruitRemoteFromConfigurationRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
-	}
-};
-
-struct RecruitRemoteFromConfigurationReply {
-	constexpr static FileIdentifier file_identifier = 9091392;
-	vector<WorkerInterface> remoteTLogs;
-	vector<WorkerInterface> logRouters;
-
-	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, remoteTLogs, logRouters);
 	}
 };
 
@@ -237,19 +237,6 @@ struct RegisterMasterRequest {
 		}
 		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
 		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
-	}
-};
-
-struct GetServerDBInfoRequest {
-	constexpr static FileIdentifier file_identifier = 9467438;
-	UID knownServerInfoID;
-	Standalone<VectorRef<StringRef>> issues;
-	std::vector<NetworkAddress> incompatiblePeers;
-	ReplyPromise< struct ServerDBInfo > reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
 	}
 };
 

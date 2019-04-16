@@ -166,6 +166,21 @@ struct SystemFailureStatus {
 	}
 };
 
+struct FailureMonitoringReply {
+	constexpr static FileIdentifier file_identifier = 6820325;
+	VectorRef< SystemFailureStatus > changes;
+	Version failureInformationVersion;
+	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
+	int clientRequestIntervalMS,        // after this many milliseconds, send another request
+		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
+	Arena arena;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
+	}
+};
+
 struct FailureMonitoringRequest {
 	// Sent by all participants to the cluster controller reply.clientRequestIntervalMS
 	//   ms after receiving the previous reply.
@@ -186,31 +201,6 @@ struct FailureMonitoringRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, senderStatus, failureInformationVersion, addresses, reply);
-	}
-};
-
-struct FailureMonitoringReply {
-	constexpr static FileIdentifier file_identifier = 6820325;
-	VectorRef< SystemFailureStatus > changes;
-	Version failureInformationVersion;
-	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
-	int clientRequestIntervalMS,        // after this many milliseconds, send another request
-		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
-	Arena arena;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
-	}
-};
-
-struct StatusRequest {
-	constexpr static FileIdentifier file_identifier = 14419140;
-	ReplyPromise< struct StatusReply > reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
 	}
 };
 
@@ -237,6 +227,16 @@ struct StatusReply {
 			}
 			statusObj = std::move(mv.get_obj());
 		}
+	}
+};
+
+struct StatusRequest {
+	constexpr static FileIdentifier file_identifier = 14419140;
+	ReplyPromise< struct StatusReply > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

@@ -250,21 +250,6 @@ struct TxnStateRequest {
 	}
 };
 
-struct GetHealthMetricsRequest
-{
-	constexpr static FileIdentifier file_identifier = 11403900;
-	ReplyPromise<struct GetHealthMetricsReply> reply;
-	bool detailed;
-
-	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
-
-	template <class Ar>
-	void serialize(Ar& ar)
-	{
-		serializer(ar, reply, detailed);
-	}
-};
-
 struct GetHealthMetricsReply
 {
 	constexpr static FileIdentifier file_identifier = 11544290;
@@ -292,6 +277,21 @@ struct GetHealthMetricsReply
 			BinaryReader br(serialized, IncludeVersion());
 			br >> healthMetrics;
 		}
+	}
+};
+
+struct GetHealthMetricsRequest
+{
+	constexpr static FileIdentifier file_identifier = 11403900;
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply, detailed);
 	}
 };
 

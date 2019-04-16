@@ -52,6 +52,19 @@ struct RatekeeperInterface {
 	}
 };
 
+struct GetRateInfoReply {
+	constexpr static FileIdentifier file_identifier = 7845006;
+	double transactionRate;
+	double batchTransactionRate;
+	double leaseDuration;
+	HealthMetrics healthMetrics;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
+	}
+};
+
 struct GetRateInfoRequest {
 	constexpr static FileIdentifier file_identifier = 9068521;
 	UID requesterID;
@@ -67,19 +80,6 @@ struct GetRateInfoRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, detailed, reply);
-	}
-};
-
-struct GetRateInfoReply {
-	constexpr static FileIdentifier file_identifier = 7845006;
-	double transactionRate;
-	double batchTransactionRate;
-	double leaseDuration;
-	HealthMetrics healthMetrics;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
 	}
 };
 

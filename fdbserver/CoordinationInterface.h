@@ -72,6 +72,18 @@ struct UniqueGeneration {
 	}
 };
 
+struct GenerationRegReadReply {
+	constexpr static FileIdentifier file_identifier = 12623609;
+	Optional<Value> value;
+	UniqueGeneration gen, rgen;
+	GenerationRegReadReply() {}
+	GenerationRegReadReply( Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen ) : value(value), gen(gen), rgen(rgen) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value, gen, rgen);
+	}
+};
+
 struct GenerationRegReadRequest {
 	constexpr static FileIdentifier file_identifier = 8975311;
 	Key key;
@@ -82,18 +94,6 @@ struct GenerationRegReadRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, gen, reply);
-	}
-};
-
-struct GenerationRegReadReply {
-	constexpr static FileIdentifier file_identifier = 12623609;
-	Optional<Value> value;
-	UniqueGeneration gen, rgen;
-	GenerationRegReadReply() {}
-	GenerationRegReadReply( Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen ) : value(value), gen(gen), rgen(rgen) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, value, gen, rgen);
 	}
 };
 

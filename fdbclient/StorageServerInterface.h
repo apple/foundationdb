@@ -359,17 +359,6 @@ struct GetPhysicalMetricsRequest {
 	}
 };
 
-struct StorageQueuingMetricsRequest {
-	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
-	constexpr static FileIdentifier file_identifier = 3978640;
-	ReplyPromise<struct StorageQueuingMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
 struct StorageQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
@@ -384,6 +373,17 @@ struct StorageQueuingMetricsReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+	}
+};
+
+struct StorageQueuingMetricsRequest {
+	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
+	constexpr static FileIdentifier file_identifier = 3978640;
+	ReplyPromise<struct StorageQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

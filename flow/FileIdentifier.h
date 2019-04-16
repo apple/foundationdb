@@ -24,11 +24,6 @@
 
 using FileIdentifier = uint32_t;
 
-template <class T>
-struct FileIdentifierOf {
-	constexpr static FileIdentifier value = T::file_identifier;
-};
-
 struct Empty {};
 
 template <typename T, typename = int>
@@ -142,4 +137,3 @@ template <>
 struct FileIdentifierFor<double> {
 	constexpr static FileIdentifier value = 9348150;
 };
-

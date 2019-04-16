@@ -33,6 +33,17 @@ struct NetworkTestInterface {
 	NetworkTestInterface( INetwork* local );
 };
 
+struct NetworkTestReply {
+	constexpr static FileIdentifier file_identifier = 14465374;
+	Value value;
+	NetworkTestReply() {}
+	NetworkTestReply( Value value ) : value(value) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
 struct NetworkTestRequest {
 	constexpr static FileIdentifier file_identifier = 4146513;
 	Key key;
@@ -43,17 +54,6 @@ struct NetworkTestRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, replySize, reply);
-	}
-};
-
-struct NetworkTestReply {
-	constexpr static FileIdentifier file_identifier = 14465374;
-	Value value;
-	NetworkTestReply() {}
-	NetworkTestReply( Value value ) : value(value) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, value);
 	}
 };
 

@@ -62,4 +62,17 @@ struct ServerDBInfo {
 	}
 };
 
+struct GetServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	UID knownServerInfoID;
+	Standalone<VectorRef<StringRef>> issues;
+	std::vector<NetworkAddress> incompatiblePeers;
+	ReplyPromise< struct ServerDBInfo > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
+	}
+};
+
 #endif

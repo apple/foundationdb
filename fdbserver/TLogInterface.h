@@ -228,16 +228,6 @@ struct TLogCommitRequest {
 	}
 };
 
-struct TLogQueuingMetricsRequest {
-	constexpr static FileIdentifier file_identifier = 7798476;
-	ReplyPromise<struct TLogQueuingMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
 struct TLogQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
@@ -249,6 +239,16 @@ struct TLogQueuingMetricsReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
+	}
+};
+
+struct TLogQueuingMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 7798476;
+	ReplyPromise<struct TLogQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

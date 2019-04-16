@@ -1070,6 +1070,7 @@ inline FileIdentifier read_file_identifier(const uint8_t* in) {
 // introduce the indirection only when necessary.
 template <class T>
 struct EnsureTable {
+	static_assert(HasFileIdentifier<T>::value);
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 	EnsureTable() = default;
 	EnsureTable(const object_construction<T>& t) : t(t) {}

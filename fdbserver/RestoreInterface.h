@@ -46,6 +46,19 @@ struct RestoreInterface {
 	}
 };
 
+struct TestReply {
+	constexpr static FileIdentifier file_identifier = 12075719;
+	int replyData;
+
+	TestReply() : replyData(0) {}
+	explicit TestReply(int replyData) : replyData(replyData) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, replyData);
+	}
+};
+
 struct TestRequest {
 	constexpr static FileIdentifier file_identifier = 14404487;
 	int testData;
@@ -57,19 +70,6 @@ struct TestRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, testData, reply);
-	}
-};
-
-struct TestReply {
-	constexpr static FileIdentifier file_identifier = 12075719;
-	int replyData;
-
-	TestReply() : replyData(0) {}
-	explicit TestReply(int replyData) : replyData(replyData) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, replyData);
 	}
 };
 
