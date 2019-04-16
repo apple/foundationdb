@@ -26,6 +26,9 @@ services:
 
   build-docs:
     <<: *build-setup
+    volumes:
+      - ..:/foundationdb
+    working_dir: /foundationdb
     command: bash -c 'make -j "$${MAKEJOBS}" docpackage'
 
 
