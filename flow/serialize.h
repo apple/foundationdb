@@ -130,11 +130,19 @@ public:
 	}
 };
 
+template <class F, class S, bool = HasFileIdentifier<F>::value&& HasFileIdentifier<S>::value>
+struct PairFileIdentifier;
+
 template <class F, class S>
-struct FileIdentifierFor<std::pair<F, S>> {
+struct PairFileIdentifier<F, S, false> {};
+
+template <class F, class S>
+struct PairFileIdentifier<F, S, true> {
 	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
 };
 
+template <class F, class S>
+struct FileIdentifierFor<std::pair<F, S>> : PairFileIdentifier<F, S> {};
 
 template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
@@ -145,9 +153,7 @@ public:
 };
 
 template <class T, class Allocator>
-struct FileIdentifierFor<std::vector<T, Allocator>> {
-	constexpr static FileIdentifier value = (0x10 << 24) | FileIdentifierFor<T>::value;
-};
+struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 0x10> {};
 
 template <class Archive, class T>
 inline void save( Archive& ar, const std::vector<T>& value ) {

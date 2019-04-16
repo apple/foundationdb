@@ -123,9 +123,8 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr {
+class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
-	constexpr static FileIdentifier file_identifier = (0x1 << 24) | FileIdentifierFor<T>::value;
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {

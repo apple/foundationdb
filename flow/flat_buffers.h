@@ -300,8 +300,8 @@ constexpr int fb_align = is_struct_like<T> ? align_helper(typename struct_like_t
 
 template <class T>
 struct _SizeOf {
-	static constexpr int size = fb_size<T>;
-	static constexpr int align = fb_align<T>;
+	static constexpr unsigned int size = fb_size<T>;
+	static constexpr unsigned int align = fb_align<T>;
 };
 
 struct PrecomputeSize {
@@ -351,7 +351,7 @@ struct PrecomputeSize {
 template <class Member, class Context>
 void load_helper(Member&, const uint8_t*, Context&);
 
-class VTableSet;
+struct VTableSet;
 
 template <class T>
 struct is_array : std::false_type {};
@@ -880,7 +880,7 @@ struct LoadSaveHelper {
 		current += sizeof(uint32_t);
 		VectorTraits::reserve(member, numEntries, context);
 		auto inserter = VectorTraits::insert(member);
-		for (int i = 0; i < numEntries; ++i) {
+		for (uint32_t i = 0; i < numEntries; ++i) {
 			T value;
 			load_helper(value, current, context);
 			*inserter = std::move(value);
@@ -945,7 +945,7 @@ struct LoadSaveHelper {
 		uint32_t len = num_entries * size;
 		auto self = writer.getMessageWriter(len);
 		auto iter = VectorTraits::begin(members);
-		for (int i = 0; i < num_entries; ++i) {
+		for (uint32_t i = 0; i < num_entries; ++i) {
 			auto result = save_helper(*iter, writer, vtables);
 			self.write(&result, i * size, size);
 			++iter;
@@ -968,7 +968,7 @@ struct LoadSaveHelper<std::vector<bool, Alloc>> {
 		member.clear();
 		member.resize(length);
 		bool m;
-		for (int i = 0; i < length; ++i) {
+		for (uint32_t i = 0; i < length; ++i) {
 			load_helper(m, current, context);
 			member[i] = m;
 			current += fb_size<bool>;

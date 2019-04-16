@@ -347,9 +347,8 @@ inline void save( Archive& ar, const Arena& p ) {
 }
 
 template <class T>
-class Optional {
+class Optional : public ComposedIdentifier<T, 0x10> {
 public:
-	static constexpr FileIdentifier file_identifier = (0x10 << 24) | FileIdentifierFor<T>::value;
 	Optional() : valid(false) {}
 	Optional(const Optional<T>& o) : valid(o.valid) {
 		if (valid) new (&value) T(o.get());
@@ -797,10 +796,9 @@ template <>
 struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 
 template <class T>
-class VectorRef {
+class VectorRef : public ComposedIdentifier<T, 0x8> {
 public:
 	using value_type = T;
-	static constexpr FileIdentifier file_identifier = (0x8 << 24) | FileIdentifierFor<T>::value;
 
 	// T must be trivially destructible (and copyable)!
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}

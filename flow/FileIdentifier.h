@@ -20,12 +20,62 @@
 
 #pragma once
 #include <cstdint>
+#include <type_traits>
 
 using FileIdentifier = uint32_t;
 
 template <class T>
-struct FileIdentifierFor {
+struct FileIdentifierOf {
 	constexpr static FileIdentifier value = T::file_identifier;
+};
+
+struct Empty {};
+
+template <typename T, typename = int>
+struct HasFileIdentifierMember : std::false_type {};
+
+template <typename T>
+struct HasFileIdentifierMember<T, decltype((void)T::file_identifier, 0)> : std::true_type {};
+
+template <class T, bool>
+struct FileIdentifierForBase;
+
+template <class T>
+struct FileIdentifierForBase<T, false> {};
+
+template <class T>
+struct FileIdentifierForBase<T, true> {
+	static constexpr FileIdentifier value = T::file_identifier;
+};
+
+template <class T>
+struct FileIdentifierFor : FileIdentifierForBase<T, HasFileIdentifierMember<T>::value> {};
+
+template <typename T, typename = int>
+struct HasFileIdentifier : std::false_type {};
+
+template <typename T>
+struct HasFileIdentifier<T, decltype((void)FileIdentifierFor<T>::value, 0)> : std::true_type {};
+
+template <class T, uint32_t B, bool = HasFileIdentifier<T>::value>
+struct ComposedIdentifier;
+
+template <class T, uint32_t B>
+struct ComposedIdentifier<T, B, true>
+{
+	static constexpr FileIdentifier file_identifier = (B << 24) | FileIdentifierFor<T>::value;
+};
+
+template <class T, uint32_t B>
+struct ComposedIdentifier<T, B, false> {};
+
+template <class T, uint32_t B, bool = HasFileIdentifier<T>::value>
+struct ComposedIdentifierExternal;
+template <class T, uint32_t B>
+struct ComposedIdentifierExternal<T, B, false> {};
+template <class T, uint32_t B>
+struct ComposedIdentifierExternal<T, B, true> {
+	static constexpr FileIdentifier value = ComposedIdentifier<T, B>::file_identifier;
 };
 
 template <>

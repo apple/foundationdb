@@ -109,10 +109,9 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 
 
 template <class T>
-class ReplyPromise sealed
+class ReplyPromise sealed : public ComposedIdentifier<T, 0x2>
 {
 public:
-	constexpr static FileIdentifier file_identifier = (0x2 << 24) | FileIdentifierFor<T>::value;
 	template <class U>
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
