@@ -175,7 +175,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 	loop {
 		if (i == results.size()) return Void();
 		try {
-			T r = wait(success(results[i]));
+			wait(success(results[i]));
 		} catch (...) {
 		}
 		i++;
