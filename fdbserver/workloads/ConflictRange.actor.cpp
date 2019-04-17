@@ -75,7 +75,6 @@ struct ConflictRangeWorkload : TestWorkload {
 
 	ACTOR Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload *self) {
 		state int i;
-		state int j;
 		state std::string clientID;
 		state std::string myKeyA;
 		state std::string myKeyB;

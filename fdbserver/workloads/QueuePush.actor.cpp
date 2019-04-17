@@ -109,7 +109,7 @@ struct QueuePushWorkload : TestWorkload {
 			loop {
 				try {
 					state double start = now();
-					Version v = wait( tr.getReadVersion() );
+					wait(success(tr.getReadVersion()));
 					self->GRVLatencies.addSample( now() - start );
 
 					// Get the last key in the database with a snapshot read

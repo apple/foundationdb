@@ -1233,7 +1233,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 			int64_t fileSize = wait(lockFile.get()->size());
 			state Key fileData = makeString(fileSize);
-			int length = wait(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+			wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
 			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
 		}
 	}

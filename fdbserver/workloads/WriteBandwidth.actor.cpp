@@ -113,7 +113,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 			loop {
 				try {
 					state double start = now();
-					Version v = wait( tr.getReadVersion() );
+					wait(success(tr.getReadVersion()));
 					self->GRVLatencies.addSample( now() - start );
 
 					// Predefine a single large write conflict range over the whole key space

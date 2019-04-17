@@ -285,7 +285,6 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 
 		printf("Building %d nodes: ", workload->nodeCount);
 		state double setupBegin = timer();
-		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
 		for(i=0; i<workload->nodeCount; i++) {
 			test.store->set( KeyValueRef( test.makeKey( i ), wr.toValue() ) );

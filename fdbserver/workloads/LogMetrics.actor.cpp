@@ -67,7 +67,7 @@ struct LogMetricsWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				Version v = wait( tr.getReadVersion() );
+				wait(success(tr.getReadVersion()));
 				tr.set(fastLoggingEnabled, br.toValue());
 				tr.makeSelfConflicting();
 				wait( tr.commit() );

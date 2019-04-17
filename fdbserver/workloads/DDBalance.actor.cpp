@@ -214,7 +214,6 @@ struct DDBalanceWorkload : TestWorkload {
 		state int currentBin = self->currentbin;
 		state int nextBin = 0;
 		state int i;
-		state int j;
 		state int key_space_drift = 0;
 
 		state double clientBegin = now();

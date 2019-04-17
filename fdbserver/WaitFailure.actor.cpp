@@ -26,7 +26,6 @@
 ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){
 	// when this actor is cancelled, the promises in the queue will send broken_promise
 	state Deque<ReplyPromise<Void>> queue;
-	state int limit = BUGGIFY ? SERVER_KNOBS->BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS : SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	loop {
 		ReplyPromise<Void> P = waitNext(waitFailure);
 		queue.push_back(P);

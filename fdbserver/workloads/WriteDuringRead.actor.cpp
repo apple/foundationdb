@@ -358,7 +358,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool useBatchPriority, bool* doingCommit, double* startTime, Key timebombStr ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		//state UID randomID = g_nondeterministic_random->randomUniqueID();
 		//TraceEvent("WDRCommit", randomID);
 		try {
 			if( !readYourWritesDisabled && !*cancelled ) {
