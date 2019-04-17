@@ -707,6 +707,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int splitBytes = 0;
 				state int firstKeySampledBytes = 0;
 				state int sampledKeys = 0;
+				state int sampledKeysWithProb = 0;
 				state double shardVariance = 0;
 				state bool canSplit = false;
 				state Key lastSampleKey;
@@ -907,6 +908,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 										firstKeySampledBytes += sampleInfo.sampledSize;
 
 									sampledKeys++;
+									if(itemProbability < 1) {
+										sampledKeysWithProb++;
+									}
 								}
 							}
 
@@ -989,12 +993,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				int estimateError = abs(shardBytes - sampledBytes);
 
 				//Only perform the check if there are sufficient keys to get a distribution that should resemble a normal distribution
-				if(sampledKeys > 30 && estimateError > failErrorNumStdDev * stdDev)
+				if(sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev)
 				{
 					double numStdDev = estimateError / sqrt(shardVariance);
 					TraceEvent("ConsistencyCheck_InaccurateShardEstimate").detail("Min", shardBounds.min.bytes).detail("Max", shardBounds.max.bytes).detail("Estimate", sampledBytes)
 						.detail("Actual", shardBytes).detail("NumStdDev", numStdDev).detail("Variance", shardVariance).detail("StdDev", stdDev)
-						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys);
+						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys)
+						.detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
 					self->testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev));
 				}
