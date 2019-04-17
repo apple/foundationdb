@@ -43,6 +43,8 @@
 const int min_num_workers = 3; //10; // TODO: This can become a configuration param later
 const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 const int FastRestore_Failure_Timeout = 3600; // seconds
+double loadBatchSizeMB = 1.0;
+double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
@@ -69,6 +71,7 @@ bool isKVOpsSorted(Reference<RestoreData> rd);
 bool allOpsAreKnown(Reference<RestoreData> rd);
 void sanityCheckMutationOps(Reference<RestoreData> rd);
 void parseSerializedMutation(Reference<RestoreData> rd, bool isSampling = false);
+bool collectFilesForOneVersionBatch(Reference<RestoreData> rd);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -630,6 +633,15 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; // Key is the unique identifier for a batch of mutation logs at the same version
 	std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Record the most recent
+
+	// In each version batch, we process the files in [curBackupFilesBeginIndex, curBackupFilesEndIndex] in RestoreData.allFiles.
+	long curBackupFilesBeginIndex;
+	long curBackupFilesEndIndex;
+	double totalWorkloadSize;
+	double curWorkloadSize;
+	int batchIndex;
+
+
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 
 	// For master applier to hold the lower bound of key ranges for each appliers
@@ -680,6 +692,8 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 		mutationPartMap.clear();
 		processedCmd.clear();
 		inProgressApplyToDB = false;
+		files.clear(); // files are backup files for a version batch
+		curWorkloadSize = 0;
 	}
 
 	vector<UID> getBusyAppliers() {
@@ -872,12 +886,9 @@ bool isForbiddenVersionRangeOverlapped(Reference<RestoreData> rd) {
 	return false; //not overlapped
 }
 
-// endVersion:
+// endVersion is begin version for range file, because range file takes snapshot at the same version
+// endVersion is the end version (excluded) for mutations recorded in log file
 bool isVersionInForbiddenRange(Reference<RestoreData> rd, Version endVersion, bool isRange) {
-//	std::map<Version, Version>::iterator iter = rd->forbiddenVersions.upper_bound(ver); // The iterator that is > ver
-//	if ( iter == rd->forbiddenVersions.end() ) {
-//		return false;
-//	}
 	bool isForbidden = false;
 	for (auto &range : rd->forbiddenVersions) {
 		if ( isRange ) { //the range file includes mutations at the endVersion
@@ -2662,6 +2673,59 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIn
 	return Void();
 }
 
+// Collect the set of backup files to be used for a version batch
+// Return true if there is still files to be restored; false otherwise.
+// This function will change the process' RestoreData
+bool collectFilesForOneVersionBatch(Reference<RestoreData> rd) {
+	rd->files.clear();
+	rd->curWorkloadSize = 0;
+ 	Version endVersion = -1;
+	bool isRange = false;
+	bool validVersion = false;
+	// Step: Find backup files in each version batch and restore them.
+	while ( rd->curBackupFilesBeginIndex < rd->allFiles.size() ) {
+		// Find the curBackupFilesEndIndex, such that the to-be-loaded files size (curWorkloadSize) is as close to loadBatchSizeThresholdB as possible,
+		// and curBackupFilesEndIndex must not belong to the forbidden version range!
+		if ( rd->curBackupFilesEndIndex < rd->allFiles.size() ) {
+			endVersion =  rd->allFiles[rd->curBackupFilesEndIndex].endVersion;
+			isRange = rd->allFiles[rd->curBackupFilesEndIndex].isRange;
+			validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
+			rd->curWorkloadSize  += rd->allFiles[rd->curBackupFilesEndIndex].fileSize;
+			printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld, files.size:%ld\n",
+				rd->batchIndex, (long long) endVersion, isRange, validVersion, rd->curWorkloadSize , rd->curBackupFilesBeginIndex, rd->curBackupFilesEndIndex, rd->allFiles.size());
+		}
+		if ( (validVersion && rd->curWorkloadSize  >= loadBatchSizeThresholdB) || rd->curBackupFilesEndIndex >= rd->allFiles.size() )  {
+			if ( rd->curBackupFilesEndIndex >= rd->allFiles.size() && rd->curWorkloadSize <= 0 ) {
+				printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%ld, curWorkloadSize:%.2f\n",
+						rd->curBackupFilesEndIndex, rd->allFiles.size(), rd->curWorkloadSize );
+				break; // return result
+			}
+			// Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
+			rd->resetPerVersionBatch();
+			rd->cmdID.setBatch(rd->batchIndex);
+			if ( rd->curBackupFilesBeginIndex < rd->allFiles.size()) {
+				for (int fileIndex = rd->curBackupFilesBeginIndex; fileIndex <= rd->curBackupFilesEndIndex && fileIndex < rd->allFiles.size(); fileIndex++) {
+					rd->files.push_back(rd->allFiles[fileIndex]);
+				}
+			}
+			printBackupFilesInfo(rd);
+			rd->totalWorkloadSize += rd->curWorkloadSize;
+		} else if (validVersion && rd->curWorkloadSize < loadBatchSizeThresholdB) {
+			rd->curBackupFilesEndIndex++;
+		} else if (!validVersion && rd->curWorkloadSize < loadBatchSizeThresholdB) {
+			rd->curBackupFilesEndIndex++;
+		} else if (!validVersion && rd->curWorkloadSize >= loadBatchSizeThresholdB) {
+			// Now: just move to the next file. We will eventually find a valid version but load more than loadBatchSizeThresholdB
+			printf("[WARNING] The loading batch size will be larger than expected! curBatchSize:%.2fB, expectedBatchSize:%2.fB, endVersion:%ld\n",
+					rd->curWorkloadSize, loadBatchSizeThresholdB, endVersion);
+			rd->curBackupFilesEndIndex++;
+			// TODO: Roll back to find a valid version
+		}
+	}
+
+	return (rd->files.size() > 0);
+}
+
 // TO delete if correctness passed
 // ACTOR Future<Void> finishRestore(Reference<RestoreData> rd) {
 // 	// Make restore workers quit
@@ -2730,9 +2794,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 	state double curEndTime = 0;
 	state double curWorkloadSize = 0; //Bytes
 
-	state double loadBatchSizeMB = 1.0;
-	state double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
-	state int restoreBatchIndex = 0;
+	
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(randomUid));
 
@@ -2757,120 +2819,79 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 		fprintf(stderr, "[ERROR] forbidden version ranges are overlapped! Check out the forbidden version range above\n");
 	}
 
+	rd->batchIndex = 0;
+	state int prevBatchIndex = 0;
+	state long prevCurBackupFilesBeginIndex = 0;
+	state long prevCurBackupFilesEndIndex = 0;
+	state double prevCurWorkloadSize = 0;
+	state double prevtotalWorkloadSize = 0;
+
 	loop {
 		try {
+			curStartTime = now();
 			rd->files.clear();
-			curWorkloadSize = 0;
-			state Version endVersion = -1;
-			state bool isRange = false;
-			state bool validVersion = false;
-			// Step: Find backup files in each version batch and restore them.
-			while ( curBackupFilesBeginIndex < rd->allFiles.size() ) {
-				// Find the curBackupFilesEndIndex, such that the to-be-loaded files size (curWorkloadSize) is as close to loadBatchSizeThresholdB as possible,
-				// and curBackupFilesEndIndex must not belong to the forbidden version range!
-				if ( curBackupFilesEndIndex < rd->allFiles.size() ) {
-					endVersion =  rd->allFiles[curBackupFilesEndIndex].endVersion;
-					isRange = rd->allFiles[curBackupFilesEndIndex].isRange;
-					validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
-					curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
-					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld, files.size:%ld\n",
-						restoreBatchIndex, (long long) endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
-				}
-				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= rd->allFiles.size() )  {
-					if ( curBackupFilesEndIndex >= rd->allFiles.size() && curWorkloadSize <= 0 ) {
-						printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%ld, curWorkloadSize:%.2f\n",
-								curBackupFilesEndIndex, rd->allFiles.size(), curWorkloadSize);
-						break;
-					}
-					//TODO: Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
-					rd->files.clear();
-					rd->resetPerVersionBatch();
-					if ( curBackupFilesBeginIndex < rd->allFiles.size()) {
-						for (int fileIndex = curBackupFilesBeginIndex; fileIndex <= curBackupFilesEndIndex && fileIndex < rd->allFiles.size(); fileIndex++) {
-							rd->files.push_back(rd->allFiles[fileIndex]);
-						}
-					}
-					printBackupFilesInfo(rd);
-
-					curStartTime = now();
-
-					printf("------[Progress] Node:%s, restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", rd->describeNode().c_str(), restoreBatchIndex, curWorkloadSize);
-					rd->resetPerVersionBatch();
-					rd->cmdID.setBatch(restoreBatchIndex);
-
-					wait( initializeVersionBatch(rd, restoreBatchIndex) );
-
-
-					wait( distributeWorkloadPerVersionBatch(interf, rd, cx, request, restoreConfig) );
-
-					curEndTime = now();
-					curRunningTime = curEndTime - curStartTime;
-					ASSERT(curRunningTime >= 0);
-					totalRunningTime += curRunningTime;
-					totalWorkloadSize += curWorkloadSize;
-
-					struct FastRestoreStatus status;
-					status.curRunningTime = curRunningTime;
-					status.curWorkloadSize = curWorkloadSize;
-					status.curSpeed = curWorkloadSize /  curRunningTime;
-					status.totalRunningTime = totalRunningTime;
-					status.totalWorkloadSize = totalWorkloadSize;
-					status.totalSpeed = totalWorkloadSize / totalRunningTime;
-
-					printf("------[Progress] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
-							restoreBatchIndex, curWorkloadSize,
-							status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
-
-					wait( registerStatus(cx, status) );
-					printf("-----[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
-						curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
-
-					curBackupFilesBeginIndex = curBackupFilesEndIndex + 1;
-					curBackupFilesEndIndex++;
-					curWorkloadSize = 0;
-					restoreBatchIndex++;
-				} else if (validVersion && curWorkloadSize < loadBatchSizeThresholdB) {
-					curBackupFilesEndIndex++;
-				} else if (!validVersion && curWorkloadSize < loadBatchSizeThresholdB) {
-					curBackupFilesEndIndex++;
-				} else if (!validVersion && curWorkloadSize >= loadBatchSizeThresholdB) {
-					// Now: just move to the next file. We will eventually find a valid version but load more than loadBatchSizeThresholdB
-					printf("[WARNING] The loading batch size will be larger than expected! curBatchSize:%.2fB, expectedBatchSize:%2.fB, endVersion:%ld\n",
-							curWorkloadSize, loadBatchSizeThresholdB, endVersion);
-					curBackupFilesEndIndex++;
-					//TODO: Roll back to find a valid version
-				} else {
-					ASSERT( 0 ); // Never happend!
-				}
+			rd->resetPerVersionBatch();
+			rd->cmdID.setBatch(rd->batchIndex);
+			// Checkpoint the progress of the previous version batch
+			prevBatchIndex = rd->batchIndex;
+			prevCurBackupFilesBeginIndex = rd->curBackupFilesBeginIndex;
+			prevCurBackupFilesEndIndex = rd->curBackupFilesEndIndex;
+			prevCurWorkloadSize = rd->curWorkloadSize;
+			prevtotalWorkloadSize = rd->totalWorkloadSize;
+			
+			bool hasBackupFilesToProcess = collectFilesForOneVersionBatch(rd);
+			if ( !hasBackupFilesToProcess ) { // No more backup files to restore
+				break;
 			}
 
+			printf("[Progress][Start version batch] Node:%s, restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", rd->describeNode().c_str(), rd->batchIndex, rd->curWorkloadSize);
+			wait( initializeVersionBatch(rd, rd->batchIndex) );
 
-			// MX: Unlock DB after restore
-			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
-			loop {
-				try {
-					printf("Finish restore cleanup. Start\n");
-					wait( unlockDB(tr_unlockDB, randomUid) );
-					printf("Finish restore cleanup. Done\n");
-					TraceEvent("ProcessRestoreRequest").detail("UnlockDB", "Done");
-					break;
-				} catch(Error &e) {
-					printf("[ERROR] At unlockDB. error code:%d message:%s. Retry...\n", e.code(), e.what());
-					if(e.code() != error_code_restore_duplicate_tag) {
-						wait(tr->onError(e));
-					}
-				}
-			}
+			wait( distributeWorkloadPerVersionBatch(interf, rd, cx, request, restoreConfig) );
 
-			break;
+			curEndTime = now();
+			curRunningTime = curEndTime - curStartTime;
+			ASSERT(curRunningTime >= 0);
+			totalRunningTime += curRunningTime;
+
+			struct FastRestoreStatus status;
+			status.curRunningTime = curRunningTime;
+			status.curWorkloadSize = rd->curWorkloadSize;
+			status.curSpeed = rd->curWorkloadSize /  curRunningTime;
+			status.totalRunningTime = totalRunningTime;
+			status.totalWorkloadSize = rd->totalWorkloadSize;
+			status.totalSpeed = rd->totalWorkloadSize / totalRunningTime;
+
+			printf("------[Progress][Finish version batch] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
+					rd->batchIndex, rd->curWorkloadSize,
+					status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
+
+			wait( registerStatus(cx, status) );
+			printf("-----[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
+				rd->curBackupFilesBeginIndex, rd->curBackupFilesEndIndex, rd->allFiles.size());
+
+			rd->curBackupFilesBeginIndex = rd->curBackupFilesEndIndex + 1;
+			rd->curBackupFilesEndIndex++;
+			rd->curWorkloadSize = 0;
+			rd->batchIndex++;
+
 		} catch(Error &e) {
-			fprintf(stderr, "ERROR: Stop at Error when we process version batch at the top level. error:%s\n", e.what());
+			fprintf(stdout, "!!![MAY HAVE BUG] Reset the version batch state to the start of the current version batch, due to error:%s\n", e.what());
 			if(e.code() != error_code_restore_duplicate_tag) {
 				wait(tr->onError(e));
 			}
-			break;
+			rd->batchIndex = prevBatchIndex;
+			rd->curBackupFilesBeginIndex = prevCurBackupFilesBeginIndex;
+			rd->curBackupFilesEndIndex = prevCurBackupFilesEndIndex;
+			rd->curWorkloadSize = prevCurWorkloadSize;
+			rd->totalWorkloadSize = prevtotalWorkloadSize;
 		}
 	}
+
+	// Unlock DB  at the end of handling the restore request
+	state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
+	wait( unlockDB(tr_unlockDB, randomUid) );
+	printf("Finish restore uid:%s \n", randomUid.toString().c_str());
 
 	return targetVersion;
 }
