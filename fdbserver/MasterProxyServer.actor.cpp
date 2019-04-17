@@ -858,8 +858,6 @@ ACTOR Future<Void> commitBatch(
 					UNREACHABLE();
 
 
-				// auto& m = (*pMutations)[mutationNum];
-
 				// Check on backing up key, if backup ranges are defined and a normal key
 				if (self->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey)) {
 					if (m.type != MutationRef::Type::ClearRange) {
@@ -1673,24 +1671,22 @@ ACTOR Future<Void> masterProxyServerCore(
 
 			// send the exec command to the list of workers which are
 			// coordinators
-			state int i = 0;
-			state int numSucc = 0;
-			for (; i < workers.size(); i++) {
+			state vector<Future<Void>> execCoords;
+			for (int i = 0; i < workers.size(); i++) {
 				if (coordinatorsAddrSet.find(workers[i].interf.address()) != coordinatorsAddrSet.end()) {
 					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].interf.address());
-					try {
-						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload)), 3.0));
-						++numSucc;
-					} catch (Error& e) {
-						TraceEvent("ExecReqFailed").detail("What", e.what());
-					}
+					execCoords.push_back(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload)));
 				}
 			}
-			if (numSucc >= (coordinatorsAddrSet.size() + 1) / 2) {
-				execReq.reply.send(Void());
-			} else {
-				execReq.reply.sendError(operation_failed());
+			wait(timeoutError(waitForAll(execCoords), 10.0));
+			int numSucc = 0;
+			for (auto item : execCoords) {
+				if (item.isValid() && item.isReady()) {
+					++numSucc;
+				}
 			}
+			bool succ = numSucc >= ((execCoords.size() + 1) / 2);
+			succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;
