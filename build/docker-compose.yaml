@@ -8,8 +8,8 @@ services:
     <<: *common
     depends_on: [common]
     volumes:
-      - ..:/__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb
-    working_dir: /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb
+      - ..:/__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb
+    working_dir: /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb
     environment:
       - MAKEJOBS=1
       - BUILD_DIR=./work
@@ -58,7 +58,7 @@ services:
 
   snapshot-cmake: &snapshot-cmake
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DINSTALL_TARGET=RPM -DFDB_RELEASE=0 -DUSE_VALGRIND=0 /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb && make -j "$${MAKEJOBS}" packages preinstall && cpack; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DINSTALL_TARGET=RPM -DFDB_RELEASE=0 -DUSE_VALGRIND=0 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && make -j "$${MAKEJOBS}" packages preinstall && cpack; fi'
 
   prb-cmake:
     <<: *snapshot-cmake
@@ -66,7 +66,7 @@ services:
 
   snapshot-ctest: &snapshot-ctest
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
 
   prb-ctest:
     <<: *snapshot-ctest
@@ -74,7 +74,7 @@ services:
 
   snapshot-correctness: &snapshot-correctness
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake /__this_is_some_very_long_name_dir_that_is_needed_to_fix_a_bug_with_cpack__/foundationdb && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
 
   prb-correctness:
     <<: *snapshot-correctness
