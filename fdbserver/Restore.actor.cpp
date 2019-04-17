@@ -51,7 +51,12 @@ struct RestoreData; // Only declare the struct exist but we cannot use its field
 ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd);
 ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd);
+ACTOR Future<Void> notifyWorkersToSetWorkersInterface(Reference<RestoreData> rd);
+ACTOR Future<Void> configureRoles(Reference<RestoreData> rd);
+ACTOR Future<Void> notifyWorkersToSetWorkersInterface(Reference<RestoreData> rd);
+
 ACTOR Future<Void> workerCore( Reference<RestoreData> rd, RestoreInterface ri, Database cx );
+ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface ri, Database cx);
 
 ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request);
 ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
@@ -1260,14 +1265,12 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	return Void();
  }
 
-// Set roles (Loader or Applier) for workers and ask all workers to share their interface
-// The master node's localNodeStatus has been set outside of this function
-// TODO: Split this function into two functions: set-role and share-worker-interface
-ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
+// Read restoreWorkersKeys from DB to get each restore worker's restore interface and set it to rd->workers_interface
+ ACTOR Future<Void> collectWorkerInterface(Reference<RestoreData> rd, Database cx) {
 	state Transaction tr(cx);
 
 	state vector<RestoreInterface> agents; // agents is cmdsInterf
-	printf("%s:Start configuring roles for workers\n", rd->describeNode().c_str());
+	
 	loop {
 		try {
 			tr.reset();
@@ -1288,13 +1291,23 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
 					rd->describeNode().c_str(), agentValues.size(), min_num_workers);
 			wait( delay(5.0) );
 		} catch( Error &e ) {
-			printf("[WARNING]%s: configureRoles transaction error:%s\n", rd->describeNode().c_str(), e.what());
+			printf("[WARNING]%s: collectWorkerInterface transaction error:%s\n", rd->describeNode().c_str(), e.what());
 			wait( tr.onError(e) );
 		}
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
+
+	TraceEvent("FastRestore").detail("CollectWorkerInterface_NumWorkers", rd->workers_interface.size());
+
+	return Void();
+ }
+
+// Set roles (Loader or Applier) for workers and ask all workers to share their interface
+// The master node's localNodeStatus has been set outside of this function
+ACTOR Future<Void> configureRoles(Reference<RestoreData> rd)  {
+	printf("%s:Start configuring roles for workers\n", rd->describeNode().c_str());
 	// Set up the role, and the global status for each node
-	int numNodes = agents.size();
+	int numNodes = rd->workers_interface.size();
 	int numLoader = numNodes * ratio_loader_to_applier / (ratio_loader_to_applier + 1);
 	int numApplier = numNodes - numLoader;
 	if (numLoader <= 0 || numApplier <= 0) {
@@ -1308,20 +1321,17 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
 	rd->localNodeStatus.nodeIndex = 0; // Master has nodeIndex = 0
 
 	// The first numLoader nodes will be loader, and the rest nodes will be applier
-	int nodeIndex = 1;
-	for (int i = 0; i < numLoader; ++i) {
+	int nodeIndex = 1; // worker's nodeIndex starts from 1
+	for (auto &workerInterf : rd->workers_interface) {
+		// globalNodeStatus does not include the master's info because master holds globalNodeStatus
 		rd->globalNodeStatus.push_back(RestoreNodeStatus());
-		rd->globalNodeStatus.back().init(RestoreRole::Loader);
-		rd->globalNodeStatus.back().nodeID = agents[i].id();
+		rd->globalNodeStatus.back().nodeID = workerInterf.second.id();
 		rd->globalNodeStatus.back().nodeIndex = nodeIndex;
-		nodeIndex++;
-	}
-
-	for (int i = numLoader; i < numNodes; ++i) {
-		rd->globalNodeStatus.push_back(RestoreNodeStatus());
-		rd->globalNodeStatus.back().init(RestoreRole::Applier);
-		rd->globalNodeStatus.back().nodeID = agents[i].id();
-		rd->globalNodeStatus.back().nodeIndex = nodeIndex;
+		if ( nodeIndex < numLoader + 1) {
+			rd->globalNodeStatus.back().init(RestoreRole::Loader);
+		} else {
+			rd->globalNodeStatus.back().init(RestoreRole::Applier);
+		}
 		nodeIndex++;
 	}
 
@@ -1329,39 +1339,33 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
 	rd->masterApplier = rd->globalNodeStatus.back().nodeID;
 	printf("masterApplier ID:%s\n", rd->masterApplier.toString().c_str());
 
+	// Notify each worker about the worker's role
 	state int index = 0;
 	state RestoreRole role;
 	state UID nodeID;
 	printf("Node:%s Start configuring roles for workers\n", rd->describeNode().c_str());
 	rd->cmdID.initPhase(RestoreCommandEnum::Set_Role);
-
 	loop {
 		try {
 			wait(delay(1.0));
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
 			index = 0;
-			for(auto& cmdInterf : agents) {
+			for (auto &workerInterf : rd->workers_interface)  {
 				role = rd->globalNodeStatus[index].role;
 				nodeID = rd->globalNodeStatus[index].nodeID;
 				rd->cmdID.nextCmd();
 				printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", rd->cmdID.toString().c_str(), rd->describeNode().c_str(),
 						getRoleStr(role).c_str(), index, nodeID.toString().c_str());
-				cmdReplies.push_back( cmdInterf.setRole.getReply(RestoreSetRoleRequest(rd->cmdID, role, index,  rd->masterApplier)) );
+				cmdReplies.push_back( workerInterf.second.setRole.getReply(RestoreSetRoleRequest(rd->cmdID, role, index,  rd->masterApplier)) );
 				index++;
 			}
 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 			printf("[SetRole] Finished\n");
-
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+			// Handle the command reply timeout error
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
-
 			printf("Node:%s waits on replies time out. Current phase: Set_Role, Retry all commands.\n", rd->describeNode().c_str());
 		}
 	}
@@ -1376,38 +1380,34 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  {
 
 	printf("Node:%s finish configure roles\n", rd->describeNode().c_str());
 
-	// Ask each restore worker to share its restore interface
+	return Void();
+}
+
+// Ask each restore worker to share its restore interface
+ACTOR Future<Void> notifyWorkersToSetWorkersInterface(Reference<RestoreData> rd) {
+	state int index = 0;
 	loop {
 		try {
 			wait(delay(1.0));
 			index = 0;
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
-			for(auto& cmdInterf : agents) {
-				role = rd->globalNodeStatus[index].role;
-				nodeID = rd->globalNodeStatus[index].nodeID;
+			for(auto& workersInterface : rd->workers_interface) {
 				rd->cmdID.nextCmd();
 				printf("[CMD:%s] Node:%s setWorkerInterface for node (index=%d uid=%s)\n", 
 						rd->cmdID.toString().c_str(), rd->describeNode().c_str(),
-						index, nodeID.toString().c_str());
-				cmdReplies.push_back( cmdInterf.setWorkerInterface.getReply(RestoreSimpleRequest(rd->cmdID)) );
+						index,  rd->globalNodeStatus[index].nodeID.toString().c_str());
+				cmdReplies.push_back( workersInterface.second.setWorkerInterface.getReply(RestoreSimpleRequest(rd->cmdID)) );
 				index++;
 			}
 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 			printf("[setWorkerInterface] Finished\n");
-
 			break;
 		} catch (Error &e) {
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
-
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+					rd->cmdID.toString().c_str(), e.code(), e.what());
 			printf("Node:%s waits on replies time out. Current phase: setWorkerInterface, Retry all commands.\n", rd->describeNode().c_str());
 		}
 	}
-
 
 	return Void();
 }
@@ -2350,6 +2350,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Reference<RestoreData> rd = Reference<RestoreData>(new RestoreData());
 	rd->localNodeStatus.nodeID = interf.id();
 
+	// Compete in registering its restoreInterface as the leader.
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -2396,56 +2397,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		// Initialize the node's UID
 		//rd->localNodeStatus.nodeID = interf.id();
 		wait( workerCore(rd, interf, cx) );
-		// Exit after restore
-		return Void();
-	}
-
-	//we are the leader
-	// We must wait for enough time to make sure all restore workers have registered their interfaces into the DB
-	printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
-			interf.id().toString().c_str());
-	wait( delay(10.0) );
-
-	//state vector<RestoreInterface> agents;
-	//state VectorRef<RestoreInterface> agents;
-
-	rd->localNodeStatus.init(RestoreRole::Master);
-	rd->localNodeStatus.nodeID = interf.id();
-	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
-	// Configure roles for each worker and ask them to share their restore interface
-	wait( configureRoles(rd, cx) );
-
-	state int restoreId = 0;
-	state int checkNum = 0;
-	loop {
-		printf("Node:%s---Wait on restore requests...---\n", rd->describeNode().c_str());
-		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
-
-		printf("Node:%s ---Received  restore requests as follows---\n", rd->describeNode().c_str());
-		// Print out the requests info
-		for ( auto &it : restoreRequests ) {
-			printf("\t[INFO][Master]Node:%s RestoreRequest info:%s\n", rd->describeNode().c_str(), it.toString().c_str());
-		}
-
-		// Step: Perform the restore requests
-		for ( auto &it : restoreRequests ) {
-			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
-			printf("Node:%s Got RestoreRequestInfo:%s\n", rd->describeNode().c_str(), it.toString().c_str());
-			Version ver = wait( processRestoreRequest(interf, rd, cx, it) );
-		}
-
-		// Step: Notify all restore requests have been handled by cleaning up the restore keys
-		wait( delay(5.0) );
-		printf("Finish my restore now!\n");
-		//wait( finishRestore(rd) );
-		wait( finishRestore(rd, cx, restoreRequests) ); 
-
-		printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
-		TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
-		wait( delay(5.0) );
-		//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.
-		//Otherwise, this special workload never returns and tester will think the test workload is stuck and the tester will timesout
-		break; //TODO: this break will be removed later since we need the restore agent to run all the time!
+	} else {
+		wait( masterCore(rd, interf, cx)  );
 	}
 
 	return Void();
@@ -4324,3 +4277,55 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 	return Void();
 }
 
+ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface interf, Database cx) {
+	//we are the leader
+	// We must wait for enough time to make sure all restore workers have registered their interfaces into the DB
+	printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
+			interf.id().toString().c_str());
+	wait( delay(10.0) );
+
+	rd->localNodeStatus.init(RestoreRole::Master);
+	rd->localNodeStatus.nodeID = interf.id();
+	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
+
+	wait( collectWorkerInterface(rd, cx) );
+
+	wait( configureRoles(rd) );
+
+	wait( notifyWorkersToSetWorkersInterface(rd) );
+
+	state int restoreId = 0;
+	state int checkNum = 0;
+	loop {
+		printf("Node:%s---Wait on restore requests...---\n", rd->describeNode().c_str());
+		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
+
+		printf("Node:%s ---Received  restore requests as follows---\n", rd->describeNode().c_str());
+		// Print out the requests info
+		for ( auto &it : restoreRequests ) {
+			printf("\t[INFO][Master]Node:%s RestoreRequest info:%s\n", rd->describeNode().c_str(), it.toString().c_str());
+		}
+
+		// Step: Perform the restore requests
+		for ( auto &it : restoreRequests ) {
+			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
+			printf("Node:%s Got RestoreRequestInfo:%s\n", rd->describeNode().c_str(), it.toString().c_str());
+			Version ver = wait( processRestoreRequest(interf, rd, cx, it) );
+		}
+
+		// Step: Notify all restore requests have been handled by cleaning up the restore keys
+		wait( delay(5.0) );
+		printf("Finish my restore now!\n");
+		//wait( finishRestore(rd) );
+		wait( finishRestore(rd, cx, restoreRequests) ); 
+
+		printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
+		TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
+		wait( delay(5.0) );
+		//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.
+		//Otherwise, this special workload never returns and tester will think the test workload is stuck and the tester will timesout
+		break; //TODO: this break will be removed later since we need the restore agent to run all the time!
+	}
+
+	return Void();
+}
