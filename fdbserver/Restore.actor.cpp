@@ -60,6 +60,7 @@ ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 
 ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request);
 ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
+ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr);
 
 bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input);
 void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input);
@@ -629,6 +630,7 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; // Key is the unique identifier for a batch of mutation logs at the same version
 	std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Record the most recent
+	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 
 	// For master applier to hold the lower bound of key ranges for each appliers
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
@@ -1297,7 +1299,7 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
 
-	TraceEvent("FastRestore").detail("CollectWorkerInterface_NumWorkers", rd->workers_interface.size());
+	TraceEvent("FastRestore").detail("CollectWorkerInterfaceNumWorkers", rd->workers_interface.size());
 
 	return Void();
  }
@@ -1674,6 +1676,13 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 	return restoreRequests;
 }
 
+void initBackupContainer(Reference<RestoreData> rd, Key url) {
+	printf("initBackupContainer, url:%s\n", url.toString().c_str());
+	rd->bc = IBackupContainer::openContainer(url.toString());
+	//state BackupDescription desc = wait(rd->bc->describeBackup());
+	//return Void();
+}
+
 // NOTE: This function can now get the backup file descriptors
 ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
@@ -1689,7 +1698,9 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 
 	ASSERT( lockDB == true );
 
-	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+	initBackupContainer(rd, url);
+
+	state Reference<IBackupContainer> bc = rd->bc;
 	state BackupDescription desc = wait(bc->describeBackup());
 
 	wait(desc.resolveVersionTimes(cx));
@@ -2593,6 +2604,26 @@ ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
 	return Void();
 }
 
+ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(normalKeys);
+			tr->commit();
+			break;
+		} catch(Error &e) {
+			printf("Retry at clean up DB before restore. error code:%d message:%s. Retry...\n", e.code(), e.what());
+			if(e.code() != error_code_restore_duplicate_tag) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIndex) {
 	state std::vector<UID> workerIDs = getWorkerIDs(rd);
 	state int index = 0;
@@ -2707,55 +2738,23 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 
 	// lock DB for restore
 	wait( _lockDB(cx, randomUid, lockDB) );
-
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->clear(normalKeys);
-			tr->commit();
-			break;
-		} catch(Error &e) {
-			printf("[ERROR] At clean up DB before restore. error code:%d message:%s. Retry...\n", e.code(), e.what());
-			if(e.code() != error_code_restore_duplicate_tag) {
-				wait(tr->onError(e));
-			}
-		}
-	}
+	wait( _clearDB(tr) );
 
 	// Step: Collect all backup files
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	printf("===========Restore request start!===========\n");
+	state double startTime = now();
+	wait( collectBackupFiles(rd, cx, request) );
+	printf("[Perf] Node:%s collectBackupFiles takes %.2f seconds\n", rd->describeNode().c_str(), now() - startTime);
+	constructFilesWithVersionRange(rd);
+	
+	// Sort the backup files based on end version.
+	sort(rd->allFiles.begin(), rd->allFiles.end());
+	printAllBackupFilesInfo(rd);
 
-			printf("===========Restore request start!===========\n");
-			state double startTime = now();
-			wait( collectBackupFiles(rd, cx, request) );
-			printf("[Perf] Node:%s collectBackupFiles takes %.2f seconds\n", rd->describeNode().c_str(), now() - startTime);
-			constructFilesWithVersionRange(rd);
-			
-
-			// Sort the backup files based on end version.
-			sort(rd->allFiles.begin(), rd->allFiles.end());
-			printAllBackupFilesInfo(rd);
-
-			buildForbiddenVersionRange(rd);
-			printForbiddenVersionRange(rd);
-			if ( isForbiddenVersionRangeOverlapped(rd) ) {
-				printf("[ERROR] forbidden version ranges are overlapped! Check out the forbidden version range above\n");
-				ASSERT( 0 );
-			}
-
-			break;
-		} catch(Error &e) {
-			printf("[ERROR] At collect all backup files. error code:%d message:%s. Retry...\n", e.code(), e.what());
-			if(e.code() != error_code_restore_duplicate_tag) {
-				wait(tr->onError(e));
-			}
-		}
+	buildForbiddenVersionRange(rd);
+	printForbiddenVersionRange(rd);
+	if ( isForbiddenVersionRangeOverlapped(rd) ) {
+		fprintf(stderr, "[ERROR] forbidden version ranges are overlapped! Check out the forbidden version range above\n");
 	}
 
 	loop {
