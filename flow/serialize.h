@@ -731,7 +731,7 @@ struct MakeSerializeSource : ISerializeSource {
 		if (useObjectSerializer) {
 			ObjectWriter writer;
 			writer.serialize(get());
-			w.serializeBytes(writer.toStringRef());
+			w.serializeBytes(writer.toStringRef()); // TODO(atn34) Eliminate unnecessary memcpy
 		} else {
 			static_cast<T const*>(this)->serialize(w);
 		}
