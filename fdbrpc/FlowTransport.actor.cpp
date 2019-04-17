@@ -1022,7 +1022,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		Standalone<StringRef> copy;
 		if (g_network->useObjectSerializer()) {
 			ObjectWriter wr;
-			what.serializeBinaryWriter(wr);
+			what.serializeObjectWriter(wr);
 			copy = wr.toStringRef();
 		} else {
 			BinaryWriter wr( AssumeVersion(currentProtocolVersion) );

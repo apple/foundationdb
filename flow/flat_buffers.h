@@ -816,7 +816,6 @@ struct LoadSaveHelper {
 	std::enable_if_t<is_struct_like<U>> load(U& member, const uint8_t* current, Context& context) {
 		using StructTraits = struct_like_traits<U>;
 		using types = typename StructTraits::types;
-		constexpr auto size = struct_size(types{});
 		for_each_i<pack_size(types{})>([&](auto i_type) {
 			constexpr int i = decltype(i_type)::value;
 			using type = index_t<i, types>;

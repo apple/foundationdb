@@ -146,9 +146,10 @@ struct OpenDatabaseRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-                ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A400040001LL);
 		}
-        serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply, arena);
+		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply,
+				   arena);
 	}
 };
 

@@ -109,7 +109,7 @@ public:
 			data = new (arena) uint8_t[size];
 			return data;
 		};
-		auto res = save_members(allocator, file_identifier, items...);
+		save_members(allocator, file_identifier, items...);
 		ASSERT(allocations == 1);
 	}
 

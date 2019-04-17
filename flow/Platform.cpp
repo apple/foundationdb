@@ -1410,7 +1410,7 @@ void setMemoryQuota( size_t limit ) {
 	}
 	if (!AssignProcessToJobObject( job, GetCurrentProcess() ))
 		TraceEvent(SevWarn, "FailedToSetMemoryLimit").GetLastError();
-#elif defined(__linux__) && !defined(USE_ASAN)
+#elif defined(__linux__)
 	struct rlimit rlim;
 	if (getrlimit(RLIMIT_AS, &rlim)) {
 		TraceEvent(SevError, "GetMemoryLimit").GetLastError();
