@@ -584,7 +584,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
-		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
@@ -706,6 +707,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int splitBytes = 0;
 				state int firstKeySampledBytes = 0;
 				state int sampledKeys = 0;
+				state int sampledKeysWithProb = 0;
 				state double shardVariance = 0;
 				state bool canSplit = false;
 				state Key lastSampleKey;
@@ -906,6 +908,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 										firstKeySampledBytes += sampleInfo.sampledSize;
 
 									sampledKeys++;
+									if(itemProbability < 1) {
+										sampledKeysWithProb++;
+									}
 								}
 							}
 
@@ -915,7 +920,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
 						if(rateLimitForThisRound > 0)
 						{
-								wait(rateLimiter->getAllowance(totalReadAmount));
+							wait(rateLimiter->getAllowance(totalReadAmount));
+							// Set ratelimit to max allowed if current round has been going on for a while
+							if(now() - rateLimiterStartTime > 1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME && rateLimitForThisRound != self->rateLimitMax) {
+								rateLimitForThisRound = self->rateLimitMax;
+								rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+								rateLimiterStartTime = now();
+								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound").detail("RateLimit", rateLimitForThisRound);
+							}
 						}
 						bytesReadInRange += totalReadAmount;
 						bytesReadInthisRound += totalReadAmount;
@@ -981,12 +993,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				int estimateError = abs(shardBytes - sampledBytes);
 
 				//Only perform the check if there are sufficient keys to get a distribution that should resemble a normal distribution
-				if(sampledKeys > 30 && estimateError > failErrorNumStdDev * stdDev)
+				if(sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev)
 				{
 					double numStdDev = estimateError / sqrt(shardVariance);
 					TraceEvent("ConsistencyCheck_InaccurateShardEstimate").detail("Min", shardBounds.min.bytes).detail("Max", shardBounds.max.bytes).detail("Estimate", sampledBytes)
 						.detail("Actual", shardBytes).detail("NumStdDev", numStdDev).detail("Variance", shardVariance).detail("StdDev", stdDev)
-						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys);
+						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys)
+						.detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
 					self->testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev));
 				}

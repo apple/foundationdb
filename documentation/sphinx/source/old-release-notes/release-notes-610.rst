@@ -2,6 +2,42 @@
 Release Notes
 #############
 
+6.1.2
+=====
+
+Fixes
+-----
+
+* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
+
+Features
+--------
+
+Performance
+-----------
+
+Fixes
+-----
+
+Status
+------
+
+Bindings
+--------
+
+Other Changes
+-------------
+
+* Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
+* IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable. [6.1.1] `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+
+Fixes only impacting 6.1.0+
+---------------------------
+
+* The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
+* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
+
 6.1.0
 =====
 
