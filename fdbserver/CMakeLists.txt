@@ -179,11 +179,11 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteInt.h
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
-target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
 
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
-  target_compile_options(sqlite BEFORE PRIVATE -w) # disable warnings for third party
+  target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
+  target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
 
 set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
