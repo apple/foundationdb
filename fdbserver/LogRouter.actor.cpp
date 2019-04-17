@@ -145,7 +145,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 
 	for(auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
-			self->messageBlocks.push_back( std::make_pair(version, block) );
+			self->messageBlocks.emplace_back(version, block);
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
@@ -158,7 +158,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 			}
 
 			if (version >= tagData->popped) {
-				tagData->version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
+				tagData->version_messages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size())));
 				if(tagData->version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tagData->version_messages.back().second.expectedSize());
 				}
@@ -167,7 +167,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 
 		msgSize -= msg.message.size();
 	}
-	self->messageBlocks.push_back( std::make_pair(version, block) );
+	self->messageBlocks.emplace_back(version, block);
 }
 
 ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
@@ -259,8 +259,8 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
-			for(auto t : tags) {
-				tagAndMsg.tags.push_back(Tag(tagLocalityRemoteLog, t));
+			for (const auto& t : tags) {
+				tagAndMsg.tags.emplace_back(tagLocalityRemoteLog, t);
 			}
 			messages.push_back(std::move(tagAndMsg));
 
