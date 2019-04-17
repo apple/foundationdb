@@ -100,7 +100,7 @@ struct BTreePage {
 
 				} while(c.moveNext());
 			}
-		} catch(Error& ) {
+		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
 			debug_printf("BTreePage::toString partial result: %s\n", r.c_str());
 			throw;

@@ -57,8 +57,6 @@ ACTOR Future<Void> networkTestServer() {
 }
 
 ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent ) {
-	state double lastTime = now();
-
 	loop {
 		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[g_random->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
 		(*sent)++;
