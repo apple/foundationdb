@@ -203,7 +203,6 @@ struct JVMContext {
 	bool checkException() {
 		auto flag = env->ExceptionCheck();
 		if (flag) {
-			jthrowable exception = env->ExceptionOccurred();
 			TraceEvent(SevError, "JavaException");
 			env->ExceptionDescribe();
 			env->ExceptionClear();
