@@ -2200,10 +2200,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 					RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 
-					printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
-							curFileIndex, rd->files[curFileIndex].toString().c_str(), 
-							param.toString().c_str(), nodeID.toString().c_str()); // VERY USEFUL INFO
-
 					RestoreCommandEnum cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
 					rd->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Range_File);
 					if (!rd->files[curFileIndex].isRange) {
@@ -2217,6 +2213,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 						curFileIndex++;
 					} else { // load the type of file in the phaseType
 						rd->cmdID.nextCmd();
+						printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
+							curFileIndex, rd->files[curFileIndex].toString().c_str(), 
+							param.toString().c_str(), nodeID.toString().c_str()); // VERY USEFUL INFO
 						printf("[INFO] Node:%s CMDUID:%s cmdType:%d isRange:%d loaderNode:%s\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str(),
 								(int) cmdType, (int) rd->files[curFileIndex].isRange, nodeID.toString().c_str());
 						if (rd->files[curFileIndex].isRange) {
@@ -2703,7 +2702,7 @@ bool collectFilesForOneVersionBatch(Reference<RestoreData> rd) {
 			if ( rd->curBackupFilesEndIndex >= rd->allFiles.size() && rd->curWorkloadSize <= 0 ) {
 				printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%ld, curWorkloadSize:%.2f\n",
 						rd->curBackupFilesEndIndex, rd->allFiles.size(), rd->curWorkloadSize );
-				break; // return result
+				//break; // return result
 			}
 			// Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
 			rd->resetPerVersionBatch();
@@ -2715,6 +2714,7 @@ bool collectFilesForOneVersionBatch(Reference<RestoreData> rd) {
 			}
 			printBackupFilesInfo(rd);
 			rd->totalWorkloadSize += rd->curWorkloadSize;
+			break;
 		} else if (validVersion && rd->curWorkloadSize < loadBatchSizeThresholdB) {
 			rd->curBackupFilesEndIndex++;
 		} else if (!validVersion && rd->curWorkloadSize < loadBatchSizeThresholdB) {
@@ -4318,8 +4318,13 @@ ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface interf
 
 	wait( collectWorkerInterface(rd, cx) );
 
+	// configureRoles must be after collectWorkerInterface
+	// Why do I need to put an extra wait() to make sure the above wait is executed after the below wwait?
+	wait( delay(1.0) );
+
 	wait( configureRoles(rd) );
 
+	wait( delay(1.0) );
 	wait( notifyWorkersToSetWorkersInterface(rd) );
 
 	state int restoreId = 0;
