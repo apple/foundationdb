@@ -2201,8 +2201,10 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 
 					RestoreCommandEnum cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
-					rd->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Range_File);
-					if (!rd->files[curFileIndex].isRange) {
+					if (rd->files[curFileIndex].isRange) {
+						cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
+						rd->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Range_File);
+					} else {
 						cmdType = RestoreCommandEnum::Assign_Loader_Log_File;
 						rd->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Log_File);
 					}
@@ -2508,7 +2510,8 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, 
 }
 
 ////--- Restore functions
-ACTOR static Future<Void> unlockDB(Reference<ReadYourWritesTransaction> tr, UID uid) {
+ACTOR static Future<Void> unlockDB(Database cx, UID uid) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	 loop {
 		try {
 			tr->reset();
@@ -2640,6 +2643,7 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 }
 
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIndex) {
+	rd->batchIndex = batchIndex;
 	state std::vector<UID> workerIDs = getWorkerIDs(rd);
 	state int index = 0;
 	loop {
@@ -2705,8 +2709,8 @@ bool collectFilesForOneVersionBatch(Reference<RestoreData> rd) {
 				//break; // return result
 			}
 			// Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
-			rd->resetPerVersionBatch();
-			rd->cmdID.setBatch(rd->batchIndex);
+			//rd->resetPerVersionBatch();
+			//rd->cmdID.setBatch(rd->batchIndex);
 			if ( rd->curBackupFilesBeginIndex < rd->allFiles.size()) {
 				for (int fileIndex = rd->curBackupFilesBeginIndex; fileIndex <= rd->curBackupFilesEndIndex && fileIndex < rd->allFiles.size(); fileIndex++) {
 					rd->files.push_back(rd->allFiles[fileIndex]);
@@ -2897,8 +2901,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 	}
 
 	// Unlock DB  at the end of handling the restore request
-	state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
-	wait( unlockDB(tr_unlockDB, randomUid) );
+	
+	wait( unlockDB(cx, randomUid) );
 	printf("Finish restore uid:%s \n", randomUid.toString().c_str());
 
 	return targetVersion;
@@ -3341,7 +3345,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 
 	state RestoreInterface applierCmdInterf; // = rd->workers_interface[rd->masterApplier];
 	state int packMutationNum = 0;
-	state int packMutationThreshold = 1;
+	state int packMutationThreshold = 10;
 	state int kvCount = 0;
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 
