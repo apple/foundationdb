@@ -70,6 +70,15 @@ public:
 		return result;
 	}
 
+	bool hasLogRouter(UID id) {
+		for (const auto& router : logRouters) {
+			if (router->get().id() == id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	std::string logServerString() {
 		std::string result;
 		for(int i = 0; i < logServers.size(); i++) {

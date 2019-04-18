@@ -68,6 +68,7 @@ struct TLogSet {
 	int8_t locality;
 	Version startVersion;
 	std::vector<std::vector<int>> satelliteTagLocations;
+	std::set<int8_t> pseudoLocalitites;
 
 	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 	explicit TLogSet(const LogSet& rhs);
@@ -78,7 +79,7 @@ struct TLogSet {
 
 	bool operator == ( const TLogSet& rhs ) const {
 		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
-			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
+			pseudoLocalitites != rhs.pseudoLocalitites || startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
@@ -99,7 +100,7 @@ struct TLogSet {
 
 	bool isEqualIds(TLogSet const& r) const {
 		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || satelliteTagLocations != r.satelliteTagLocations ||
-			startVersion != r.startVersion || tLogs.size() != r.tLogs.size() || locality != r.locality) {
+			pseudoLocalitites != r.pseudoLocalitites || startVersion != r.startVersion || tLogs.size() != r.tLogs.size() || locality != r.locality) {
 			return false;
 		}
 		if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
@@ -115,7 +116,7 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations, pseudoLocalitites);
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
 			tLogVersion = TLogVersion::V2;
 		} else {
@@ -129,6 +130,7 @@ struct OldTLogConf {
 	std::vector<TLogSet> tLogs;
 	Version epochEnd;
 	int32_t logRouterTags;
+	std::set<int8_t> pseudoLocalities;
 
 	OldTLogConf() : epochEnd(0), logRouterTags(0) {}
 
@@ -137,7 +139,7 @@ struct OldTLogConf {
 	}
 
 	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags;
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -154,7 +156,7 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, epochEnd, logRouterTags);
+		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities);
 	}
 };
 
