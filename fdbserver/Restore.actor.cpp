@@ -708,6 +708,11 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 		cmdID.initPhase(RestoreCommandEnum::Init);
 		localNodeStatus.role = RestoreRole::Invalid;
 		localNodeStatus.nodeIndex = 0;
+		curBackupFilesBeginIndex = 0;
+		curBackupFilesEndIndex = 0;
+	 	totalWorkloadSize = 0;
+		curWorkloadSize = 0;
+		batchIndex = 0;
 	}
 
 	~RestoreData() {
@@ -2841,11 +2846,14 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 			
 			bool hasBackupFilesToProcess = collectFilesForOneVersionBatch(rd);
 			if ( !hasBackupFilesToProcess ) { // No more backup files to restore
+				printf("No backup files to process any more\n");
 				break;
 			}
 
 			printf("[Progress][Start version batch] Node:%s, restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", rd->describeNode().c_str(), rd->batchIndex, rd->curWorkloadSize);
 			wait( initializeVersionBatch(rd, rd->batchIndex) );
+
+			wait( delay(1.0) );
 
 			wait( distributeWorkloadPerVersionBatch(interf, rd, cx, request, restoreConfig) );
 
