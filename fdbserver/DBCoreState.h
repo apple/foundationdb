@@ -30,6 +30,7 @@
 #include "fdbserver/MasterInterface.h"
 
 class LogSet;
+struct OldLogData;
 
 // This structure is stored persistently in CoordinatedState and must be versioned carefully!
 // It records a synchronous replication topology which can be used in the absence of faults (or under a limited
@@ -52,19 +53,18 @@ struct CoreTLogSet {
 	Version startVersion;
 	std::vector<std::vector<int>> satelliteTagLocations;
 	TLogVersion tLogVersion;
-	std::set<int8_t> pseudoLocalitites;
 
 	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
 	explicit CoreTLogSet(const LogSet& logset);
 
 	bool operator == (CoreTLogSet const& rhs) const { 
 		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
-			pseudoLocalitites == rhs.pseudoLocalitites && locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
+			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations, pseudoLocalitites);
+		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
 			tLogVersion = TLogVersion::V2;
 		} else {
@@ -80,6 +80,7 @@ struct OldTLogCoreData {
 	std::set<int8_t> pseudoLocalities;
 
 	OldTLogCoreData() : epochEnd(0), logRouterTags(0) {}
+	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator == (OldTLogCoreData const& rhs) const { 
 		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;

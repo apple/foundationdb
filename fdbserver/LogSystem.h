@@ -53,7 +53,6 @@ public:
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
 	std::vector<std::vector<int>> satelliteTagLocations;
-	std::set<int8_t> pseudoLocalities;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 	LogSet(const TLogSet& tlogSet);
