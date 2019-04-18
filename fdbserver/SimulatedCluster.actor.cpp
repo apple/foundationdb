@@ -240,7 +240,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 			try {
 				//SOMEDAY: test lower memory limits, without making them too small and causing the database to stop making progress
-				FlowTransport::createInstance(1);
+				FlowTransport::createInstance(processClass == ProcessClass::TesterClass, 1);
 				Sim2FileSystem::newFileSystem();
 				if (sslEnabled) {
 					tlsOptions->register_network();
@@ -1402,7 +1402,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", ""),
 	    TaskDefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(1);
+	FlowTransport::createInstance(true, 1);
 	if (tlsOptions->enabled()) {
 		simInitTLS(tlsOptions);
 	}

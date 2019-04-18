@@ -1523,7 +1523,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
 			g_network = newNet2(useThreadPool, true, useObjectSerializer);
-			FlowTransport::createInstance(1);
+			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
 			if (publicAddressStrs.empty()) {
