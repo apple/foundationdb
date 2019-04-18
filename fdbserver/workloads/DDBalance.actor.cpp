@@ -213,7 +213,6 @@ struct DDBalanceWorkload : TestWorkload {
 	ACTOR Future<Void> ddBalanceMover( Database cx, DDBalanceWorkload *self, int moverId ) {
 		state int currentBin = self->currentbin;
 		state int nextBin = 0;
-		state int i;
 		state int key_space_drift = 0;
 
 		state double clientBegin = now();
@@ -224,7 +223,7 @@ struct DDBalanceWorkload : TestWorkload {
 			while(nextBin == currentBin) nextBin = g_random->randomInt(key_space_drift,self->binCount+key_space_drift);
 
 			vector<Future<Void>> fs;
-			for(i=0; i < self->actorsPerClient / self->moversPerClient; i++)
+			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
 				fs.push_back( self->ddBalanceWorker(cx, self, moverId, currentBin, nextBin, i*self->nodesPerActor, (i+1)*self->nodesPerActor, clientBegin, &lastTime, 1.0 / self->transactionsPerSecond));
 			wait( waitForAll(fs) );
 
