@@ -3353,6 +3353,15 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 
 	printAppliersKeyRange(rd);
 
+	state double mutationVectorThreshold = 1;//1024 * 10; // Bytes.
+	state std::map<UID, Standalone<VectorRef<MutationRef>>> applierMutationsBuffer; // The mutation vector to be sent to each applier
+	state std::map<UID, double> applierMutationsSize; // buffered mutation vector size for each applier
+	// Initialize the above two maps
+	state std::vector<UID> applierIDs = getApplierIDs(rd);
+	for (auto &applierID : applierIDs) {
+		applierMutationsBuffer[applierID] = Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>());
+		applierMutationsSize[applierID] = 0.0;
+	}
 	loop {
 		try {
 			packMutationNum = 0;
@@ -3383,22 +3392,40 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 							MutationRef mutation = mvector[splitMutationIndex];
 							UID applierID = nodeIDs[splitMutationIndex];
 							applierCmdInterf = rd->workers_interface[applierID];
+							applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
+							applierMutationsSize[applierID] += mutation.expectedSize();
 
-							rd->cmdID.nextCmd();
-							if ( debug_verbose ) { 
-								printf("[VERBOSE_DEBUG] mutation:%s\n", mutation.toString().c_str());
-							}
-							cmdReplies.push_back(applierCmdInterf.sendMutation.getReply(
-									RestoreSendMutationRequest(rd->cmdID, commitVersion, mutation)));
-
-							packMutationNum++;
 							kvCount++;
-							if (packMutationNum >= packMutationThreshold) {
-								ASSERT( packMutationNum == packMutationThreshold );
+
+							// rd->cmdID.nextCmd();
+							// if ( debug_verbose ) { 
+							// 	printf("[VERBOSE_DEBUG] mutation:%s\n", mutation.toString().c_str());
+							// }
+							// cmdReplies.push_back(applierCmdInterf.sendMutation.getReply(
+							// 		RestoreSendMutationRequest(rd->cmdID, commitVersion, mutation)));
+
+							// packMutationNum++;
+							// kvCount++;
+							// if (packMutationNum >= packMutationThreshold) {
+							// 	ASSERT( packMutationNum == packMutationThreshold );
+							// 	printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", cmdReplies.size());
+							// 	std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+							// 	cmdReplies.clear();
+							// 	packMutationNum = 0;
+							// }
+						}
+
+						for (auto &applierID : applierIDs) {
+							if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
+								rd->cmdID.nextCmd();
+								cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+									RestoreSendMutationVectorRequest(rd->cmdID, commitVersion, applierMutationsBuffer[applierID])));
+								applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+								applierMutationsSize[applierID] = 0;
+
 								printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", cmdReplies.size());
 								std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 								cmdReplies.clear();
-								packMutationNum = 0;
 							}
 						}
 					} else { // mutation operates on a particular key
@@ -3411,22 +3438,54 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 						MutationRef mutation = kvm;
 						UID applierID = itlow->second;
 						applierCmdInterf = rd->workers_interface[applierID];
-
-						rd->cmdID.nextCmd();
-						cmdReplies.push_back(applierCmdInterf.sendMutation.getReply(
-								RestoreSendMutationRequest(rd->cmdID, commitVersion, mutation)));
-						packMutationNum++;
 						kvCount++;
-						if (packMutationNum >= packMutationThreshold) {
-							ASSERT( packMutationNum == packMutationThreshold );
-							printf("[INFO][Loader] Waits for applier to receive %ld mutations\n", cmdReplies.size());
+
+						applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
+						applierMutationsSize[applierID] += mutation.expectedSize();
+						if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
+							rd->cmdID.nextCmd();
+							cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+								RestoreSendMutationVectorRequest(rd->cmdID, commitVersion, applierMutationsBuffer[applierID])));
+								applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+								applierMutationsSize[applierID] = 0;
+
+							printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", cmdReplies.size());
 							std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 							cmdReplies.clear();
-							packMutationNum = 0;
 						}
+
+
+						// rd->cmdID.nextCmd();
+						// cmdReplies.push_back(applierCmdInterf.sendMutation.getReply(
+						// 		RestoreSendMutationRequest(rd->cmdID, commitVersion, mutation)));
+						// packMutationNum++;
+						// kvCount++;
+						// if (packMutationNum >= packMutationThreshold) {
+						// 	ASSERT( packMutationNum == packMutationThreshold );
+						// 	printf("[INFO][Loader] Waits for applier to receive %ld mutations\n", cmdReplies.size());
+						// 	std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+						// 	cmdReplies.clear();
+						// 	packMutationNum = 0;
+						// }
 					}
 				}
 
+			}
+
+			// In case the mutation vector is not larger than mutationVectorThreshold
+			for (auto &applierID : applierIDs) {
+				if (applierMutationsBuffer[applierID].empty()) {
+					continue;
+				}
+				rd->cmdID.nextCmd();
+				cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+					RestoreSendMutationVectorRequest(rd->cmdID, commitVersion, applierMutationsBuffer[applierID])));
+				applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+				applierMutationsSize[applierID] = 0;
+
+				printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", cmdReplies.size());
+				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+				cmdReplies.clear();
 			}
 
 			if (!cmdReplies.empty()) {
@@ -4032,6 +4091,47 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	return Void();
 }
 
+ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
+	state int numMutations = 0;
+
+	if ( debug_verbose ) {
+		printf("[VERBOSE_DEBUG] Node:%s receive mutation number:%d\n", rd->describeNode().c_str(), req.mutations.size());
+	}
+
+	// Handle duplicat cmd
+	if ( rd->isCmdProcessed(req.cmdID) ) {
+		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
+		//printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
+		return Void();
+	}
+
+	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+	state uint64_t commitVersion = req.commitVersion;
+	VectorRef<MutationRef> mutations(req.mutations);
+	printf("[DEBUG] Node:%s receive %d mutations at version:%ld\n", rd->describeNode().c_str(), mutations.size(), commitVersion);
+	if ( rd->kvOps.find(commitVersion) == rd->kvOps.end() ) {
+		rd->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+	}
+	state int mIndex = 0;
+	for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+		MutationRef mutation = mutations[mIndex];
+		rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
+		numMutations++;
+		if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
+			printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
+					rd->describeNode().c_str(), numMutations, mutation.toString().c_str());
+		}
+	}
+	
+	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+	// Avoid race condition when this actor is called twice on the same command
+	rd->processedCmd[req.cmdID] = 1;
+	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+
+	return Void();
+}
+
 ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	state int numMutations = 0;
 	rd->numSampledMutations = 0;
@@ -4263,6 +4363,11 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					requestTypeStr = "sendMutation";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
 					actors.add( handleSendMutationRequest(req, rd, ri) );
+				}
+				when ( RestoreSendMutationVectorRequest req = waitNext(ri.sendMutationVector.getFuture()) ) {
+					requestTypeStr = "sendMutationVector";
+					ASSERT(rd->getRole() == RestoreRole::Applier);
+					actors.add( handleSendMutationVectorRequest(req, rd, ri) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(ri.applyToDB.getFuture()) ) {
 					requestTypeStr = "applyToDB";

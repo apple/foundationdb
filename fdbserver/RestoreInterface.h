@@ -51,6 +51,7 @@ struct RestoreSetApplierKeyRangeRequest;
 struct GetKeyRangeNumberReply;
 struct RestoreVersionBatchRequest;
 struct RestoreCalculateApplierKeyRangeRequest;
+struct RestoreSendMutationVectorRequest;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -119,6 +120,7 @@ struct RestoreInterface {
 	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
 	RequestStream<RestoreLoadFileRequest> sampleLogFile;
 	RequestStream<RestoreSendMutationRequest> sendSampleMutation;
+	//RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
 
 	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
 	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
@@ -127,6 +129,7 @@ struct RestoreInterface {
 	RequestStream<RestoreLoadFileRequest> loadRangeFile;
 	RequestStream<RestoreLoadFileRequest> loadLogFile;
 	RequestStream<RestoreSendMutationRequest> sendMutation;
+	RequestStream<RestoreSendMutationVectorRequest> sendMutationVector;
 	RequestStream<RestoreSimpleRequest> applyToDB;
 
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
@@ -159,6 +162,7 @@ struct RestoreInterface {
 		loadRangeFile.getEndpoint( TaskClusterController ); 
 		loadLogFile.getEndpoint( TaskClusterController ); 
 		sendMutation.getEndpoint( TaskClusterController ); 
+		sendMutationVector.getEndpoint( TaskClusterController ); 
 		applyToDB.getEndpoint( TaskClusterController ); 
 		
 		initVersionBatch.getEndpoint( TaskClusterController );
@@ -173,7 +177,7 @@ struct RestoreInterface {
 	void serialize( Ar& ar ) {
 		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
-				loadRangeFile, loadLogFile, sendMutation, applyToDB, initVersionBatch, setWorkerInterface,
+				loadRangeFile, loadLogFile, sendMutation, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
 				finishRestore);
 	}
 };
@@ -256,6 +260,22 @@ struct RestoreSendMutationRequest : TimedRequest {
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		serializer(ar, cmdID, commitVersion, mutation, reply);
+	}
+};
+
+struct RestoreSendMutationVectorRequest : TimedRequest {
+	CMDUID cmdID;
+	uint64_t commitVersion;
+	VectorRef<MutationRef> mutations;
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSendMutationVectorRequest() : cmdID(CMDUID()), commitVersion(0), mutations(VectorRef<MutationRef>()) {}
+	explicit RestoreSendMutationVectorRequest(CMDUID cmdID, uint64_t commitVersion, VectorRef<MutationRef> mutations) : cmdID(cmdID), commitVersion(commitVersion),  mutations(mutations) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, commitVersion, mutations, reply);
 	}
 };
 
