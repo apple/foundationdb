@@ -1446,13 +1446,13 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 	std::vector<Standalone<KeyRangeRef>> keyRanges;
 	std::vector<UID> applierIDs;
 
-	printf("[INFO] Node:%s, Assign key range to appliers. num_appliers:%ld\n", rd->describeNode().c_str(), rd->range2Applier.size());
+	// printf("[INFO] Node:%s, Assign key range to appliers. num_appliers:%ld\n", rd->describeNode().c_str(), rd->range2Applier.size());
 	for (auto& applier : rd->range2Applier) {
 		lowerBounds.push_back(applier.first);
 		applierIDs.push_back(applier.second);
-		printf("\t[INFO] ApplierID:%s lowerBound:%s\n",
-				applierIDs.back().toString().c_str(),
-				lowerBounds.back().toString().c_str());
+		// printf("\t[INFO] ApplierID:%s lowerBound:%s\n",
+		// 		applierIDs.back().toString().c_str(),
+		// 		lowerBounds.back().toString().c_str());
 	}
 	for (int i  = 0; i < lowerBounds.size(); ++i) {
 		KeyRef startKey = lowerBounds[i];
@@ -1563,6 +1563,9 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 
 
 void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
+	if ( debug_verbose == false )
+		return;
+
 	printf("[INFO] Print out %ld keys in the lowerbounds\n", lowerBounds.size());
 	for (int i = 0; i < lowerBounds.size(); i++) {
 		printf("\t[INFO][%d] %s\n", i, getHexString(lowerBounds[i]).c_str());
@@ -1633,7 +1636,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			printf("[INFO][Master] Finish setting up watch for restoreRequestTriggerKey\n");
 			break;
 		} catch(Error &e) {
-			printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			//printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
@@ -1646,17 +1649,17 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Assumption: restoreRequestTriggerKey has not been set
 			// Before we wait on the watch, we must make sure the key is not there yet!
-			printf("[INFO][Master] Make sure restoreRequestTriggerKey does not exist before we wait on the key\n");
+			//printf("[INFO][Master] Make sure restoreRequestTriggerKey does not exist before we wait on the key\n");
 			Optional<Value> triggerKey = wait( tr2.get(restoreRequestTriggerKey) );
 			if ( triggerKey.present() ) {
-				printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
+				//printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
 				break;
 			}
 			wait(watch4RestoreRequest);
 			printf("[INFO][Master] restoreRequestTriggerKey watch is triggered\n");
 			break;
 		} catch(Error &e) {
-			printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			//printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
@@ -1685,7 +1688,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			}
 			break;
 		} catch(Error &e) {
-			printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
+			//printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
@@ -1947,13 +1950,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout.\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
+			// Handle the command reply timeout error
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+					rd->cmdID.toString().c_str(), e.code(), e.what());
 			rd->cmdID = checkpointCMDUID;
 			curFileIndex = checkpointCurFileIndex;
 			curFileOffset = checkpointCurFileOffset;
@@ -1990,13 +1989,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
+			// Handle the command reply timeout error
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+					rd->cmdID.toString().c_str(), e.code(), e.what());
 			printf("[Sampling] [Warning] Retry on Calculate_Applier_KeyRange\n");
 		}
 	}
@@ -2043,12 +2038,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			break;
 		} catch (Error &e) {
 			// TODO: Handle the command reply timeout error
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+					rd->cmdID.toString().c_str(), e.code(), e.what());
 			printf("[Sampling] [Warning] Retry on Get_Applier_KeyRange\n");
 		}
 	}
@@ -2107,7 +2098,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 	wait( delay(1.0) );
 
-	printf("------[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds------\n", now() - startTimeSampling);
+	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTimeSampling);
 
 	state double startTime = now();
 
@@ -2268,12 +2259,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 			} catch (Error &e) {
 				// TODO: Handle the command reply timeout error
-				if (e.code() != error_code_io_timeout) {
-					fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-				} else {
-					fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-							rd->cmdID.toString().c_str(), e.code(), e.what());
-				}
+				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+						rd->cmdID.toString().c_str(), e.code(), e.what());
 				curFileIndex = checkpointCurFileIndex;
 			}
 		}
@@ -2294,7 +2281,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 	state double endTime = now();
 
 	double runningTime = endTime - startTime;
-	printf("------[Progress] Node:%s distributeWorkloadPerVersionBatch runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds------\n",
+	printf("[Progress] Node:%s distributeWorkloadPerVersionBatch runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds\n",
 			rd->describeNode().c_str(),
 			runningTime, endTime - startTimeSampling);
 
@@ -2325,12 +2312,8 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 
 			break;
 		} catch (Error &e) {
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
-			}
+			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+					rd->cmdID.toString().c_str(), e.code(), e.what());
 		}
 	}
 
@@ -2876,12 +2859,12 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 			status.totalWorkloadSize = rd->totalWorkloadSize;
 			status.totalSpeed = rd->totalWorkloadSize / totalRunningTime;
 
-			printf("------[Progress][Finish version batch] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
+			printf("[Progress][Finish version batch] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
 					rd->batchIndex, rd->curWorkloadSize,
 					status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
 
 			wait( registerStatus(cx, status) );
-			printf("-----[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
+			printf("[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
 				rd->curBackupFilesBeginIndex, rd->curBackupFilesEndIndex, rd->allFiles.size());
 
 			rd->curBackupFilesBeginIndex = rd->curBackupFilesEndIndex + 1;
@@ -3527,8 +3510,9 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 							RestoreSendMutationVectorRequest(rd->cmdID, commitVersion, mutationsBuffer)));
 							mutationsBuffer.pop_front(mutationsBuffer.size());
 							mutationsSize = 0;
-
-						printf("[INFO][Loader] Waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
+						if ( debug_verbose ) {
+							printf("[INFO][Loader] Waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
+						}
 						std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 						cmdReplies.clear();
 					}
@@ -4064,7 +4048,7 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	}
 	rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
 	numMutations++;
-	if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
+	if ( debug_verbose && numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
 		printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
 				rd->describeNode().c_str(), numMutations, mutation.toString().c_str());
 	}

@@ -673,7 +673,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						Optional<Value> restoreRequestDoneKeyValue = wait( tr2.get(restoreRequestDoneKey) );
 						if ( restoreRequestDoneKeyValue.present() ) {
-							printf("!!! restoreRequestTriggerKey has been set before we wait on the key: Restore has been done before restore agent waits for the done key\n");
+							//printf("!!! restoreRequestTriggerKey has been set before we wait on the key: Restore has been done before restore agent waits for the done key\n");
 							break;
 						}
 						wait(watch4RestoreRequestDone);
