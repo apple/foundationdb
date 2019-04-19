@@ -615,7 +615,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 	snmp_stream >> retransSegs;
 }
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	INJECT_FAULT( platform_error, "getMachineLoad" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	std::ifstream stat_stream("/proc/stat", std::ifstream::in);
 
@@ -628,7 +628,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 	totalTime = t_user+t_nice+t_system+t_idle+t_iowait+t_irq+t_softirq+t_steal+t_guest;
 	idleTime = t_idle+t_iowait;
 
-	if( !DEBUG_DETERMINISM )
+	if( !DEBUG_DETERMINISM && logDetails )
 		TraceEvent("MachineLoadDetail").detail("User", t_user).detail("Nice", t_nice).detail("System", t_system).detail("Idle", t_idle).detail("IOWait", t_iowait).detail("IRQ", t_irq).detail("SoftIRQ", t_softirq).detail("Steal", t_steal).detail("Guest", t_guest);
 }
 
@@ -818,7 +818,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 	free(buf);
 }
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	INJECT_FAULT( platform_error, "getMachineLoad" );
 	mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
 	host_cpu_load_info_data_t r_load;
@@ -838,8 +838,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	busyTicks = 0;
 	writeSectors = 0;
 	readSectors = 0;
-
-	const int kMaxDiskNameSize = 64;
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
@@ -1103,7 +1101,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState) {
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState, bool logDetails) {
 	if( (*statState) == NULL )
 		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
@@ -1238,7 +1236,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 	uint64_t clockIdleTime = (*statState)->lastClockIdleTime;
 	uint64_t clockTotalTime = (*statState)->lastClockTotalTime;
 
-	getMachineLoad(clockIdleTime, clockTotalTime);
+	getMachineLoad(clockIdleTime, clockTotalTime, logDetails);
 	returnStats.machineCPUSeconds = clockTotalTime - (*statState)->lastClockTotalTime != 0 ? ( 1 - ((clockIdleTime - (*statState)->lastClockIdleTime) / ((double)(clockTotalTime - (*statState)->lastClockTotalTime)))) * returnStats.elapsed : 0;
 	(*statState)->lastClockIdleTime = clockIdleTime;
 	(*statState)->lastClockTotalTime = clockTotalTime;
@@ -1499,7 +1497,6 @@ static void enableLargePages() {
 }
 
 static void *allocateInternal(size_t length, bool largePages) {
-	void *block = NULL;
 
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT|MEM_RESERVE;

@@ -1264,8 +1264,6 @@ int main(int argc, char** argv) {
 	fd_set srfds;
 #endif
 
-	CSimpleIniA* ini = NULL;
-
 	if (daemonize) {
 #ifdef __APPLE__
 #pragma GCC diagnostic push
@@ -1323,7 +1321,8 @@ int main(int argc, char** argv) {
 	/* write our pid to the lockfile for convenience */
 	char pid_buf[16];
 	snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());
-	ssize_t ign = write(lockfile_fd, pid_buf, strlen(pid_buf));
+	auto ign = write(lockfile_fd, pid_buf, strlen(pid_buf));
+	(void)ign;
 
 #ifdef __linux__
 	/* attempt to do clean shutdown and remove lockfile when killed */

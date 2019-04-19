@@ -776,13 +776,23 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
+	state int resetCount = 0;
+	state double lastReset = now();
 	loop {
 		choose {
 			when( wait( resetDelay ) ) {
 				var->set( val );
+				if(now() - lastReset > warningResetDelay) {
+					resetCount = 0;
+				}
+				resetCount++;
+				if(context && warningLimit >= 0 && resetCount > warningLimit) {
+					TraceEvent(SevWarnAlways, context).detail("ResetCount", resetCount).detail("LastReset", now() - lastReset);
+				}
+				lastReset = now();
 				isEqual = true;
 				resetDelay = Never();
 			}

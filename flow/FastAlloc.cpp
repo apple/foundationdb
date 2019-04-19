@@ -233,6 +233,7 @@ long long FastAllocator<Size>::getActiveThreads() {
 	return globalData()->activeThreads;
 }
 
+#if FAST_ALLOCATOR_DEBUG
 static int64_t getSizeCode(int i) {
 	switch (i) {
 		case 16: return 1;
@@ -248,6 +249,7 @@ static int64_t getSizeCode(int i) {
 		default: return 11;
 	}
 }
+#endif
 
 template<int Size>
 void *FastAllocator<Size>::allocate() {

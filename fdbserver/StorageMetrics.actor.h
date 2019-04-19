@@ -73,7 +73,7 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", range).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
@@ -307,7 +307,7 @@ struct StorageServerMetrics {
 			StorageMetrics estimated = req.estimated;
 			StorageMetrics remaining = getMetrics( req.keys ) + used;
 
-			//TraceEvent("SplitMetrics").detail("Begin", printable(req.keys.begin)).detail("End", printable(req.keys.end)).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
 			
 			while( true ) {
 				if( remaining.bytes < 2*SERVER_KNOBS->MIN_SHARD_BYTES )

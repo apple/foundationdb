@@ -426,10 +426,10 @@ struct DDQueueData {
 					auto range = queueMap.rangeContaining( rdit->keys.begin );
 					if( range.value() != *rdit || range.range() != rdit->keys )
 						TraceEvent(SevError, "DDQueueValidateError4").detail("Problem", "relocates in the queue are in the queueMap exactly")
-						.detail("RangeBegin", printable(range.range().begin))
-						.detail("RangeEnd", printable(range.range().end))
-						.detail("RelocateBegin2", printable(range.value().keys.begin))
-						.detail("RelocateEnd2", printable(range.value().keys.end))
+						.detail("RangeBegin", range.range().begin)
+						.detail("RangeEnd", range.range().end)
+						.detail("RelocateBegin2", range.value().keys.begin)
+						.detail("RelocateEnd2", range.value().keys.end)
 						.detail("RelocateStart", range.value().startTime)
 						.detail("MapStart", rdit->startTime)
 						.detail("RelocateWork", range.value().workFactor)
@@ -570,7 +570,7 @@ struct DDQueueData {
 
 	//This function cannot handle relocation requests which split a shard into three pieces
 	void queueRelocation( RelocateData rd, std::set<UID> &serversToLaunchFrom ) {
-		//TraceEvent("QueueRelocationBegin").detail("Begin", printable(rd.keys.begin)).detail("End", printable(rd.keys.end));
+		//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
 
 		// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
 		auto ranges = queueMap.intersectingRanges( rd.keys );
@@ -637,7 +637,7 @@ struct DDQueueData {
 
 				rrs.interval = TraceInterval("QueuedRelocation");
 				/*TraceEvent(rrs.interval.begin(), distributorId);
-					.detail("KeyBegin", printable(rrs.keys.begin)).detail("KeyEnd", printable(rrs.keys.end))
+				  .detail("KeyBegin", rrs.keys.begin).detail("KeyEnd", rrs.keys.end)
 					.detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
 				queuedRelocations++;
 				startRelocation(rrs.priority);
@@ -657,7 +657,7 @@ struct DDQueueData {
 						if( !foundActiveRelocation ) {
 							newData.interval = TraceInterval("QueuedRelocation");
 							/*TraceEvent(newData.interval.begin(), distributorId);
-								.detail("KeyBegin", printable(newData.keys.begin)).detail("KeyEnd", printable(newData.keys.end))
+							  .detail("KeyBegin", newData.keys.begin).detail("KeyEnd", newData.keys.end)
 								.detail("Priority", newData.priority).detail("WantsNewServers", newData.wantsNewServers);*/
 							queuedRelocations++;
 							startRelocation(newData.priority);
@@ -677,8 +677,8 @@ struct DDQueueData {
 		}
 
 		/*TraceEvent("ReceivedRelocateShard", distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin))
-			.detail("KeyEnd", printable(rd.keys.end))
+		  .detail("KeyBegin", rd.keys.begin)
+		  .detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority)
 			.detail("AffectedRanges", affectedQueuedItems.size()); */
 	}
@@ -701,8 +701,8 @@ struct DDQueueData {
 			busyString += describe(rd.src[i]) + " - (" + busymap[ rd.src[i] ].toString() + "); ";
 
 		TraceEvent(title, distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin))
-			.detail("KeyEnd", printable(rd.keys.end))
+			.detail("KeyBegin", rd.keys.begin)
+			.detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority)
 			.detail("WorkFactor", rd.workFactor)
 			.detail("SourceServerCount", rd.src.size())
@@ -759,9 +759,9 @@ struct DDQueueData {
 						it->value().priority >= rd.priority &&
 						rd.priority < PRIORITY_TEAM_REDUNDANT ) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
-						.detail("KeyBegin", printable(it->value().keys.begin))
-						.detail("KeyEnd", printable(it->value().keys.end))
-						.detail("Priority", it->value().priority); */
+						.detail("KeyBegin", it->value().keys.begin)
+						.detail("KeyEnd", it->value().keys.end)
+						.detail("Priority", it->value().priority);*/
 					overlappingInFlight = true;
 					break;
 				}
@@ -867,7 +867,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 		}
 
 		TraceEvent(relocateShardInterval.begin(), distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin)).detail("KeyEnd", printable(rd.keys.end))
+			.detail("KeyBegin", rd.keys.begin).detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority).detail("RelocationID", relocateShardInterval.pairID).detail("SuppressedEventCount", self->suppressIntervals);
 
 		if(relocateShardInterval.severity != SevDebug) {

@@ -717,7 +717,6 @@ int testReplication()
 	const char*							reportCacheEnv = getenv("REPLICATION_REPORTCACHE");
 	const char*							stopOnErrorEnv = getenv("REPLICATION_STOPONERROR");
 	const char*							skipTotalEnv = getenv("REPLICATION_SKIPTOTAL");
-	const char*							debugEntryEnv = getenv("REPLICATION_DEBUGENTRY");
 	const char*							validateEnv = getenv("REPLICATION_VALIDATE");
 	const char*							findBestEnv = getenv("REPLICATION_FINDBEST");
 	const char*							rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
@@ -794,7 +793,7 @@ int testReplication()
 
 		if (findBest)
 		{
-			auto bSucceeded = findBestPolicySet(bestSet, testServers, policies[policyIndex], policyMin, rateSample, policySample);
+			findBestPolicySet(bestSet, testServers, policies[policyIndex], policyMin, rateSample, policySample);
 
 			if (g_replicationdebug > 1) {
 				printf("BestSet:%4lu entries\n", bestSet.size());

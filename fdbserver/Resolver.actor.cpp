@@ -132,7 +132,6 @@ ACTOR Future<Void> resolveBatch(
 		
 		vector<int> commitList;
 		vector<int> tooOldList;
-		double commitTime = now();
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;

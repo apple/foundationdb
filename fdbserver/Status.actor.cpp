@@ -1751,7 +1751,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 							json.absorb(doc.get_obj());
 							wait(yield());
 						} catch(Error &e) {
-							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", printable(docs[j].key));
+							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}
 				}
@@ -2320,7 +2320,6 @@ TEST_CASE("/status/json/builderPerf") {
 	int iterations = 200;
 
 	printf("Generating and serializing random document\n");
-	double start = timer();
 
 	int64_t bytes = 0;
 	double generated = 0;

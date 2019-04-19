@@ -151,7 +151,7 @@ int getOption( VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -167,7 +167,7 @@ uint64_t getOption( VectorRef<KeyValueRef> options, Key key, uint64_t defaultVal
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -183,7 +183,7 @@ int64_t getOption( VectorRef<KeyValueRef> options, Key key, int64_t defaultValue
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -304,7 +304,7 @@ TestWorkload *getWorkloadIface( WorkloadRequest work, VectorRef<KeyValueRef> opt
 	auto unconsumedOptions = checkAllOptionsConsumed( workload ? workload->options : VectorRef<KeyValueRef>() );
 	if( !workload || unconsumedOptions.size() ) {
 		TraceEvent evt(SevError,"TestCreationError");
-		evt.detail("TestName", printable(testName));
+		evt.detail("TestName", testName);
 		if( !workload ) {
 			evt.detail("Reason", "Null workload");
 			fprintf(stderr, "ERROR: Workload could not be created, perhaps testName (%s) is not a valid workload\n", printable(testName).c_str());
@@ -509,7 +509,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		// add test for "done" ?
-		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", printable(work.title) );
+		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title );
 		TestWorkload *workload = getWorkloadIface( work, dbInfo );
 		if(!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
@@ -635,7 +635,7 @@ void throwIfError(const std::vector<Future<ErrorOr<T>>> &futures, std::string er
 
 ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< TesterInterface > testers, 
 	TestSpec spec ) {
-	TraceEvent("TestRunning").detail( "WorkloadTitle", printable(spec.title) )
+	TraceEvent("TestRunning").detail( "WorkloadTitle", spec.title )
 		.detail("TesterCount", testers.size()).detail("Phases", spec.phases)
 		.detail("TestTimeout", spec.timeout);
 
@@ -667,16 +667,16 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	if( spec.phases & TestWorkload::SETUP ) {
 		state std::vector< Future<ErrorOr<Void>> > setups;
 		printf("setting up test (%s)...\n", printable(spec.title).c_str());
-		TraceEvent("TestSetupStart").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
 		for(int i= 0; i < workloads.size(); i++)
 			setups.push_back( workloads[i].setup.template getReplyUnlessFailedFor<Void>( waitForFailureTime, 0) );
 		wait( waitForAll( setups ) );
 		throwIfError(setups, "SetupFailedForWorkload" + printable(spec.title));
-		TraceEvent("TestSetupComplete").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestSetupComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if( spec.phases & TestWorkload::EXECUTION ) {
-		TraceEvent("TestStarting").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
 		printf("running test (%s)...\n", printable(spec.title).c_str());
 		state std::vector< Future<ErrorOr<Void>> > starts;
 		for(int i= 0; i < workloads.size(); i++)
@@ -684,7 +684,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		wait( waitForAll( starts ) );
 		throwIfError(starts, "StartFailedForWorkload" + printable(spec.title));
 		printf("%s complete\n", printable(spec.title).c_str());
-		TraceEvent("TestComplete").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if( spec.phases & TestWorkload::CHECK ) {
@@ -716,7 +716,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	if( spec.phases & TestWorkload::METRICS ) {
 		state std::vector< Future<ErrorOr<vector<PerfMetric>>> > metricTasks;
 		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
-		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", spec.title);
 		for(int i= 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReplyUnlessFailedFor<vector<PerfMetric>>(waitForFailureTime, 0) );
 		wait( waitForAll( metricTasks ) );
@@ -840,7 +840,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	}
 
 	TraceEvent(ok ? SevInfo : SevWarnAlways, "TestResults")
-		.detail("Workload", printable(spec.title))
+		.detail("Workload", spec.title)
 		.detail("Passed", (int)ok);
 		//.detail("Metrics", metricSummary);
 
@@ -894,7 +894,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			}
 
 			spec.title = StringRef( value );
-			TraceEvent("TestParserTest").detail("ParsedTest", printable( spec.title ));
+			TraceEvent("TestParserTest").detail("ParsedTest",  spec.title );
 		} else if( attrib == "timeout" ) {
 			sscanf( value.c_str(), "%d", &(spec.timeout) );
 			ASSERT( spec.timeout > 0 );

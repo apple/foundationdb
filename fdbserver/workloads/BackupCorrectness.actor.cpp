@@ -515,7 +515,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				wait(waitForAll(restores));
 
 				for (auto &restore : restores) {
-					assert(!restore.isError());
+					ASSERT(!restore.isError());
 				}
 			}
 

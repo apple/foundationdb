@@ -220,7 +220,6 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 		// If flush then write a page using records from start to i.  It's guaranteed that pageUpperBound has been set above.
 		if(flush) {
 			end = i == iEnd;  // i could have been moved above
-			int count = i - start;
 			debug_printf("Flushing page start=%d i=%d\nlower='%s'\nupper='%s'\n", start, i, pageLowerBound.toHexString(20).c_str(), pageUpperBound.toHexString(20).c_str());
 			ASSERT(pageLowerBound <= pageUpperBound);
 			for(int j = start; j < i; ++j) {
@@ -791,7 +790,6 @@ private:
 			for(int i=0; i<pages.size(); i++)
 				childEntries.emplace_back(pages[i].lowerBound, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t)));
 
-			int oldPages = pages.size();
 			pages = buildPages(false, beginKey, endKey, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_usablePageSizeOverride);
 
 			debug_printf("Writing a new root level at version %lld with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
@@ -856,10 +854,8 @@ private:
 
 	class SuperPage : public IPage, ReferenceCounted<SuperPage> {
 	public:
-		SuperPage(std::vector<Reference<const IPage>> pages, int usablePageSize) : m_size(0) {
-			for(auto &p : pages) {
-				m_size += usablePageSize;
-			}
+		SuperPage(std::vector<Reference<const IPage>> pages, int usablePageSize)
+		  : m_size(pages.size() * usablePageSize) {
 			m_data = new uint8_t[m_size];
 			uint8_t *wptr = m_data;
 			for(auto &p : pages) {
@@ -894,7 +890,7 @@ private:
 
 	private:
 		uint8_t *m_data;
-		int m_size;
+		const int m_size;
 	};
 
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize) {
@@ -1205,13 +1201,13 @@ private:
 				bool modified = version != 0;
 
 				for(int i = 0; i < futureChildren.size(); ++i) {
-					LogicalPageID pageID = childPageIDs[i];
 					const VersionedChildrenT &children = futureChildren[i].get();
-
-					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS, pageID, children.size());
+					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS,
+					             childPageIDs[i], children.size());
 					for(auto &versionedPageSet : children) {
 						debug_printf("%p    version: Page id=%lld\n", THIS, versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
+							(void)boundaryPage;
 							debug_printf("%p      '%s' -> Page id=%u\n", THIS, printable(boundaryPage.first).c_str(), boundaryPage.second);
 						}
 					}
@@ -1963,10 +1959,7 @@ IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) 
 }
 
 int randomSize(int max) {
-	int exp = g_random->randomInt(0, 6);
-	int limit = (pow(10.0, exp) / 1e5 * max) + 1;
-	int n = g_random->randomInt(0, max);
-	return n;
+	return g_random->randomInt(0, max);
 }
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
@@ -2403,7 +2396,6 @@ TEST_CASE("!/redwood/performance/set") {
 	state int maxChangesPerVersion = 1000;
 	state int versions = 5000;
 	int maxKeySize = 50;
-	int maxValueSize = 100;
 
 	state std::string key(maxKeySize, 'k');
 	state std::string value(maxKeySize, 'v');
