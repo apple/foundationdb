@@ -547,7 +547,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Database cx, Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
-	state double metric;
 
 	// construct a map from a process address to a status object containing a trace file open error
 	// this is later added to the messages subsection
@@ -1787,9 +1786,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
 			choose{
-				when(Version f = wait(tr.getReadVersion())) {
-					statusObj["database_locked"] = false;
-				}
+				when(wait(success(tr.getReadVersion()))) { statusObj["database_locked"] = false; }
 
 				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));

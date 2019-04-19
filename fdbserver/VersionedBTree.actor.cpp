@@ -100,7 +100,7 @@ struct BTreePage {
 
 				} while(c.moveNext());
 			}
-		} catch(Error& ) {
+		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
 			debug_printf("BTreePage::toString partial result: %s\n", r.c_str());
 			throw;
@@ -1239,7 +1239,7 @@ private:
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("%p  Adding child page '%s'\n", this, printable(childPage.first).c_str());
+						debug_printf("%p  Adding child page '%s'\n", THIS, printable(childPage.first).c_str());
 						childEntries.emplace_back(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t)));
 					}
 				}
@@ -1874,7 +1874,6 @@ public:
 
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
-		state Version readVersion = self->m_tree->getLastCommittedVersion();
 		if(rowLimit >= 0) {
 			wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
 			while(cur->isValid() && cur->getKey() < keys.end) {
@@ -1910,7 +1909,6 @@ public:
 
 	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, Key key, Optional< UID > debugID) {
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
-		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
 		wait(cur->findEqual(key));
 		if(cur->isValid()) {

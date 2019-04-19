@@ -250,8 +250,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							throw;
 					}
 
-					bool hasStorage = wait( self->checkForStorage(cx, configuration, self) );
-					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
+					wait(::success(self->checkForStorage(cx, configuration, self)));
+					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					//Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
@@ -282,7 +282,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						//Check that each shard has the same data on all storage servers that it resides on
-						bool dataConsistencyResult = wait(self->checkDataConsistency(cx, keyLocations, configuration, self));
+						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, self)));
 					}
 				}
 			}
