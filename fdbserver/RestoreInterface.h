@@ -120,7 +120,7 @@ struct RestoreInterface {
 	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
 	RequestStream<RestoreLoadFileRequest> sampleLogFile;
 	RequestStream<RestoreSendMutationRequest> sendSampleMutation;
-	//RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
+	RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
 
 	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
 	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
@@ -154,6 +154,7 @@ struct RestoreInterface {
 		sampleRangeFile.getEndpoint( TaskClusterController ); 
 		sampleLogFile.getEndpoint( TaskClusterController ); 
 		sendSampleMutation.getEndpoint( TaskClusterController ); 
+		sendSampleMutationVector.getEndpoint( TaskClusterController ); 
 
 		calculateApplierKeyRange.getEndpoint( TaskClusterController ); 
 		getApplierKeyRangeRequest.getEndpoint( TaskClusterController ); 
@@ -175,7 +176,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
+		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation, sendSampleMutationVector,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
 				loadRangeFile, loadLogFile, sendMutation, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
 				finishRestore);
