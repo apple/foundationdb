@@ -1328,31 +1328,32 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	ASSERT( !rd->workers_interface.empty() );
 	state int wIndex = 0;
 	for (auto &workerInterf : rd->workers_interface) {
-		printf("[Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first, workerInterf.second.describeNode().c_str());
+		printf("[Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first.toString().c_str(), workerInterf.second.nodeID.toString().c_str());
 		wIndex++;
 	}
 
-	wIndex = 0;
+	state std::vector<Future<RestoreCommonReply>> cmdReplies;
+	state std::map<UID, RestoreInterface>::iterator workerInterf;
 	loop {
-		for (auto &workerInterf : rd->workers_interface)  {
+		wIndex = 0;
+		for ( workerInterf = rd->workers_interface.begin(); workerInterf !=  rd->workers_interface.end(); workerInterf++)  {
 			try {
 				wait( delay(1.0) );
-				std::vector<Future<RestoreCommonReply>> cmdReplies;
-				wIndex = 0;
-				cmdReplies.push_back( workerInterf.second.heartbeat.getReply(RestoreSimpleRequest(rd->cmdID)) );
+				cmdReplies.push_back( workerInterf->second.heartbeat.getReply(RestoreSimpleRequest(rd->cmdID)) );
 				std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+				cmdReplies.clear();
 				wIndex++;
 			} catch (Error &e) {
 				// Handle the command reply timeout error
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 							rd->cmdID.toString().c_str(), e.code(), e.what());
-				printf("[Heartbeat: Node may be down][Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first, workerInterf.second.describeNode().c_str());
+				printf("[Heartbeat: Node may be down][Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex,  workerInterf->first.toString().c_str(), workerInterf->second.nodeID.toString().c_str());
 			}
 		}
 		wait( delay(30.0) );
 	}
 
-	return Void();
+	//return Void();
  }
 
 // Set roles (Loader or Applier) for workers and ask all workers to share their interface
@@ -3642,7 +3643,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfi
 
 //// -- New implementation of restore following storage server example
 
-ACTOR Future<Void> handleHeartbeat(RestoreVersionBatchRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
+ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	// wait( delay(1.0) );
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 
