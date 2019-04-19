@@ -1497,6 +1497,10 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 			endKey = normalKeys.end;
 		}
 
+		if (startKey > endKey) {
+			fprintf(stderr, "ERROR at assignKeyRangeToAppliers, startKey:%s > endKey:%s\n", startKey.toString().c_str(), endKey.toString().c_str());
+		}
+
 		keyRanges.push_back(KeyRangeRef(startKey, endKey));
 	}
 
