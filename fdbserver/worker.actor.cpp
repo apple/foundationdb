@@ -19,6 +19,15 @@
  */
 
 #include <boost/lexical_cast.hpp>
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include "boost/process.hpp"
+// c.wait() conflicts with ACTOR compiler
+void childWait(boost::process::child& c) {
+       c.wait();
+       return;
+}
 
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -1205,7 +1214,7 @@ ACTOR Future<Void> workerServer(
 					// get bin path
 					auto snapBin = execArg.getBinaryPath();
 					auto dataFolder = "path=" + coordFolder;
-					vector<std::string> paramList;
+					std::vector<std::string> paramList;
 					paramList.push_back(snapBin.toString());
 					// get user passed arguments
 					auto listArgs = execArg.getBinaryArgs();
@@ -1228,22 +1237,19 @@ ACTOR Future<Void> workerServer(
 					std::string folder = coordFolder;
 					state std::string folderFrom = "./" + folder + "/.";
 					state std::string folderTo = "./" + folder + "-snap-" + uidStr.toString();
-					vector<std::string> paramList;
+					std::vector<std::string> paramList;
 					std::string mkdirBin = "/bin/mkdir";
-					paramList.push_back(mkdirBin);
 					paramList.push_back(folderTo);
 					cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 					wait(success(cmdErr));
 					err = cmdErr.get();
 					if (err == 0) {
-						vector<std::string> paramList;
+						std::vector<std::string> paramList;
 						std::string cpBin = "/bin/cp";
-						paramList.clear();
-						paramList.push_back(cpBin);
 						paramList.push_back("-a");
 						paramList.push_back(folderFrom);
 						paramList.push_back(folderTo);
-						cmdErr = spawnProcess(cpBin, paramList, 3.0);
+						cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
 						wait(success(cmdErr));
 						err = cmdErr.get();
 					}
@@ -1452,49 +1458,42 @@ ACTOR Future<Void> fdbd(
 	}
 }
 
-ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime, bool isSync)
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
 {
-	state pid_t pid = -1;
-	try {
-		pid = fdbForkSpawn(binPath, paramList);
-	} catch (Error& e) {
-		TraceEvent("fdbForkSpawnFailed")
-			.detail("Error", e.what());
+	std::string argsString;
+	for (int i = 0; i < paramList.size(); i++) {
+		argsString += paramList[i] + ",";
 	}
-	if (pid < 0) {
-		return -1;
-	}
+	TraceEvent("SpawnProcess").detail("Cmd", binPath).detail("Args", argsString);
 
-	if (!isSync && g_network->isSimulated()) {
-		wait(delay(g_random->random01()));
-	}
-
-	state double sleepTime = 0;
 	state int err = 0;
-	while (true) {
-		err = fdbForkWaitPid(pid, g_network->isSimulated() ? true : false);
-		if (g_network->isSimulated()) {
-			if (err == pid) {
-				return 0;
-			}
-			return err;
+	state double runTime = 0;
+	state boost::process::child c(binPath, boost::process::args(paramList));
+	if (!isSync) {
+		while (c.running() && runTime <= maxWaitTime) {
+			wait(delay(0.1));
+			runTime += 0.1;
 		}
-		if (err != EINPROGRESS) {
-			break;
+		if (c.running()) {
+			c.terminate();
+			err = -1;
+		} else {
+			err = c.exit_code();
 		}
-
-		sleepTime += 0.1;
-		wait(delay(0.1));
-		if (sleepTime > maxWaitTime) {
-			TraceEvent(SevWarnAlways, "SpawnProcessTookTooLong")
-				.detail("Error", EINPROGRESS);
-			kill(pid, SIGTERM);
-			// FIXME, we can end up here in a rare situation,
-			// make this asynchronous
-			fdbForkWaitPid(pid, true);
-			return -1;
+		childWait(c);
+	} else {
+		state std::error_code errCode;
+		bool succ = c.wait_for(std::chrono::seconds(3), errCode);
+		err = errCode.value();
+		if (!succ) {
+			err = -1;
+			c.terminate();
+			childWait(c);
 		}
 	}
+	TraceEvent("SpawnProcess")
+		.detail("Cmd", binPath)
+		.detail("Error", err);
 	return err;
 }
 

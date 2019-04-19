@@ -1889,11 +1889,11 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 
 	if (!otherRoleExeced) {
 		setExecOpInProgress(execUID);
-		if (!g_network->isSimulated() || cmd != execSnap) {
+		if (!g_network->isSimulated()) {
 			// get bin path
 			auto binPath = execArg.getBinaryPath();
 			auto dataFolder = "path=" + data->folder;
-			vector<std::string> paramList;
+			std::vector<std::string> paramList;
 			paramList.push_back(binPath.toString());
 			// get user passed arguments
 			auto listArgs = execArg.getBinaryArgs();
@@ -1917,23 +1917,19 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 			std::string folder = abspath(data->folder);
 			state std::string folderFrom = folder + "/.";
 			state std::string folderTo = folder + "-snap-" + uidStr.toString();
-			vector<std::string> paramList;
+			std::vector<std::string> paramList;
 			std::string mkdirBin = "/bin/mkdir";
-
-			paramList.push_back(mkdirBin);
 			paramList.push_back(folderTo);
 			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
 			if (err == 0) {
-				vector<std::string> paramList;
+				std::vector<std::string> paramList;
 				std::string cpBin = "/bin/cp";
-				paramList.clear();
-				paramList.push_back(cpBin);
 				paramList.push_back("-a");
 				paramList.push_back(folderFrom);
 				paramList.push_back(folderTo);
-				cmdErr = spawnProcess(cpBin, paramList, 3.0);
+				cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
 				wait(success(cmdErr));
 				err = cmdErr.get();
 			}

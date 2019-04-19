@@ -1811,7 +1811,7 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 			// get the bin path
 			auto snapBin = execArg->getBinaryPath();
 			auto dataFolder = "path=" + self->dataFolder;
-			vector<std::string> paramList;
+			std::vector<std::string> paramList;
 			paramList.push_back(snapBin.toString());
 			// user passed arguments
 			auto listArgs = execArg->getBinaryArgs();
@@ -1833,22 +1833,19 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 			// copy the entire directory
 			state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
 			state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr.toString();
-			vector<std::string> paramList;
+			std::vector<std::string> paramList;
 			std::string mkdirBin = "/bin/mkdir";
-			paramList.push_back(mkdirBin);
 			paramList.push_back(tLogFolderTo);
 			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
 			if (err == 0) {
-				vector<std::string> paramList;
+				std::vector<std::string> paramList;
 				std::string cpBin = "/bin/cp";
-				paramList.clear();
-				paramList.push_back(cpBin);
 				paramList.push_back("-a");
 				paramList.push_back(tLogFolderFrom);
 				paramList.push_back(tLogFolderTo);
-				cmdErr = spawnProcess(cpBin, paramList, 3.0);
+				cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
 				wait(success(cmdErr));
 				err = cmdErr.get();
 			}
