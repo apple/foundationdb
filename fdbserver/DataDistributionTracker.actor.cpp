@@ -144,7 +144,7 @@ ACTOR Future<Void> trackShardBytes(
 
 	/*TraceEvent("TrackShardBytesStarting")
 		.detail("TrackerID", trackerID)
-		.detail("Keys", printable(keys))
+		.detail("Keys", keys)
 		.detail("TrackedBytesInitiallyPresent", shardSize->get().present())
 		.detail("StartingSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 		.detail("StartingMerges", shardSize->get().present() ? shardSize->get().get().merges : 0);*/
@@ -190,7 +190,7 @@ ACTOR Future<Void> trackShardBytes(
 			StorageMetrics metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT ) );
 
 			/*TraceEvent("ShardSizeUpdate")
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
 				.detail("BandwithStatus", getBandwidthStatus(metrics))
@@ -199,7 +199,7 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("BandwidthLower", bounds.min.bytesPerKSecond)
 				.detail("BandwidthUpper", bounds.max.bytesPerKSecond)
 				.detail("ShardSizePresent", shardSize->get().present())
-				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0 )
+				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 				.detail("TrackerID", trackerID);*/
 
 			if( shardSize->get().present() && addToSizeEstimate )
@@ -329,8 +329,8 @@ ACTOR Future<Void> shardSplitter(
 
 	if( g_random->random01() < 0.01 ) {
 		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
-			.detail("Begin", printable(keys.begin))
-			.detail("End", printable(keys.end))
+			.detail("Begin", keys.begin)
+			.detail("End", keys.end)
 			.detail("MaxBytes", shardBounds.max.bytes)
 			.detail("MetricsBytes", metrics.bytes)
 			.detail("Bandwidth", bandwidthStatus == BandwidthStatusHigh ? "High" : bandwidthStatus == BandwidthStatusNormal ? "Normal" : "Low")
@@ -450,8 +450,8 @@ Future<Void> shardMerger(
 	KeyRange mergeRange = merged;
 
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
-		.detail("OldKeys", printable(keys))
-		.detail("NewKeys", printable(mergeRange))
+		.detail("OldKeys", keys)
+		.detail("NewKeys", mergeRange)
 		.detail("EndingSize", endingStats.bytes)
 		.detail("BatchedMerges", shardsMerged);
 
@@ -532,8 +532,8 @@ ACTOR Future<Void> shardTracker(
 	wait( delay( 0, TaskDataDistribution ) );
 
 	/*TraceEvent("ShardTracker", self->distributorId)
-		.detail("Begin", printable(keys.begin))
-		.detail("End", printable(keys.end))
+		.detail("Begin", keys.begin)
+		.detail("End", keys.end)
 		.detail("TrackerID", trackerID)
 		.detail("MaxBytes", self->maxShardSize->get().get())
 		.detail("ShardSize", shardSize->get().get().bytes)
@@ -572,7 +572,7 @@ void restartShardTrackers( DataDistributionTracker* self, KeyRangeRef keys, Opti
 		if( startingSize.present() ) {
 			ASSERT( ranges.size() == 1 );
 			/*TraceEvent("ShardTrackerSizePreset", self->distributorId)
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("Size", startingSize.get().metrics.bytes)
 				.detail("Merges", startingSize.get().merges);*/
 			TEST( true ); // shardTracker started with trackedBytes already set
@@ -736,9 +736,9 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	uniquify(prevTeams);
 
 	/*TraceEvent("ShardsAffectedByTeamFailureDefine")
-		.detail("KeyBegin", printable(keys.begin))
-		.detail("KeyEnd", printable(keys.end))
-		.detail("TeamCount", teams.size()); */
+		.detail("KeyBegin", keys.begin)
+		.detail("KeyEnd", keys.end)
+		.detail("TeamCount", teams.size());*/
 
 	auto affectedRanges = shard_teams.getAffectedRangesAfterInsertion(keys);
 	shard_teams.insert( keys, std::make_pair(teams, prevTeams) );
@@ -754,8 +754,8 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 
 void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team> destinationTeams ) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
-		.detail("KeyBegin", printable(keys.begin))
-		.detail("KeyEnd", printable(keys.end))
+		.detail("KeyBegin", keys.begin)
+		.detail("KeyEnd", keys.end)
 		.detail("NewTeamSize", destinationTeam.size())
 		.detail("NewTeam", describe(destinationTeam));*/
 
@@ -828,8 +828,8 @@ void ShardsAffectedByTeamFailure::check() {
 					for(auto x = team_shards.lower_bound( std::make_pair( *t, KeyRangeRef() ) ); x != team_shards.end() && x->first == *t; ++x)
 						shards += printable(x->second.begin) + "-" + printable(x->second.end) + ",";
 					TraceEvent(SevError,"SATFInvariantError2")
-						.detail("KB", printable(i->begin()))
-						.detail("KE", printable(i->end()))
+						.detail("KB", i->begin())
+						.detail("KE", i->end())
 						.detail("Team", teamDesc)
 						.detail("Shards", shards);
 					ASSERT(false);

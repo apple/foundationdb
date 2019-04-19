@@ -1396,8 +1396,10 @@ void copyTest() {
 
 	{
 		start = timer();
-		for(int i=0; i<100; i++)
+		for (int i = 0; i < 100; i++) {
 			StringRef k = s;
+			(void)k;
+		}
 		elapsed = timer() - start;
 
 		printf("StringRef->StringRef: %fs/GB\n", elapsed);

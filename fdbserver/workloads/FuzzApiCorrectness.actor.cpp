@@ -58,7 +58,8 @@ struct ExceptionContract {
 			e.code() == error_code_future_version ||
 			e.code() == error_code_transaction_cancelled ||
 			e.code() == error_code_key_too_large ||
-			e.code() == error_code_value_too_large)
+			e.code() == error_code_value_too_large ||
+			e.code() == error_code_process_behind)
 		{
 			return;
 		}

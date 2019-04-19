@@ -172,7 +172,6 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 		return false;
 	}
 	int num_sans = sk_GENERAL_NAME_num( sans );
-	bool match_found = false;
 	bool rc = false;
 	for( int i = 0; i < num_sans && !rc; ++i ) {
 		GENERAL_NAME* altname = sk_GENERAL_NAME_value( sans, i );
@@ -232,7 +231,6 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
 	X509_STORE_CTX *store_ctx = NULL;
 	X509_NAME *subject, *issuer;
-	BIO *bio = NULL;
 	bool rc = false;
 	X509* cert = NULL;
 	// if returning false, give a reason string

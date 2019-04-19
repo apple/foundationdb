@@ -47,7 +47,7 @@ void printTrace(JNIEnv* env, jobject self, jint severity, jstring message, jobje
 	auto f = onMainThread([severity, &detailsMap, msg]() -> Future<Void> {
 		TraceEvent evt(Severity(severity), msg);
 		for (const auto& p : detailsMap) {
-			evt.detail(p.first, p.second);
+			evt.detail(p.first.c_str(), p.second);
 		}
 		return Void();
 	});

@@ -115,7 +115,7 @@ namespace dbBackup {
 		Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint32_t version) {
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > version) {
-			TraceEvent(SevError, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevError, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", name).detail("Version", version);
 			wait(logError(tr, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]),
 				format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version)));
 
@@ -305,7 +305,7 @@ namespace dbBackup {
 							return Void();
 						}
 
-						//TraceEvent("DBA_Range").detail("Range", printable(KeyRangeRef(rangeBegin, rangeEnd))).detail("Version", values.second).detail("Size", values.first.size()).detail("LogUID", printable(task->params[BackupAgentBase::keyConfigLogUid])).detail("AddPrefix", printable(addPrefix)).detail("RemovePrefix", printable(removePrefix));
+						//TraceEvent("DBA_Range").detail("Range", KeyRangeRef(rangeBegin, rangeEnd)).detail("Version", values.second).detail("Size", values.first.size()).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]).detail("AddPrefix", addPrefix).detail("RemovePrefix", removePrefix);
 
 						Subspace krv(conf.get(DatabaseBackupAgent::keyRangeVersions));
 						state KeyRange versionRange = singleKeyRange(krv.pack(values.second));
@@ -340,7 +340,7 @@ namespace dbBackup {
 									break;
 
 								if( values.first[valueLoc].key >= backupVersions.get()[versionLoc].key ) {
-									//TraceEvent("DBA_Set", debugID).detail("Key", printable(values.first[valueLoc].key)).detail("Value", printable(values.first[valueLoc].value));
+									//TraceEvent("DBA_Set", debugID).detail("Key", values.first[valueLoc].key).detail("Value", values.first[valueLoc].value);
 									tr->set(values.first[valueLoc].key.removePrefix(removePrefix).withPrefix(addPrefix), values.first[valueLoc].value);
 									bytesSet += values.first[valueLoc].expectedSize() - removePrefix.expectedSize() + addPrefix.expectedSize();
 								}
@@ -353,7 +353,7 @@ namespace dbBackup {
 
 						wait(tr->commit());
 						Params.bytesWritten().set(task, Params.bytesWritten().getOrDefault(task) + bytesSet);
-						//TraceEvent("DBA_SetComplete", debugID).detail("Ver", values.second).detail("LogVersion", logVersion).detail("ReadVersion", readVer).detail("CommitVer", tr.getCommittedVersion()).detail("Range", printable(versionRange));
+						//TraceEvent("DBA_SetComplete", debugID).detail("Ver", values.second).detail("LogVersion", logVersion).detail("ReadVersion", readVer).detail("CommitVer", tr.getCommittedVersion()).detail("Range", versionRange);
 
 						if(backupVersions.get().more) {
 							tr->reset();
@@ -737,7 +737,7 @@ namespace dbBackup {
 			state Version stopVersionData = stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("DBA_CopyLogs").detail("BeginVersion", beginVersion).detail("ApplyVersion", applyVersion).detail("EndVersion", endVersion).detail("StopVersionData", stopVersionData).detail("LogUID", printable(task->params[BackupAgentBase::keyConfigLogUid]));
+				TraceEvent("DBA_CopyLogs").detail("BeginVersion", beginVersion).detail("ApplyVersion", applyVersion).detail("EndVersion", endVersion).detail("StopVersionData", stopVersionData).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 			}
 
 			if ((stopVersionData == -1) || (stopVersionData >= applyVersion)) {
@@ -941,7 +941,7 @@ namespace dbBackup {
 			Optional<Value> stopWhenDone = wait(fStopWhenDone);
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("DBA_CopyDiffLogs").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("LogUID", printable(task->params[BackupAgentBase::keyConfigLogUid]));
+				TraceEvent("DBA_CopyDiffLogs").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 			}
 
 			if (!stopWhenDone.present()) {
@@ -1410,7 +1410,7 @@ namespace dbBackup {
 
 			state UID logUid = BinaryReader::fromStringRef<UID>(task->params[DatabaseBackupAgent::keyConfigLogUid], Unversioned());
 
-			TraceEvent("DBA_Complete").detail("RestoreVersion", restoreVersion).detail("Differential", stopWhenDone.present()).detail("LogUID", printable(task->params[BackupAgentBase::keyConfigLogUid]));
+			TraceEvent("DBA_Complete").detail("RestoreVersion", restoreVersion).detail("Differential", stopWhenDone.present()).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 
 			// Start the complete task, if differential is not enabled
 			if (stopWhenDone.present()) {
@@ -1935,8 +1935,8 @@ public:
 		else
 			wait(checkDatabaseLock(tr, logUid));
 
-		TraceEvent("DBA_Submit").detail("LogUid", logUid).detail("Lock", lockDB).detail("LogUID", printable(logUidValue)).detail("Tag", printable(tagName))
-			.detail("Key", printable(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId))).detail("MapPrefix", printable(mapPrefix));
+		TraceEvent("DBA_Submit").detail("LogUid", logUid).detail("Lock", lockDB).detail("LogUID", logUidValue).detail("Tag", tagName)
+			.detail("Key", backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)).detail("MapPrefix", mapPrefix);
 
 		return Void();
 	}
@@ -1944,7 +1944,7 @@ public:
 	ACTOR static Future<Void> unlockBackup(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 		wait(unlockDatabase(tr, logUid));
-		TraceEvent("DBA_Unlock").detail("Tag", printable(tagName));
+		TraceEvent("DBA_Unlock").detail("Tag", tagName);
 		return Void();
 	}
 
@@ -1997,7 +1997,7 @@ public:
 				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Optional<Value> backupUid = wait(tr2.get(backupAgent->states.get(BinaryWriter::toValue(destlogUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
-				TraceEvent("DBA_SwitchoverBackupUID").detail("Uid", printable(backupUid)).detail("Key", printable(backupAgent->states.get(BinaryWriter::toValue(destlogUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
+				TraceEvent("DBA_SwitchoverBackupUID").detail("Uid", backupUid).detail("Key", backupAgent->states.get(BinaryWriter::toValue(destlogUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId));
 				if(!backupUid.present())
 					throw backup_duplicate();
 				Optional<Value> v = wait(tr2.get(BinaryWriter::toValue(destlogUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));

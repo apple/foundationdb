@@ -964,9 +964,6 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
-			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message
-			//     which would be the same error message if the catch block was hit
-			bool success = false;
 			try {
 				outputString += "\n  FoundationDB processes - ";
 				if (statusObjCluster.get("processes", processesMap)) {
@@ -2292,7 +2289,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("Error", errMsg);
 }
 
 struct CLIOptions {
@@ -2523,7 +2520,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line)));
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
@@ -3345,7 +3342,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						catch(Error &e) {
 							//options->setOption() prints error message
-							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", printable(tokens[2]));
+							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", tokens[2]);
 							is_error = true;
 						}
 					}
@@ -3357,7 +3354,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("IsError", is_error);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)

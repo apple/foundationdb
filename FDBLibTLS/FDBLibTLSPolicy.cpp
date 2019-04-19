@@ -106,7 +106,6 @@ struct stack_st_X509* FDBLibTLSPolicy::parse_cert_pem(const uint8_t* cert_pem, s
 	X509 *cert = NULL;
 	BIO *bio = NULL;
 	int errnum;
-	bool rc = false;
 
 	if (cert_pem_len > INT_MAX)
 		goto err;

@@ -255,7 +255,7 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 		}
 		else {
 			TraceEvent(SevError, "SerializingInvalidPolicyType")
-				.detailext("PolicyName", name);
+				.detail("PolicyName", name);
 		}
 	}
 	else {

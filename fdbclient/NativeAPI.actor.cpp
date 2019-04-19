@@ -222,6 +222,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("NotCommitted", cx->transactionsNotCommitted)
 			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
 			.detail("ResourceConstrained", cx->transactionsResourceConstrained)
+			.detail("ProcessBehind", cx->transactionsProcessBehind)
 			.detail("MeanLatency", cx->latencies.mean())
 			.detail("MedianLatency", cx->latencies.median())
 			.detail("Latency90", cx->latencies.percentile(0.90))
@@ -513,7 +514,7 @@ DatabaseContext::DatabaseContext(
 	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
+	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
@@ -625,7 +626,6 @@ pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const
 
 bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::pair<KeyRange,Reference<LocationInfo>>>& result, int limit, bool reverse ) {
 	result.clear();
-	auto locRanges = locationCache.intersectingRanges(range);
 
 	auto begin = locationCache.rangeContaining(range.begin);
 	auto end = locationCache.rangeContainingKeyBefore(range.end);
@@ -1126,13 +1126,13 @@ AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 		auto addr = NetworkAddress::parse(key.toString());
 		if (addr.isTLS()) {
 			TraceEvent(SevWarnAlways, "AddressExclusionParseError")
-				.detail("String", printable(key))
+				.detail("String", key)
 				.detail("Description", "Address inclusion string should not include `:tls' suffix.");
 			return AddressExclusion();
 		}
 		return AddressExclusion(addr.ip, addr.port);
 	} catch (Error& ) {
-		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
+		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", key);
 		return AddressExclusion();
 	}
 }
@@ -1334,7 +1334,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("Servers", describe(ssi.second->get()));*/
 			}
@@ -1356,7 +1356,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1367,7 +1367,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1404,11 +1404,11 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 		try {
 			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
 			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
+				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
 				return k.getKey();
@@ -1421,7 +1421,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			} else {
 				TraceEvent(SevInfo, "GetKeyError")
 					.error(e)
-					.detail("AtKey", printable(k.getKey()))
+					.detail("AtKey", k.getKey())
 					.detail("Offset", k.offset);
 				throw e;
 			}
@@ -1478,7 +1478,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
 			Version v = wait( waitForCommittedVersion( cx, resp ) );
 
-			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key", printable( key )).detail("Value", printable(value));
+			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key",  key ).detail("Value", value);
 
 			if( v - resp < 50000000 ) // False if there is a master failure between getting the response and getting the committed version, Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
 				return Void();
@@ -1487,8 +1487,9 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache( key );
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
-			} else if( e.code() == error_code_watch_cancelled ) {
-				TEST( true ); // Too many watches on the storage server, poll for changes instead
+			} else if( e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind ) {
+				TEST( e.code() == error_code_watch_cancelled ); // Too many watches on the storage server, poll for changes instead
+				TEST( e.code() == error_code_process_behind ); // The storage servers are all behind
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if ( e.code() == error_code_timed_out ) { //The storage server occasionally times out watches in case it was cancelled
 				TEST( true ); // A watch timed out
@@ -1551,13 +1552,13 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.Before");
 					/*TraceEvent("TransactionDebugGetExactRangeInfo", info.debugID.get())
-					.detail("ReqBeginKey", printable(req.begin.getKey()))
-					.detail("ReqEndKey", printable(req.end.getKey()))
-					.detail("ReqLimit", req.limit)
-					.detail("ReqLimitBytes", req.limitBytes)
-					.detail("ReqVersion", req.version)
-					.detail("Reverse", reverse)
-					.detail("Servers", locations[shard].second->description());*/
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
+						.detail("ReqLimit", req.limit)
+						.detail("ReqLimitBytes", req.limitBytes)
+						.detail("ReqVersion", req.version)
+						.detail("Reverse", reverse)
+						.detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
 				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
@@ -1641,8 +1642,8 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
 						.error(e)
-						.detail("ShardBegin", printable(locations[shard].first.begin))
-						.detail("ShardEnd", printable(locations[shard].first.end));
+						.detail("ShardBegin", locations[shard].first.begin)
+						.detail("ShardEnd", locations[shard].first.end);
 					throw;
 				}
 			}
@@ -1816,13 +1817,13 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
-						.detail("ReqBeginKey", printable(req.begin.getKey()))
-						.detail("ReqEndKey", printable(req.end.getKey()))
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("OriginalBegin", originalBegin.toString())
 						.detail("OriginalEnd", originalEnd.toString())
 						.detail("Begin", begin.toString())
 						.detail("End", end.toString())
-						.detail("Shard", printable(shard))
+						.detail("Shard", shard)
 						.detail("ReqLimit", req.limit)
 						.detail("ReqLimitBytes", req.limitBytes)
 						.detail("ReqVersion", req.version)
@@ -1837,8 +1838,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
-						.detail("ReqBeginKey", printable(req.begin.getKey()))
-						.detail("ReqEndKey", printable(req.end.getKey()))
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("RepIsMore", rep.more)
 						.detail("VersionReturned", rep.version)
 						.detail("RowsReturned", rep.data.size());*/
@@ -2484,19 +2485,21 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 					Standalone<RangeResultRef> shouldBeEmpty = wait(
 						tr.getRange( it->range(), 1 ) );
 					if( shouldBeEmpty.size() ) {
-						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", printable(it->range().begin).c_str())
-							.detail("KeyEnd", printable(it->range().end).c_str());
+						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", it->range().begin)
+							.detail("KeyEnd", it->range().end);
 						return;
 					}
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Set").detail("Key", printable(it->range().begin).c_str())
-							.detail("Expected", printable(m.setValue).c_str());
+						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
+							.detail("Class", "Set")
+							.detail("Key", it->range().begin)
+							.detail("Expected", m.setValue);
 						if( !val.present() )
 							evt.detail("Actual", "_Value Missing_");
 						else
-							evt.detail("Actual", printable(val.get()).c_str());
+							evt.detail("Actual", val.get());
 						return;
 					}
 				}
@@ -2515,7 +2518,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 	state int retries = 0;
 	loop {
 		try {
-			TraceEvent("CommitDummyTransaction").detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
 			tr.options = options;
 			tr.info.taskID = info.taskID;
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -2526,7 +2529,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", range.begin).detail("Retries", retries);
 			wait( tr.onError(e) );
 		}
 		++retries;
@@ -2715,7 +2718,7 @@ Future<Void> Transaction::commitMutations() {
 			UID u = g_nondeterministic_random->randomUniqueID();
 			TraceEvent("TransactionDump", u);
 			for(auto i=tr.transaction.mutations.begin(); i!=tr.transaction.mutations.end(); ++i)
-				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", printable(i->param1)).detail("P2", printable(i->param2));
+				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", i->param1).detail("P2", i->param2);
 		}
 
 		if(options.lockAware) {
@@ -2840,7 +2843,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 					trLogInfo->identifier = printable(value.get());
 				}
 				else if (trLogInfo->identifier != printable(value.get())) {
-					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", printable(value.get()));
+					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", value.get());
 					throw client_invalid_operation();
 				}
 			}
@@ -3028,7 +3031,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 	if (e.code() == error_code_not_committed ||
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
-		e.code() == error_code_proxy_memory_limit_exceeded)
+		e.code() == error_code_proxy_memory_limit_exceeded ||
+		e.code() == error_code_process_behind)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3036,6 +3040,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsMaybeCommitted++;
 		if (e.code() == error_code_proxy_memory_limit_exceeded)
 			cx->transactionsResourceConstrained++;
+		if (e.code() == error_code_process_behind)
+			cx->transactionsProcessBehind++;
 
 		double backoff = getBackoff(e.code());
 		reset();
@@ -3154,7 +3160,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 			}
 		} else {
 			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
 				.detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));

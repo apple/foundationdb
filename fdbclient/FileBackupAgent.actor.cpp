@@ -741,7 +741,7 @@ namespace fileBackup {
 		if (taskVersion > version) {
 			state Error err = task_invalid_version();
 
-			TraceEvent(SevWarn, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevWarn, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", name).detail("Version", version);
 			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
 				std::string msg = format("%s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
 				wait(BackupConfig(task).logError(cx, err, msg));
@@ -806,7 +806,7 @@ namespace fileBackup {
 			TEST(true);  // Canceling old backup task
 
 			TraceEvent(SevInfo, "FileBackupCancelOldTask")
-					.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("Task", task->params[Task::reservedTaskParamKeyType])
 					.detail("TagName", tagName);
 			wait(abortFiveZeroBackup(&backupAgent, tr, tagName));
 
@@ -876,7 +876,7 @@ namespace fileBackup {
 			TEST(true);  // Canceling 5.1 backup task
 
 			TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
-					.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("Task", task->params[Task::reservedTaskParamKeyType])
 					.detail("TagName", tagName);
 			wait(abortFiveOneBackup(&backupAgent, tr, tagName));
 
@@ -1575,11 +1575,6 @@ namespace fileBackup {
 				countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
 			}
 
-			// countShardsThisDispatch is how many total shards are to be dispatched by this dispatch cycle.
-			// Since this dispatch cycle can span many incrementally progressing separate executions of the BackupSnapshotDispatchTask
-			// instance, this is calculated as the number of shards dispatched so far in the dispatch batch plus the number of shards
-			// the current execution is going to attempt to do.
-			int countShardsThisDispatch = countShardsToDispatch + snapshotBatchSize.get();
 			// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are being dispatched, if any.
 			int countShardsBehind = std::max<int64_t>(0, countShardsToDispatch + snapshotBatchSize.get() - countShardsExpectedPerNormalWindow); 
 			Params.shardsBehind().set(task, countShardsBehind);
@@ -2688,13 +2683,13 @@ namespace fileBackup {
 							.detail("ReadOffset", readOffset)
 							.detail("ReadLen", readLen)
 							.detail("CommitVersion", tr->getCommittedVersion())
-							.detail("BeginRange", printable(trRange.begin))
-							.detail("EndRange", printable(trRange.end))
+							.detail("BeginRange", trRange.begin)
+							.detail("EndRange", trRange.end)
 							.detail("StartIndex", start)
 							.detail("EndIndex", i)
 							.detail("DataSize", data.size())
 							.detail("Bytes", txBytes)
-							.detail("OriginalFileRange", printable(originalFileRange))
+							.detail("OriginalFileRange", originalFileRange)
 							.detail("TaskInstance", THIS_ADDR);
 
 						// Commit succeeded, so advance starting point
@@ -3005,7 +3000,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -3019,7 +3014,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -3033,7 +3028,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "restore_complete")
@@ -3141,7 +3136,7 @@ namespace fileBackup {
 				TraceEvent("FileRestoreDispatch")
 					.detail("RestoreUID", restore.getUid())
 					.detail("BeginVersion", beginVersion)
-					.detail("BeginFile", printable(Params.beginFile().get(task)))
+					.detail("BeginFile", Params.beginFile().get(task))
 					.detail("BeginBlock", Params.beginBlock().get(task))
 					.detail("EndVersion", endVersion)
 					.detail("ApplyLag", applyLag)
@@ -3187,7 +3182,7 @@ namespace fileBackup {
 			TraceEvent("FileRestoreDispatch")
 				.detail("RestoreUID", restore.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("BeginFile", printable(Params.beginFile().get(task)))
+				.detail("BeginFile", Params.beginFile().get(task))
 				.detail("BeginBlock", Params.beginBlock().get(task))
 				.detail("EndVersion", endVersion)
 				.detail("ApplyLag", applyLag)

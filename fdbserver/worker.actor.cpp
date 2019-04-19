@@ -312,18 +312,18 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
 			// because they might be different if a new option was introduced in this version.
 			StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
-			TraceEvent("DiskStoreVersioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersioned").detail("Filename", filename);
 			ErrorOr<TLogOptions> tLogOptions = TLogOptions::FromStringRef(optionsString);
 			if (tLogOptions.isError()) {
-				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", printable(filename));
+				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", filename);
 				continue;
 			}
-			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", filename);
 			store.tLogOptions = tLogOptions.get();
 			prefix = filename.substr(0, fileVersionedLogDataPrefix.size() + optionsString.size() + 1);
 		}
 		else if( filename.startsWith( fileLogDataPrefix ) ) {
-			TraceEvent("DiskStoreUnversioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreUnversioned").detail("Filename", filename);
 			store.storedComponent = DiskStore::TLogData;
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
@@ -709,7 +709,7 @@ ACTOR Future<Void> workerServer(
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
-	state Reference<AsyncVar<bool>> degraded( new AsyncVar<bool>(false) );
+	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
@@ -736,7 +736,7 @@ ACTOR Future<Void> workerServer(
 		}
 	}
 
-	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->TLOG_DEGRADED_RESET_INTERVAL, false));
+	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
@@ -1322,7 +1322,7 @@ ACTOR Future<Void> fdbd(
 	try {
 
 		ServerCoordinators coordinators( connFile );
-		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		state vector<Future<Void>> v;

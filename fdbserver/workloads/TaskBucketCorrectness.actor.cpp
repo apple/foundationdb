@@ -33,7 +33,7 @@
 
 struct SayHelloTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
 	StringRef getName() const { return name; };
 	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -43,7 +43,11 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		// check task version
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > SayHelloTaskFunc::version) {
-			TraceEvent("TaskBucketCorrectnessSayHello").detail("CheckTaskVersion", "taskVersion is larger than the funcVersion").detail("TaskVersion", taskVersion).detail("FuncVersion", SayHelloTaskFunc::version);
+			uint32_t v = SayHelloTaskFunc::version;
+			TraceEvent("TaskBucketCorrectnessSayHello")
+				.detail("CheckTaskVersion", "taskVersion is larger than the funcVersion")
+				.detail("TaskVersion", taskVersion)
+				.detail("FuncVersion", v);
 		}
 
 		state Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);

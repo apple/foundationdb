@@ -794,10 +794,15 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 }
 
 TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
-	if(!g_network->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network->isSimulated()) {
+		state Reference<IAsyncFile> f;
 		try {
-			state Reference<IAsyncFile> f = wait(AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__", IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
-			state int fileSize = 2<<27; // ~100MB
+			Reference<IAsyncFile> f_ = wait(AsyncFileKAIO::open(
+			    "/tmp/__KAIO_TEST_FILE__",
+			    IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
+			f = f_;
+			state int fileSize = 2 << 27; // ~100MB
 			wait(f->truncate(fileSize));
 
 			// Test that the request list works as intended with default timeout
@@ -814,8 +819,7 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 			AsyncFileKAIO::setTimeout(0.0001);
 			wait(runTestOps(f, 10, fileSize, false));
 			ASSERT(((AsyncFileKAIO*)f.getPtr())->failed);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			state Error err = e;
 			if(f) {
 				wait(AsyncFileEIO::deleteFile(f->getFilename(), true));

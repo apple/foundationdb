@@ -49,7 +49,15 @@
 
 using namespace std::rel_ops;
 
-#define TEST( condition ) if (!(condition)); else { static TraceEvent* __test = &(TraceEvent("CodeCoverage").detail("File", __FILE__).detail("Line",__LINE__).detail("Condition", #condition)); }
+#define TEST(condition)                                                                                                \
+	if (!(condition)) {                                                                                                \
+	} else {                                                                                                           \
+		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
+		                                  .detail("File", __FILE__)                                                    \
+		                                  .detail("Line", __LINE__)                                                    \
+		                                  .detail("Condition", #condition));                                           \
+		(void)__test;                                                                                                  \
+	}
 
 /*
 usage:
