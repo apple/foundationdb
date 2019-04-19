@@ -451,7 +451,7 @@ typedef decltype(&tLog) TLogFn;
 
 // spawns a process pointed by `binPath` and the arguments provided at `paramList`,
 // if the process spawned takes more than `maxWaitTime` then it will be killed
-ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime, bool isSync = false);
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync = false);
 
 // returns true if the execUID op is in progress
 bool isExecOpInProgress(UID execUID);

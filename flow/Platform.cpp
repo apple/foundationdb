@@ -2683,61 +2683,6 @@ void* loadFunction(void* lib, const char* func_name) {
 	return dlfcn;
 }
 
-int
-fdbForkSpawn(const std::string& path, const std::vector<std::string>& args)
-{
-    std::vector<char*> paramList;
-    for (int i = 0; i < args.size(); i++) {
-        paramList.push_back(const_cast<char*>(args[i].c_str()));
-    }
-    paramList.push_back(nullptr);
-
-	std::string argsString;
-	for (int i = 0; i < args.size(); i++) {
-		argsString += args[i] + ",";
-	}
-	TraceEvent("FdbFork").detail("Cmd", path).detail("Args", argsString);
-
-	pid_t pid = fork();
-    if (pid == -1) {
-		TraceEvent(SevWarnAlways, "CommandFailedToSpawn").detail("Cmd", path);
-		throw platform_error();
-	} else if (pid > 0) {
-		// parent process returns with child's pid
-		return pid;
-	}
-	// child process
-	execv(const_cast<char*>(path.c_str()), &paramList[0]);
-	_exit(EXIT_FAILURE);
-	return pid;
-}
-
-int fdbForkWaitPid(pid_t pid, bool isSync)
-{
-	int status;
-	int err = waitpid(pid, &status, (!isSync) ? WNOHANG : 0);
-	if (isSync) {
-		err = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-		return err;
-	}
-	if (err == 0) {
-		return EINPROGRESS;
-	}
-
-	if (err == -1 || WIFSIGNALED(status)) {
-		err = -1;
-	} else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-		err = 0;
-	} else {
-		err = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-	}
-	TraceEvent((err == 0) ? SevInfo : SevWarnAlways, "CommandStatus")
-		.detail("Pid", pid)
-		.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-	return err;
-}
-
-
 void platformInit() {
 #ifdef WIN32
 	_set_FMA3_enable(0); // Workaround for VS 2013 code generation bug. See https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
