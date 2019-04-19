@@ -1322,6 +1322,39 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	return Void();
  }
 
+
+// Periodically send worker heartbeat to 
+ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreData> rd) {
+	ASSERT( !rd->workers_interface.empty() );
+	state int wIndex = 0;
+	for (auto &workerInterf : rd->workers_interface) {
+		printf("[Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first, workerInterf.second.describeNode().c_str());
+		wIndex++;
+	}
+
+	wIndex = 0;
+	loop {
+		for (auto &workerInterf : rd->workers_interface)  {
+			try {
+				wait( delay(1.0) );
+				std::vector<Future<RestoreCommonReply>> cmdReplies;
+				wIndex = 0;
+				cmdReplies.push_back( workerInterf.second.heartbeat.getReply(RestoreSimpleRequest(rd->cmdID)) );
+				std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+				wIndex++;
+			} catch (Error &e) {
+				// Handle the command reply timeout error
+				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+							rd->cmdID.toString().c_str(), e.code(), e.what());
+				printf("[Heartbeat: Node may be down][Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first, workerInterf.second.describeNode().c_str());
+			}
+		}
+		wait( delay(30.0) );
+	}
+
+	return Void();
+ }
+
 // Set roles (Loader or Applier) for workers and ask all workers to share their interface
 // The master node's localNodeStatus has been set outside of this function
 ACTOR Future<Void> configureRoles(Reference<RestoreData> rd)  {
@@ -3609,6 +3642,14 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfi
 
 //// -- New implementation of restore following storage server example
 
+ACTOR Future<Void> handleHeartbeat(RestoreVersionBatchRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
+	// wait( delay(1.0) );
+	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+
+	return Void();
+}
+
+
 
 ACTOR Future<Void> handleVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	// wait( delay(1.0) );
@@ -4337,6 +4378,10 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 
 		try {
 			choose {
+				when ( RestoreSimpleRequest req = waitNext(ri.heartbeat.getFuture()) ) {
+					requestTypeStr = "heartbeat";
+					wait(handleHeartbeat(req, rd, ri));
+				}
 				when ( RestoreSetRoleRequest req = waitNext(ri.setRole.getFuture()) ) {
 					requestTypeStr = "setRole";
 					wait(handleSetRoleRequest(req, rd, ri));
@@ -4452,6 +4497,8 @@ ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface interf
 	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
 
 	wait( collectWorkerInterface(rd, cx) );
+
+	Future<Void> workersFailureMonitor = monitorWorkerLiveness(rd);
 
 	// configureRoles must be after collectWorkerInterface
 	// Why do I need to put an extra wait() to make sure the above wait is executed after the below wwait?

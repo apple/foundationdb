@@ -116,6 +116,8 @@ template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>
 struct RestoreInterface {
 	UID nodeID;
 
+	RequestStream<RestoreSimpleRequest> heartbeat;
+
 	RequestStream<RestoreSetRoleRequest> setRole;
 	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
 	RequestStream<RestoreLoadFileRequest> sampleLogFile;
@@ -176,7 +178,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation, sendSampleMutationVector,
+		serializer(ar, nodeID, heartbeat, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation, sendSampleMutationVector,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
 				loadRangeFile, loadLogFile, sendMutation, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
 				finishRestore);
