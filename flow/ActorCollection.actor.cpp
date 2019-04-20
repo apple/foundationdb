@@ -106,7 +106,7 @@ TEST_CASE("/flow/TraceEvent") {
 		doub.emplace_back(g_random->random01());
 		strIdx.emplace_back(g_random->randomInt(0, strings.size()));
 	}
-	TraceEvent("pairsfilled")
+	TraceEvent("PairsFilled")
 		.detail("MemoryUsage", getMemoryUsage());
 	printf("Sleeping for 20 seconds - attach perf now to PID %d\n", getpid());
 	wait(delay(20));
@@ -120,8 +120,8 @@ TEST_CASE("/flow/TraceEvent") {
 			TraceEvent("TestTraceLineNoDebug")
 				.detail("Num", num[idx])
 				.detail("Double", doub[idx])
-				.detail("str", strings[strIdx[idx]])
-				.detail("pair", p);
+				.detail("Str", strings[strIdx[idx]])
+				.detail("Pair", p);
 		}
 		wait(delay(0));
 	}
@@ -136,8 +136,8 @@ TEST_CASE("/flow/TraceEvent") {
 			TraceEvent(SevDebug, "TestTraceLineDebug")
 				.detail("Num", num[idx])
 				.detail("Double", doub[idx])
-				.detail("str", strings[strIdx[idx]])
-				.detail("pair", p);
+				.detail("Str", strings[strIdx[idx]])
+				.detail("Pair", p);
 		}
 		wait(delay(0));
 	}
