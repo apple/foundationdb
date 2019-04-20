@@ -84,28 +84,36 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
 bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
-	int errCode = result.isError() ? result.getError().code() : error_code_success;
-	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
-	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
-	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
-
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
+	int errCode;
+	if (loadBalancedReply.present()) {
+		errCode = loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code() : error_code_success;
+	}
+	else {
+		errCode = result.isError() ? result.getError().code() : error_code_success;
+	}
+
+	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
+	bool receivedResponse = loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
+	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
 
-	if (loadBalancedReply.present() && loadBalancedReply.get().error.present()) {
-		throw loadBalancedReply.get().error.get();
+	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
+		return true;
 	}
-	
-	if(result.present()) {
+
+	if (!loadBalancedReply.present() && result.present()) {
 		return true;
 	}
 
 	if(receivedResponse) {
-		throw result.getError();
+		throw loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
 	}
 
 	if(atMostOnce && maybeDelivered) {
