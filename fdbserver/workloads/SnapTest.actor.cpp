@@ -1,39 +1,38 @@
-#include "fdbserver/Status.h"
-#include "flow/actorcompiler.h"
-#include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include <boost/lexical_cast.hpp>
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbrpc/ContinuousSample.h"
+#include "fdbmonitor/SimpleIni.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/Status.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "workloads.actor.h"
-#include "BulkSetup.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
-#include "fdbclient/ReadYourWrites.h"
-#include "fdbmonitor/SimpleIni.h"
-#include <boost/lexical_cast.hpp>
-
-#undef FLOW_ACOMPILER_STATE
-#define FLOW_ACOMPILER_STATE 1
+#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"
 
 void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
 	version = -1;
 	numTags = -1;
 
-	sscanf(md.getValue("Version").c_str(), "%lld", &version);
-	sscanf(md.getValue("NumTags").c_str(), "%d:%d", &numTags);
+	version = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	numTags = boost::lexical_cast<int>(md.getValue("NumTags"));
 }
 
 void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
 	Version verifyVersion;
 	durableVersion = -1;
 
-	int tagLocality;
-	int tagId;
-	sscanf(md.getValue("Version").c_str(), "%lld", &verifyVersion);
-	sscanf(md.getValue("Tag").c_str(), "%d:%d", &tagLocality, &tagId);
-	tag.locality = tagLocality;
-	tag.id = tagId;
-	sscanf(md.getValue("DurableVersion").c_str(), "%lld", &durableVersion);
+	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	std::string tagString = md.getValue("Tag");
+	int colon = tagString.find_first_of(':');
+	std::string localityString = tagString.substr(0, colon);
+	std::string idString = tagString.substr(colon + 1);
+	tag.locality = boost::lexical_cast<int>(localityString);
+	tag.id = boost::lexical_cast<int>(idString);
+
+	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
 }
 
 void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Version& minTLogVersion,
@@ -42,29 +41,27 @@ void getMinAndMaxTLogVersions(TraceEventFields md, Version version, Tag tag, Ver
 	Tag verifyTag;
 	minTLogVersion = maxTLogVersion = -1;
 
-	sscanf(md.getValue("Version").c_str(), "%lld", &verifyVersion);
-	int tagLocality;
-	int tagId;
-	sscanf(md.getValue("Tag").c_str(), "%d:%d", &tagLocality, &tagId);
-	verifyTag.locality = tagLocality;
-	verifyTag.id = tagId;
+	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	std::string tagString = md.getValue("Tag");
+	int colon = tagString.find_first_of(':');
+	std::string localityString = tagString.substr(0, colon);
+	std::string idString = tagString.substr(colon + 1);
+	verifyTag.locality = boost::lexical_cast<int>(localityString);
+	verifyTag.id = boost::lexical_cast<int>(idString);
 	if (tag != verifyTag) {
 		return;
 	}
-	sscanf(md.getValue("PoppedTagVersion").c_str(), "%lld", &minTLogVersion);
-	sscanf(md.getValue("QueueCommittedVersion").c_str(), "%lld", &maxTLogVersion);
+	minTLogVersion = boost::lexical_cast<int64_t>(md.getValue("PoppedTagVersion"));
+	maxTLogVersion = boost::lexical_cast<int64_t>(md.getValue("QueueCommittedVersion"));
 }
 
 void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	std::string emptyStr;
-	auto it = messages.begin();
-	while (it != messages.end()) {
-		if (!it->isReady() || it->get().toString() == emptyStr) {
-			it = messages.erase(it);
-		} else {
-			++it;
-		}
-	}
+	messages.erase(std::remove_if(messages.begin(), messages.end(),
+								  [](Future<TraceEventFields>const & msgFuture)
+								  {
+									  return !msgFuture.isReady() || msgFuture.get().size() == 0;
+								  }
+					   ), messages.end());
 	return;
 }
 
@@ -168,8 +165,8 @@ public: // workload functions
 		}
 
 		state int retry = 0;
+		tr.reset();
 		loop {
-			tr.reset();
 			try {
 				for (auto id : keys) {
 					if (even) {
@@ -244,8 +241,8 @@ public: // workload functions
 			// with snapKeys 1) validate that all key ids are even ie -
 			// created before snap 2) values are same as the key id 3) # of
 			// keys adds up to the total keys created before snap
+			tr.reset();
 			loop {
-				tr.reset();
 				try {
 					Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, CLIENT_KNOBS->TOO_MANY));
 					if (!kvRange.more && kvRange.size() == 0) {
@@ -283,9 +280,9 @@ public: // workload functions
 			// corresponding enable, then TLog will automatically enable the
 			// popping of TLogs. this test case validates that we auto
 			// enable the popping of TLogs
+			tr.reset();
 			loop {
 				// disable pop of the TLog
-				tr.reset();
 				try {
 					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=a36b2ca0e8dab0452ac3e12b6b926f4b");
 					tr.execute(execDisableTLogPop, payLoadRef);
@@ -302,9 +299,9 @@ public: // workload functions
 		} else if (self->testID == 5) {
 			// description: disable TLog pop and enable TLog pop with
 			// different UIDs should mis-match and print an error
+			tr.reset();
 			loop {
 				// disable pop of the TLog
-				tr.reset();
 				try {
 					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=956349f5f368d37a802f1f37d7f4b9c1");
 					tr.execute(execDisableTLogPop, payLoadRef);
@@ -314,9 +311,9 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
+			tr.reset();
 			loop {
 				// enable pop of the TLog
-				tr.reset();
 				try {
 					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=5810898ca2f3143a246886c79d1bea92");
 					tr.execute(execEnableTLogPop, payLoadRef);
@@ -329,9 +326,9 @@ public: // workload functions
 			self->snapUID = UID::fromString("5810898ca2f3143a246886c79d1bea92");
 		} else if (self->testID == 6) {
 			// snapshot create without disabling pop of the TLog
+			tr.reset();
 			loop {
 				try {
-					tr.reset();
 					StringRef snapPayload = LiteralStringRef("/bin/"
 					                                         "snap_create.sh:uid=d78b08d47f341158e9a54d4baaf4a4dd");
 					tr.execute(execSnap, snapPayload);
@@ -345,9 +342,9 @@ public: // workload functions
 			self->snapUID = UID::fromString("d78b08d47f341158e9a54d4baaf4a4dd");
 		} else if (self->testID == 7) {
 			// disable popping of TLog and snapshot create with mis-matching
+			tr.reset();
 			loop {
 				// disable pop of the TLog
-				tr.reset();
 				try {
 					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=f49d27ddf7a28b6549d930743e0ebdbe");
 					tr.execute(execDisableTLogPop, payLoadRef);
@@ -357,10 +354,10 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
+			tr.reset();
 			loop {
 				// snap create with different UID
 				try {
-					tr.reset();
 					StringRef snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=ba61e9612a561d60bd83ad83e1b63568");
 					tr.execute(execSnap, snapPayload);
 					wait(tr.commit());
@@ -424,11 +421,11 @@ public: // workload functions
 			}
 		}
 
-		state int i = 0;
+		state int entryi = 0;
 		state int foundTagServers = 0;
-		for (; i < tLogWorkers.size(); i++) {
+		for (; entryi < tLogWorkers.size(); entryi++) {
 			tLogMessages.push_back(
-			    timeoutError(tLogWorkers[i].eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
+			    timeoutError(tLogWorkers[entryi].eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
 
 			try {
 				TraceEvent(SevDebug, "WaitingForTlogMessages");
@@ -444,7 +441,7 @@ public: // workload functions
 			filterEmptyMessages(tLogMessages);
 			if (tLogMessages.size() < 1) {
 				TraceEvent("VerifyTLogTrackLatestMessageNotFound")
-				    .detail("Address", tLogWorkers[i].address())
+				    .detail("Address", tLogWorkers[entryi].address())
 				    .detail("Token", eventTokenRef.toString());
 			} else {
 				++foundTagServers;
@@ -533,28 +530,28 @@ public: // workload functions
 			return false;
 		}
 
-		state int i = 0;
+		state int entryi = 0;
 		state int numTags = -1;
 
-		for (; i < proxyMessages.size(); i++) {
+		for (; entryi < proxyMessages.size(); entryi++) {
 			state Version execVersion = -1;
 			state std::string emptyStr;
 
-			TraceEvent("RelevantProxyMessage").detail("Msg", proxyMessages[i].get().toString());
-			if (proxyMessages[i].get().toString() != emptyStr) {
-				getVersionAndnumTags(proxyMessages[i].get(), execVersion, numTags);
+			TraceEvent("RelevantProxyMessage").detail("Msg", proxyMessages[entryi].get().toString());
+			if (proxyMessages[entryi].get().toString() != emptyStr) {
+				getVersionAndnumTags(proxyMessages[entryi].get(), execVersion, numTags);
 				ASSERT(numTags > 0);
 			}
-			state int j = 0;
-			for (; (execVersion != -1) && j < storageMessages.size(); j++) {
+			state int entryj = 0;
+			for (; (execVersion != -1) && entryj < storageMessages.size(); entryj++) {
 				// for each message that has this verison, get the tag and
 				// the durable version
 				state Tag tag;
 				state Tag invalidTag;
 				state Version durableVersion = -1;
-				TraceEvent("RelevantStorageMessage").detail("Msg", storageMessages[j].get().toString());
-				ASSERT(storageMessages[j].get().toString() != emptyStr);
-				getTagAndDurableVersion(storageMessages[j].get(), execVersion, tag, durableVersion);
+				TraceEvent("RelevantStorageMessage").detail("Msg", storageMessages[entryj].get().toString());
+				ASSERT(storageMessages[entryj].get().toString() != emptyStr);
+				getTagAndDurableVersion(storageMessages[entryj].get(), execVersion, tag, durableVersion);
 				TraceEvent("SearchingTLogMessages").detail("Tag", tag.toString());
 
 				tLogMessages.clear();
@@ -577,18 +574,18 @@ public: // workload functions
 					return false;
 				}
 				filterEmptyMessages(tLogMessages);
-				state int k = 0;
+				state int entryk = 0;
 				numDurableVersionChecks = 0;
-				for (; (tag != invalidTag) && k < tLogMessages.size(); k++) {
+				for (; (tag != invalidTag) && entryk < tLogMessages.size(); entryk++) {
 					// for each of the message that has this version and tag
 					// verify that
 					// 1) durableVersion >= minTLogVersion -1
 					// 2) durableVersion < maxTLogVersion
 					Version minTLogVersion = -1;
 					Version maxTLogVersion = -1;
-					TraceEvent("TLogMessage").detail("Msg", tLogMessages[k].get().toString());
-					ASSERT(tLogMessages[k].get().toString() != emptyStr);
-					getMinAndMaxTLogVersions(tLogMessages[k].get(), execVersion, tag, minTLogVersion, maxTLogVersion);
+					TraceEvent("TLogMessage").detail("Msg", tLogMessages[entryk].get().toString());
+					ASSERT(tLogMessages[entryk].get().toString() != emptyStr);
+					getMinAndMaxTLogVersions(tLogMessages[entryk].get(), execVersion, tag, minTLogVersion, maxTLogVersion);
 					if (minTLogVersion != -1 && maxTLogVersion != -1) {
 						if ((durableVersion >= minTLogVersion - 1) && (durableVersion < maxTLogVersion)) {
 							++numDurableVersionChecks;

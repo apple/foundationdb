@@ -45,7 +45,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbserver/FDBExecArgs.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -416,27 +416,28 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 }
 
 void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
-	int p = 0;
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
-	for (; p < binPath.size(); ) {
-		int pComma = binPath.find_first_of(',', p);
-		if (pComma == binPath.npos) {
-			pComma = binPath.size();
-		}
-		Standalone<StringRef> token(binPath.substr(p, pComma - p));
-		TraceEvent(SevDebug, "BinPathItem").detail("Element", token.toString());
-		binPathVec.push_back(token);
-		p = pComma + 1;
-		while (binPath[p] == ' ' && p < binPath.size()) {
-			p++;
+	StringRef input(binPath);
+	while (input != StringRef()) {
+		StringRef token = input.eat(LiteralStringRef(","));
+		if (token != StringRef()) {
+			const uint8_t* ptr = token.begin();
+			while (ptr != token.end() && *ptr == ' ') {
+				ptr++;
+			}
+			if (ptr != token.end()) {
+				Standalone<StringRef> newElement(token.substr(ptr - token.begin()));
+				TraceEvent(SevDebug, "BinPathItem").detail("Element", newElement.toString());
+				binPathVec.push_back(newElement);
+			}
 		}
 	}
 	return;
 }
 
-bool isWhitelisted(vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
+bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
 	TraceEvent("BinPath").detail("Value", binPath.toString());
-	for (auto item : binPathVec) {
+	for (const auto& item : binPathVec) {
 		TraceEvent("Element").detail("Value", item.toString());
 	}
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
@@ -816,7 +817,6 @@ ACTOR Future<Void> commitBatch(
 						ASSERT(localityKey.present());
 						locality = decodeTagLocalityListValue(localityKey.get());
 
-						auto ranges = self->keyInfo.intersectingRanges(allKeys);
 						std::set<Tag> allSources;
 						auto& m = (*pMutations)[mutationNum];
 						if (debugMutation("ProxyCommit", commitVersion, m))
@@ -845,12 +845,9 @@ ACTOR Future<Void> commitBatch(
 						if (m.param1 == execSnap) {
 							te1.trackLatest(tokenStr.c_str());
 						}
-						std::string allTagString;
 						for (auto& tag : allSources) {
-							allTagString += tag.toString() + ",";
 							toCommit.addTag(tag);
 						}
-						TraceEvent(SevDebug, "TagInfo").detail("Tags", allTagString);
 						toCommit.addTypedMessage(m, true /* allLocations */);
 						toCommit.setHasExecOp();
 					}

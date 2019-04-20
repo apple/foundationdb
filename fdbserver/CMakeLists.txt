@@ -17,8 +17,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
-  FDBExecArgs.cpp
-  FDBExecArgs.h
+  FDBExecHelper.actor.cpp
+  FDBExecHelper.actor.h
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h

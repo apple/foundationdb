@@ -3320,8 +3320,8 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	state Standalone<StringRef>
 		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
 	// disable popping of TLog
+	tr.reset();
 	loop {
-		tr.reset();
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
@@ -3353,8 +3353,8 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	// then the snapCreate can end up creating multiple snapshots with
 	// the same name which needs additional handling, hence we fail in
 	// failure cases and let the caller retry with different snapUID
+	tr.reset();
 	try {
-		tr.reset();
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.execute(execSnap, snapPayloadRef);
 		wait(tr.commit());
@@ -3371,11 +3371,11 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	}
 
 	// enable popping of the TLog
+	tr.reset();
 	loop {
-		tr.reset();
 		try {
-			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3389,7 +3389,7 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	// snap the coordinators
 	try {
 		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
-		wait(exec);
+		wait(timeoutError(exec, 5.0));
 	} catch (Error& e) {
 		TraceEvent("SnapCreateErrorSnapCoords").error(e);
 		throw;

@@ -19,15 +19,6 @@
  */
 
 #include <boost/lexical_cast.hpp>
-#define BOOST_SYSTEM_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#include "boost/process.hpp"
-// c.wait() conflicts with ACTOR compiler
-void childWait(boost::process::child& c) {
-       c.wait();
-       return;
-}
 
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -44,15 +35,12 @@ void childWait(boost::process::child& c) {
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/FDBExecArgs.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -79,27 +67,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 # define KV_STORE(filename,uid) keyValueStoreMemory(filename,uid)
 #endif
 
-
-std::map<NetworkAddress, std::set<UID>> execOpsInProgress;
-
-bool isExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	return (execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-}
-
-void setExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) == execOpsInProgress[addr].end());
-	execOpsInProgress[addr].insert(execUID);
-	return;
-}
-
-void clearExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-	execOpsInProgress[addr].erase(execUID);
-	return;
-}
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	loop {
@@ -1206,54 +1173,8 @@ ACTOR Future<Void> workerServer(
 			}
 			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				state ExecCmdValueString execArg(req.execPayload);
-				execArg.dbgPrint();
-				state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-				state int err = 0;
-				state Future<int> cmdErr;
-				if (!g_network->isSimulated()) {
-					// get bin path
-					auto snapBin = execArg.getBinaryPath();
-					auto dataFolder = "path=" + coordFolder;
-					std::vector<std::string> paramList;
-					paramList.push_back(snapBin.toString());
-					// get user passed arguments
-					auto listArgs = execArg.getBinaryArgs();
-					for (auto elem : listArgs) {
-						paramList.push_back(elem.toString());
-					}
-					// get additional arguments
-					paramList.push_back(dataFolder);
-					const char* version = FDB_VT_VERSION;
-					std::string versionString = "version=";
-					versionString += version;
-					paramList.push_back(versionString);
-					std::string roleString = "role=coordinator";
-					paramList.push_back(roleString);
-					cmdErr = spawnProcess(snapBin.toString(), paramList, 3.0);
-					wait(success(cmdErr));
-					err = cmdErr.get();
-				} else {
-					// copy the files
-					std::string folder = coordFolder;
-					state std::string folderFrom = "./" + folder + "/.";
-					state std::string folderTo = "./" + folder + "-snap-" + uidStr.toString();
-					std::vector<std::string> paramList;
-					std::string mkdirBin = "/bin/mkdir";
-					paramList.push_back(folderTo);
-					cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
-					wait(success(cmdErr));
-					err = cmdErr.get();
-					if (err == 0) {
-						std::vector<std::string> paramList;
-						std::string cpBin = "/bin/cp";
-						paramList.push_back("-a");
-						paramList.push_back(folderFrom);
-						paramList.push_back(folderTo);
-						cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
-						wait(success(cmdErr));
-						err = cmdErr.get();
-					}
-				}
+				int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
+				StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
 				auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
 				auto te = TraceEvent("ExecTraceCoordinators");
 				te.detail("Uid", uidStr.toString());
@@ -1422,7 +1343,7 @@ ACTOR Future<Void> fdbd(
 
 		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
-			whitelistBinPaths = "random_path,  /bin/snap_create.sh";
+			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
 		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
@@ -1456,45 +1377,6 @@ ACTOR Future<Void> fdbd(
 		Error err = checkIOTimeout(e);
 		throw err;
 	}
-}
-
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
-{
-	std::string argsString;
-	for (int i = 0; i < paramList.size(); i++) {
-		argsString += paramList[i] + ",";
-	}
-	TraceEvent("SpawnProcess").detail("Cmd", binPath).detail("Args", argsString);
-
-	state int err = 0;
-	state double runTime = 0;
-	state boost::process::child c(binPath, boost::process::args(paramList));
-	if (!isSync) {
-		while (c.running() && runTime <= maxWaitTime) {
-			wait(delay(0.1));
-			runTime += 0.1;
-		}
-		if (c.running()) {
-			c.terminate();
-			err = -1;
-		} else {
-			err = c.exit_code();
-		}
-		childWait(c);
-	} else {
-		state std::error_code errCode;
-		bool succ = c.wait_for(std::chrono::seconds(3), errCode);
-		err = errCode.value();
-		if (!succ) {
-			err = -1;
-			c.terminate();
-			childWait(c);
-		}
-	}
-	TraceEvent("SpawnProcess")
-		.detail("Cmd", binPath)
-		.detail("Error", err);
-	return err;
 }
 
 const Role Role::WORKER("Worker", "WK", false);
