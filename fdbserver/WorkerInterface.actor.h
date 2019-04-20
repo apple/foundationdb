@@ -449,16 +449,5 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
 
 typedef decltype(&tLog) TLogFn;
 
-// spawns a process pointed by `binPath` and the arguments provided at `paramList`,
-// if the process spawned takes more than `maxWaitTime` then it will be killed
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync = false);
-
-// returns true if the execUID op is in progress
-bool isExecOpInProgress(UID execUID);
-// adds the execUID op to the list of ops in progress
-void setExecOpInProgress(UID execUID);
-// clears the execUID op from the list of ops in progress
-void clearExecOpInProgress(UID execUID);
-
 #include "flow/unactorcompiler.h"
 #endif

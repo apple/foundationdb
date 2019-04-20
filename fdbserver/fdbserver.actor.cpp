@@ -1698,7 +1698,6 @@ int main(int argc, char* argv[]) {
 						std::string childf = tmpFolder + "/" + returnList[i];
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
 						for (int j = 0; j < returnFiles.size(); j++) {
-							fprintf(stderr, "file : %s\n", returnFiles[j].c_str());
 							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
 								TraceEvent("DeletingNonSnapfiles")
 									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
@@ -1709,7 +1708,6 @@ int main(int argc, char* argv[]) {
 					// move the contents from snap folder to the original folder,
 					// delete snap folders
 					for (int i = 0; i < returnList.size(); i++) {
-						fprintf(stderr, "Dir : %s\n", returnList[i].c_str());
 						if (returnList[i] == "." || returnList[i] == "..") {
 							continue;
 						}

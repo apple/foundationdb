@@ -49,12 +49,9 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include "fdbserver/FDBExecArgs.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
 
 using std::pair;
 using std::make_pair;
@@ -1875,65 +1872,24 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
 		return Void();
 	}
+
 	state ExecCmdValueString execArg(m.param2);
 	state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
 	state int err = 0;
 	state Future<int> cmdErr;
 	state UID execUID = UID::fromString(uidStr.toString());
-	bool otherRoleExeced = false;
-
-	// other TLog or storage has initiated the exec, so we can skip
-	if (isExecOpInProgress(execUID)) {
-		otherRoleExeced = true;
+	state bool skip = false;
+	if (cmd == execSnap && isTLogInSameNode()) {
+		skip = true;
+	}
+	// other storage has initiated the exec, so we can skip
+	if (!skip && isExecOpInProgress(execUID)) {
+		skip = true;
 	}
 
-	if (!otherRoleExeced) {
+	if (!skip) {
 		setExecOpInProgress(execUID);
-		if (!g_network->isSimulated()) {
-			// get bin path
-			auto binPath = execArg.getBinaryPath();
-			auto dataFolder = "path=" + data->folder;
-			std::vector<std::string> paramList;
-			paramList.push_back(binPath.toString());
-			// get user passed arguments
-			auto listArgs = execArg.getBinaryArgs();
-			execArg.dbgPrint();
-			for (auto elem : listArgs) {
-				paramList.push_back(elem.toString());
-			}
-			// get additional arguments
-			paramList.push_back(dataFolder);
-			const char* version = FDB_VT_VERSION;
-			std::string versionString = "version=";
-			versionString += version;
-			paramList.push_back(versionString);
-			std::string roleString = "role=storage";
-			paramList.push_back(roleString);
-			cmdErr = spawnProcess(binPath.toString(), paramList, 3.0);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-		} else {
-			// copy the files
-			std::string folder = abspath(data->folder);
-			state std::string folderFrom = folder + "/.";
-			state std::string folderTo = folder + "-snap-" + uidStr.toString();
-			std::vector<std::string> paramList;
-			std::string mkdirBin = "/bin/mkdir";
-			paramList.push_back(folderTo);
-			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-			if (err == 0) {
-				std::vector<std::string> paramList;
-				std::string cpBin = "/bin/cp";
-				paramList.push_back("-a");
-				paramList.push_back(folderFrom);
-				paramList.push_back(folderTo);
-				cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
-				wait(success(cmdErr));
-				err = cmdErr.get();
-			}
-		}
+		int err = wait(execHelper(&execArg, data->folder, "role=storage"));
 		clearExecOpInProgress(execUID);
 	}
 	auto tokenStr = "ExecTrace/storage/" + uidStr.toString();
@@ -1947,6 +1903,7 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 	te.detail("DurableVersion", data->durableVersion.get());
 	te.detail("DataVersion", data->version.get());
 	te.detail("Tag", data->tag.toString());
+	te.detail("SnapCreateSkipped", skip);
 	if (cmd == execSnap) {
 		te.trackLatest(tokenStr.c_str());
 	}

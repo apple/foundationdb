@@ -38,11 +38,8 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/FDBExecArgs.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
 
 using std::pair;
 using std::make_pair;
@@ -536,6 +533,7 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	TEST( !logData->stopped );
 
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
+	unregisterTLog(logData->logId);
 
 	logData->stopped = true;
 	if(!logData->recoveryComplete.isSet()) {
@@ -1353,9 +1351,8 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 					.detail("Reason", reason)
 					.trackLatest(reason.c_str());
 
-				auto startTag = logData->allTags.begin();
-				std::string message = "ExecTrace/TLog/" + logData->allTags.begin()->toString();
-				"/" + uidStr.toString();
+				std::string message = "ExecTrace/TLog/" + logData->allTags.begin()->toString()
+					+ "/" + uidStr.toString();
 				TraceEvent("ExecCmdSnapCreate")
 					.detail("Uid", uidStr.toString())
 					.detail("Status", -1)
@@ -1432,58 +1429,13 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
 	state UID execUID = UID::fromString(uidStr.toString());
 	state bool otherRoleExeced = false;
-	// TLog is special, we need to exec at the execVersion.
-	// If storage on the same process has initiated the exec then wait for it to
-	// finish and hold the tlog at the execVersion
-	while (isExecOpInProgress(execUID)) {
-		wait(delay(0.1));
-		otherRoleExeced = true;
-	}
+	// TLog is special, we need to snap at the execVersion.
+	// storage on the same node should not initiate a snap before TLog which will make
+	// the snap version at TLog unpredictable
+	ASSERT(!isExecOpInProgress(execUID));
 	if (!otherRoleExeced) {
 		setExecOpInProgress(execUID);
-		if (!g_network->isSimulated()) {
-			// get the bin path
-			auto snapBin = execArg->getBinaryPath();
-			auto dataFolder = "path=" + self->dataFolder;
-			std::vector<std::string> paramList;
-			paramList.push_back(snapBin.toString());
-			// user passed arguments
-			auto listArgs = execArg->getBinaryArgs();
-			for (auto elem : listArgs) {
-				paramList.push_back(elem.toString());
-			}
-			// additional arguments
-			paramList.push_back(dataFolder);
-			const char* version = FDB_VT_VERSION;
-			std::string versionString = "version=";
-			versionString += version;
-			paramList.push_back(versionString);
-			std::string roleString = "role=tlog";
-			paramList.push_back(roleString);
-			cmdErr = spawnProcess(snapBin.toString(), paramList, 3.0);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-		} else {
-			// copy the entire directory
-			state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
-			state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr.toString();
-			std::vector<std::string> paramList;
-			std::string mkdirBin = "/bin/mkdir";
-			paramList.push_back(tLogFolderTo);
-			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
-			wait(success(cmdErr));
-			err = cmdErr.get();
-			if (err == 0) {
-				std::vector<std::string> paramList;
-				std::string cpBin = "/bin/cp";
-				paramList.push_back("-a");
-				paramList.push_back(tLogFolderFrom);
-				paramList.push_back(tLogFolderTo);
-				cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
-				wait(success(cmdErr));
-				err = cmdErr.get();
-			}
-		}
+		int err = wait(execHelper(execArg, self->dataFolder, "role=tlog"));
 		clearExecOpInProgress(execUID);
 	}
 	TraceEvent("TLogCommitExecTraceTLog")
@@ -1849,6 +1801,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 void removeLog( TLogData* self, Reference<LogData> logData ) {
 	TraceEvent("TLogRemoved", logData->logId).detail("Input", logData->bytesInput.getValue()).detail("Durable", logData->bytesDurable.getValue());
 	logData->stopped = true;
+	unregisterTLog(logData->logId);
 	if(!logData->recoveryComplete.isSet()) {
 		logData->recoveryComplete.sendError(end_of_stream());
 	}
@@ -2335,6 +2288,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	self->queueOrder.push_back(recruited.id());
 
 	TraceEvent("TLogStart", logData->logId);
+	registerTLog(logData->logId);
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
 	try {
