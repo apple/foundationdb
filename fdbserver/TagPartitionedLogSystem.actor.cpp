@@ -284,6 +284,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (const auto &t : tLogs) {
 			if (t->logServers.size()) {
 				newState.tLogs.emplace_back(*t);
+				newState.tLogs.back().tLogLocalities.clear();
+				for (const auto& log : t->logServers) {
+					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().locality);
+				}
 			}
 		}
 
