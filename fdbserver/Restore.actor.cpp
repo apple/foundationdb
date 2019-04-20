@@ -2133,7 +2133,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 	state double startTimeSampling = now();
 	// TODO: WiP Sample backup files to determine the key range for appliers
 	wait( sampleWorkload(rd, request, restoreConfig, sampleSizeMB) );
-
 	wait( delay(1.0) );
 
 	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTimeSampling);
