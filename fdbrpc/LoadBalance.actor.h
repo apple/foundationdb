@@ -104,6 +104,11 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
 
+	if (errCode == error_code_server_overloaded)
+	{
+		return false;
+	}
+
 	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
 		return true;
 	}
