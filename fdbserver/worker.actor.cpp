@@ -195,6 +195,7 @@ std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyVa
 std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
 std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
+std::pair<KeyValueStoreType, std::string> rocksdbSuffix = std::make_pair( KeyValueStoreType::SSD_ROCKSDB_V1,   ".rocksdb" );
 
 std::string validationFilename = "_validate";
 
@@ -208,6 +209,8 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
 
@@ -220,6 +223,9 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, prefix + id.toString() + ".rocksdb");
+
 
 	UNREACHABLE();
 }
@@ -1066,6 +1072,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+						}
+						else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
 						}
 						else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY);

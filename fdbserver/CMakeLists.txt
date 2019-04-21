@@ -24,6 +24,7 @@ set(FDBSERVER_SRCS
   IndirectShadowPager.actor.cpp
   IndirectShadowPager.h
   KeyValueStoreCompressTestData.actor.cpp
+  KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
@@ -179,6 +180,9 @@ set(SQLITE_SRCS
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
+set(ROCKSDB_USE_STATIC_LIBS ON)
+find_package(RocksDB REQUIRED)
+
 add_library(sqlite ${SQLITE_SRCS})
 target_compile_definitions(sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
 
@@ -199,7 +203,7 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
+target_link_libraries(fdbserver PRIVATE fdbclient sqlite RocksDB)
 if(WITH_JAVA_WORKLOAD)
   if(NOT JNI_FOUND)
     message(SEND_ERROR "Trying to build Java workload but couldn't find JNI")
