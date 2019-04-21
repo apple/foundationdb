@@ -645,6 +645,7 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
+	Key bcUrl; // The url used to get the bc
 
 	// For master applier to hold the lower bound of key ranges for each appliers
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
@@ -715,6 +716,8 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	 	totalWorkloadSize = 0;
 		curWorkloadSize = 0;
 		batchIndex = 0;
+		bc = Reference<IBackupContainer>();
+		bcUrl = StringRef();
 	}
 
 	~RestoreData() {
@@ -1736,7 +1739,11 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 }
 
 void initBackupContainer(Reference<RestoreData> rd, Key url) {
+	if ( rd->bcUrl == url && rd->bc.isValid() ) {
+		return;
+	}
 	printf("initBackupContainer, url:%s\n", url.toString().c_str());
+	rd->bcUrl = url;
 	rd->bc = IBackupContainer::openContainer(url.toString());
 	//state BackupDescription desc = wait(rd->bc->describeBackup());
 	//return Void();
@@ -3707,7 +3714,7 @@ ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Refe
 			rd->describeNode().c_str(), param.toString().c_str());
 
 	// TODO: This can be expensive
-	state Reference<IBackupContainer> bc =  IBackupContainer::openContainer(param.url.toString());
+	state Reference<IBackupContainer> bc =  rd->bc;
 	printf("[INFO] node:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(),
 			param.url.toString().c_str());
@@ -3772,7 +3779,7 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 	printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n", rd->describeNode().c_str(), param.toString().c_str());
 
 	// TODO: Expensive operation
-	state Reference<IBackupContainer> bc =  IBackupContainer::openContainer(param.url.toString());
+	state Reference<IBackupContainer> bc =  rd->bc;
 	printf("[Sampling][Loader] Node:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(),
 			param.url.toString().c_str());
@@ -3924,7 +3931,7 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 			getRoleStr(rd->localNodeStatus.role).c_str(),
 			param.toString().c_str());
 
-	bc = IBackupContainer::openContainer(param.url.toString());
+	bc = rd->bc;
 	// printf("[INFO] Node:%s CMDUID:%s open backup container for url:%s\n",
 	// 		rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 	// 		param.url.toString().c_str());
@@ -4014,7 +4021,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 								getRoleStr(rd->localNodeStatus.role).c_str(),
 								param.toString().c_str());
 
-	bc = IBackupContainer::openContainer(param.url.toString());
+	bc = rd->bc;
 	printf("[INFO][Loader] Node:%s CMDUID:%s open backup container for url:%s\n",
 			rd->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.url.toString().c_str());
@@ -4392,10 +4399,12 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				}
 				when ( RestoreLoadFileRequest req = waitNext(ri.sampleRangeFile.getFuture()) ) {
 					requestTypeStr = "sampleRangeFile";
+					initBackupContainer(rd, req.param.url);
 					ASSERT(rd->getRole() == RestoreRole::Loader);
 					actors.add( handleSampleRangeFileRequest(req, rd, ri) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(ri.sampleLogFile.getFuture()) ) {
+					initBackupContainer(rd, req.param.url);
 					requestTypeStr = "sampleLogFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
 					actors.add( handleSampleLogFileRequest(req, rd, ri) );
@@ -4411,11 +4420,13 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 				when ( RestoreLoadFileRequest req = waitNext(ri.loadRangeFile.getFuture()) ) {
 					requestTypeStr = "loadRangeFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
+					initBackupContainer(rd, req.param.url);
 					actors.add( handleLoadRangeFileRequest(req, rd, ri) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(ri.loadLogFile.getFuture()) ) {
 					requestTypeStr = "loadLogFile";
 					ASSERT(rd->getRole() == RestoreRole::Loader);
+					initBackupContainer(rd, req.param.url);
 					actors.add( handleLoadLogFileRequest(req, rd, ri) );
 				}
 
