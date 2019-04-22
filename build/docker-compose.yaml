@@ -26,16 +26,16 @@ services:
 
   build-docs:
     <<: *build-setup
-    command: bash -c 'make -j "$${MAKEJOBS}" docpackage'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" package_html'
 
 
   release-packages: &release-packages
     <<: *release-setup
-    command: bash -c 'make -j "$${MAKEJOBS}" packages'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=1 -DVALGRIND=0 .. && make -j "$${MAKEJOBS}" packages preinstall && cpack'
 
   snapshot-packages: &snapshot-packages
     <<: *build-setup
-    command: bash -c 'make -j "$${MAKEJOBS}" packages'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=0 -DVALGRIND=0 .. && make -j "$${MAKEJOBS}" packages preinstall && cpack'
 
   prb-packages:
     <<: *snapshot-packages
@@ -47,7 +47,7 @@ services:
 
   snapshot-bindings: &snapshot-bindings
     <<: *build-setup
-    command: bash -c 'make -j "$${MAKEJOBS}" bindings'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=0 .. && make -j "$${MAKEJOBS}" python_binding'
 
   prb-bindings:
     <<: *snapshot-bindings
@@ -55,7 +55,7 @@ services:
 
   snapshot-cmake: &snapshot-cmake
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}"; fi'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=0 -DVALGRIND=0 .. && make -j "$${MAKEJOBS}" packages preinstall && cpack'
 
   prb-cmake:
     <<: *snapshot-cmake
@@ -63,7 +63,7 @@ services:
 
   snapshot-ctest: &snapshot-ctest
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=1 .. && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure'
 
   prb-ctest:
     <<: *snapshot-ctest
@@ -71,7 +71,7 @@ services:
 
   snapshot-correctness: &snapshot-correctness
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -DFDB_RELEASE=1 .. && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure
 
   prb-correctness:
     <<: *snapshot-correctness
