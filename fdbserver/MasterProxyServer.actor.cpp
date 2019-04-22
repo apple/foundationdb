@@ -469,7 +469,7 @@ ACTOR Future<Void> commitBatch(
 	for(auto it : versionReply.resolverChanges) {
 		auto rs = self->keyResolvers.modify(it.range);
 		for(auto r = rs.begin(); r != rs.end(); ++r)
-			r->value().push_back(std::make_pair(versionReply.resolverChangesVersion,it.dest));
+			r->value().emplace_back(versionReply.resolverChangesVersion,it.dest);
 	}
 
 	//TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
@@ -560,7 +560,7 @@ ACTOR Future<Void> commitBatch(
 
 		// These changes to txnStateStore will be committed by the other proxy, so we simply discard the commit message
 		auto fcm = self->logAdapter->getCommitMessage();
-		storeCommits.push_back(std::make_pair(fcm, self->txnStateStore->commit()));
+		storeCommits.emplace_back(fcm, self->txnStateStore->commit());
 		//discardCommit( dbgid, fcm, txnStateStore->commit() );
 
 		if (initialState) {
@@ -647,7 +647,7 @@ ACTOR Future<Void> commitBatch(
 	state Optional<Value> metadataVersionAfter = self->txnStateStore->readValue(metadataVersionKey).get();
 
 	auto fcm = self->logAdapter->getCommitMessage();
-	storeCommits.push_back(std::make_pair(fcm, self->txnStateStore->commit()));
+	storeCommits.emplace_back(fcm, self->txnStateStore->commit());
 	self->version = commitVersion;
 	if (!self->validState.isSet()) self->validState.send(Void());
 	ASSERT(commitVersion);
@@ -907,7 +907,7 @@ ACTOR Future<Void> commitBatch(
 			self->txsPopVersions.pop_front();
 		}
 
-		self->txsPopVersions.push_back(std::make_pair(commitVersion, msg.popTo));
+		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
 	self->logSystem->pop(msg.popTo, txsTag);
 
@@ -1220,7 +1220,7 @@ ACTOR static Future<Void> readRequestServer(
 					for(auto& it : r.value().src_info) {
 						ssis.push_back(it->interf);
 					}
-					rep.results.push_back(std::make_pair(r.range(), ssis));
+					rep.results.emplace_back(r.range(), ssis);
 				} else if(!req.reverse) {
 					int count = 0;
 					for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
@@ -1229,7 +1229,7 @@ ACTOR static Future<Void> readRequestServer(
 						for(auto& it : r.value().src_info) {
 							ssis.push_back(it->interf);
 						}
-						rep.results.push_back(std::make_pair(r.range(), ssis));
+						rep.results.emplace_back(r.range(), ssis);
 						count++;
 					}
 				} else {
@@ -1241,7 +1241,7 @@ ACTOR static Future<Void> readRequestServer(
 						for(auto& it : r.value().src_info) {
 							ssis.push_back(it->interf);
 						}
-						rep.results.push_back(std::make_pair(r.range(), ssis));
+						rep.results.emplace_back(r.range(), ssis);
 						if(r == commitData->keyInfo.ranges().begin()) {
 							break;
 						}
@@ -1258,7 +1258,7 @@ ACTOR static Future<Void> readRequestServer(
 					rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
 					Standalone<VectorRef<KeyValueRef>> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 					for(int i = history.size()-1; i >= 0; i-- ) {
-						rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
+						rep.history.emplace_back(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value));
 					}
 					auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
 					if( localityKey.present() ) {
@@ -1427,7 +1427,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for(auto r = rs.begin(); r != rs.end(); ++r)
-		r->value().push_back(std::make_pair<Version,int>(0,0));
+		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
@@ -1560,7 +1560,7 @@ ACTOR Future<Void> masterProxyServerCore(
 										info.dest_info.push_back( storageInfo );
 									}
 									uniquify(info.tags);
-									keyInfoData.push_back( std::make_pair(MapPair<Key,ServerCacheInfo>(k, info), 1) );
+									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
 								}
 							} else {
 								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
