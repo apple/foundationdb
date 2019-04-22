@@ -94,6 +94,18 @@ struct ServerCacheInfo {
 	std::vector<Tag> tags;
 	std::vector<Reference<StorageInfo>> src_info;
 	std::vector<Reference<StorageInfo>> dest_info;
+
+	void populateTags() {
+		if (tags.size()) return;
+
+		for (const auto& info : src_info) {
+			tags.push_back(info->tag);
+		}
+		for (const auto& info : dest_info) {
+			tags.push_back(info->tag);
+		}
+		uniquify(tags);
+	}
 };
 
 struct GetValueReply : public LoadBalancedReply {
