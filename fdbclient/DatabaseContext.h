@@ -95,7 +95,17 @@ public:
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<ClusterConnectionFile> getConnectionFile();
 
-//private: 
+	// Change the database to use the new connection file, and recreate all pending watches for committed transactions.
+	//
+	// Meant to be used as part of a 'hot standby' solution to switch to the standby. A correct switch will involve
+	// advancing the version on the new cluster sufficiently far that any transaction begun with a read version from the
+	// old cluster will fail to commit. Assuming the above version-advancing is done properly, a call to
+	// changeConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
+	// new cluster.
+	Future<Void> changeConnectionFile(Reference<ClusterConnectionFile> standby);
+	Future<Void> recreateWatches();
+
+	// private:
 	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
 		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
@@ -118,6 +128,14 @@ public:
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
+
+	AsyncTrigger recreateWatchesTrigger;
+
+	// Disallow any reads at a read version lower than minAcceptableReadVersion.  This way the client does not have to
+	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
+	// Updated everytime we get a GRV response
+	Version minAcceptableReadVersion = std::numeric_limits<Version>::max();
+	void validateVersion(Version);
 
 	// Client status updater
 	struct ClientStatusUpdater {

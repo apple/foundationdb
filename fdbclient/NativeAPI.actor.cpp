@@ -173,12 +173,16 @@ std::string unprintable( std::string const& val ) {
 	return s;
 }
 
-void validateVersion(Version version) {
+void DatabaseContext::validateVersion(Version version) {
 	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any reads.
 	// We throw client_invalid_operation because the caller didn't directly set the version, so the version_invalid error
 	// might be confusing.
 	if(version == 0) {
 		throw client_invalid_operation();
+	}
+	if (version < minAcceptableReadVersion) {
+		TEST(true); // Attempted to read a version lower than any this client has seen from the current cluster
+		throw transaction_too_old();
 	}
 
 	ASSERT(version > 0 || version == latestVersion);
@@ -775,9 +779,51 @@ Future<Void> DatabaseContext::onConnected() {
 	return cluster->onConnected();
 }
 
+ACTOR static Future<Void> changeConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
+	TEST(true); // Change connection file
+	TraceEvent("ChangeClusterFile")
+	    .detail("ClusterFile", connFile->canGetFilename() ? connFile->getFilename() : "")
+	    .detail("ConnectionString", connFile->getConnectionString().toString());
+
+	// Reset state from former cluster.
+	self->masterProxies.clear();
+	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
+	self->invalidateCache(allKeys);
+	self->cluster->getClusterInterface()->set({});
+
+	self->cluster->getConnectionFile()->set(connFile);
+	state Database db(Reference<DatabaseContext>::addRef(self));
+	state Transaction tr(db);
+	loop {
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		try {
+			TraceEvent("ChangeClusterFileAttemptingGRV");
+			Version v = wait(tr.getReadVersion());
+			TraceEvent("ChangeClusterFileGotRV")
+			    .detail("ReadVersion", v)
+			    .detail("MinAcceptableReadVersion", self->minAcceptableReadVersion);
+			ASSERT(self->minAcceptableReadVersion != std::numeric_limits<Version>::max());
+			TraceEvent("ChangeClusterFileRecreateWatchesTrigger");
+			self->recreateWatchesTrigger.trigger();
+			return Void();
+		} catch (Error& e) {
+			TraceEvent("ChangeClusterFileError").detail("Error", e.what());
+			wait(tr.onError(e));
+		}
+	}
+}
+
 Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 	ASSERT(cluster);
-	return cluster->getConnectionFile();
+	return cluster->getConnectionFile()->get();
+}
+
+Future<Void> DatabaseContext::changeConnectionFile(Reference<ClusterConnectionFile> standby) {
+	return changeConnectionFileImpl(standby, this);
+}
+
+Future<Void> DatabaseContext::recreateWatches() {
+	return recreateWatchesTrigger.onTrigger();
 }
 
 Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
@@ -817,8 +863,34 @@ Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar
 	init(connFile, true, connectedCoordinatorsNum);
 }
 
-void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion ) {
-	connectionFile = connFile;
+ACTOR Future<Void> monitorConnectionFile(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
+                                         Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
+                                         Reference<AsyncVar<int>> connectedCoordinatorsNum) {
+	state Future<Void> monitor;
+	state Future<Void> firstTime = Void();
+	loop {
+		choose {
+			when(wait(firstTime || connFile->onChange())) {
+				firstTime = Never();
+				if (connFile->get()) {
+					monitor.cancel();
+					monitor = monitorLeader(connFile->get(), clusterInterface, connectedCoordinatorsNum);
+				} else {
+					monitor = Never();
+				}
+			}
+			when(wait(monitor)) {
+				ASSERT(false); // monitorLeader should never quit.
+			}
+		}
+	}
+}
+
+void Cluster::init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor,
+                   Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion) {
+	connectionFile =
+	    Reference<AsyncVar<Reference<ClusterConnectionFile>>>(new AsyncVar<Reference<ClusterConnectionFile>>());
+	connectionFile->set(connFile);
 	connected = clusterInterface->onChange();
 
 	if(!g_network)
@@ -851,7 +923,7 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
 		}
 
-		leaderMon = monitorLeader( connFile, clusterInterface, connectedCoordinatorsNum );
+		connectionFileMon = monitorConnectionFile(connectionFile, clusterInterface, connectedCoordinatorsNum);
 		failMon = failureMonitorClient( clusterInterface, false );
 	}
 }
@@ -1317,7 +1389,7 @@ Future<Void> Transaction::warmRange(Database cx, KeyRange keys) {
 ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Database cx, TransactionInfo info, Reference<TransactionLogInfo> trLogInfo )
 {
 	state Version ver = wait( version );
-	validateVersion(ver);
+	cx->validateVersion(ver);
 
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, key, &StorageServerInterface::getValue, info) );
@@ -1434,6 +1506,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -1451,10 +1524,10 @@ ACTOR Future<Void> readVersionBatcher(
 	DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
 	uint32_t flags);
 
-ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Value> value, Database cx, int readVersionFlags, TransactionInfo info )
-{
+ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> value, Database cx,
+                              TransactionInfo info) {
 	state Version ver = wait( version );
-	validateVersion(ver);
+	cx->validateVersion(ver);
 	ASSERT(ver != latestVersion);
 
 	loop {
@@ -1468,7 +1541,15 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			state Version resp = wait( loadBalance( ssi.second, &StorageServerInterface::watchValue, WatchValueRequest(key, value, ver, watchValueID), TaskDefaultPromiseEndpoint ) );
+			state Version resp;
+			choose {
+				when(Version r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
+				                                  WatchValueRequest(key, value, ver, watchValueID),
+				                                  TaskDefaultPromiseEndpoint))) {
+					resp = r;
+				}
+				when(wait(cx->cluster ? cx->cluster->getConnectionFile()->onChange() : Never())) { wait(Never()); }
+			}
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After"); //.detail("TaskID", g_network->getCurrentTask());
 			}
@@ -1765,7 +1846,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 	try {
 		state Version version = wait( fVersion );
-		validateVersion(version);
+		cx->validateVersion(version);
 
 		state double startTime = now();
 		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the version that the first one completed
@@ -2067,6 +2148,7 @@ void Watch::setWatch(Future<Void> watchFuture) {
 
 //FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self ) {
+	state TransactionInfo info = self->info;
 	cx->addWatch();
 	try {
 		self->watches.push_back(watch);
@@ -2079,8 +2161,18 @@ ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self
 			// NativeAPI finished commit and updated watchFuture
 			when(wait(watch->onSetWatchTrigger.getFuture())) {
 
-				// NativeAPI watchValue future finishes or errors
-				wait(watch->watchFuture);
+				loop {
+					choose {
+						// NativeAPI watchValue future finishes or errors
+						when(wait(watch->watchFuture)) { break; }
+
+						when(wait(cx->recreateWatches())) {
+							TEST(true); // Recreated a watch after switch
+							watch->watchFuture =
+							    watchValue(cx->minAcceptableReadVersion, watch->key, watch->value, cx, info);
+						}
+					}
+				}
 			}
 		}
 	}
@@ -2600,7 +2692,7 @@ void Transaction::setupWatches() {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
 		for(int i = 0; i < watches.size(); ++i)
-			watches[i]->setWatch(watchValue( watchVersion, watches[i]->key, watches[i]->value, cx, options.getReadVersionFlags, info ));
+			watches[i]->setWatch(watchValue(watchVersion, watches[i]->key, watches[i]->value, cx, info));
 
 		watches.clear();
 	}
@@ -2969,6 +3061,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT( v.version > 0 );
+					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					return v;
 				}
 			}
