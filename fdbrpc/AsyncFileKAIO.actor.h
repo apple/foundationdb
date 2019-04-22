@@ -639,7 +639,7 @@ private:
 
 	ACTOR static void poll( Reference<IEventFD> ev ) {
 		loop {
-			int64_t evfd_count = wait( ev->read() );
+			wait(success(ev->read()));
 
 			wait(delay(0, TaskDiskIOComplete));
 
