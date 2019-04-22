@@ -406,7 +406,7 @@ public:
 				return rocksdb::Status::IOError();
 			}
 		}
-		return OpenWritableFile(fname, result, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE);
+		return OpenWritableFile(fname, result, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE);
 	}
 
 	rocksdb::Status ReuseWritableFile(const std::string& fname,
@@ -631,6 +631,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(OpenAction& a) {
 			a.options.env = new FlowEnv(id);
+			a.options.create_if_missing = true;
 			auto status = rocksdb::DB::Open(a.options, a.path, &db);
 			db->CreateColumnFamily(a.cfOptions, "fdb_cf", &cf);
 			if (!status.ok()) {
@@ -799,6 +800,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		, id(id)
 	{
 		writeThread = CoroThreadPool::createThreadPool();
+		readThreads = CoroThreadPool::createThreadPool();
 		writeThread->addThread(new Writer(db, cf, id));
 		for (unsigned i = 0; i < nReaders; ++i) {
 			readThreads->addThread(new Reader(db, cf));
