@@ -1665,7 +1665,7 @@ int main(int argc, char* argv[]) {
 				actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 				//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
-				actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
+				//actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 				//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter( waitForAll(actors) );

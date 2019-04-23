@@ -152,6 +152,8 @@ struct RestoreInterface {
 	NetworkAddress address() const { return setRole.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
+		heartbeat.getEndpoint( TaskClusterController );
+		
 		setRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
 		sampleRangeFile.getEndpoint( TaskClusterController ); 
 		sampleLogFile.getEndpoint( TaskClusterController ); 
