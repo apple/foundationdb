@@ -378,7 +378,8 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 	self->poppedVersion = std::min(minKnownCommittedVersion, self->minKnownCommittedVersion);
 	if(self->logSystem->get() && self->allowPops) {
-		self->logSystem->get()->pop(self->poppedVersion, self->routerTag);
+		const Tag popTag = self->logSystem->get()->getPseudoPopTag(self->routerTag, ProcessClass::LogRouterClass);
+		self->logSystem->get()->pop(self->poppedVersion, popTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));

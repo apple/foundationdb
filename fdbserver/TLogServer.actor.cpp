@@ -1122,26 +1122,33 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 };
 
 ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
-	auto tagData = logData->getTagData(req.tag);
+	state Version upTo = req.to;
+	int8_t tagLocality = req.tag.locality;
+	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
+		upTo = logData->logSystem->get()->getPseudoLocalityPopVersion(tagLocality, req.to);
+		tagLocality = tagLocalityLogRouter;
+	}
+	state Tag tag(tagLocality, req.tag.id);
+	auto tagData = logData->getTagData(tag);
 	if (!tagData) {
-		tagData = logData->createTagData(req.tag, req.to, true, true, false);
-	} else if (req.to > tagData->popped) {
-		tagData->popped = req.to;
+		tagData = logData->createTagData(tag, upTo, true, true, false);
+	} else if (upTo > tagData->popped) {
+		tagData->popped = upTo;
 		tagData->poppedRecently = true;
 		tagData->requiresPoppedLocationUpdate = true;
 
-		if(tagData->unpoppedRecovered && req.to > logData->recoveredAt) {
+		if(tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
 			tagData->unpoppedRecovered = false;
 			logData->unpoppedRecoveredTags--;
-			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", req.tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
+			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
 			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
 				logData->recoveryComplete.send(Void());
 			}
 		}
 
-		if ( req.to > logData->persistentDataDurableVersion )
-			wait(tagData->eraseMessagesBefore( req.to, self, logData, TaskTLogPop ));
-		//TraceEvent("TLogPop", self->dbgid).detail("Tag", req.tag).detail("To", req.to);
+		if (upTo > logData->persistentDataDurableVersion)
+			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskTLogPop));
+		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
 	}
 
 	req.reply.send(Void());

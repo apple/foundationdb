@@ -166,6 +166,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	int repopulateRegionAntiQuorum;
 	bool stopped;
 	std::set<int8_t> pseudoLocalities;
+	std::map<int8_t, Version> pseudoLocalityPopVersion;
 
 	// new members
 	Future<Void> rejoins;
@@ -214,6 +215,41 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual UID getDebugID() {
 		return dbgid;
+	}
+
+	void addPseudoLocality(int8_t locality) override {
+		ASSERT(locality < 0);
+		pseudoLocalities.insert(locality);
+		pseudoLocalityPopVersion[locality] = 0;
+	}
+
+	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) override {
+		switch (type) {
+		case ProcessClass::LogRouterClass:
+			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tag.locality) > 0) {
+				tag.locality = tagLocalityLogRouterMapped;
+			}
+			break;
+
+		default:
+			break;
+		}
+		return tag;
+	}
+
+	bool isPseudoLocality(int8_t locality) override {
+		return pseudoLocalities.count(locality) > 0;
+	}
+
+	Version getPseudoLocalityPopVersion(int8_t locality, Version upTo) override {
+		ASSERT(isPseudoLocality(locality));
+		auto& localityVersion = pseudoLocalityPopVersion[locality];
+		localityVersion = std::max(localityVersion, upTo);
+		Version minVersion = localityVersion;
+		for (const auto& it : pseudoLocalityPopVersion) {
+			minVersion = std::min(minVersion, it.second);
+		}
+		return minVersion;
 	}
 
 	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery) {
@@ -1083,7 +1119,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual bool hasRemoteLogs() {
-		return logRouterTags > 0;
+		return logRouterTags > 0 || pseudoLocalities.size() > 0;
 	}
 
 	virtual Tag getRandomRouterTag() {
@@ -1750,7 +1786,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(configuration.usableRegions > 1) {
 			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,recr.tLogs.size()));
 			logSystem->expectedLogSets++;
-			logSystem->pseudoLocalities.insert(tagLocalityLogRouter);
+			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
 		}
 
 		logSystem->tLogs.emplace_back(new LogSet());

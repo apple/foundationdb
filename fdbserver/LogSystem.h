@@ -697,6 +697,16 @@ struct ILogSystem {
 	virtual Tag getRandomRouterTag() = 0;
 
 	virtual void stopRejoins() = 0;
+
+	virtual void addPseudoLocality(int8_t locality) = 0;
+
+	// Returns the pseudo tag to be popped for the given process class. If the
+	// process class doesn't use pseudo tag, return the same tag.
+	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) = 0;
+
+	virtual bool isPseudoLocality(int8_t locality) = 0;
+
+	virtual Version getPseudoLocalityPopVersion(int8_t locality, Version upTo) = 0;
 };
 
 struct LengthPrefixedStringRef {
