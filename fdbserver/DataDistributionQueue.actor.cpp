@@ -51,7 +51,8 @@ struct RelocateData {
 			rs.priority == PRIORITY_REBALANCE_SHARD ||
 			rs.priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-			rs.priority == PRIORITY_SPLIT_SHARD ), interval("QueuedRelocation") {}
+			rs.priority == PRIORITY_SPLIT_SHARD ||
+			rs.priority == PRIORITY_TEAM_REDUNDANT ), interval("QueuedRelocation") {}
 
 	bool operator> (const RelocateData& rhs) const {
 		return priority != rhs.priority ? priority > rhs.priority : ( startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId );
