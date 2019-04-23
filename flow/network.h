@@ -51,7 +51,6 @@ enum {
 	TaskTLogPeek = 8590,
 	TaskTLogCommitReply = 8580,
 	TaskTLogCommit = 8570,
-	TaskTLogSpilledPeekReply = 8567,
 	TaskProxyGetRawCommittedVersion = 8565,
 	TaskProxyResolverReply = 8560,
 	TaskProxyCommitBatcher = 8550,
@@ -73,6 +72,7 @@ enum {
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
+	TaskTLogSpilledPeekReply = 2800,
 	TaskLowPriority = 2000,
 
 	TaskMinPriority = 1000
