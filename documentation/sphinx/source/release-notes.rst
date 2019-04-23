@@ -2,14 +2,6 @@
 Release Notes
 #############
 
-6.1.2
-=====
-
-Fixes
------
-
-* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
-
 6.1.0
 =====
 
@@ -76,6 +68,7 @@ Fixes
 * Windows: Fixed a crash when deleting files. `(Issue #1380) <https://github.com/apple/foundationdb/issues/1380>`_ (by KrzysFR)
 * Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. `(PR #1394) <https://github.com/apple/foundationdb/pull/1394>`_
 * The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
 
 Status
 ------
@@ -122,6 +115,7 @@ Fixes only impacting 6.1.0+
 
 * The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
 * The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
+* The background actor which removes redundant teams could leave data unbalanced. [6.1.3] `(PR #1479) <https://github.com/apple/foundationdb/pull/1479>`_
 
 Earlier release notes
 ---------------------
