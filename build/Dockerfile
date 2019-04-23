@@ -1,5 +1,5 @@
 FROM centos:6
-LABEL version=0.1.1
+LABEL version=0.1.2
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
@@ -8,11 +8,12 @@ RUN yum install -y yum-utils &&\
 	yum -y install centos-release-scl epel-release &&\
 	yum -y install devtoolset-7 mono-core java-1.8.0-openjdk-devel \
 		rh-python36-python-devel rh-ruby24 golang python27 \
-		rpm-build debbuild python-pip npm ccache distcc
+		rpm-build debbuild python-pip npm ccache distcc &&\
+	pip install boto3==1.1.1
 
-RUN adduser --comment '' fdb && chown -R fdb /opt && chmod -R 0777 /opt
+USER root
 
-USER fdb
+RUN adduser --comment '' fdb && chown fdb /opt
 
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
 RUN cd /opt/ &&\
@@ -21,8 +22,6 @@ RUN cd /opt/ &&\
 		sha256sum -c boost-sha.txt &&\
     tar -xjf boost_1_67_0.tar.bz2 &&\
     rm -rf boost_1_67_0.tar.bz2 boost-sha.txt boost_1_67_0/libs
-
-USER root
 
 # install cmake
 RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz > /tmp/cmake.tar.gz &&\
