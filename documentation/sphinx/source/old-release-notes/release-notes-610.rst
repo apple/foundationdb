@@ -10,34 +10,6 @@ Fixes
 
 * Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
 
-Features
---------
-
-Performance
------------
-
-Fixes
------
-
-Status
-------
-
-Bindings
---------
-
-Other Changes
--------------
-
-* Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
-* IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
-* The ``process_behind`` error can now be thrown by clients and is treated as retryable. [6.1.1] `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
-
-Fixes only impacting 6.1.0+
----------------------------
-
-* The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
-* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
-
 6.1.0
 =====
 
@@ -76,6 +48,7 @@ Features
 * Added ``modify`` command to fdbbackup for modifying parameters of a running backup. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 * Added ``header`` parameter to blobstore backup URLs for setting custom HTTP headers. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 * Added the ``maintenance`` command to ``fdbcli``. This command will stop data distribution from moving data away from processes with a specified zoneID. `(PR #1397) <https://github.com/apple/foundationdb/pull/1397>`_
+* Added the ``three_data_hall_fallback`` configuration, which can be used to drop storage replicas in a dead data hall. [6.1.1] `(PR #1422) <https://github.com/apple/foundationdb/pull/1422>`_
 
 Performance
 -----------
@@ -102,6 +75,7 @@ Fixes
 * Java: Successful commits and range reads no longer create ``FDBException`` objects, which avoids wasting resources and reduces memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
 * Windows: Fixed a crash when deleting files. `(Issue #1380) <https://github.com/apple/foundationdb/issues/1380>`_ (by KrzysFR)
 * Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. `(PR #1394) <https://github.com/apple/foundationdb/pull/1394>`_
+* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
 
 Status
 ------
@@ -141,6 +115,13 @@ Other Changes
 
 * Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
 * IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable. [6.1.1] `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+
+Fixes only impacting 6.1.0+
+---------------------------
+
+* The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
+* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
 
 Earlier release notes
 ---------------------
