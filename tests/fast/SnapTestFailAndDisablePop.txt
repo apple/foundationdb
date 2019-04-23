@@ -5,36 +5,24 @@ testName=SnapTest
 numSnaps=1
 maxSnapDelay=3.0
 testID=4
-snapCheck=true
-
-; TLog pop enable and disable UID mismatch
-testTitle=SnapTLogPopEnableDisableMismatch
-testName=SnapTest
-numSnaps=1
-maxSnapDelay=3.0
-testID=5
-snapCheck=true
 
 ; snapCreate without TLogPopDisable
 testTitle=SnapCreateWithNoDisablePop
 testName=SnapTest
 numSnaps=1
 maxSnapDelay=3.0
-testID=6
-snapCheck=true
+testID=5
 
 ; snapCreate and tlogPopDisable with mis-matched UID
 testTitle=SnapCreateDisableTLogPopMismatch
 testName=SnapTest
 numSnaps=1
 maxSnapDelay=3.0
-testID=7
-snapCheck=true
+testID=6
 
 ; snapCreate with binary path that is not whitelisted
 testTitle=SnapCreateNotWhitelistedBinaryPath
 testName=SnapTest
 numSnaps=1
 maxSnapDelay=3.0
-testID=8
-snapCheck=false
+testID=7

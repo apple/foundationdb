@@ -285,6 +285,7 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 extern const StringRef execSnap;
 extern const StringRef execDisableTLogPop;
 extern const StringRef execEnableTLogPop;
+extern const StringRef snapTestFailStatus;
 
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.

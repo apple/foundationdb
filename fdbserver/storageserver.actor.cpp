@@ -1892,7 +1892,6 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		int err = wait(execHelper(&execArg, data->folder, "role=storage"));
 		clearExecOpInProgress(execUID);
 	}
-	auto tokenStr = "ExecTrace/storage/" + uidStr.toString();
 	TraceEvent te = TraceEvent("ExecTraceStorage");
 	te.detail("Uid", uidStr.toString());
 	te.detail("Status", err);
@@ -1904,9 +1903,6 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 	te.detail("DataVersion", data->version.get());
 	te.detail("Tag", data->tag.toString());
 	te.detail("SnapCreateSkipped", skip);
-	if (cmd == execSnap) {
-		te.trackLatest(tokenStr.c_str());
-	}
 	return Void();
 }
 

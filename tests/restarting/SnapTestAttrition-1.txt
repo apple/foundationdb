@@ -5,7 +5,6 @@ testTitle=SnapTestPre
         maxSnapDelay=3.0
         testID=0
         clearAfterTest=false
-        snapCheck=false
 
 testTitle=SnapTestTakeSnap
 ;Take snap and do read/write
@@ -26,7 +25,6 @@ testTitle=SnapTestTakeSnap
         maxSnapDelay=30.0
         testID=1
         clearAfterTest=false
-        snapCheck=false
 
         testName=Attrition
         testDuration=20.0
@@ -38,7 +36,6 @@ testTitle=SnapTestPost
         maxSnapDelay=25.0
         testID=2
         clearAfterTest=false
-        snapCheck=false
 
 ; save and shutdown
 testTitle=SnapSimpleShutdown
