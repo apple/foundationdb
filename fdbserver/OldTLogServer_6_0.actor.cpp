@@ -25,6 +25,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
@@ -252,6 +253,7 @@ struct TLogData : NonCopyable {
 	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Database cx;
 
 	NotifiedVersion queueCommitEnd;
 	Version queueCommitBegin;
@@ -295,6 +297,7 @@ struct TLogData : NonCopyable {
 			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS),
 			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped()
 		{
+			cx = openDBOnServer(dbInfo, TaskDefaultEndpoint, true, true);
 		}
 };
 
@@ -969,8 +972,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		TraceEvent("ResetIgnorePopRequest")
 		    .detail("Now", g_network->now())
 		    .detail("IgnorePopRequest", self->ignorePopRequest)
-		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
-		    .trackLatest("DisableTLogPopTimedOut");
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
 	}
 	wait(tLogPopCore(self, req.tag, req.to, logData));
 	req.reply.send(Void());
@@ -1282,7 +1284,8 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 										Standalone<VectorRef<Tag>>* execTags,
 										ExecCmdValueString* execArg,
 										StringRef* execCmd,
-										Version* execVersion)
+										Version* execVersion,
+										vector<Future<Void>>* snapFailKeySetters)
 {
 	// inspect the messages to find if there is an Exec type and print
 	// it. message are prefixed by the length of the message and each
@@ -1335,7 +1338,7 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 		}
 		if (*execCmd == execSnap) {
 			// validation check specific to snap request
-			std::string reason;
+			state std::string reason;
 			if (!self->ignorePopRequest) {
 				*execVersion = invalidVersion;
 				reason = "SnapFailIgnorePopNotSet";
@@ -1348,17 +1351,21 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 				TraceEvent(SevWarn, "TLogSnapFailed")
 					.detail("IgnorePopUid", self->ignorePopUid)
 					.detail("IgnorePopRequest", self->ignorePopRequest)
-					.detail("Reason", reason)
-					.trackLatest(reason.c_str());
+					.detail("Reason", reason);
 
-				std::string message = "ExecTrace/TLog/" + logData->allTags.begin()->toString()
-					+ "/" + uidStr.toString();
 				TraceEvent("ExecCmdSnapCreate")
 					.detail("Uid", uidStr.toString())
 					.detail("Status", -1)
 					.detail("Tag", logData->allTags.begin()->toString())
-					.detail("Role", "TLog")
-					.trackLatest(message.c_str());
+					.detail("Role", "TLog");
+				if (g_network->isSimulated()) {
+					// write SnapFailedTLog.$UID
+					Standalone<StringRef> keyStr = snapTestFailStatus.withSuffix(uidStr);
+					Standalone<StringRef> valStr = LiteralStringRef("Success");
+					TraceEvent(SevDebug, "TLogKeyStr").detail("Value", keyStr);
+					snapFailKeySetters->push_back(runRYWTransaction(self->cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
+																   { tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS); tr->set(keyStr, valStr); return Void(); }));
+				}
 			}
 		}
 		if (*execCmd == execDisableTLogPop) {
@@ -1376,15 +1383,13 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 				.detail("UidStr", uidStr.toString())
 				.detail("IgnorePopUid", self->ignorePopUid)
 				.detail("IgnporePopRequest", self->ignorePopRequest)
-				.detail("IgnporePopDeadline", self->ignorePopDeadline)
-				.trackLatest("DisablePopTLog");
+				.detail("IgnporePopDeadline", self->ignorePopDeadline);
 		}
 		if (*execCmd == execEnableTLogPop) {
 			if (self->ignorePopUid != uidStr.toString()) {
 				TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
 					.detail("IgnorePopUid", self->ignorePopUid)
-					.detail("UidStr", uidStr.toString())
-					.trackLatest("TLogPopDisableEnableUidMismatch");
+					.detail("UidStr", uidStr.toString());
 			}
 
 			TraceEvent("EnableTLogPlayAllIgnoredPops");
@@ -1408,8 +1413,7 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 				.detail("UidStr", uidStr.toString())
 				.detail("IgnorePopUid", self->ignorePopUid)
 				.detail("IgnporePopRequest", self->ignorePopRequest)
-				.detail("IgnporePopDeadline", self->ignorePopDeadline)
-				.trackLatest("EnablePopTLog");
+				.detail("IgnporePopDeadline", self->ignorePopDeadline);
 		}
 	}
 	return Void();
@@ -1454,8 +1458,6 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 		}
 		poppedTagVersion = tagv->popped;
 
-		state std::string message = "ExecTrace/TLog/" + tagv->tag.toString() + "/" + uidStr.toString();
-
 		TraceEvent te = TraceEvent(SevDebug, "TLogExecTraceDetailed");
 		te.detail("Uid", uidStr.toString());
 		te.detail("Status", err);
@@ -1469,9 +1471,6 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 		te.detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion);
 		te.detail("QueueCommittedVersion", logData->queueCommittedVersion.get());
 		te.detail("IgnorePopUid", self->ignorePopUid);
-		if (execCmd == execSnap) {
-			te.trackLatest(message.c_str());
-		}
 	}
 	return Void();
 }
@@ -1530,6 +1529,7 @@ ACTOR Future<Void> tLogCommit(
 	state TLogQueueEntryRef qe;
 	state StringRef execCmd;
 	state Standalone<VectorRef<Tag>> execTags;
+	state vector<Future<Void>> snapFailKeySetters;
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		if(req.debugID.present())
@@ -1542,7 +1542,7 @@ ACTOR Future<Void> tLogCommit(
 		qe.id = logData->logId;
 
 		if (req.hasExecOp) {
-			wait(execProcessingHelper(self, logData, &req, &execTags, &execArg, &execCmd, &execVersion));
+			wait(execProcessingHelper(self, logData, &req, &execTags, &execArg, &execCmd, &execVersion, &snapFailKeySetters));
 			if (execVersion != invalidVersion) {
 				TraceEvent(SevDebug, "SettingExecOpCommit")
 					.detail("ExecVersion", execVersion)
@@ -1566,6 +1566,7 @@ ACTOR Future<Void> tLogCommit(
 
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set( req.version );
+
 
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
@@ -1593,6 +1594,13 @@ ACTOR Future<Void> tLogCommit(
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
 
 	req.reply.send( logData->durableKnownCommittedVersion );
+	if (g_network->isSimulated()) {
+		if (snapFailKeySetters.size() > 0) {
+			TraceEvent(SevDebug, "SettingSnapFailKey");
+			wait(waitForAll(snapFailKeySetters));
+			TraceEvent(SevDebug, "SettingSnapFailKeyDone");
+		}
+	}
 	return Void();
 }
 

@@ -41,6 +41,8 @@ const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent stat
                                                      // storage, TLog and coordinated state
 const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
 const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
+// used to communicate snap failures between TLog and SnapTest Workload, used only in simulator
+const StringRef snapTestFailStatus = LiteralStringRef("\xff/SnapTestFailStatus/");
 
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );

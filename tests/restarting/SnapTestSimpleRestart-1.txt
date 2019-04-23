@@ -5,7 +5,6 @@ testTitle=SnapSimplePre
         maxSnapDelay=30.0
         testID=0
         clearAfterTest=false
-        snapCheck=false
 
 ;take snap
 testTitle=SnapSimpleTakeSnap
@@ -14,7 +13,6 @@ testTitle=SnapSimpleTakeSnap
         maxSnapDelay=5.0
         testID=1
         clearAfterTest=false
-        snapCheck=true
 
 ;write 1000 Keys ending with odd number
 testTitle=SnapSimplePost
@@ -23,7 +21,6 @@ testTitle=SnapSimplePost
         maxSnapDelay=3.0
         testID=2
         clearAfterTest=false
-        snapCheck=false
 
 ; save and shutdown
 testTitle=SnapSimpleShutdown

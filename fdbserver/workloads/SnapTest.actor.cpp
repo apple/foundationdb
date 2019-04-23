@@ -77,7 +77,6 @@ public: // variables
 	int numSnaps; // num of snapshots to be taken
 	              // FIXME: currently validation works on numSnap = 1
 	double maxSnapDelay; // max delay before which a snapshot will be taken
-	bool snapCheck; // check for the successful snap create
 	int testID; // test id
 	UID snapUID; // UID used for snap name
 	std::string restartInfoLocation; // file location to store the snap restore info
@@ -85,14 +84,13 @@ public: // variables
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), snapCheck(false), testID(0), snapUID() {
+	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), testID(0), snapUID() {
 		TraceEvent("SnapTestWorkload Constructor");
 		std::string workloadName = "SnapTest";
 		maxRetryCntToRetrieveMessage = 10;
 
 		numSnaps = getOption(options, LiteralStringRef("numSnaps"), 0);
 		maxSnapDelay = getOption(options, LiteralStringRef("maxSnapDelay"), 25.0);
-		snapCheck = getOption(options, LiteralStringRef("snapCheck"), false);
 		testID = getOption(options, LiteralStringRef("testID"), 0);
 		restartInfoLocation =
 		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
@@ -113,45 +111,33 @@ public: // workload functions
 		return Void();
 	}
 
+	ACTOR Future<bool> _check(Database cx, SnapTestWorkload* self) {
+		state Transaction tr(cx);
+		// read the key SnapFailedTLog.$UID
+		loop {
+			try {
+				Standalone<StringRef> keyStr = snapTestFailStatus.withSuffix(StringRef(self->snapUID.toString()));
+				TraceEvent("TestKeyStr").detail("Value", keyStr);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> val = wait(tr.get(keyStr));
+				ASSERT(val.present());
+				break;
+			} catch (Error &e) {
+				wait(tr.onError(e));
+			}
+		}
+		return true;
+	}
+
 	Future<bool> check(Database const& cx) override {
-		TraceEvent("SnapTestWorkloadCheck").detail("ClientID", clientId).detail("SnapCheck", this->snapCheck);
-		if (!this->snapCheck || clientId != 0) {
-			TraceEvent("SnapTestCheckSucc");
+		TraceEvent("SnapTestWorkloadCheck").detail("ClientID", clientId);
+		if (clientId != 0) {
 			return true;
 		}
-		switch (this->testID) {
-		case 0:
-		case 1:
-		case 2:
-		case 3: {
-			Future<std::vector<WorkerInterface>> proxyIfaces;
-			return (verifyExecTraceVersion(cx, this));
-			break;
+		if (this->testID != 5 && this->testID != 6) {
+			return true;
 		}
-		case 4: {
-			std::string token = "DisableTLogPopTimedOut";
-			return verifyTLogTrackLatest(cx, this, token);
-			break;
-		}
-		case 5: {
-			std::string token = "TLogPopDisableEnableUidMismatch";
-			return verifyTLogTrackLatest(cx, this, token);
-			break;
-		}
-		case 6: {
-			std::string token = "SnapFailIgnorePopNotSet";
-			return verifyTLogTrackLatest(cx, this, token);
-			break;
-		}
-		case 7: {
-			std::string token = "SnapFailedDisableTLogUidMismatch";
-			return verifyTLogTrackLatest(cx, this, token);
-			break;
-		}
-		default: { break; }
-		}
-		TraceEvent(SevError, "InvalidPathCheckOptions");
-		return false;
+		return _check(cx, this);
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
@@ -268,7 +254,6 @@ public: // workload functions
 					begin = firstGreaterThan(kvRange.end()[-1].key);
 				} catch (Error& e) {
 					wait(tr.onError(e));
-					cnt = 0;
 				}
 			}
 			TraceEvent("SnapTestVerifyCntValue").detail("Value", cnt);
@@ -292,45 +277,15 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
-			// wait for 40 seconds and verify that the enabled pop happened
-			// automatically
-			wait(delay(40.0));
-			self->snapUID = UID::fromString("a36b2ca0e8dab0452ac3e12b6b926f4b");
 		} else if (self->testID == 5) {
-			// description: disable TLog pop and enable TLog pop with
-			// different UIDs should mis-match and print an error
-			tr.reset();
-			loop {
-				// disable pop of the TLog
-				try {
-					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=956349f5f368d37a802f1f37d7f4b9c1");
-					tr.execute(execDisableTLogPop, payLoadRef);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-			tr.reset();
-			loop {
-				// enable pop of the TLog
-				try {
-					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=5810898ca2f3143a246886c79d1bea92");
-					tr.execute(execEnableTLogPop, payLoadRef);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-			self->snapUID = UID::fromString("5810898ca2f3143a246886c79d1bea92");
-		} else if (self->testID == 6) {
 			// snapshot create without disabling pop of the TLog
 			tr.reset();
+			state Standalone<StringRef> uidStr = LiteralStringRef("d78b08d47f341158e9a54d4baaf4a4dd");
+			self->snapUID = UID::fromString(uidStr.toString());
 			loop {
 				try {
-					StringRef snapPayload = LiteralStringRef("/bin/"
-					                                         "snap_create.sh:uid=d78b08d47f341158e9a54d4baaf4a4dd");
+					Standalone<StringRef> snapPayload = LiteralStringRef("/bin/"
+					                                         "snap_create.sh:uid=").withSuffix(uidStr);
 					tr.execute(execSnap, snapPayload);
 					wait(tr.commit());
 					break;
@@ -339,8 +294,7 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
-			self->snapUID = UID::fromString("d78b08d47f341158e9a54d4baaf4a4dd");
-		} else if (self->testID == 7) {
+		} else if (self->testID == 6) {
 			// disable popping of TLog and snapshot create with mis-matching
 			tr.reset();
 			loop {
@@ -355,10 +309,12 @@ public: // workload functions
 				}
 			}
 			tr.reset();
+			uidStr = LiteralStringRef("ba61e9612a561d60bd83ad83e1b63568");
+			self->snapUID = UID::fromString(uidStr.toString());
 			loop {
 				// snap create with different UID
 				try {
-					StringRef snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=ba61e9612a561d60bd83ad83e1b63568");
+					Standalone<StringRef> snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=").withSuffix(uidStr);
 					tr.execute(execSnap, snapPayload);
 					wait(tr.commit());
 					break;
@@ -367,8 +323,7 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
-			self->snapUID = UID::fromString("ba61e9612a561d60bd83ad83e1b63568");
-		} else if (self->testID == 8) {
+		} else if (self->testID == 7) {
 			// create a snapshot with a non whitelisted binary path and operation
 			// should fail
 			state bool testedFailure = false;
@@ -395,220 +350,6 @@ public: // workload functions
 		}
 		wait(delay(0.0));
 		return Void();
-	}
-
-	ACTOR Future<bool> verifyTLogTrackLatest(Database cx, SnapTestWorkload* self, std::string event) {
-		TraceEvent("VerifyTLogTrackLatest");
-		state StringRef eventTokenRef(event);
-		state vector<WorkerInterface> tLogWorkers;
-		state std::vector<Future<TraceEventFields>> tLogMessages;
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-		state std::map<NetworkAddress, WorkerInterface> address_workers;
-
-		for (auto const& worker : workers) {
-			address_workers[worker.interf.address()] = worker.interf;
-		}
-		vector<TLogInterface> tLogServers = self->dbInfo->get().logSystemConfig.allLocalLogs();
-
-		for (auto s : tLogServers) {
-			auto it = address_workers.find(s.address());
-			if (it != address_workers.end()) {
-				tLogWorkers.push_back(it->second);
-				TraceEvent("TLogWorker")
-				    .detail("Address", s.address())
-				    .detail("Id", s.id())
-				    .detail("Locality", s.locality.toString());
-			}
-		}
-
-		state int entryi = 0;
-		state int foundTagServers = 0;
-		for (; entryi < tLogWorkers.size(); entryi++) {
-			tLogMessages.push_back(
-			    timeoutError(tLogWorkers[entryi].eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
-
-			try {
-				TraceEvent(SevDebug, "WaitingForTlogMessages");
-				wait(waitForAll(tLogMessages));
-			} catch (Error& e) {
-				TraceEvent(SevError, "UnableToRetrieveTLogMessages")
-					.detail("Token", eventTokenRef.toString())
-					.detail("Reason", "FailedToGetTLogMessages")
-					.detail("Code", e.what());
-				return false;
-			}
-			printMessages(tLogMessages);
-			filterEmptyMessages(tLogMessages);
-			if (tLogMessages.size() < 1) {
-				TraceEvent("VerifyTLogTrackLatestMessageNotFound")
-				    .detail("Address", tLogWorkers[entryi].address())
-				    .detail("Token", eventTokenRef.toString());
-			} else {
-				++foundTagServers;
-			}
-			tLogMessages.clear();
-		}
-		// FIXME: logSystemConfig.allLocalLogs returns remote tlogServers also in few cases and hence the test fails.
-		// Verify that foundTagServers matches the number of TLogServers in the local region
-		if (foundTagServers < 1) {
-			TraceEvent(SevError, "VerifyTLogTrackLatestMessageNotReachAllTLogservers")
-				.detail("Token", eventTokenRef.toString())
-				.detail("FoundaTagServers", foundTagServers);
-			return false;
-		}
-		TraceEvent("VerifyTLogTrackLatestDone");
-		return true;
-	}
-
-	ACTOR Future<bool> verifyExecTraceVersion(Database cx, SnapTestWorkload* self) {
-		state std::vector<NetworkAddress> coordAddrs = wait(getCoordinators(cx));
-		state vector<WorkerDetails> proxyWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerDetails> storageWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerDetails> tLogWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-
-		state std::vector<Future<TraceEventFields>> proxyMessages;
-		state std::vector<Future<TraceEventFields>> tLogMessages;
-		state std::vector<Future<TraceEventFields>> storageMessages;
-		state std::vector<Future<TraceEventFields>> coordMessages;
-		state int numDurableVersionChecks = 0;
-		state std::map<Tag, bool> visitedStorageTags;
-
-		for (int i = 0; i < workers.size(); i++) {
-			std::string eventToken = "ExecTrace/Coordinators/" + self->snapUID.toString();
-			StringRef eventTokenRef(eventToken);
-			coordMessages.push_back(
-				timeoutError(workers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
-		}
-
-		for (int i = 0; i < workers.size(); i++) {
-			std::string eventToken = "ExecTrace/Proxy/" + self->snapUID.toString();
-			StringRef eventTokenRef(eventToken);
-			proxyMessages.push_back(
-				timeoutError(workers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
-		}
-
-		for (int i = 0; i < storageWorkers.size(); i++) {
-			std::string eventToken = "ExecTrace/storage/" + self->snapUID.toString();
-			StringRef eventTokenRef(eventToken);
-			storageMessages.push_back(timeoutError(
-				storageWorkers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
-		}
-
-		try {
-			wait(waitForAll(proxyMessages));
-			wait(waitForAll(storageMessages));
-			wait(waitForAll(coordMessages));
-		} catch (Error& e) {
-			TraceEvent(SevError, "UnableToRetrieveProxyStorageCoordMessages");
-			return false;
-		}
-
-		// filter out empty messages
-		filterEmptyMessages(proxyMessages);
-		filterEmptyMessages(storageMessages);
-		filterEmptyMessages(coordMessages);
-
-		TraceEvent("SnapTestProxyMessages");
-		printMessages(proxyMessages);
-		TraceEvent("SnapTestStorageMessages");
-		printMessages(storageMessages);
-		TraceEvent("SnapTestCoordMessages");
-		printMessages(coordMessages);
-
-		if (proxyMessages.size() != 1) {
-			// if no message from proxy or more than one fail the check
-			TraceEvent(SevError, "NoExecTraceMessageFromProxy");
-			return false;
-		}
-
-		TraceEvent("CoordinatorSnapStatus")
-		    .detail("CoordMessageSize", coordMessages.size())
-		    .detail("CoordAddrssize", coordAddrs.size());
-		if (coordMessages.size() < (coordAddrs.size() + 1) / 2) {
-			TraceEvent(SevError, "NoExecTraceMessageFromQuorumOfCoordinators");
-			return false;
-		}
-
-		state int entryi = 0;
-		state int numTags = -1;
-
-		for (; entryi < proxyMessages.size(); entryi++) {
-			state Version execVersion = -1;
-			state std::string emptyStr;
-
-			TraceEvent("RelevantProxyMessage").detail("Msg", proxyMessages[entryi].get().toString());
-			if (proxyMessages[entryi].get().toString() != emptyStr) {
-				getVersionAndnumTags(proxyMessages[entryi].get(), execVersion, numTags);
-				ASSERT(numTags > 0);
-			}
-			state int entryj = 0;
-			for (; (execVersion != -1) && entryj < storageMessages.size(); entryj++) {
-				// for each message that has this verison, get the tag and
-				// the durable version
-				state Tag tag;
-				state Tag invalidTag;
-				state Version durableVersion = -1;
-				TraceEvent("RelevantStorageMessage").detail("Msg", storageMessages[entryj].get().toString());
-				ASSERT(storageMessages[entryj].get().toString() != emptyStr);
-				getTagAndDurableVersion(storageMessages[entryj].get(), execVersion, tag, durableVersion);
-				TraceEvent("SearchingTLogMessages").detail("Tag", tag.toString());
-
-				tLogMessages.clear();
-				for (int m = 0; (tag != invalidTag) && m < tLogWorkers.size(); m++) {
-					visitedStorageTags[tag] = true;
-					std::string eventToken = "ExecTrace/TLog/" + tag.toString() + "/" + self->snapUID.toString();
-					StringRef eventTokenRef(eventToken);
-					tLogMessages.push_back(timeoutError(
-						tLogWorkers[m].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 3.0));
-				}
-				try {
-					TraceEvent("WaitingForTlogMessages");
-					if (tag != invalidTag) {
-						wait(waitForAll(tLogMessages));
-					}
-				} catch (Error& e) {
-					TraceEvent(SevError, "VerifyExecTraceVersionFailure")
-						.detail("Reason", "FailedToGetTLogMessages")
-						.detail("Code", e.what());
-					return false;
-				}
-				filterEmptyMessages(tLogMessages);
-				state int entryk = 0;
-				numDurableVersionChecks = 0;
-				for (; (tag != invalidTag) && entryk < tLogMessages.size(); entryk++) {
-					// for each of the message that has this version and tag
-					// verify that
-					// 1) durableVersion >= minTLogVersion -1
-					// 2) durableVersion < maxTLogVersion
-					Version minTLogVersion = -1;
-					Version maxTLogVersion = -1;
-					TraceEvent("TLogMessage").detail("Msg", tLogMessages[entryk].get().toString());
-					ASSERT(tLogMessages[entryk].get().toString() != emptyStr);
-					getMinAndMaxTLogVersions(tLogMessages[entryk].get(), execVersion, tag, minTLogVersion, maxTLogVersion);
-					if (minTLogVersion != -1 && maxTLogVersion != -1) {
-						if ((durableVersion >= minTLogVersion - 1) && (durableVersion < maxTLogVersion)) {
-							++numDurableVersionChecks;
-							TraceEvent("Successs!!!");
-						}
-					}
-				}
-				// if we did not find even one tlog for a given tag fail the check
-				if (numDurableVersionChecks < 1) {
-					TraceEvent(SevError, "NoTLogFoundForATag");
-					return false;
-				}
-				tLogMessages.clear();
-			}
-		}
-
-		// validates that we encountered unique tags of value numTags
-		if (numTags != visitedStorageTags.size()) {
-			TraceEvent(SevError, "StorageMessagesWereNotFound");
-			return false;
-		}
-		TraceEvent("VerifyExecTraceVersionSuccess");
-		return true;
 	}
 };
 

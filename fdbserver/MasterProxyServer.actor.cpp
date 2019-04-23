@@ -836,15 +836,12 @@ ACTOR Future<Void> commitBatch(
 							allSources.insert(localTags.begin(), localTags.end());
 						}
 
-						std::string tokenStr = "ExecTrace/Proxy/" + uidStr.toString();
 						auto te1 = TraceEvent("ProxyCommitTo", self->dbgid);
 						te1.detail("To", "all sources");
+						te1.detail("UidStr", uidStr);
 						te1.detail("Mutation", m.toString());
 						te1.detail("Version", commitVersion);
 						te1.detail("NumTags", allSources.size());
-						if (m.param1 == execSnap) {
-							te1.trackLatest(tokenStr.c_str());
-						}
 						for (auto& tag : allSources) {
 							toCommit.addTag(tag);
 						}
