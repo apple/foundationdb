@@ -47,7 +47,7 @@ Performance
 
 * Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
 * Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
-* Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #) <>`_
+* Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
 
 Fixes
 -----
