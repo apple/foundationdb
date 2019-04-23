@@ -1432,10 +1432,8 @@ public:
 	~KeyValueStoreSQLite();
 
 	struct SpringCleaningWorkPerformed {
-		int lazyDeletePages;
-		int vacuumedPages;
-
-		SpringCleaningWorkPerformed() : lazyDeletePages(0), vacuumedPages(0) {}
+		int lazyDeletePages = 0;
+		int vacuumedPages = 0;
 	};
 
 	Future<SpringCleaningWorkPerformed> doClean();
