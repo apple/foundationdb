@@ -117,7 +117,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		state UID lockUid = g_random->randomUniqueID();
 		wait(delay(self->switchAfter));
 		state Future<Void> watchFuture;
-		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
 			watchFuture = tr->watch(self->keyToWatch);
 			return Void();
 		}));
