@@ -936,7 +936,6 @@ int main(int argc, char* argv[]) {
 		LocalityData localities;
 		int minTesterCount = 1;
 		bool testOnServers = false;
-		bool isRestoring = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;

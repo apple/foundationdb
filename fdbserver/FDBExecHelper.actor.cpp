@@ -156,8 +156,8 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		err = cmdErr.get();
 	} else {
 		// copy the files
-		state std::string folderFrom = "./" + folder + "/.";
-		state std::string folderTo = "./" + folder + "-snap-" + uidStr.toString();
+		state std::string folderFrom = folder + "/.";
+		state std::string folderTo = folder + "-snap-" + uidStr.toString();
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(folderTo);
