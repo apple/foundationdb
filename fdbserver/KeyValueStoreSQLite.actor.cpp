@@ -1325,6 +1325,9 @@ void SQLiteDB::open(bool writable) {
 	int result = sqlite3_open_v2(apath.c_str(), &db, (writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY), NULL);
 	checkError("open", result);
 
+	int chunkSize = 4096 * (BUGGIFY ? g_random->randomInt(0, 100) : SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES);
+	checkError("setChunkSize", sqlite3_file_control(db, nullptr, SQLITE_FCNTL_CHUNK_SIZE, &chunkSize));
+
 	btree = db->aDb[0].pBt;
 	initPagerCodec();
 
