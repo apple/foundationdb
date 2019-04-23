@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.2
+=====
+
+Fixes
+-----
+
+* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
+
 6.1.1
 =====
 
