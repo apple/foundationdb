@@ -2298,7 +2298,7 @@ ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayloa
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
 									"NativeAPI.executeCoordinators.Inside loop");
 		}
-		wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::execReq, req, cx->taskID));
+		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::execReq, req, cx->taskID));
 		if (debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
 									"NativeAPI.executeCoordinators.After");

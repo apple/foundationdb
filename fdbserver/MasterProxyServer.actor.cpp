@@ -427,7 +427,7 @@ void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<Str
 			}
 			if (ptr != token.end()) {
 				Standalone<StringRef> newElement(token.substr(ptr - token.begin()));
-				TraceEvent(SevDebug, "BinPathItem").detail("Element", newElement.toString());
+				TraceEvent(SevDebug, "BinPathItem").detail("Element", newElement);
 				binPathVec.push_back(newElement);
 			}
 		}
@@ -436,9 +436,9 @@ void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<Str
 }
 
 bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
-	TraceEvent("BinPath").detail("Value", binPath.toString());
+	TraceEvent("BinPath").detail("Value", binPath);
 	for (const auto& item : binPathVec) {
-		TraceEvent("Element").detail("Value", item.toString());
+		TraceEvent("Element").detail("Value", item);
 	}
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
