@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
@@ -700,6 +701,7 @@ ACTOR Future<Void> workerServer(
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
+	state Reference<AsyncVar<Optional<BackupInterface>>> bcInterf(new AsyncVar<Optional<BackupInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -955,6 +957,25 @@ ACTOR Future<Void> workerServer(
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
+				BackupInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (bcInterf->get().present()) {
+					recruited = bcInterf->get().get();
+					TEST(true);  // Recruited while already a backup worker.
+				} else {
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+					errorForwarders.add(
+					    forwardError(errors, Role::RATEKEEPER, recruited.id(),
+					                 setWhenDoneOrError(backupProcess, bcInterf, Optional<BackupInterface>())));
+					bcInterf->set(Optional<BackupInterface>(recruited));
+				}
+				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
@@ -1368,3 +1389,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::BACKUP("Backup", "BC");
