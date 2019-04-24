@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.0
+6.1.3
 =====
 
 Features
@@ -47,6 +47,7 @@ Performance
 
 * Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
 * Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
+* Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
 * SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 4MB. [6.1.3] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_
 
 Fixes
