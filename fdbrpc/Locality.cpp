@@ -135,6 +135,23 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::Backup:
+		switch( _class ) {
+		case ProcessClass::BackupClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::ClusterControllerClass:
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::MasterClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::TransactionClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::ClusterController:
 		switch( _class ) {
 		case ProcessClass::ClusterControllerClass:

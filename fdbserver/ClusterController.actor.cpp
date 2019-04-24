@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -186,6 +187,7 @@ public:
 			}
 			serverInfo->set( newInfoCache );
 		}
+
 	};
 
 	struct UpdateWorkerList {
@@ -1293,8 +1295,8 @@ public:
 	double startTime;
 	Optional<double> remoteStartTime;
 	Version datacenterVersionDifference;
-	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
+	bool versionDifferenceUpdated;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
@@ -2155,11 +2157,14 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
 			self->clusterControllerDcId != w.locality.dcId()) {
-				TraceEvent("CCHaltRegisteringRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
-			.detail("DcID", printable(self->clusterControllerDcId))
-			.detail("ReqDcID", printable(w.locality.dcId()))
-			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
+				TraceEvent("CCHaltRegisteringRatekeeper", self->id)
+					.detail("RKID", req.ratekeeperInterf.get().id())
+					.detail("DcID", printable(self->clusterControllerDcId))
+					.detail("ReqDcID", printable(w.locality.dcId()))
+					.detail("RecruitingRKID",
+							self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
+			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(
+			    req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 		} else if(!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;

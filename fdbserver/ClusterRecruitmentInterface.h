@@ -26,6 +26,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/RecoveryState.h"
@@ -84,12 +85,12 @@ struct ClusterControllerFullInterface {
 
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
-	vector<WorkerInterface> tLogs;
-	vector<WorkerInterface> satelliteTLogs;
-	vector<WorkerInterface> proxies;
-	vector<WorkerInterface> resolvers;
-	vector<WorkerInterface> storageServers;
-	vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> storageServers;
+	std::vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
