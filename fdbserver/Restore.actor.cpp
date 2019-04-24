@@ -58,6 +58,7 @@ ACTOR Future<Void> notifyWorkersToSetWorkersInterface(Reference<RestoreData> rd)
 ACTOR Future<Void> configureRoles(Reference<RestoreData> rd);
 ACTOR Future<Void> notifyWorkersToSetWorkersInterface(Reference<RestoreData> rd);
 ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreData> rd, RestoreInterface interf);
+ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<RestoreData> rd, RestoreInterface interf, Database cx);
 
 ACTOR Future<Void> workerCore( Reference<RestoreData> rd, RestoreInterface ri, Database cx );
 ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface ri, Database cx);
@@ -1288,6 +1289,30 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	return Void();
  }
 
+
+ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<RestoreData> rd, RestoreInterface interf, Database cx) {
+ 	state Transaction tr(cx);
+	
+	loop {
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(restoreWorkerKeyFor(interf.id())); 
+			tr.commit();
+			printf("Node:%s finish restore, clear the key for interf.id:%s and exit\n", rd->describeNode().c_str(),  interf.id().toString().c_str()); 
+			req.reply.send( RestoreCommonReply(interf.id(), req.cmdID) );
+			break;
+		} catch( Error &e ) {
+			printf("[WARNING] Node:%s finishRestoreHandler() transaction error:%s\n", rd->describeNode().c_str(), e.what());
+			wait( tr.onError(e) );
+		}
+	};
+
+
+	return Void();
+ }
+
 // Read restoreWorkersKeys from DB to get each restore worker's restore interface and set it to rd->workers_interface
  ACTOR Future<Void> collectWorkerInterface(Reference<RestoreData> rd, Database cx) {
 	state Transaction tr(cx);
@@ -2470,21 +2495,20 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 // ToDelete: If we can pass the correctness test
 ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests) {
 	// Make restore workers quit
-	state std::vector<UID> workersIDs = getWorkerIDs(rd);
+	state std::vector<UID> workersIDs = getWorkerIDs(rd); // All workers ID
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state int tryNum = 0; // TODO: Change it to a more robust way which uses DB to check which process has already been destroyed.
+	state std::map<UID, RestoreInterface>::iterator workerInterf;
 	loop {
-		try {
-			tryNum++;
-			if (tryNum >= 3) {
-				break;
-			}
+		try {	
 			cmdReplies.clear();
 			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
-			for (auto &nodeID : workersIDs) {
+			
+			for ( workerInterf = rd->workers_interface.begin(); workerInterf != rd->workers_interface.end(); workerInterf++ ) {
+				if ( std::find(workersIDs.begin(), workersIDs.end(), workerInterf->first) == workersIDs.end() ) {
+					continue; // The workerInterf is not discovered at configureRoles and therefore not involve in restore
+				}
 				rd->cmdID.nextCmd();
-				ASSERT( rd->workers_interface.find(nodeID) != rd->workers_interface.end() );
-				RestoreInterface &interf = rd->workers_interface[nodeID];
+				RestoreInterface &interf = workerInterf->second;
 				cmdReplies.push_back(interf.finishRestore.getReply(RestoreSimpleRequest(rd->cmdID)));
 			}
 
@@ -2498,6 +2522,8 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, 
 			break;
 		} catch(Error &e) {
 			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
+			rd->workers_interface.clear();
+			wait( collectWorkerInterface(rd, cx) );
 		}
 	}
 
@@ -4474,9 +4500,7 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 
 				when ( RestoreSimpleRequest req = waitNext(ri.finishRestore.getFuture()) ) {
 					// Destroy the worker at the end of the restore
-					printf("Node:%s finish restore and exit\n", rd->describeNode().c_str());
-					req.reply.send( RestoreCommonReply(ri.id(), req.cmdID) );
-					wait( delay(1.0) );
+					wait( handleFinishRestoreReq(req, rd, ri, cx) );
 					return Void();
 				}
 			}
