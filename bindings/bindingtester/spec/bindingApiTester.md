@@ -98,7 +98,7 @@ Data Operations
 
     When finished, the stack should be empty. Note that because the stack may be
     large, it may be necessary to commit the transaction every so often (e.g.
-    after every 100 sets) to avoid past_version errors.
+    after every 100 sets) to avoid transaction_too_old errors.
 
 FoundationDB Operations
 -----------------------
