@@ -912,7 +912,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 	for(auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
-			logData->messageBlocks.push_back( std::make_pair(version, block) );
+			logData->messageBlocks.emplace_back(version, block);
 			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
@@ -947,7 +947,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 			}
 
 			if (version >= tagData->popped) {
-				tagData->versionMessages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
+				tagData->versionMessages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size())));
 				if(tagData->versionMessages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tagData->versionMessages.back().second.expectedSize());
 				}
@@ -967,7 +967,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 		msgSize -= msg.message.size();
 	}
-	logData->messageBlocks.push_back( std::make_pair(version, block) );
+	logData->messageBlocks.emplace_back(version, block);
 	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	addedBytes += overheadBytes;
 
@@ -1856,7 +1856,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 			}
 
-			messages.push_back( TagsAndMessage(r->getMessageWithTags(), r->getTags()) );
+			messages.emplace_back(r->getMessageWithTags(), r->getTags());
 			r->nextMessage();
 		}
 
