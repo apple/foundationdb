@@ -313,7 +313,7 @@ public:
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
 			res = 0.0;
 		} else if (versionLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
-			res = double(versionLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX);
+			res = 1.0 - (double(versionLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX));
 		} else {
 			res = 1.0;
 		}
