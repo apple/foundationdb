@@ -799,7 +799,7 @@ ACTOR Future<Void> commitBatch(
 						// cluster is fully_recovered.
 						TraceEvent("ExecTransactionConflict")
 							.detail("TransactionNum", transactionNum);
-						committed[transactionNum] = ConflictBatch::TransactionConflict;
+						committed[transactionNum] = ConflictBatch::TransactionNotPermitted;
 					} else {
 						// Send the ExecOp to
 						// - all the storage nodes in a single region and
