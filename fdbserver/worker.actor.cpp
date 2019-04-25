@@ -356,6 +356,7 @@ ACTOR Future<Void> registrationClient(
 		WorkerInterface interf,
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
 		ProcessClass initialClass,
+		Reference<AsyncVar<Optional<BackupInterface>>> backupInterf,
 		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
 		Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
 		Reference<AsyncVar<bool>> degraded) {
@@ -365,13 +366,14 @@ ACTOR Future<Void> registrationClient(
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), backupInterf->get(), degraded->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;	
 				asyncPriorityInfo->set( reply.priorityInfo );
 			}
+			when ( wait( backupInterf->onChange() ) ) {}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
@@ -855,7 +857,7 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, bcInterf, ddInterf, rkInterf, degraded ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -971,7 +973,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.waitFailure);
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
 					errorForwarders.add(
-					    forwardError(errors, Role::RATEKEEPER, recruited.id(),
+					    forwardError(errors, Role::BACKUP, recruited.id(),
 					                 setWhenDoneOrError(backupProcess, bcInterf, Optional<BackupInterface>())));
 					bcInterf->set(Optional<BackupInterface>(recruited));
 				}
@@ -1389,4 +1391,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
-const Role Role::BACKUP("Backup", "BC");
+const Role Role::BACKUP("Backup", "BK");

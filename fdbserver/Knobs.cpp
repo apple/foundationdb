@@ -302,6 +302,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RESOLVER_STATE_MEMORY_LIMIT,                           1e6 );
 	init( LAST_LIMITED_RATIO,                                    0.6 );
 
+	// Backup Worker
+	init( BACKUP_FAILURE_TIME,                                   1.0 );
+	init( WAIT_FOR_BACKUP_JOIN_DELAY,                            1.0 );
+
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
 	init( MASTER_FAILURE_REACTION_TIME,                          0.4 ); if( randomize && BUGGIFY ) MASTER_FAILURE_REACTION_TIME = 10.0;

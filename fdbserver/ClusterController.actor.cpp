@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -134,6 +135,42 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			}
 			serverInfo->set( newInfo );
+		}
+
+		// Inserts the interface to backupServers in ascending order. No changes
+		// if the interface already exists.
+		void addBackupWorker(const BackupInterface& interf) {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			auto it = newInfo.backupServers.begin();
+			for ( ; it != newInfo.backupServers.end(); it++) {
+				if (it->id() == interf.id()) {
+					return;
+				} else if (it->id() > interf.id()) {
+					break;
+				}
+			}
+			newInfo.backupServers.insert(it, interf);
+			TraceEvent("CC_BackupWorker", interf.id()).detail("N", newInfo.backupServers.size());
+			serverInfo->set(newInfo);
+		}
+
+		void removeBackupWorker(UID id) {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			const int n = newInfo.backupServers.size();
+			bool found = false;
+			for (int i = 0; i < n; i++) {
+				if (newInfo.backupServers[i].id() == id) {
+					found = true;
+					if (i != n - 1) {
+						newInfo.backupServers[i] = newInfo.backupServers[n-1];
+					}
+					newInfo.backupServers.pop_back();
+				}
+			}
+			ASSERT(found);
+			serverInfo->set(newInfo);
 		}
 	};
 
@@ -1944,6 +1981,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
+	if (req.backupInterf.present()) {
+		const BackupInterface& bci = req.backupInterf.get();
+		TraceEvent("CC_RegisterBackupWorker", self->id).detail("BCID", bci.id());
+		self->db.addBackupWorker(bci);
+	}
 }
 
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
@@ -2604,6 +2646,59 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<BackupInterface> startBackupWorker(ClusterControllerData *self) {
+	TraceEvent("CC_StartBackupWorker", self->id);
+	loop {
+		try {
+			state bool no_worker = (self->db.serverInfo->get().backupServers.size() == 0);
+			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (no_worker && self->db.serverInfo->get().backupServers.size() > 0) {
+				return self->db.serverInfo->get().backupServers[0];
+			}
+
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			WorkerFitnessInfo backupWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Backup, ProcessClass::NeverAssign, self->db.config, id_used);
+			state WorkerDetails worker = backupWorker.worker;
+
+			InitializeBackupRequest req(g_random->randomUniqueID());
+			TraceEvent("CC_BackupRecruit", self->id).detail("Addr", worker.interf.address());
+
+			ErrorOr<BackupInterface> backupInterf = wait(worker.interf.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_BACKUP_JOIN_DELAY, 0));
+			if (backupInterf.present()) {
+				TraceEvent("CC_BackupWorkerRecruited", self->id).detail("Addr", worker.interf.address());
+				return backupInterf.get();
+			}
+		}
+		catch (Error& e) {
+			TraceEvent("CC_BackupRecruitError", self->id).error(e);
+			if ( e.code() != error_code_no_more_servers ) {
+				throw;
+			}
+		}
+		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+	}
+}
+
+ACTOR Future<Void> monitorBackupWorker(ClusterControllerData *self) {
+	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->db.serverInfo->onChange());
+	}
+
+	loop {
+		if (self->db.serverInfo->get().backupServers.size() > 0) {
+			wait( waitFailureClient(self->db.serverInfo->get().backupServers[0].waitFailure, SERVER_KNOBS->BACKUP_FAILURE_TIME) );
+			const UID workerId = self->db.serverInfo->get().backupServers[0].id();
+			TraceEvent("CC_BackupWorkerDied", self->id).detail("WorkerId", workerId);
+			self->db.removeBackupWorker(workerId);
+		} else {
+			BackupInterface backupInterf = wait(startBackupWorker(self));
+			self->db.addBackupWorker(backupInterf);
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -2623,6 +2718,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
+	self.addActor.send( monitorBackupWorker(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
