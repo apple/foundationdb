@@ -40,12 +40,13 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = 3; //10; // TODO: This can become a configuration param later
+const int min_num_workers = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
 const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 const int FastRestore_Failure_Timeout = 3600; // seconds
-double loadBatchSizeMB = 1000.0;
+double loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
 double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
-double mutationVectorThreshold = 1;//10 * 1024; // Bytes
+double mutationVectorThreshold =  g_network->isSimulated() ? 100 : 10 * 1024; // Bytes // correctness passed when the value is 1
+double transactionBatchSizeThreshold =  g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
@@ -4318,7 +4319,6 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
  	state int count = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int numVersion = 0;
-	state double transactionBatchSizeThreshold = 1 * 1024 * 1024; // Byte
 	state double transactionSize = 0;
 	loop {
 		try {
