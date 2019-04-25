@@ -2165,21 +2165,24 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 	state int loadingSizeMB = 0; //numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
 	int64_t sampleSizeMB = 0; //loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
 
-	state double startTimeSampling = now();
+	state double startTime = now();
 	// TODO: WiP Sample backup files to determine the key range for appliers
 	wait( sampleWorkload(rd, request, restoreConfig, sampleSizeMB) );
 	wait( delay(1.0) );
 
-	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTimeSampling);
-
-	state double startTime = now();
+	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
+	state double startTimeAfterSampling = now();
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
+	startTime = now();
 	wait( assignKeyRangeToAppliers(rd, cx) );
 	wait( delay(1.0) );
+	printf("[Progress] distributeWorkloadPerVersionBatch assignKeyRangeToAppliers time:%.2f seconds\n", now() - startTime);
 
+	startTime = now();
 	wait( notifyAppliersKeyRangeToLoader(rd, cx) );
 	wait( delay(1.0) );
+	printf("[Progress] distributeWorkloadPerVersionBatch notifyAppliersKeyRangeToLoader time:%.2f seconds\n", now() - startTime);
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
 	// Notify the loader about the data block and send the cmd to the loader to start loading the data
@@ -2209,6 +2212,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 	state int checkpointCurFileIndex = 0;
 
+	startTime = now();
 	// We should load log file before we do range file
 	state RestoreCommandEnum phaseType = RestoreCommandEnum::Assign_Loader_Log_File;
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
@@ -2343,16 +2347,20 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 			break;
 		}
 	}
+	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
 
 	ASSERT( cmdReplies.empty() );
 	
 	wait( delay(5.0) );
 	// Notify the applier to applly mutation to DB
+
+	startTime = now();
 	wait( notifyApplierToApplyMutations(rd) );
+	printf("[Progress] distributeWorkloadPerVersionBatch applyToDB time:%.2f seconds\n", now() - startTime);
 
 	state double endTime = now();
 
-	double runningTime = endTime - startTime;
+	double runningTime = endTime - startTimeAfterSampling;
 	printf("[Progress] Node:%s distributeWorkloadPerVersionBatch runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds\n",
 			rd->describeNode().c_str(),
 			runningTime, endTime - startTimeSampling);
