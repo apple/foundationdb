@@ -105,8 +105,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MAXLOGS,               "--maxlogs",                   SO_REQ_SEP },
 	{ OPT_MAXLOGSSIZE,           "--maxlogssize",               SO_REQ_SEP },
 	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
-#ifdef _WIN32
 	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
+#ifdef _WIN32
 	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
 	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
 	{ OPT_NOBOX,                 "-q",                          SO_NONE },
@@ -503,6 +503,15 @@ void parentWatcher(void *parentHandle) {
 	if( signal == WAIT_OBJECT_0 )
 		criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+}
+#else
+void* parentWatcher(void *arg) {
+	int *parent_pid = (int*) arg;
+	while(1) {
+		sleep(1);
+		if(getppid() != *parent_pid)
+			criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
+	}
 }
 #endif
 
@@ -1166,6 +1175,14 @@ int main(int argc, char* argv[]) {
 				case OPT_NOBOX:
 					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 					break;
+	#else
+				case OPT_PARENTPID: {
+					auto pid_str = args.OptionArg();
+					int *parent_pid = new(int);
+					*parent_pid = atoi(pid_str);
+					startThread(&parentWatcher, parent_pid);
+					break;
+				}
 	#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
