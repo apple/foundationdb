@@ -4312,83 +4312,103 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 		printf("ApplyKVOPsToDB num_of_version:%ld\n", rd->kvOps.size());
  	}
  	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = rd->kvOps.begin();
+	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator prevIt = it;
+	state int index = 0;
+	state int prevIndex = index;
  	state int count = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int numVersion = 0;
- 	for ( ; it != rd->kvOps.end(); ++it ) {
-		 numVersion++;
- 		if ( debug_verbose ) {
-			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
- 		}
-		//printf("ApplyKVOPsToDB numVersion:%d Version:%08lx num_of_ops:%d, \n", numVersion, it->first, it->second.size());
+	state double transactionBatchSizeThreshold = 1 * 1024 * 1024; // Byte
+	state double transactionSize = 0;
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			transactionSize = 0;
 
+			for ( ; it != rd->kvOps.end(); ++it ) {
+				numVersion++;
+				if ( debug_verbose ) {
+					TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
+				}
+				//printf("ApplyKVOPsToDB numVersion:%d Version:%08lx num_of_ops:%d, \n", numVersion, it->first, it->second.size());
 
- 		state MutationRef m;
- 		state int index = 0;
- 		for ( ; index < it->second.size(); ++index ) {
- 			m = it->second[index];
- 			if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
- 				typeStr = typeString[m.type];
- 			else {
- 				printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
- 			}
+				state MutationRef m;
+				for ( ; index < it->second.size(); ++index ) {
+					m = it->second[index];
+					if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
+						typeStr = typeString[m.type];
+					else {
+						printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
+					}
 
- 			if ( count % 1000 == 1 ) {
- 				printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops:%d\n",
- 						rd->describeNode().c_str(), count, it->first, it->second.size());
- 			}
+					if ( debug_verbose && count % 1000 == 1 ) {
+						printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops:%d\n",
+								rd->describeNode().c_str(), count, it->first, it->second.size());
+					}
 
- 			// Mutation types SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or,
-			//		Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue,
-			//		ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP
+					// Mutation types SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or,
+					//		Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue,
+					//		ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP
 
-			if ( debug_verbose ) {
-				printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
-			}
-			
- 			loop {
- 				try {
- 					tr->reset();
- 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
- 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					if ( debug_verbose ) {
+						printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", rd->describeNode().c_str(), m.toString().c_str());
+					}
 
- 					if ( m.type == MutationRef::SetValue ) {
- 						tr->set(m.param1, m.param2);
- 					} else if ( m.type == MutationRef::ClearRange ) {
- 						KeyRangeRef mutationRange(m.param1, m.param2);
- 						tr->clear(mutationRange);
- 					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
- 						//// Now handle atomic operation from this if statement
- 						// TODO: Have not de-duplicated the mutations for multiple network delivery
- 						// ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << MinV2) | (1 << AndV2),
- 						//atomicOp( const KeyRef& key, const ValueRef& operand, uint32_t operationType )
- 						tr->atomicOp(m.param1, m.param2, m.type);
- 					} else {
- 						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
- 					}
-
- 					wait(tr->commit());
+					if ( m.type == MutationRef::SetValue ) {
+						tr->set(m.param1, m.param2);
+					} else if ( m.type == MutationRef::ClearRange ) {
+						KeyRangeRef mutationRange(m.param1, m.param2);
+						tr->clear(mutationRange);
+					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
+						//// Now handle atomic operation from this if statement
+						// TODO: Have not de-duplicated the mutations for multiple network delivery
+						// ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << MinV2) | (1 << AndV2),
+						//atomicOp( const KeyRef& key, const ValueRef& operand, uint32_t operationType )
+						tr->atomicOp(m.param1, m.param2, m.type);
+					} else {
+						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
+					}
 					++count;
- 					break;
- 				} catch(Error &e) {
- 					printf("ApplyKVOPsToDB transaction error:%s. Type:%d, Param1:%s, Param2:%s\n", e.what(),
- 							m.type, getHexString(m.param1).c_str(), getHexString(m.param2).c_str());
- 					wait(tr->onError(e));
- 				}
- 			}
+					transactionSize += m.expectedSize();
+					
+					if ( transactionSize >= transactionBatchSizeThreshold ) { // commit per 1000 mutations
+						wait(tr->commit());
+						tr->reset();
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						prevIt = it;
+						prevIndex = index;
+						transactionSize = 0;
+					}
 
- 			if ( isPrint ) {
- 				printf("\tApplyKVOPsToDB Version:%016lx MType:%s K:%s, V:%s K_size:%d V_size:%d\n", it->first, typeStr.c_str(),
- 					   getHexString(m.param1).c_str(), getHexString(m.param2).c_str(), m.param1.size(), m.param2.size());
+					if ( isPrint ) {
+						printf("\tApplyKVOPsToDB Version:%016lx MType:%s K:%s, V:%s K_size:%d V_size:%d\n", it->first, typeStr.c_str(),
+							getHexString(m.param1).c_str(), getHexString(m.param2).c_str(), m.param1.size(), m.param2.size());
 
- 				TraceEvent("ApplyKVOPsToDB\t\t").detail("Version", it->first)
- 						.detail("MType", m.type).detail("MTypeStr", typeStr)
- 						.detail("MKey", getHexString(m.param1))
- 						.detail("MValueSize", m.param2.size())
- 						.detail("MValue", getHexString(m.param2));
- 			}
- 		}
- 	}
+						TraceEvent("ApplyKVOPsToDB\t\t").detail("Version", it->first)
+								.detail("MType", m.type).detail("MTypeStr", typeStr)
+								.detail("MKey", getHexString(m.param1))
+								.detail("MValueSize", m.param2.size())
+								.detail("MValue", getHexString(m.param2));
+					}
+				}
+				index = 0;
+			}
+			// Last transaction
+			if (transactionSize > 0) {
+				wait(tr->commit());
+			}
+			break;
+		} catch(Error &e) {
+			printf("ApplyKVOPsToDB transaction error:%s.\n", e.what());
+			wait(tr->onError(e));
+			it = prevIt;
+			index = prevIndex;
+			transactionSize = 0;
+		}
+	}
 
  	rd->kvOps.clear();
  	printf("Node:%s ApplyKVOPsToDB number of kv mutations:%d\n", rd->describeNode().c_str(), count);
