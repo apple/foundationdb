@@ -43,7 +43,7 @@
 const int min_num_workers = 3; //10; // TODO: This can become a configuration param later
 const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 const int FastRestore_Failure_Timeout = 3600; // seconds
-double loadBatchSizeMB = 1.0;
+double loadBatchSizeMB = 1000.0;
 double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 double mutationVectorThreshold = 1;//10 * 1024; // Bytes
 
@@ -1057,7 +1057,9 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 
 		for(; i < iend; ++i) {
 			//MXX: print out the key value version, and operations.
-			printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), version);
+			if ( debug_verbose ) {
+				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), version);
+			}
 // 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
 // 					.detail("Version", rangeFile.version).detail("Op", "set");
 ////				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
