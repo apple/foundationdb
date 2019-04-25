@@ -40,13 +40,14 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
-const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
-const int FastRestore_Failure_Timeout = 3600; // seconds
-double loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
+// These configurations for restore workers will  be set in initRestoreWorkerConfig() later.
+int min_num_workers = 3; //10; // TODO: This can become a configuration param later
+int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
+int FastRestore_Failure_Timeout = 3600; // seconds
+double loadBatchSizeMB = 1; // MB
 double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
-double mutationVectorThreshold =  g_network->isSimulated() ? 100 : 10 * 1024; // Bytes // correctness passed when the value is 1
-double transactionBatchSizeThreshold =  g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
+double mutationVectorThreshold =  100; // Bytes // correctness passed when the value is 1
+double transactionBatchSizeThreshold =  512; // Byte
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
@@ -768,6 +769,16 @@ std::pair<int, int> getNumLoaderAndApplier(Reference<RestoreData> rd){
 	return std::make_pair(numLoaders, numAppliers);
 }
 
+std::vector<UID> getWorkingApplierIDs(Reference<RestoreData> rd) {
+	std::vector<UID> applierIDs;
+	for ( auto &applier : rd->range2Applier ) {
+		applierIDs.push_back(applier.second);
+	}
+
+	ASSERT( !applierIDs.empty() );
+	return applierIDs;
+}
+
 std::vector<UID> getApplierIDs(Reference<RestoreData> rd) {
 	std::vector<UID> applierIDs;
 	for (int i = 0; i < rd->globalNodeStatus.size(); ++i) {
@@ -790,6 +801,7 @@ std::vector<UID> getApplierIDs(Reference<RestoreData> rd) {
 		printGlobalNodeStatus(rd);
 	}
 
+	ASSERT( !applierIDs.empty() );
 	return applierIDs;
 }
 
@@ -2166,6 +2178,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 	int64_t sampleSizeMB = 0; //loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
 
 	state double startTime = now();
+	state double startTimeBeforeSampling = now();
 	// TODO: WiP Sample backup files to determine the key range for appliers
 	wait( sampleWorkload(rd, request, restoreConfig, sampleSizeMB) );
 	wait( delay(1.0) );
@@ -2360,10 +2373,10 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 	state double endTime = now();
 
-	double runningTime = endTime - startTimeAfterSampling;
+	double runningTime = endTime - startTimeBeforeSampling;
 	printf("[Progress] Node:%s distributeWorkloadPerVersionBatch runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds\n",
 			rd->describeNode().c_str(),
-			runningTime, endTime - startTimeSampling);
+			runningTime, endTime - startTimeAfterSampling);
 
 	return Void();
 
@@ -2434,6 +2447,23 @@ ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx,
 
 }
 
+void initRestoreWorkerConfig() {
+	min_num_workers = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
+	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
+	FastRestore_Failure_Timeout = 3600; // seconds
+	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
+	loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
+	mutationVectorThreshold =  g_network->isSimulated() ? 100 : 10 * 1024; // Bytes // correctness passed when the value is 1
+	transactionBatchSizeThreshold =  g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
+
+	// Debug
+	loadBatchSizeThresholdB = 1;
+	transactionBatchSizeThreshold = 1;
+
+	printf("Init RestoreWorkerConfig. min_num_workers:%d ratio_loader_to_applier:%d loadBatchSizeMB:%.2f loadBatchSizeThresholdB:%.2f transactionBatchSizeThreshold:%.2f\n",
+			min_num_workers, ratio_loader_to_applier, loadBatchSizeMB, loadBatchSizeThresholdB, transactionBatchSizeThreshold);
+}
+
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Database cx = cx_input;
 	state RestoreInterface interf;
@@ -2442,6 +2472,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	//Global data for the worker
 	state Reference<RestoreData> rd = Reference<RestoreData>(new RestoreData());
 	rd->localNodeStatus.nodeID = interf.id();
+
+	initRestoreWorkerConfig();
 
 	// Compete in registering its restoreInterface as the leader.
 	state Transaction tr(cx);
@@ -3421,7 +3453,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 	state std::map<UID, Standalone<VectorRef<MutationRef>>> applierMutationsBuffer; // The mutation vector to be sent to each applier
 	state std::map<UID, double> applierMutationsSize; // buffered mutation vector size for each applier
 	// Initialize the above two maps
-	state std::vector<UID> applierIDs = getApplierIDs(rd);
+	state std::vector<UID> applierIDs = getWorkingApplierIDs(rd);
 	for (auto &applierID : applierIDs) {
 		applierMutationsBuffer[applierID] = Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>());
 		applierMutationsSize[applierID] = 0.0;

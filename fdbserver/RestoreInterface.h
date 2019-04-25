@@ -37,7 +37,7 @@ BINARY_SERIALIZABLE( RestoreRole );
 
 
 // Timeout threshold in seconds for restore commands
-extern const int FastRestore_Failure_Timeout;
+extern int FastRestore_Failure_Timeout;
 
 struct RestoreCommonReply;
 struct GetKeyRangeReply;
