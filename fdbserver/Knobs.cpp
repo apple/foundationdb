@@ -81,7 +81,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
 	init( BG_DD_POLLING_INTERVAL,                               10.0 );
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
-	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                4 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
+	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
 	init( DD_REBALANCE_PARALLELISM,                               50 );
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
@@ -399,7 +399,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STORAGE_LIMIT_BYTES,                                500000 );
 	init( BUGGIFY_LIMIT_BYTES,                                  1000 );
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
-	init( FETCH_KEYS_PARALLELISM_BYTES,                          5e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 4e6;
+	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
