@@ -1279,6 +1279,7 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 	printf("[INFO][Worker] Node:%s Get the interface for all workers\n", rd->describeNode().c_str());
 	loop {
 		try {
+			rd->workers_interface.clear();
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
