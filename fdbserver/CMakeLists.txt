@@ -111,6 +111,7 @@ set(FDBSERVER_SRCS
   workloads/BulkSetup.actor.h
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/KillAllLoop.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
