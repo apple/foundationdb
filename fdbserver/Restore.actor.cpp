@@ -1833,13 +1833,13 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
  	for(const RangeFile &f : restorable.get().ranges) {
  		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize, 0};
+		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version, 0};
  		rd->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
  		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, 0};
+		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion, 0};
 		rd->files.push_back(file);
  	}
 
@@ -1906,7 +1906,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB, loadSizeB, sampleIndex);
 			for (auto &loaderID : loaderIDs) {
 				// Find the sample file
-				while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
+				while ( curFileIndex < rd->files.size() && rd->files[curFileIndex].fileSize == 0 ) {
 					// NOTE: && rd->files[curFileIndex].cursor >= rd->files[curFileIndex].fileSize
 					printf("[Sampling] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 							rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
@@ -2243,7 +2243,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 				printf("[INFO] Number of backup files:%ld\n", rd->files.size());
 				rd->cmdID.initPhase(phaseType);
 				for (auto &loaderID : loaderIDs) {
-					while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
+					while (  curFileIndex < rd->files.size() && rd->files[curFileIndex].fileSize == 0 ) {
 						// NOTE: && rd->files[curFileIndex].cursor >= rd->files[curFileIndex].fileSize
 						printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 								rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
