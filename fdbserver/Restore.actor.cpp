@@ -4190,6 +4190,11 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 		printf("[VERBOSE_DEBUG] Node:%s receive mutation number:%d\n", rd->describeNode().c_str(), req.mutations.size());
 	}
 
+	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
+		printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+
 	// Handle duplicat cmd
 	if ( rd->isCmdProcessed(req.cmdID) ) {
 		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
@@ -4197,6 +4202,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
 		return Void();
 	}
+	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
 	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 	state uint64_t commitVersion = req.commitVersion;
@@ -4219,7 +4225,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	// Avoid race condition when this actor is called twice on the same command
 	rd->processedCmd[req.cmdID] = 1;
-	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
 	return Void();
 }
@@ -4275,11 +4281,10 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 	//wait( delay(1.0) );
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
-	// while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-	// 	printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
-	// 	wait(delay(5.0));
-	// }
-	// rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
+	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
+		printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
 
 	// Handle duplicate message
 	if (rd->isCmdProcessed(req.cmdID)) {
@@ -4287,6 +4292,7 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 		return Void();
 	}
+	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
 
 	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 	state uint64_t commitVersion = req.commitVersion;
@@ -4314,7 +4320,7 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	rd->processedCmd[req.cmdID] = 1;
 
-	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
+	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
 
 	return Void();
 }
