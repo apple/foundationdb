@@ -195,7 +195,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	init( SQLITE_PAGE_SCAN_ERROR_LIMIT,                        10000 );
 	init( SQLITE_BTREE_PAGE_USABLE,                          4096 - 8);  // pageSize - reserveSize for page checksum
-	init( SQLITE_CHUNK_SIZE_PAGES,                              1024 );  // 4MB
+	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
+	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
 	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
