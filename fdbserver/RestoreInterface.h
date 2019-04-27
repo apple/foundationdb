@@ -392,8 +392,8 @@ struct GetKeyRangeReply : RestoreCommonReply {
 	explicit GetKeyRangeReply(int index, KeyRef lowerBound,  KeyRef upperBound) : index(index), lowerBound(lowerBound), upperBound(upperBound) {}
 	explicit GetKeyRangeReply(UID id, CMDUID cmdID, int index, KeyRef lowerBound,  KeyRef upperBound) : 
 	 						RestoreCommonReply(id, cmdID), index(index), lowerBound(lowerBound), upperBound(upperBound) {}
-	explicit GetKeyRangeReply(UID id, CMDUID cmdID) : 
-	 						RestoreCommonReply(id, cmdID) {}
+	// explicit GetKeyRangeReply(UID id, CMDUID cmdID) : 
+	//  						RestoreCommonReply(id, cmdID) {}
 
 	std::string toString() const {
 		std::stringstream ss;

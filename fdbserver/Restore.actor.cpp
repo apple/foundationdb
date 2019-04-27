@@ -259,6 +259,11 @@ public:
 
 		bool operator<(const RestoreFileFR& rhs) const { return endVersion < rhs.endVersion; }
 
+		RestoreFileFR() : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion), beginVersion(invalidVersion), cursor(0) {}
+	
+		RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize, Version endVersion, Version beginVersion) : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize), endVersion(endVersion), beginVersion(beginVersion), cursor(0) {}
+	
+
 		std::string toString() const {
 			std::stringstream ss;
 			ss << "version:" << std::to_string(version) << " fileName:" << fileName  << " isRange:" << std::to_string(isRange)
@@ -941,7 +946,7 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 	printf("[INFO] constructFilesWithVersionRange for num_files:%ld\n", rd->files.size());
 	rd->allFiles.clear();
 	for (int i = 0; i < rd->files.size(); i++) {
-		printf("\t[File:%d] %s\n", i, rd->files[i].toString().c_str());
+		printf("\t[File:%d] Start %s\n", i, rd->files[i].toString().c_str());
 		Version beginVersion = 0;
 		Version endVersion = 0;
 		if (rd->files[i].isRange) {
@@ -957,10 +962,13 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%ln", &beginVersion, &endVersion, &blockSize, &len);
 			printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
 		}
+		rd->files[i].beginVersion = beginVersion;
+		rd->files[i].endVersion = endVersion;
+		printf("\t[File:%d] End %s\n", i, rd->files[i].toString().c_str());
 		ASSERT(beginVersion <= endVersion);
 		rd->allFiles.push_back(rd->files[i]);
-		rd->allFiles.back().beginVersion = beginVersion;
-		rd->allFiles.back().endVersion = endVersion;
+		// rd->allFiles.back().beginVersion = beginVersion;
+		// rd->allFiles.back().endVersion = endVersion;
 	}
 }
 
@@ -1291,6 +1299,7 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 					// Save the RestoreInterface for the later operations
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
+				tr.commit();
 				req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 				break;
 			}
@@ -1299,6 +1308,7 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 			wait( tr.onError(e) );
 		}
 		printf("[WARNING] Node:%s setWorkerInterface should always succeed in the first loop! Something goes wrong!\n", rd->describeNode().c_str());
+		wait ( delay(1.0) );
 	};
 
 
@@ -1337,6 +1347,8 @@ ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<Re
 	
 	loop {
 		try {
+			rd->workers_interface.clear();
+			agents.clear();
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1698,6 +1710,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 	state int restoreId = 0;
 	state int checkNum = 0;
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests;
+	state Future<Void> watch4RestoreRequest;
 
 	//wait for the restoreRequestTriggerKey to be set by the client/test workload
 	state ReadYourWritesTransaction tr2(cx);
@@ -1713,12 +1726,12 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			// Note: restoreRequestTriggerKey may be set before the watch is set or may have a conflict when the client sets the same key
 			// when it happens, will we  stuck at wait on the watch?
 
-			state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
+			watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
 			wait(tr2.commit());
 			printf("[INFO][Master] Finish setting up watch for restoreRequestTriggerKey\n");
 			break;
 		} catch(Error &e) {
-			//printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			printf("[WARNING] Transaction for restore request in watch restoreRequestTriggerKey. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
@@ -1734,14 +1747,14 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			//printf("[INFO][Master] Make sure restoreRequestTriggerKey does not exist before we wait on the key\n");
 			Optional<Value> triggerKey = wait( tr2.get(restoreRequestTriggerKey) );
 			if ( triggerKey.present() ) {
-				//printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
+				printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
 				break;
 			}
 			wait(watch4RestoreRequest);
 			printf("[INFO][Master] restoreRequestTriggerKey watch is triggered\n");
 			break;
 		} catch(Error &e) {
-			//printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			printf("[WARNING] Transaction for restore request at wait on watch restoreRequestTriggerKey. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
@@ -1758,7 +1771,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			printf("[INFO] RestoreRequestNum:%d\n", num);
 
 			state Standalone<RangeResultRef> restoreRequestValues = wait(tr2.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
-			printf("Restore worker get restoreRequest: %sn", restoreRequestValues.toString().c_str());
+			printf("Restore worker get restoreRequest: %s\n", restoreRequestValues.toString().c_str());
 
 			ASSERT(!restoreRequestValues.more);
 
@@ -1770,11 +1783,10 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			}
 			break;
 		} catch(Error &e) {
-			//printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
+			printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
 			wait(tr2.onError(e));
 		}
 	};
-
 
 	return restoreRequests;
 }
@@ -1834,13 +1846,13 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
  	for(const RangeFile &f : restorable.get().ranges) {
  		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version, 0};
+		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
  		rd->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
  		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion, 0};
+		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
 		rd->files.push_back(file);
  	}
 
@@ -1892,7 +1904,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state int checkpointCurFileIndex = curFileIndex;
 	state int64_t checkpointCurFileOffset = 0;
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_Range_File;
+	state RestoreCommandEnum cmdType;
 	loop { // For retry on timeout
 		try {
 			if ( allLoadReqsSent ) {
@@ -2015,13 +2027,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 			if ( !cmdReplies.empty() ) {
 				//TODO: change to getAny. NOTE: need to keep the still-waiting replies
-				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
-				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
+				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
+				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
-					printf("[Sampling] Get reply:%s for  Sample_Range_File or Sample_Log_File\n",
-							reps[i].toString().c_str());
+					printf("[Sampling][%d out of %d] Get reply:%s for  Sample_Range_File or Sample_Log_File\n",
+							i, reps.size(), reps[i].toString().c_str());
 					finishedLoaderIDs.push_back(reps[i].id);
 					//int64_t repLoadingCmdIndex = reps[i].cmdIndex;
 				}
@@ -2032,6 +2044,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 
 			if (allLoadReqsSent) {
+				printf("[Sampling] allLoadReqsSent, sampling finished\n");
 				break; // NOTE: need to change when change to wait on any cmdReplies
 			}
 
@@ -2047,14 +2060,14 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 		}
 	}
 
-	wait(delay(5.0));
+	wait(delay(1.0));
 
 	// Ask master applier to calculate the key ranges for appliers
 	state int numKeyRanges = 0;
 	loop {
 		try {
-			RestoreInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
 			printf("[Sampling][CMD] Ask master applier %s for the key ranges for appliers\n", rd->masterApplier.toString().c_str());
+			RestoreInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
 			ASSERT(applierIDs.size() > 0);
 			rd->cmdID.initPhase(RestoreCommandEnum::Calculate_Applier_KeyRange);
 			rd->cmdID.nextCmd();
@@ -2088,6 +2101,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state std::vector<Future<GetKeyRangeReply>> keyRangeReplies;
 	loop {
 		try {
+			rd->range2Applier.clear();
+			keyRangeReplies.clear(); // In case error happens in try loop
 			rd->cmdID.initPhase(RestoreCommandEnum::Get_Applier_KeyRange);
 			rd->cmdID.nextCmd();
 			for (int i = 0; i < applierIDs.size() && i < numKeyRanges; ++i) {
@@ -2103,15 +2118,17 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 			std::vector<GetKeyRangeReply> reps = wait( timeoutError( getAll(keyRangeReplies), FastRestore_Failure_Timeout) );
 
+			ASSERT( reps.size() <= applierIDs.size() );
+
 			// TODO: Directly use the replied lowerBound and upperBound
-			for (int i = 0; i < applierIDs.size() && i < numKeyRanges; ++i) {
+			for (int i = 0; i < reps.size() && i < numKeyRanges; ++i) {
 				UID applierID = applierIDs[i];
-				Standalone<KeyRef> lowerBound;
-				if (i < numKeyRanges) {
-					lowerBound = reps[i].lowerBound;
-				} else {
-					lowerBound = normalKeys.end;
-				}
+				Standalone<KeyRef> lowerBound = reps[i].lowerBound;
+				// if (i < numKeyRanges) {
+				// 	lowerBound = reps[i].lowerBound;
+				// } else {
+				// 	lowerBound = normalKeys.end;
+				// }
 
 				if (i == 0) {
 					lowerBound = LiteralStringRef("\x00"); // The first interval must starts with the smallest possible key
@@ -2129,6 +2146,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			printf("[Sampling] [Warning] Retry on Get_Applier_KeyRange\n");
 		}
 	}
+	printf("[Sampling] rd->range2Applier has been set. Its size is:%d\n", rd->range2Applier.size());
+	printAppliersKeyRange(rd);
 
 	wait(delay(1.0));
 
@@ -2337,13 +2356,14 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 						finishedLoaderIDs.push_back(reps[i].id);
 						//int64_t repLoadingCmdIndex = reps[i].cmdIndex;
 					}
-					loaderIDs = finishedLoaderIDs;
+					//loaderIDs = finishedLoaderIDs; // loaderIDs are also used in enumerating all loaders. The finishedLoaderIDs can be different based on the getRply results
 					checkpointCurFileIndex = curFileIndex; // Save the previous success point
 				}
 
 				// TODO: Let master print all nodes status. Note: We need a function to print out all nodes status
 
 				if (allLoadReqsSent) {
+					printf("[INFO] allLoadReqsSent has finished.");
 					break; // NOTE: need to change when change to wait on any cmdReplies
 				}
 
@@ -2916,6 +2936,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 	wait( collectBackupFiles(rd, cx, request) );
 	printf("[Perf] Node:%s collectBackupFiles takes %.2f seconds\n", rd->describeNode().c_str(), now() - startTime);
 	constructFilesWithVersionRange(rd);
+	rd->files.clear(); // Ensure no mistakely use rd->files
 	
 	// Sort the backup files based on end version.
 	sort(rd->allFiles.begin(), rd->allFiles.end());
@@ -3896,13 +3917,20 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 	state int numMutations = 0;
 	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
 
+	while (rd->isInProgress(RestoreCommandEnum::Calculate_Applier_KeyRange)) {
+		printf("[DEBUG] NODE:%s Calculate_Applier_KeyRange wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+
 	wait( delay(1.0) );
 	// Handle duplicate message
-	if (rd->isCmdProcessed(req.cmdID) ) {
+	// We need to recalculate the value for duplicate message! Because the reply to duplicate message may arrive earlier!
+	if (rd->isCmdProcessed(req.cmdID) && !keyRangeLowerBounds.empty() ) {
 		printf("[DEBUG] Node:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(GetKeyRangeNumberReply(interf.id(), req.cmdID));
+		req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));
 		return Void();
 	}
+	rd->setInProgressFlag(RestoreCommandEnum::Calculate_Applier_KeyRange);
 
 	// Applier will calculate applier key range
 	printf("[INFO][Applier] CMD:%s, Node:%s Calculate key ranges for %d appliers\n",
@@ -3915,7 +3943,8 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 	printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%ld\n",
 			rd->cmdID.toString().c_str(), rd->describeNode().c_str(), keyRangeLowerBounds.size());
 	req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));
-	//rd->processedCmd[req.cmdID] = 1; // We should not skip this command in the following phase. Otherwise, the handler in other phases may return a wrong number of appliers
+	rd->processedCmd[req.cmdID] = 1; // We should not skip this command in the following phase. Otherwise, the handler in other phases may return a wrong number of appliers
+	rd->clearInProgressFlag(RestoreCommandEnum::Calculate_Applier_KeyRange);
 
 	return Void();
 }
@@ -3924,13 +3953,19 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 	state int numMutations = 0;
 	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds = rd->keyRangeLowerBounds;
 
-	wait( delay(1.0) );
-	// Handle duplicate message
-	if (rd->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] Node:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(GetKeyRangeReply(interf.id(), req.cmdID));
-		return Void();
+	while (rd->isInProgress(RestoreCommandEnum::Get_Applier_KeyRange)) {
+		printf("[DEBUG] NODE:%s Calculate_Applier_KeyRange wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
 	}
+
+	wait( delay(1.0) );
+	//NOTE: Must reply a valid lowerBound and upperBound! Otherwise, the master will receive an invalid value!
+	// if (rd->isCmdProcessed(req.cmdID) ) {
+	// 	printf("[DEBUG] Node:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
+	// 	req.reply.send(GetKeyRangeReply(interf.id(), req.cmdID)); // Must wait until the previous command returns
+	// 	return Void();
+	// }
+	rd->setInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
 	
 	if ( req.applierIndex < 0 || req.applierIndex >= keyRangeLowerBounds.size() ) {
 		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%ld\n",
@@ -3945,8 +3980,10 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 	KeyRef upperBound = (req.applierIndex + 1) < keyRangeLowerBounds.size() ? keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
 
 	req.reply.send(GetKeyRangeReply(interf.id(), req.cmdID, req.applierIndex, lowerBound, upperBound));
+	rd->clearInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
 
 	return Void();
+
 }
 
 // TODO: We may not need this function?
@@ -4148,11 +4185,13 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 		printf("[VERBOSE_DEBUG] Node:%s receive mutation:%s\n", rd->describeNode().c_str(), req.mutation.toString().c_str());
 	}
 
-	// while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
-	// 	printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
-	// 	wait(delay(5.0));
-	// }
-	// rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+	// NOTE: We have insert operation to rd->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
+	// Otherwise, race condition may happen!
+	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
+		printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(0.2));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
 	// Handle duplicat cmd
 	if ( rd->isCmdProcessed(req.cmdID) ) {
@@ -4178,7 +4217,7 @@ ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Ref
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	// Avoid race condition when this actor is called twice on the same command
 	rd->processedCmd[req.cmdID] = 1;
-	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
 	return Void();
 }
@@ -4191,9 +4230,11 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 		printf("[VERBOSE_DEBUG] Node:%s receive mutation number:%d\n", rd->describeNode().c_str(), req.mutations.size());
 	}
 
+	// NOTE: We have insert operation to rd->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
+	// Otherwise, race condition may happen!
 	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
-		wait(delay(5.0));
+		printf("[DEBUG] NODE:%s sendMutation wait for 1s\n",  rd->describeNode().c_str());
+		wait(delay(1.0));
 	}
 
 	// Handle duplicat cmd
@@ -4262,7 +4303,7 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 	rd->keyOpsCount[mutation.param1]++;
 	rd->numSampledMutations++;
 
-	if ( rd->numSampledMutations % 1000 == 1 ) {
+	if ( debug_verbose && rd->numSampledMutations % 1000 == 1 ) {
 		printf("[Sampling][Applier] Node:%s Receives %d sampled mutations. cur_mutation:%s\n",
 				rd->describeNode().c_str(), rd->numSampledMutations, mutation.toString().c_str());
 	}
@@ -4282,9 +4323,11 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 	//wait( delay(1.0) );
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
+	// NOTE: We have insert operation to rd->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
+	// Otherwise, race condition may happen!
 	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
-		wait(delay(5.0));
+		printf("[DEBUG] NODE:%s sendSampleMutation wait for 1s\n",  rd->describeNode().c_str());
+		wait(delay(1.0));
 	}
 
 	// Handle duplicate message
@@ -4312,7 +4355,7 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 		rd->keyOpsCount[mutation.param1]++;
 		rd->numSampledMutations++;
 
-		if ( rd->numSampledMutations % 1000 == 1 ) {
+		if ( debug_verbose && rd->numSampledMutations % 1000 == 1 ) {
 			printf("[Sampling][Applier] Node:%s Receives %d sampled mutations. cur_mutation:%s\n",
 					rd->describeNode().c_str(), rd->numSampledMutations, mutation.toString().c_str());
 		}
@@ -4569,6 +4612,7 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 
 				when ( RestoreSimpleRequest req = waitNext(ri.finishRestore.getFuture()) ) {
 					// Destroy the worker at the end of the restore
+					// TODO: Cancel its own actors
 					wait( handleFinishRestoreReq(req, rd, ri, cx) );
 					return Void();
 				}
