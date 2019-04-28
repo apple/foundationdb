@@ -3025,7 +3025,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<TrackedReply<GetReadVersionRequest>> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion) {
 	TrackedReply<GetReadVersionRequest> trackedReply = wait(f);
 	if (trLogInfo) {
-		trLogInfo->requestStats.proxies.push_back(trackedReply.address); // TODO: should use log event
+		trLogInfo->addLog(FdbClientLogEvents::EventContactedProxy { now(), trackedReply.address });
 	}
 	auto rep = trackedReply.reply;
 	double latency = now() - startTime;

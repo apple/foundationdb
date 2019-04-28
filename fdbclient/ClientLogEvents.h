@@ -22,6 +22,7 @@
 #ifndef FDBCLIENT_CLIENTLOGEVENTS_H
 #define FDBCLIENT_CLIENTLOGEVENTS_H
 
+#include <algorithm>
 #include "fdbclient/FDBTypes.h"
 
 struct ReadStats {
@@ -55,6 +56,7 @@ namespace FdbClientLogEvents {
 			ERROR_GET_RANGE		= 5,
 			ERROR_COMMIT		= 6,
 			READ_STATS			= 7,
+			CONTACTED_PROXY	= 8,
 
 			EVENTTYPEEND	// End of EventType
 	     };
@@ -270,6 +272,26 @@ namespace FdbClientLogEvents {
 			readStats.endKey = endKey;
 			readStats.storageContacted = storageContacted;
 			reqStats.reads.push_back(std::move(readStats));
+		}
+	};
+
+	struct EventContactedProxy : public Event {
+		EventContactedProxy(double ts, NetworkAddress proxyContacted) :
+			Event(CONTACTED_PROXY, ts),
+			proxyContacted(proxyContacted) {}
+
+		NetworkAddress proxyContacted;
+
+		template <typename Ar> Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), proxyContacted);
+			else
+				return serializer(ar, proxyContacted);
+		}
+
+		override void addToReqStats(RequestStats &reqStats) const {
+			if (std::find(reqStats.proxies.begin(), reqStats.proxies.end(), proxyContacted) == reqStats.proxies.end())
+				reqStats.proxies.push_back(proxyContacted);
 		}
 	};
 }
