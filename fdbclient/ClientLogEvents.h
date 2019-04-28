@@ -25,23 +25,25 @@
 #include <algorithm>
 #include "fdbclient/FDBTypes.h"
 
-struct ReadStats {
-	ReadStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
-
-	uint64_t requestId;
-	uint64_t bytesFetched;
-	uint64_t keysFetched;
-	Key beginKey;
-	Key endKey;
-	NetworkAddress storageContacted;
-};
-
 struct RequestStats {
 	RequestStats() : nextReadId(0) {}
+
+	struct ReadStats {
+		ReadStats(uint64_t requestId, uint64_t bytesFetched, uint64_t keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
+			requestId(requestId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
+
+		uint64_t requestId;
+		uint64_t bytesFetched;
+		uint64_t keysFetched;
+		Key beginKey;
+		Key endKey;
+		NetworkAddress storageContacted;
+	};
+
 	std::vector<ReadStats> reads;
 	std::vector<NetworkAddress> proxies;
-	uint64_t getNextReadId();
 
+	uint64_t getNextReadId() { return nextReadId++; };
 private:
 	uint64_t nextReadId;
 };
@@ -265,13 +267,16 @@ namespace FdbClientLogEvents {
 		NetworkAddress storageContacted;
 
 		override void addToReqStats(RequestStats &reqStats) const {
-			ReadStats readStats(readId);
-			readStats.bytesFetched = bytesFetched;
-			readStats.keysFetched = keysFetched;
-			readStats.beginKey = beginKey;
-			readStats.endKey = endKey;
-			readStats.storageContacted = storageContacted;
-			reqStats.reads.push_back(std::move(readStats));
+			reqStats.reads.push_back(
+				RequestStats::ReadStats {
+					readId,
+					bytesFetched,
+					keysFetched,
+					beginKey,
+					endKey,
+					storageContacted
+				}
+			);
 		}
 	};
 
