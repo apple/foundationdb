@@ -1868,7 +1868,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					}
 					uint64_t keysFetched = rep.data.size();
 					auto beginKey = rep.data.empty() ? Key() : rep.data.begin()->key;
-					auto endKey = rep.data.empty() ? Key() : rep.data.end()->key;
+					auto endKey = rep.data.empty() ? Key() : rep.data.rbegin()->key;
 					auto storageContacted = trackedReply.address;
 					trLogInfo->addLog(FdbClientLogEvents::EventReadStats {
 						now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
