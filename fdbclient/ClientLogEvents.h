@@ -22,6 +22,29 @@
 #ifndef FDBCLIENT_CLIENTLOGEVENTS_H
 #define FDBCLIENT_CLIENTLOGEVENTS_H
 
+#include "fdbclient/FDBTypes.h"
+
+struct ReadStats {
+	ReadStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
+
+	uint64_t requestId;
+	uint64_t bytesFetched;
+	uint64_t keysFetched;
+	Key beginKey;
+	Key endKey;
+	NetworkAddress storageContacted;
+};
+
+struct RequestStats {
+	RequestStats() : nextReadId(0) {}
+	std::vector<ReadStats> reads;
+	std::vector<NetworkAddress> proxies;
+	uint64_t getNextReadId();
+
+private:
+	uint64_t nextReadId;
+};
+
 namespace FdbClientLogEvents {
 	typedef int EventType;
 	enum {	GET_VERSION_LATENCY	= 0,
@@ -31,6 +54,7 @@ namespace FdbClientLogEvents {
 			ERROR_GET			= 4,
 			ERROR_GET_RANGE		= 5,
 			ERROR_COMMIT		= 6,
+			READ_STATS			= 7,
 
 			EVENTTYPEEND	// End of EventType
 	     };
@@ -45,6 +69,7 @@ namespace FdbClientLogEvents {
 		double startTs{ 0 };
 
 		void logEvent(std::string id) const {}
+		void addToRequestStats(RequestStats &reqStats) const {}
 	};
 
 	struct EventGetVersion : public Event {
@@ -206,6 +231,45 @@ namespace FdbClientLogEvents {
 			}
 
 			TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
+		}
+	};
+
+	struct EventReadStats : public Event {
+		EventReadStats(double ts, uint64_t readId, uint64_t bytesFetched,
+			uint64_t keysFetched, Key beginKey, Key endKey,
+			NetworkAddress storageContacted) :
+			Event(READ_STATS, ts),
+			readId(readId),
+			bytesFetched(bytesFetched),
+			keysFetched(keysFetched),
+			beginKey(beginKey),
+			endKey(endKey),
+			storageContacted(storageContacted) {}
+
+		template <typename Ar> Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), readId, bytesFetched,
+					keysFetched, beginKey, endKey, storageContacted);
+			else
+				return serializer(ar, readId, bytesFetched, keysFetched,
+					beginKey, endKey, storageContacted);
+		}
+
+		uint64_t readId;
+		uint64_t bytesFetched;
+		uint64_t keysFetched;
+		Key beginKey;
+		Key endKey;
+		NetworkAddress storageContacted;
+
+		override void addToReqStats(RequestStats &reqStats) const {
+			ReadStats readStats(readId);
+			readStats.bytesFetched = bytesFetched;
+			readStats.keysFetched = keysFetched;
+			readStats.beginKey = beginKey;
+			readStats.endKey = endKey;
+			readStats.storageContacted = storageContacted;
+			reqStats.reads.push_back(std::move(readStats));
 		}
 	};
 }

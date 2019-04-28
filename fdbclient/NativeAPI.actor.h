@@ -166,7 +166,7 @@ struct TransactionInfo {
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
-	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
+	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2, REQ_STATS = 4 };
 
 	TransactionLogInfo() : logLocation(DONT_LOG) {}
 	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
@@ -190,7 +190,14 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
 			trLogWriter << event;
 		}
+
+		if(logLocation & REQ_STATS) {
+			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
+			event.addToRequestStats(requestStats);
+		}
 	}
+
+	RequestStats requestStats;
 
 	BinaryWriter trLogWriter{ IncludeVersion() };
 	bool logsAdded{ false };
@@ -214,31 +221,6 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Watch(Key key, Optional<Value> val) : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) { }
 
 	void setWatch(Future<Void> watchFuture);
-};
-
-struct ReadStats : public ReferenceCounted<ReadStats>, NonCopyable {
-	ReadStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
-
-	uint64_t requestId;
-	uint64_t bytesFetched;
-	uint64_t keysFetched;
-	Key beginKey;
-	Key endKey;
-	NetworkAddress storageContacted;
-};
-
-struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
-	RequestStats() : nextReadId(0) {}
-	std::vector<Reference<ReadStats>> reads;
-	std::vector<NetworkAddress> proxies;
-
-	Reference<ReadStats> getNewReadStats();
-	Reference<ReadStats> getNewReadStats(uint64_t requestId);
-
-	uint64_t getNextReadId();
-
-private:
-	uint64_t nextReadId;
 };
 
 class Transaction : NonCopyable {
@@ -315,8 +297,6 @@ public:
 	int numErrors;
 
 	std::vector<Reference<Watch>> watches;
-	Reference<RequestStats> requestStats;
-
 	int apiVersionAtLeast(int minVersion) const;
 
 	void checkDeferredError();
@@ -331,8 +311,6 @@ public:
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	void setPriority(uint32_t priorityFlag);
-	Reference<ReadStats> getNewReadStats();
-	Reference<ReadStats> getNewReadStats(uint64_t requestId);
 
 	Database cx;
 
