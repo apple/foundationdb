@@ -22,8 +22,10 @@
 #ifndef FDBCLIENT_CLIENTLOGEVENTS_H
 #define FDBCLIENT_CLIENTLOGEVENTS_H
 
-#include <algorithm>
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/JSONDoc.h"
+
+#include <algorithm>
 
 struct RequestStats {
 	RequestStats() : nextReadId(0) {}
@@ -44,6 +46,28 @@ struct RequestStats {
 	std::vector<NetworkAddress> proxies;
 
 	uint64_t getNextReadId() { return nextReadId++; };
+
+	json_spirit::Object getJson() const {
+		json_spirit::Array proxiesContacted;
+		for (const auto &p : proxies) {
+			proxiesContacted.push_back(json_spirit::Value(p.toString()));
+		}
+		json_spirit::Array readStatsList;
+		for (const auto &r : reads) {
+			json_spirit::Object readStats;
+			readStats.push_back(json_spirit::Pair("requestId", json_spirit::Value(r.requestId)));
+			readStats.push_back(json_spirit::Pair("beginKey", json_spirit::Value(r.beginKey.toString())));
+			readStats.push_back(json_spirit::Pair("endKey", json_spirit::Value(r.endKey.toString())));
+			readStats.push_back(json_spirit::Pair("storageContacted", json_spirit::Value(r.storageContacted.toString())));
+			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(r.keysFetched)));
+			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(r.bytesFetched)));
+			readStatsList.push_back(readStats);
+		}
+		json_spirit::Object result;
+		result.push_back(json_spirit::Pair("readStatistics", json_spirit::Value(readStatsList)));
+		result.push_back(json_spirit::Pair("proxiesContacted", json_spirit::Value(proxiesContacted)));
+		return std::move(result);
+	}
 private:
 	uint64_t nextReadId;
 };
