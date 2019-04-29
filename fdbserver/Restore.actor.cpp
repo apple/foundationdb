@@ -2244,6 +2244,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 
 	state int checkpointCurFileIndex = 0;
+	state long checkpointCurOffset = 0; 
 
 	startTime = now();
 	// We should load log file before we do range file
@@ -2251,6 +2252,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 	loop {
 		state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
+		state long curOffset = 0;
 		state bool allLoadReqsSent = false;
 		loop {
 			try {
@@ -2274,13 +2276,13 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 						break;
 					}
 					LoadingParam param;
-					rd->files[curFileIndex].cursor = 0; // This is a hacky way to make sure cursor is correct in current version when we load 1 file at a time
+					//rd->files[curFileIndex].cursor = 0; // This is a hacky way to make sure cursor is correct in current version when we load 1 file at a time
 					param.url = request.url;
 					param.version = rd->files[curFileIndex].version;
 					param.filename = rd->files[curFileIndex].fileName;
-					param.offset = rd->files[curFileIndex].cursor;
-					//param.length = std::min(rd->files[curFileIndex].fileSize - rd->files[curFileIndex].cursor, loadSizeB);
-					param.length = rd->files[curFileIndex].fileSize;
+					param.offset = curOffset; //rd->files[curFileIndex].cursor;
+					param.length = std::min(rd->files[curFileIndex].fileSize - curOffset, rd->files[curFileIndex].blockSize);
+					//param.length = rd->files[curFileIndex].fileSize;
 					loadSizeB = param.length;
 					param.blockSize = rd->files[curFileIndex].blockSize;
 					param.restoreRange = restoreRange;
@@ -2338,7 +2340,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 						allLoadReqsSent = true;
 						break;
 					}
-					++loadingCmdIndex; // Replaced by cmdUID
+					//++loadingCmdIndex; // Replaced by cmdUID
 				}
 
 				printf("[INFO] Wait for %ld loaders to accept the cmd Assign_Loader_File\n", cmdReplies.size());
@@ -2358,6 +2360,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					}
 					//loaderIDs = finishedLoaderIDs; // loaderIDs are also used in enumerating all loaders. The finishedLoaderIDs can be different based on the getRply results
 					checkpointCurFileIndex = curFileIndex; // Save the previous success point
+					checkpointCurOffset = curOffset;
 				}
 
 				// TODO: Let master print all nodes status. Note: We need a function to print out all nodes status
@@ -2372,6 +2375,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 				curFileIndex = checkpointCurFileIndex;
+				curOffset = checkpointCurOffset;
 			}
 		}
 
