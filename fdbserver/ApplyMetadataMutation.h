@@ -357,6 +357,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
+			if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
+				if(!initialCommit) txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
+			}
 			if(range.intersects(applyMutationsEndRange)) {
 				KeyRangeRef commonEndRange(range & applyMutationsEndRange);
 				if(!initialCommit) txnStateStore->clear(commonEndRange);
