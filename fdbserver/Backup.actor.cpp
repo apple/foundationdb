@@ -18,55 +18,90 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Notified.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
+#include "flow/Error.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupData {
-  UID myId;
+	UID myId;
+	std::vector<Tag> backupTags;
+	Version minKnownCommittedVersion;
+	Version startVersion;
+	AsyncVar<Reference<ILogSystem>> logSystem;
+	std::vector<TagsAndMessage> messages;
+	NotifiedVersion version;
 
-  explicit BackupData(UID id, const InitializeBackupRequest& req) : myId(id) {}
+	explicit BackupData(UID id, const InitializeBackupRequest& req) :
+		myId(id), startVersion(0), version(invalidVersion) {}
 };
 
 // Pulls data from TLog servers using LogRouter tag.
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
-  loop {
-    wait(Never());
-  }
-}
+	state Future<Void> logSystemChange = Void();
+	state Reference<ILogSystem::IPeekCursor> r;
+	state Version tagAt = 0;
+	state Version tagPopped = 0;
+	state Version lastVersion = 0;
 
-ACTOR Future<Void> backupCore(
-	BackupInterface interf,
-	InitializeBackupRequest req,
-	Reference<AsyncVar<ServerDBInfo>> db)
-{
-  state BackupData self(interf.id(), req);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection( addActor.getFuture() );
+	loop {
+		loop choose {
+			when (wait(r ? r->getMore(TaskTLogCommit) : Never())) {
+				break;
+			}
+			when (wait(logSystemChange)) {
+				if (r) tagPopped = std::max(tagPopped, r->popped());
+				if (self->logSystem.get()) {
+					// peekLogRouter() assumes "myId" is one of the log router and returns the ServerPeekCursor
+					// from primary location's server for the tag.
+					// Otherwise, returns the SetPeekCursor from old log sets that has the log router.
+					Tag tag(-2, 0);
+					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, tag);
+				} else {
+					r = Reference<ILogSystem::IPeekCursor>();
+				}
+				logSystemChange = self->logSystem.onChange();
+			}
+		}
+		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
-	addActor.send(pullAsyncData(&self));
+		state Version ver = 0;
+		while (r->hasMessage()) {
+			lastVersion = r->version().version;
+			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
+			r->nextMessage();
+		}
 
-  loop choose {
-    when (wait(db->onChange())) {}
-    when (wait(error)) {}
-  }
+		tagAt = std::max(r->version().version, lastVersion);
+	}
 }
 
 ACTOR Future<Void> backupWorker(
-  BackupInterface interf, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db)
+	BackupInterface interf, InitializeBackupRequest req,
+	Reference<AsyncVar<ServerDBInfo>> db)
 {
+	state BackupData self(interf.id(), req);
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> error = actorCollection( addActor.getFuture() );
+	state Future<Void> dbInfoChange = Void();
+
+	TraceEvent("BackupWorkerStart", interf.id());
 	try {
-		TraceEvent("BackupWorkerStart", interf.id());
-		state Future<Void> core = backupCore(interf, req, db);
-		loop choose{
-			when(wait(core)) { return Void(); }
+		addActor.send(pullAsyncData(&self));
+		loop choose {
+			when (wait(dbInfoChange)) {
+				dbInfoChange = db->onChange();
+				self.logSystem.set(ILogSystem::fromServerDBInfo(self.myId, db->get(), true));
+			}
+			when (wait(error)) {}
 		}
 	}
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed)
-		{
-			TraceEvent("LogRouterTerminated", interf.id()).error(e, true);
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
+			TraceEvent("BackupWorkerTerminated", interf.id()).error(e, true);
 			return Void();
 		}
 		throw;
