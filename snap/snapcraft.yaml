@@ -1,0 +1,50 @@
+name: foundationdb
+version: 6.0.18
+summary:  An open source, distributed, transactional key-value store.
+description:| 
+A multi-model NoSQL database.
+
+grade: stable
+confinement: classic
+base: core18
+
+architectures:
+  - build-on: amd64
+
+apps:
+  foundationdb:
+    command: bin/desktop-launch $SNAP/bin/FoundationDB
+    environment:
+      LD_LIBRARY_PATH: "$SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/pulseaudio:$LD_LIBRARY_PATH"
+
+parts:
+  foundationdb:
+    after: [desktop-glib-only]
+    plugin: dump
+    source-type: tar
+    source:
+      - on amd64: https://www.foundationdb.org/downloads/$SNAPCRAFT_PROJECT_VERSION/FoundationDB_v$SNAPCRAFT_PROJECT_VERSION.tar.gz
+      
+    stage-packages:
+      - libgl1-mesa-dri
+      - libglu1-mesa
+      - libgl1-mesa-glx
+      - libgles2-mesa
+      - libflac8
+      - libxcursor1
+      - libxi6
+      - libxinerama1
+      - libxrandr2
+      - libxrender1
+      - libasound2
+      - libasyncns0
+      - libogg0
+      - libpulse0
+      - libsndfile1
+      - libtheora0
+      - libvorbis0a
+      - libvorbisenc2
+      - libvorbisfile3
+      - libwebp5
+    organize:
+      'FoundationDB_v*': 'bin/FoundationDB'
