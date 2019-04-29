@@ -217,7 +217,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return dbgid;
 	}
 
-	void addPseudoLocality(int8_t locality) override {
+	void addPseudoLocality(int8_t locality) {
 		ASSERT(locality < 0);
 		pseudoLocalities.insert(locality);
 		pseudoLocalityPopVersion[locality] = 0;
@@ -241,7 +241,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return pseudoLocalities.count(locality) > 0;
 	}
 
-	Version getPseudoLocalityPopVersion(int8_t locality, Version upTo) override {
+	Version popPseudoLocalityTag(int8_t locality, Version upTo) override {
 		ASSERT(isPseudoLocality(locality));
 		auto& localityVersion = pseudoLocalityPopVersion[locality];
 		localityVersion = std::max(localityVersion, upTo);

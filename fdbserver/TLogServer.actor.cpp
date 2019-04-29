@@ -1125,7 +1125,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 	state Version upTo = req.to;
 	int8_t tagLocality = req.tag.locality;
 	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->getPseudoLocalityPopVersion(tagLocality, req.to);
+		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, req.to);
 		tagLocality = tagLocalityLogRouter;
 	}
 	state Tag tag(tagLocality, req.tag.id);
