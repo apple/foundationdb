@@ -3315,8 +3315,14 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	    .detail("UID", snapUID)
 	    .detail("PreSnapClientUID", preSnapClientUID);
 
-	tr.debugTransaction(snapUID);
+	StringRef snapCmdArgs = snapCmd;
+	StringRef snapCmdPart = snapCmdArgs.eat(":");
 	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+		.withSuffix(LiteralStringRef(":uid="))
+		.withSuffix(snapUIDRef)
+		.withSuffix(LiteralStringRef(","))
+		.withSuffix(snapCmdArgs);
 	state Standalone<StringRef>
 		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
 	// disable popping of TLog
@@ -3334,19 +3340,6 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	}
 
 	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
-
-	const uint8_t* ptr = snapCmd.begin();
-	while (*ptr != ':' && ptr < snapCmd.end()) {
-		ptr++;
-	}
-	state Standalone<StringRef> snapPayloadRef;
-	if (ptr == snapCmd.end()) {
-		snapPayloadRef =
-			snapCmd.withSuffix(LiteralStringRef(":uid=")).withSuffix(snapUIDRef);
-	} else {
-		snapPayloadRef =
-			snapCmd.withSuffix(LiteralStringRef(",uid=")).withSuffix(snapUIDRef);
-	}
 
 	// snap the storage and Tlogs
 	// if we retry the below command in failure cases with the same snapUID

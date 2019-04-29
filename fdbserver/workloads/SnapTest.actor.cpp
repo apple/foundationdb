@@ -202,8 +202,9 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					++retry;
-					TraceEvent(retry > 3 ? SevWarn : SevInfo, "SnapCreateCommandFailed").detail("Error", e.what());
-					if (retry > 3) {
+					TraceEvent(retry > 100 ? SevWarn : SevInfo, "SnapCreateCommandFailed").detail("Error", e.what());
+					if (retry > 100) {
+						TraceEvent(SevError, "SnapCreateCommandFailed").detail("Error", e.what());
 						throw operation_failed();
 					}
 				}
