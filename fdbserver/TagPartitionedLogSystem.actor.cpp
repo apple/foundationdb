@@ -1880,11 +1880,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
-		for( int i = 0; i < self->logRouterTags; i++) {
+		const Version startVersion = oldLogSystem->logRouterTags == 0
+			? oldLogSystem->recoverAt.get() + 1
+			: std::max(self->tLogs[0]->startVersion, logSet->startVersion);
+		for (int i = 0; i < self->logRouterTags; i++) {
 			InitializeLogRouterRequest req;
 			req.recoveryCount = recoveryCount;
 			req.routerTag = Tag(tagLocalityLogRouter, i);
-			req.startVersion = oldLogSystem->logRouterTags == 0 ? oldLogSystem->recoverAt.get() + 1 : std::max(self->tLogs[0]->startVersion, logSet->startVersion);
+			req.startVersion = startVersion;
 			req.tLogLocalities = localities;
 			req.tLogPolicy = logSet->tLogPolicy;
 			req.locality = remoteLocality;
