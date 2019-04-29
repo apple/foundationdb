@@ -360,7 +360,7 @@ ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct Cl
 
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
                         std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
-                        std::string metricsConnFile, std::string metricsPrefix);
+                        std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold);
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,

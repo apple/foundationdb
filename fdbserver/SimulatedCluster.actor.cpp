@@ -247,7 +247,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind( n, n ));
 				}
-				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
+				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "", -1);
 				Future<Void> backup = runBackupAgents ? runBackup(connFile) : Future<Void>(Never());
 				Future<Void> dr = runBackupAgents ? runDr(connFile) : Future<Void>(Never());
 

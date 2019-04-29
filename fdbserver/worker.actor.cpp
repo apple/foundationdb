@@ -42,6 +42,11 @@
 #include "flow/Profiler.h"
 
 #ifdef __linux__
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
 #include "gperftools/heap-profiler.h"
@@ -452,10 +457,10 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	}
 }
 
-void runHeapProfiler() {
+void runHeapProfiler(const char* msg) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	if (IsHeapProfilerRunning()) {
-		HeapProfilerDump("User triggered heap dump");
+		HeapProfilerDump(msg);
 	} else {
 		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
 	}
@@ -466,11 +471,59 @@ void runHeapProfiler() {
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
-		runHeapProfiler();
+		runHeapProfiler("User triggered heap dump");
 	} else {
 		wait( runCpuProfiler(req) );
 	}
 
+	return Void();
+}
+
+bool checkHighMemory(int64_t threshold, bool* error) {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	*error = false;
+	uint64_t page_size = sysconf(_SC_PAGESIZE);
+	int fd = open("/proc/self/statm", O_RDONLY);
+	if (fd < 0) {
+		TraceEvent("OpenStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	const int buf_sz = 256;
+	char stat_buf[buf_sz];
+	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
+	if (stat_nread < 0) {
+		TraceEvent("ReadStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	uint64_t vmsize, rss;
+	sscanf(stat_buf, "%lu %lu", &vmsize, &rss);
+	rss *= page_size;
+	if (rss >= threshold) {
+		return true;
+	}
+#else
+	TraceEvent("CheckHighMemoryUnsupported");
+	*error = true;
+#endif
+	return false;
+}
+
+// Runs heap profiler when RSS memory usage is high.
+ACTOR Future<Void> monitorHighMemory(int64_t threshold) {
+	if (threshold <= 0) return Void();
+
+	loop {
+		bool err = false;
+		bool highmem = checkHighMemory(threshold, &err);
+		if (err) break;
+
+		if (highmem) runHeapProfiler("Highmem heap dump");
+		wait( delay(SERVER_KNOBS->HEAP_PROFILER_INTERVAL) );
+	}
 	return Void();
 }
 
@@ -636,8 +689,14 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
-ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData locality,
-	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
+ACTOR Future<Void> workerServer(
+		Reference<ClusterConnectionFile> connFile,
+		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+		LocalityData locality,
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
+		std::string metricsConnFile, std::string metricsPrefix,
+		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -682,6 +741,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
+	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
 	filesClosed.add(stopping.getFuture());
 
@@ -1256,7 +1316,8 @@ ACTOR Future<Void> fdbd(
 	std::string coordFolder,
 	int64_t memoryLimit,
 	std::string metricsConnFile,
-	std::string metricsPrefix )
+	std::string metricsPrefix,
+	int64_t memoryProfileThreshold)
 {
 	try {
 
@@ -1283,7 +1344,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(v,1) );
