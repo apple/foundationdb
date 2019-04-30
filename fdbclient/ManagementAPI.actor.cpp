@@ -336,7 +336,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						return ConfigurationResult::REGION_REPLICATION_MISMATCH;
 					}
 
-					oldReplicationUsesDcId = oldReplicationUsesDcId | oldConfig.tLogPolicy->attributeKeys().count("dcid");
+					oldReplicationUsesDcId = oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().count("dcid");
 
 					if(oldConfig.usableRegions != newConfig.usableRegions) {
 						//cannot change region configuration
