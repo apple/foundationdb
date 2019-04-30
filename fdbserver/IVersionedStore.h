@@ -44,6 +44,8 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	virtual std::string toString() const = 0;
 };
 
 class IVersionedStore : public IClosable {
