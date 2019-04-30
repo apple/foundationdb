@@ -41,6 +41,7 @@ struct ConflictBatch {
 		TransactionTooOld,
 		TransactionCommitted,
 		TransactionNotPermitted,
+		TransactionNotFullyRecovered,
 	};
 
 	void addTransaction( const CommitTransactionRef& transaction );
