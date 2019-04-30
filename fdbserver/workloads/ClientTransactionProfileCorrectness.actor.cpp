@@ -46,16 +46,16 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 			ASSERT(gv.latency < 10000);
 			break;
 		}
-		case FdbClientLogEvents::GET_LATENCY:
+		case FdbClientLogEvents::GET_VALUE:
 		{
-			FdbClientLogEvents::EventGet g;
+			FdbClientLogEvents::EventGetValue g;
 			reader >> g;
 			ASSERT(g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
-		case FdbClientLogEvents::GET_RANGE_LATENCY:
+		case FdbClientLogEvents::GET_RANGE_FINISHED:
 		{
-			FdbClientLogEvents::EventGetRange gr;
+			FdbClientLogEvents::EventGetRangeFinished gr;
 			reader >> gr;
 			ASSERT(gr.latency < 10000 && gr.rangeSize < 1000000000 && gr.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;

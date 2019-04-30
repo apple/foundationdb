@@ -1349,17 +1349,8 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 			if (trLogInfo) {
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
-			}
-			if (trLogInfo) {
-				auto readId = trLogInfo->requestStats.getNextReadId();
-				uint64_t bytesFetched = valueSize;
-				uint64_t keysFetched = reply.value.present() ? 1 : 0;
-				auto beginKey = key;
-				auto endKey = key;
-				auto storageContacted = trackedReply.address;
-				trLogInfo->addLog(FdbClientLogEvents::EventReadStats {
-					now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
+				trLogInfo->addLog(FdbClientLogEvents::EventGetValue {
+					startTimeD, trLogInfo->requestStats.getNextReadId(), latency, valueSize, key, trackedReply.address
 				});
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
@@ -1421,14 +1412,8 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			TrackedReply<GetKeyRequest> trackedReply = wait( trackedLoadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			GetKeyReply reply = trackedReply.reply;
 			if (trLogInfo) {
-				auto readId = trLogInfo->requestStats.getNextReadId();
-				uint64_t bytesFetched = k.getKey().size();
-				uint64_t keysFetched = 1;
-				auto beginKey = k.getKey();
-				auto endKey = k.getKey();
-				auto storageContacted = trackedReply.address;
-				trLogInfo->addLog(FdbClientLogEvents::EventReadStats {
-					now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
+				trLogInfo->addLog(FdbClientLogEvents::EventGetKey {
+					now(), trLogInfo->requestStats.getNextReadId(), k.getKey(), trackedReply.address
 				});
 			}
 			if( info.debugID.present() )
@@ -1740,7 +1725,7 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 		int rangeSize = 0;
 		for (const KeyValueRef &kv : result.contents())
 			rangeSize += kv.key.size() + kv.value.size();
-		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, now()-startTime, rangeSize, begin.getKey(), end.getKey()));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetRangeFinished(startTime, now()-startTime, rangeSize, begin.getKey(), end.getKey()));
 	}
 
 	if( !snapshot ) {
@@ -1781,7 +1766,7 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 
 ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-	TransactionInfo info, uint64_t readId )
+	TransactionInfo info, int readId )
 {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
@@ -1860,15 +1845,15 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				TrackedReply<GetKeyValuesRequest> trackedReply = wait( trackedLoadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 				GetKeyValuesReply rep = trackedReply.reply;
 				if (trLogInfo) {
-					uint64_t bytesFetched = 0;
+					auto bytesFetched = 0;
 					for (const auto &kv : rep.data) {
 						bytesFetched += kv.key.size() + kv.value.size();
 					}
-					uint64_t keysFetched = rep.data.size();
+					auto keysFetched = rep.data.size();
 					auto beginKey = rep.data.empty() ? Key() : rep.data.begin()->key;
 					auto endKey = rep.data.empty() ? Key() : rep.data.rbegin()->key;
 					auto storageContacted = trackedReply.address;
-					trLogInfo->addLog(FdbClientLogEvents::EventReadStats {
+					trLogInfo->addLog(FdbClientLogEvents::EventGetRange {
 						now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
 					});
 				}
@@ -1995,7 +1980,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
-	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, Reference<TransactionLogInfo> trLogInfo, uint64_t readId )
+	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, Reference<TransactionLogInfo> trLogInfo, int readId )
 {
 	return getRange(cx, trLogInfo, fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, readId);
 }
@@ -2237,7 +2222,7 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 		extraConflictRanges.push_back( conflictRange.getFuture() );
 	}
 
-	uint64_t readId = trLogInfo ? trLogInfo->requestStats.getNextReadId() : 0;
+	auto readId = trLogInfo ? trLogInfo->requestStats.getNextReadId() : 0;
 	auto result = ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, readId);
 	return result;
 }

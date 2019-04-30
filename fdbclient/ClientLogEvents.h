@@ -31,12 +31,12 @@ struct RequestStats {
 	RequestStats() : nextReadId(0) {}
 
 	struct ReadStats {
-		ReadStats(uint64_t requestId, uint64_t bytesFetched, uint64_t keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
+		ReadStats(int requestId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
 			requestId(requestId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
 
-		uint64_t requestId;
-		uint64_t bytesFetched;
-		uint64_t keysFetched;
+		int requestId;
+		int bytesFetched;
+		int keysFetched;
 		Key beginKey;
 		Key endKey;
 		NetworkAddress storageContacted;
@@ -45,7 +45,7 @@ struct RequestStats {
 	std::vector<ReadStats> reads;
 	std::vector<NetworkAddress> proxies;
 
-	uint64_t getNextReadId() { return nextReadId++; };
+	int getNextReadId() { return nextReadId++; };
 
 	json_spirit::Object getJson() const {
 		json_spirit::Array proxiesContacted;
@@ -55,12 +55,12 @@ struct RequestStats {
 		json_spirit::Array readStatsList;
 		for (const auto &r : reads) {
 			json_spirit::Object readStats;
-			readStats.push_back(json_spirit::Pair("requestId", json_spirit::Value(r.requestId)));
+			readStats.push_back(json_spirit::Pair("requestId", json_spirit::Value(static_cast<uint64_t>(r.requestId))));
 			readStats.push_back(json_spirit::Pair("beginKey", json_spirit::Value(r.beginKey.toString())));
 			readStats.push_back(json_spirit::Pair("endKey", json_spirit::Value(r.endKey.toString())));
 			readStats.push_back(json_spirit::Pair("storageContacted", json_spirit::Value(r.storageContacted.toString())));
-			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(r.keysFetched)));
-			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(r.bytesFetched)));
+			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(static_cast<uint64_t>(r.keysFetched))));
+			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(static_cast<uint64_t>(r.bytesFetched))));
 			readStatsList.push_back(readStats);
 		}
 		json_spirit::Object result;
@@ -69,20 +69,21 @@ struct RequestStats {
 		return std::move(result);
 	}
 private:
-	uint64_t nextReadId;
+	int nextReadId;
 };
 
 namespace FdbClientLogEvents {
 	typedef int EventType;
 	enum {	GET_VERSION_LATENCY	= 0,
-			GET_LATENCY			= 1,
-			GET_RANGE_LATENCY	= 2,
-			COMMIT_LATENCY		= 3,
-			ERROR_GET			= 4,
-			ERROR_GET_RANGE		= 5,
-			ERROR_COMMIT		= 6,
-			READ_STATS			= 7,
-			CONTACTED_PROXY	= 8,
+			GET_VALUE			= 1,
+			GET_KEY			= 2,
+			GET_RANGE_FINISHED	= 3,
+			GET_RANGE			= 4,
+			COMMIT_LATENCY		= 5,
+			CONTACTED_PROXY	= 6,
+			ERROR_GET			= 7,
+			ERROR_GET_RANGE	= 8,
+			ERROR_COMMIT		= 9,
 
 			EVENTTYPEEND	// End of EventType
 	     };
@@ -113,14 +114,15 @@ namespace FdbClientLogEvents {
 
 		double latency;
 
-		void logEvent(std::string id) const {
+		override void logEvent(std::string id) const {
 			TraceEvent("TransactionTrace_GetVersion").detail("TransactionID", id).detail("Latency", latency);
 		}
 	};
 
-	struct EventGet : public Event {
-		EventGet(double ts, double lat, int size, const KeyRef &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(in_key) { }
-		EventGet() { }
+	struct EventGetValue : public Event {
+		EventGetValue(double ts, int readId, double lat, int size, const KeyRef &in_key, NetworkAddress storageContacted) :
+			Event(GET_VALUE, ts), readId(readId), latency(lat), valueSize(size), key(in_key), storageContacted(storageContacted) {}
+		EventGetValue() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -129,18 +131,76 @@ namespace FdbClientLogEvents {
 				return serializer(ar, latency, valueSize, key);
 		}
 
+		int readId;
 		double latency;
 		int valueSize;
 		Key key;
+		NetworkAddress storageContacted;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", printable(key));
+		override void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_GetValue")
+				.detail("TransactionID", id)
+				.detail("Latency", latency)
+				.detail("ValueSizeBytes", valueSize)
+				.detail("Key", printable(key))
+				.detail("StorageContacted", storageContacted);
+		}
+
+		override void addToReqStats(RequestStats &reqStats) const {
+			reqStats.reads.push_back(
+				RequestStats::ReadStats {
+					readId,
+					valueSize,
+					(valueSize == 0) ? 0 : 1,
+					key,
+					key,
+					storageContacted
+				}
+			);
 		}
 	};
 
-	struct EventGetRange : public Event {
-		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
-		EventGetRange() { }
+	struct EventGetKey : public Event {
+		EventGetKey(double ts, int readId, Key key, NetworkAddress storageContacted) :
+			Event(GET_KEY, ts), readId(readId), key(key), storageContacted(storageContacted) {} 
+
+		template <typename Ar> Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), readId, key, storageContacted);
+			else
+				return serializer(ar, readId, key, storageContacted);
+		}
+
+		int readId;
+		Key key;
+		NetworkAddress storageContacted;
+
+		override void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_GetKey")
+				.detail("TransactionID", id)
+				.detail("ReadId", readId)
+				.detail("BytesFetched", key.size())
+				.detail("Key", printable(key))
+				.detail("StorageContacted", storageContacted);
+		}
+
+		override void addToReqStats(RequestStats &reqStats) const {
+			reqStats.reads.push_back(
+				RequestStats::ReadStats {
+					readId,
+					key.size(),
+					1,
+					key,
+					key,
+					storageContacted
+				}
+			);
+		}
+	};
+
+	struct EventGetRangeFinished : public Event {
+		EventGetRangeFinished(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_FINISHED, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
+		EventGetRangeFinished() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -154,8 +214,57 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
+		override void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_GetRangeFinished")
+				.detail("TransactionID", id)
+				.detail("Latency", latency)
+				.detail("RangeSizeBytes", rangeSize)
+				.detail("StartKey", printable(startKey))
+				.detail("EndKey", printable(endKey));
+		}
+	};
+
+	struct EventGetRange : public Event {
+		EventGetRange(double ts, int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
+			Event(GET_RANGE, ts), readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
+		EventGetRange() {}
+
+		template <typename Ar> Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
+			else
+				return serializer(ar, readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
+		}
+
+		int readId;
+		int bytesFetched;
+		int keysFetched;
+		Key beginKey;
+		Key endKey;
+		NetworkAddress storageContacted;
+
+		override void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_GetRange")
+				.detail("TransactionID", id)
+				.detail("ReadId", readId)
+				.detail("BytesFetched", bytesFetched)
+				.detail("KeysFetched", keysFetched)
+				.detail("BeginKey", printable(beginKey))
+				.detail("EndKey", printable(endKey))
+				.detail("StorageContacted", storageContacted);
+		}
+
+		override void addToReqStats(RequestStats &reqStats) const {
+			reqStats.reads.push_back(
+				RequestStats::ReadStats {
+					readId,
+					bytesFetched,
+					keysFetched,
+					beginKey,
+					endKey,
+					storageContacted
+				}
+			);
 		}
 	};
 
@@ -175,7 +284,7 @@ namespace FdbClientLogEvents {
 		int commitBytes;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id) const {
+		override void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
 				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
@@ -206,7 +315,7 @@ namespace FdbClientLogEvents {
 		int errCode;
 		Key key;
 
-		void logEvent(std::string id) const {
+		override void logEvent(std::string id) const {
 			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", printable(key));
 		}
 	};
@@ -226,7 +335,7 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id) const {
+		override void logEvent(std::string id) const {
 			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
 		}
 	};
@@ -245,7 +354,7 @@ namespace FdbClientLogEvents {
 		int errCode;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id) const {
+		override void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
 				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
@@ -262,48 +371,6 @@ namespace FdbClientLogEvents {
 		}
 	};
 
-	struct EventReadStats : public Event {
-		EventReadStats(double ts, uint64_t readId, uint64_t bytesFetched,
-			uint64_t keysFetched, Key beginKey, Key endKey,
-			NetworkAddress storageContacted) :
-			Event(READ_STATS, ts),
-			readId(readId),
-			bytesFetched(bytesFetched),
-			keysFetched(keysFetched),
-			beginKey(beginKey),
-			endKey(endKey),
-			storageContacted(storageContacted) {}
-
-		template <typename Ar> Ar& serialize(Ar &ar) {
-			if (!ar.isDeserializing)
-				return serializer(Event::serialize(ar), readId, bytesFetched,
-					keysFetched, beginKey, endKey, storageContacted);
-			else
-				return serializer(ar, readId, bytesFetched, keysFetched,
-					beginKey, endKey, storageContacted);
-		}
-
-		uint64_t readId;
-		uint64_t bytesFetched;
-		uint64_t keysFetched;
-		Key beginKey;
-		Key endKey;
-		NetworkAddress storageContacted;
-
-		override void addToReqStats(RequestStats &reqStats) const {
-			reqStats.reads.push_back(
-				RequestStats::ReadStats {
-					readId,
-					bytesFetched,
-					keysFetched,
-					beginKey,
-					endKey,
-					storageContacted
-				}
-			);
-		}
-	};
-
 	struct EventContactedProxy : public Event {
 		EventContactedProxy(double ts, NetworkAddress proxyContacted) :
 			Event(CONTACTED_PROXY, ts),
@@ -316,6 +383,12 @@ namespace FdbClientLogEvents {
 				return serializer(Event::serialize(ar), proxyContacted);
 			else
 				return serializer(ar, proxyContacted);
+		}
+
+		override void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_ContactedProxy")
+				.detail("TransactionID", id)
+				.detail("ProxyContacted", proxyContacted);
 		}
 
 		override void addToReqStats(RequestStats &reqStats) const {
