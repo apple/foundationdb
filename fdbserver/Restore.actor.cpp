@@ -1656,14 +1656,14 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 	// 			printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 	// 			//cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, applierRange->second, range)) );
 	// 			cmdReplies.push_back( cmdInterf.setApplierKeyRangeVectorRequest.getReply(RestoreSetApplierKeyRangeVectorRequest(rd->cmdID, appliers, ranges)) );
-	// 			printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
-	// 			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-	// 			for (int i = 0; i < reps.size(); ++i) {
-	// 				printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
-	// 						reps[i].toString().c_str());
-	// 			}
-	// 			cmdReplies.clear();
 	// 		}
+	// 		printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
+	// 		std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+	// 		for (int i = 0; i < reps.size(); ++i) {
+	// 			printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
+	// 					reps[i].toString().c_str());
+	// 		}
+	// 		cmdReplies.clear();
 	// 		break;
 	// 	} catch (Error &e) {
 	// 		if (e.code() != error_code_io_timeout) {
@@ -1676,7 +1676,10 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 	// }
 
 	rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
-	for (auto& nodeID : loaders) {
+	state UID nodeID;
+	state int i = 0;
+	for (i = 0; i < loaders.size(); ++i) {
+		nodeID = loaders[i];
 		rd->cmdID.nextCmd();
 		ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 		loop {
@@ -2379,6 +2382,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 						} else {
 							cmdReplies.push_back( cmdInterf.loadLogFile.getReply(RestoreLoadFileRequest(rd->cmdID, param)) );
 						}
+						curOffset += param.length;
 
 						// Reach the end of the file
 						if ( param.length + param.offset >= rd->files[curFileIndex].fileSize ) {
