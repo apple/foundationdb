@@ -33,11 +33,8 @@ EvictablePage::~EvictablePage() {
 		else
 			aligned_free(data);
 	}
-	if (index > -1) {
-		pageCache->pages[index] = pageCache->pages.back();
-		pageCache->pages[index]->index = index;
-		pageCache->pages.pop_back();
-	}
+	// remove it from the LRU
+	pageCache->lruPages.erase(EvictablePageCache::List::s_iterator_to(*this));
 }
 
 std::map< std::string, OpenFileInfo > AsyncFileCached::openFiles;
@@ -97,6 +94,8 @@ Future<Void> AsyncFileCached::read_write_impl( AsyncFileCached* self, void* data
 		if ( p == self->pages.end() ) {
 			AFCPage* page = new AFCPage( self, pageOffset );
 			p = self->pages.insert( std::make_pair(pageOffset, page) ).first;
+		} else {
+			self->pageCache->updateHit(p->second);
 		}
 
 		int bytesInPage = std::min(self->pageCache->pageSize - offsetInPage, remaining);
@@ -133,6 +132,8 @@ Future<Void> AsyncFileCached::readZeroCopy( void** data, int* length, int64_t of
 	if ( p == pages.end() ) {
 		AFCPage* page = new AFCPage( this, offset );
 		p = pages.insert( std::make_pair(offset, page) ).first;
+	} else {
+		p->second->pageCache->updateHit(p->second);
 	}
 
 	*data = p->second->data;
