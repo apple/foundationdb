@@ -9,7 +9,7 @@ testTitle=SnapTestPre
 testTitle=SnapTestTakeSnap
 ;Take snap and do read/write
         testName=ReadWrite
-        testDuration=20.0
+        testDuration=10.0
         transactionsPerSecond=10000
         writesPerTransactionA=0
         readsPerTransactionA=10
@@ -22,12 +22,12 @@ testTitle=SnapTestTakeSnap
 
         testName=SnapTest
         numSnaps=1
-        maxSnapDelay=30.0
+        maxSnapDelay=10.0
         testID=1
         clearAfterTest=false
 
         testName=Attrition
-        testDuration=20.0
+        testDuration=10.0
 
 testTitle=SnapTestPost
 ;write 1000 Keys ending with odd numbers
