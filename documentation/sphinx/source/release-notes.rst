@@ -73,6 +73,8 @@ Fixes
 * The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
 * Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
 * Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* The ``configure`` command in ``fdbcli`` returned successfully even when the configuration was not changed for some error types. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Safety protections in the ``configure`` command in ``fdbcli`` would trigger spuriously when changing between ``three_datacenter`` replication and a region configuration. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
 
 Status
 ------
