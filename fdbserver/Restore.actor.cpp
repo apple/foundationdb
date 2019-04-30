@@ -1645,34 +1645,57 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 	printf("Notify_Loader_ApplierKeyRange: number of appliers:%d\n", appliers.size());
 	ASSERT( appliers.size() == ranges.size() && appliers.size() != 0 );
 
-	loop {
-		try {
-			rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
-			cmdReplies.clear();
-			for (auto& nodeID : loaders) {
-				rd->cmdID.nextCmd();
-				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
+	// loop {
+	// 	try {
+	// 		rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
+	// 		cmdReplies.clear();
+	// 		for (auto& nodeID : loaders) {
+	// 			rd->cmdID.nextCmd();
+	// 			ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
+	// 			RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
+	// 			printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
+	// 			//cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, applierRange->second, range)) );
+	// 			cmdReplies.push_back( cmdInterf.setApplierKeyRangeVectorRequest.getReply(RestoreSetApplierKeyRangeVectorRequest(rd->cmdID, appliers, ranges)) );
+	// 			printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
+	// 			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+	// 			for (int i = 0; i < reps.size(); ++i) {
+	// 				printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
+	// 						reps[i].toString().c_str());
+	// 			}
+	// 			cmdReplies.clear();
+	// 		}
+	// 		break;
+	// 	} catch (Error &e) {
+	// 		if (e.code() != error_code_io_timeout) {
+	// 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
+	// 		} else {
+	// 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+	// 					rd->cmdID.toString().c_str(), e.code(), e.what());
+	// 		}
+	// 	}
+	// }
+
+	rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
+	for (auto& nodeID : loaders) {
+		rd->cmdID.nextCmd();
+		ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
+		loop {
+			try {
+				cmdReplies.clear();
 				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 				//cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, applierRange->second, range)) );
 				cmdReplies.push_back( cmdInterf.setApplierKeyRangeVectorRequest.getReply(RestoreSetApplierKeyRangeVectorRequest(rd->cmdID, appliers, ranges)) );
-			}
-			printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
-			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
-						reps[i].toString().c_str());
-			}
-
-			cmdReplies.clear();
-
-			break;
-		} catch (Error &e) {
-			if (e.code() != error_code_io_timeout) {
+				printf("[INFO] Wait for node:%s to accept the cmd Notify_Loader_ApplierKeyRange\n", nodeID.toString().c_str());
+				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+				for (int i = 0; i < reps.size(); ++i) {
+					printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
+							reps[i].toString().c_str());
+				}
+				cmdReplies.clear();
+				break;
+			} catch (Error &e) {
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
 		}
 	}
