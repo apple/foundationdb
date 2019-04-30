@@ -204,7 +204,7 @@ public: // workload functions
 					++retry;
 					TraceEvent(retry > 100 ? SevWarn : SevInfo, "SnapCreateCommandFailed").detail("Error", e.what());
 					if (retry > 100) {
-						TraceEvent(SevError, "SnapCreateCommandFailed").detail("Error", e.what());
+						TraceEvent(SevError, "SnapCreateCommandExhausted").detail("Error", e.what());
 						throw operation_failed();
 					}
 				}

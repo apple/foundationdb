@@ -797,9 +797,9 @@ ACTOR Future<Void> commitBatch(
 						// Currently, snapshot of old tlog generation is not
 						// supported and hence failing the snapshot request until
 						// cluster is fully_recovered.
-						TraceEvent("ExecTransactionConflict")
+						TraceEvent("ExecTransactionNotFullyRecovered")
 							.detail("TransactionNum", transactionNum);
-						committed[transactionNum] = ConflictBatch::TransactionNotPermitted;
+						committed[transactionNum] = ConflictBatch::TransactionNotFullyRecovered;
 					} else {
 						// Send the ExecOp to
 						// - all the storage nodes in a single region and
@@ -1069,6 +1069,9 @@ ACTOR Future<Void> commitBatch(
 		}
 		else if (committed[t] == ConflictBatch::TransactionNotPermitted) {
 			trs[t].reply.sendError(transaction_not_permitted());
+		}
+		else if (committed[t] == ConflictBatch::TransactionNotFullyRecovered) {
+			trs[t].reply.sendError(transaction_not_fully_recovered());
 		}
 		else {
 			trs[t].reply.sendError(not_committed());
