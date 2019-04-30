@@ -52,6 +52,7 @@ struct GetKeyRangeNumberReply;
 struct RestoreVersionBatchRequest;
 struct RestoreCalculateApplierKeyRangeRequest;
 struct RestoreSendMutationVectorRequest;
+struct RestoreSetApplierKeyRangeVectorRequest;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -126,7 +127,8 @@ struct RestoreInterface {
 
 	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
 	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
-	RequestStream<RestoreSetApplierKeyRangeRequest> setApplierKeyRangeRequest;
+	RequestStream<RestoreSetApplierKeyRangeRequest> setApplierKeyRangeRequest; // To delete
+	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 
 	RequestStream<RestoreLoadFileRequest> loadRangeFile;
 	RequestStream<RestoreLoadFileRequest> loadLogFile;
@@ -162,7 +164,8 @@ struct RestoreInterface {
 
 		calculateApplierKeyRange.getEndpoint( TaskClusterController ); 
 		getApplierKeyRangeRequest.getEndpoint( TaskClusterController ); 
-		setApplierKeyRangeRequest.getEndpoint( TaskClusterController ); 
+		setApplierKeyRangeRequest.getEndpoint( TaskClusterController );
+		setApplierKeyRangeVectorRequest.getEndpoint( TaskClusterController ); 
 
 		loadRangeFile.getEndpoint( TaskClusterController ); 
 		loadLogFile.getEndpoint( TaskClusterController ); 
@@ -181,7 +184,7 @@ struct RestoreInterface {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, nodeID, heartbeat, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation, sendSampleMutationVector,
-				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
+				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest, setApplierKeyRangeVectorRequest,
 				loadRangeFile, loadLogFile, sendMutation, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
 				finishRestore);
 	}
@@ -358,6 +361,22 @@ struct RestoreSetApplierKeyRangeRequest : TimedRequest {
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		serializer(ar, cmdID, applierID, range, reply);
+	}
+};
+
+struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
+	CMDUID cmdID;
+	VectorRef<UID> applierIDs;
+	VectorRef<KeyRange> ranges; // the key range that will be assigned to the node
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSetApplierKeyRangeVectorRequest() : cmdID(CMDUID()), applierIDs(VectorRef<UID>()), ranges(VectorRef<KeyRange>()) {}
+	explicit RestoreSetApplierKeyRangeVectorRequest(CMDUID cmdID, VectorRef<UID> applierIDs, VectorRef<KeyRange> ranges) : cmdID(cmdID), applierIDs(applierIDs), ranges(ranges) { ASSERT(applierIDs.size() == ranges.size()); }
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, applierIDs, ranges, reply);
 	}
 };
 
