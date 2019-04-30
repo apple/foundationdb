@@ -14,8 +14,7 @@ architectures:
 apps:
   foundationdb:
     command: bin/desktop-launch $SNAP/bin/FoundationDB
-    environment:
-      LD_LIBRARY_PATH: "$SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/pulseaudio:$LD_LIBRARY_PATH"
+   
 
 parts:
   foundationdb:
@@ -42,9 +41,6 @@ parts:
       - libpulse0
       - libsndfile1
       - libtheora0
-      - libvorbis0a
-      - libvorbisenc2
-      - libvorbisfile3
-      - libwebp5
+      
     organize:
       'FoundationDB_v*': 'bin/FoundationDB'
