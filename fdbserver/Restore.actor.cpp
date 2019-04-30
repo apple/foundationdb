@@ -1059,7 +1059,8 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 
  	state int start = 0;
  	state int end = data.size();
- 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+ 	//state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+	state int dataSizeLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
  	state int kvCount = 0;
 
  	//MX: This is where the key-value pair in range file is applied into DB
@@ -1137,7 +1138,8 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 
  	state int start = 0;
  	state int end = data.size();
- 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+ 	//state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+	state int dataSizeLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 	state int kvCount = 0;
 	state int numConcatenated = 0;
 	loop {
@@ -4601,10 +4603,10 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 		
 		double loopTopTime = now();
 		double elapsedTime = loopTopTime - lastLoopTopTime;
-		if( elapsedTime > 0.050 ) {
-			if (g_random->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", rd->describeNode()).detail("Elapsed", elapsedTime);
-		}
+		// if( elapsedTime > 0.050 ) {
+		// 	if (g_random->random01() < 0.01)
+		// 		TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", rd->describeNode()).detail("Elapsed", elapsedTime);
+		// }
 		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
 
