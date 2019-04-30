@@ -1283,6 +1283,19 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<RestoreData> rd, RestoreInterface interf, Database cx) {
  	state Transaction tr(cx);
 
+	while (rd->isInProgress(RestoreCommandEnum::Set_WorkerInterface)) {
+		printf("[DEBUG] NODE:%s setWorkerInterface wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+	// Handle duplicate, assuming cmdUID is always unique for the same workload
+	if ( rd->isCmdProcessed(req.cmdID) ) {
+		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+		return Void();
+	} 
+
+	rd->setInProgressFlag(RestoreCommandEnum::Set_WorkerInterface);
+
 	state vector<RestoreInterface> agents; // agents is cmdsInterf
 	printf("[INFO][Worker] Node:%s Get the interface for all workers\n", rd->describeNode().c_str());
 	loop {
@@ -1300,7 +1313,6 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
 				tr.commit();
-				req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 				break;
 			}
 		} catch( Error &e ) {
@@ -1311,6 +1323,9 @@ ACTOR Future<Void> setWorkerInterface(RestoreSimpleRequest req, Reference<Restor
 		wait ( delay(1.0) );
 	};
 
+	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+	rd->processedCmd[req.cmdID] = 1;
+	rd->clearInProgressFlag(RestoreCommandEnum::Set_WorkerInterface);
 
 	return Void();
  }
@@ -1621,7 +1636,6 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 
 	state std::map<Standalone<KeyRef>, UID>::iterator applierRange;
 	for (applierRange = rd->range2Applier.begin(); applierRange != rd->range2Applier.end(); applierRange++) {
-		rd->cmdID.nextCmd();
 		KeyRef beginRange = applierRange->first;
 		KeyRange range(KeyRangeRef(beginRange, beginRange)); // TODO: Use the end of key range
 		appliers.push_back(appliers.arena(), applierRange->second);
@@ -1634,7 +1648,9 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 	loop {
 		try {
 			rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
+			cmdReplies.clear();
 			for (auto& nodeID : loaders) {
+				rd->cmdID.nextCmd();
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
 				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
@@ -2792,6 +2808,7 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreData> rd, int batchIn
 		try {
 			wait(delay(1.0));
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
+			rd->cmdID.initPhase(RestoreCommandEnum::RESET_VersionBatch);
 			for(auto& workerID : workerIDs) {
 				ASSERT( rd->workers_interface.find(workerID) != rd->workers_interface.end() );
 				auto& cmdInterf = rd->workers_interface[workerID];
@@ -3741,9 +3758,26 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, Reference<RestoreDa
 ACTOR Future<Void> handleVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	// wait( delay(1.0) );
 	printf("[Batch:%d] Node:%s Start...\n", req.batchID, rd->describeNode().c_str());
+	while (rd->isInProgress(RestoreCommandEnum::RESET_VersionBatch)) {
+		printf("[DEBUG] NODE:%s sampleRangeFile wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(5.0));
+	}
+
+	// Handle duplicate, assuming cmdUID is always unique for the same workload
+	if ( rd->isCmdProcessed(req.cmdID) ) {
+		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
+		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+		return Void();
+	} 
+
+	rd->setInProgressFlag(RestoreCommandEnum::RESET_VersionBatch);
+
 	rd->resetPerVersionBatch();
 	rd->processedFiles.clear();
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
+
+	rd->processedCmd[req.cmdID] = 1;
+	rd->clearInProgressFlag(RestoreCommandEnum::RESET_VersionBatch);
 
 	// This actor never returns. You may cancel it in master
 	return Void();
@@ -3971,12 +4005,27 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 
 }
 
+// Assign key range to applier
 ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
 	// The applier should remember the key range it is responsible for
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 	//rd->applierStatus.keyRange = req.range;
+	while (rd->isInProgress(RestoreCommandEnum::Assign_Applier_KeyRange)) {
+		printf("[DEBUG] NODE:%s handleSetApplierKeyRangeRequest wait for 1s\n",  rd->describeNode().c_str());
+		wait(delay(1.0));
+	}
+	if ( rd->isCmdProcessed(req.cmdID) ) {
+		req.reply.send(RestoreCommonReply(interf.id(),req.cmdID));
+		return Void();
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Assign_Applier_KeyRange);
+
 	rd->range2Applier[req.range.begin] = req.applierID;
+
+	rd->processedCmd[req.cmdID] = 1;
+	rd->clearInProgressFlag(RestoreCommandEnum::Assign_Applier_KeyRange);
+
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 
 	return Void();
@@ -3987,12 +4036,24 @@ ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRan
 	// The applier should remember the key range it is responsible for
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 	//rd->applierStatus.keyRange = req.range;
+	while (rd->isInProgress(RestoreCommandEnum::Notify_Loader_ApplierKeyRange)) {
+		printf("[DEBUG] NODE:%s handleSetApplierKeyRangeVectorRequest wait for 1s\n",  rd->describeNode().c_str());
+		wait(delay(1.0));
+	}
+	if ( rd->isCmdProcessed(req.cmdID) ) {
+		req.reply.send(RestoreCommonReply(interf.id(),req.cmdID));
+		return Void();
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Notify_Loader_ApplierKeyRange);
+
 	VectorRef<UID> appliers = req.applierIDs;
 	VectorRef<KeyRange> ranges = req.ranges;
 	for ( int i = 0; i < appliers.size(); i++ ) {
 		rd->range2Applier[ranges[i].begin] = appliers[i];
 	}
 	
+	rd->processedCmd[req.cmdID] = 1;
+	rd->clearInProgressFlag(RestoreCommandEnum::Notify_Loader_ApplierKeyRange);
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 
 	return Void();
@@ -4275,11 +4336,11 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 	state int numMutations = 0;
 	rd->numSampledMutations = 0;
 	//wait( delay(1.0) );
-	// while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-	// 	printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
-	// 	wait(delay(5.0));
-	// }
-	// rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
+	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
+		printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
+		wait(delay(1.0));
+	}
+	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
 
 	// Handle duplicate message
 	if (rd->isCmdProcessed(req.cmdID)) {
@@ -4310,7 +4371,7 @@ ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest re
 	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
 	rd->processedCmd[req.cmdID] = 1;
 
-	//rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
+	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
 
 	return Void();
 }

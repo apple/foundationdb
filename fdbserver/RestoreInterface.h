@@ -66,7 +66,7 @@ enum class RestoreCommandEnum {Init = 0,
 		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //19
 		Loader_Notify_Appler_To_Apply_Mutation,
 		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done, //22
-		Finish_Restore}; //23
+		Finish_Restore, RESET_VersionBatch, Set_WorkerInterface}; //23
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
 // Restore command's UID. uint64_t part[2];
