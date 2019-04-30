@@ -69,12 +69,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::UnsetClass:
-			return ProcessClass::UnsetFit;
 		case ProcessClass::CoordinatorClass:
 			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
@@ -88,10 +88,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
-		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
@@ -105,10 +105,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
-		case ProcessClass::TransactionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
@@ -122,12 +122,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::UnsetClass:
-			return ProcessClass::UnsetFit;
 		case ProcessClass::CoordinatorClass:
 			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
@@ -141,6 +141,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
@@ -151,8 +153,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::UnsetClass:
-			return ProcessClass::UnsetFit;
 		case ProcessClass::CoordinatorClass:
 			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
@@ -166,10 +166,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
-		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
@@ -182,10 +182,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
-		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
