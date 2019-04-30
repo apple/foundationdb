@@ -304,6 +304,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 
 	state Future<Void> tooLong = delay(4.5);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	state bool oldReplicationUsesDcId = false;
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
@@ -330,6 +331,12 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					if(!newConfig.isValid()) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
+					
+					if(newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size()>0) {
+						return ConfigurationResult::REGION_REPLICATION_MISMATCH;
+					}
+
+					oldReplicationUsesDcId = oldReplicationUsesDcId | oldConfig.tLogPolicy->attributeKeys().count("dcid");
 
 					if(oldConfig.usableRegions != newConfig.usableRegions) {
 						//cannot change region configuration
@@ -358,21 +365,45 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					state Future<Standalone<RangeResultRef>> fServerList = (newConfig.regions.size()) ? tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) : Future<Standalone<RangeResultRef>>();
 
 					if(newConfig.usableRegions==2) {
-						//all regions with priority >= 0 must be fully replicated
-						state std::vector<Future<Optional<Value>>> replicasFutures;
-						for(auto& it : newConfig.regions) {
-							if(it.priority >= 0) {
-								replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
-							}
-						}
-						wait( waitForAll(replicasFutures) || tooLong );
+						if(oldReplicationUsesDcId) {
+								state Future<Standalone<RangeResultRef>> fLocalityList = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
+								wait( success(fLocalityList) || tooLong );
+								if(!fLocalityList.isReady()) {
+									return ConfigurationResult::DATABASE_UNAVAILABLE;
+								}
+								Standalone<RangeResultRef> localityList = fLocalityList.get();
+								ASSERT( !localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY );
 
-						for(auto& it : replicasFutures) {
-							if(!it.isReady()) {
-								return ConfigurationResult::DATABASE_UNAVAILABLE;
+								std::set<Key> localityDcIds;
+								for(auto& s : localityList) {
+									auto dc = decodeTagLocalityListKey( s.key );
+									if(dc.present()) {
+										localityDcIds.insert(dc.get());
+									}
+								}
+
+								for(auto& it : newConfig.regions) {
+									if(localityDcIds.count(it.dcId) == 0) {
+										return ConfigurationResult::DCID_MISSING;
+									}
+								}
+						} else {
+							//all regions with priority >= 0 must be fully replicated
+							state std::vector<Future<Optional<Value>>> replicasFutures;
+							for(auto& it : newConfig.regions) {
+								if(it.priority >= 0) {
+									replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
+								}
 							}
-							if(!it.get().present()) {
-								return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+							wait( waitForAll(replicasFutures) || tooLong );
+
+							for(auto& it : replicasFutures) {
+								if(!it.isReady()) {
+									return ConfigurationResult::DATABASE_UNAVAILABLE;
+								}
+								if(!it.get().present()) {
+									return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+								}
 							}
 						}
 					}
@@ -390,11 +421,15 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						for(auto& it : newConfig.regions) {
 							newDcIds.insert(it.dcId);
 						}
+						std::set<Key> missingDcIds;
 						for(auto& s : serverList) {
 							auto ssi = decodeServerListValue( s.value );
 							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
-								return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
+								missingDcIds.insert(ssi.locality.dcId().get());
 							}
+						}
+						if(missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
+							return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
 						}
 					}
 
