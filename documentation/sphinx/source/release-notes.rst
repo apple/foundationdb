@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.3
+6.1.4
 =====
 
 Features
@@ -48,7 +48,8 @@ Performance
 * Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
 * Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
 * Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
-* SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 4MB. [6.1.3] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_
+* SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
 
 Fixes
 -----
@@ -71,7 +72,7 @@ Fixes
 * Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. `(PR #1394) <https://github.com/apple/foundationdb/pull/1394>`_
 * The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
 * Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
-* Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.3] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_.
+* Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
 
 Status
 ------
