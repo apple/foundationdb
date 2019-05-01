@@ -79,22 +79,23 @@ def write_unix_asm(asmfile, functions, prefix):
         asmfile.write("\tjmp r11\n")
 
 
-with open(asm, 'w') as asmfile, open(h, 'w') as hfile:
-    hfile.write(
-        "void fdb_api_ptr_unimpl() { fprintf(stderr, \"UNIMPLEMENTED FDB API FUNCTION\\n\"); abort(); }\n\n")
-    hfile.write(
-        "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
+with open(asm, 'w') as asmfile:
+    with open(h, 'w') as hfile:
+        hfile.write(
+            "void fdb_api_ptr_unimpl() { fprintf(stderr, \"UNIMPLEMENTED FDB API FUNCTION\\n\"); abort(); }\n\n")
+        hfile.write(
+            "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
-    if platform == "linux":
-        write_unix_asm(asmfile, functions, '')
-    elif platform == "osx":
-        write_unix_asm(asmfile, functions, '_')
-    elif platform == "windows":
-        write_windows_asm(asmfile, functions)
+        if platform == "linux":
+            write_unix_asm(asmfile, functions, '')
+        elif platform == "osx":
+            write_unix_asm(asmfile, functions, '_')
+        elif platform == "windows":
+            write_windows_asm(asmfile, functions)
 
-    for f in functions:
-        if platform == "windows":
-            hfile.write("extern \"C\" ")
-        hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)
-        for v in functions[f]:
-            hfile.write("#define %s_v%d_PREV %s_v%d\n" % (f, v, f, v - 1))
+        for f in functions:
+            if platform == "windows":
+                hfile.write("extern \"C\" ")
+            hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)
+            for v in functions[f]:
+                hfile.write("#define %s_v%d_PREV %s_v%d\n" % (f, v, f, v - 1))

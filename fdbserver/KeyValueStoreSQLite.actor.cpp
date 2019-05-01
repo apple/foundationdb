@@ -1325,6 +1325,16 @@ void SQLiteDB::open(bool writable) {
 	int result = sqlite3_open_v2(apath.c_str(), &db, (writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY), NULL);
 	checkError("open", result);
 
+	int chunkSize;
+	if( !g_network->isSimulated() ) {
+		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
+	} else if( BUGGIFY ) {
+		chunkSize = 4096 * g_random->randomInt(0, 100);
+	} else {
+		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
+	}
+	checkError("setChunkSize", sqlite3_file_control(db, nullptr, SQLITE_FCNTL_CHUNK_SIZE, &chunkSize));
+
 	btree = db->aDb[0].pBt;
 	initPagerCodec();
 
@@ -1431,7 +1441,12 @@ public:
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
 
-	Future<Void> doClean();
+	struct SpringCleaningWorkPerformed {
+		int lazyDeletePages = 0;
+		int vacuumedPages = 0;
+	};
+
+	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
 
 private:
@@ -1704,15 +1719,17 @@ private:
 		}
 
 		struct SpringCleaningAction : TypedAction<Writer, SpringCleaningAction>, FastAllocated<SpringCleaningAction> {
-			ThreadReturnPromise<Void> result;
-			virtual double getTimeEstimate() { return SERVER_KNOBS->SPRING_CLEANING_TIME_ESTIMATE; }
+			ThreadReturnPromise<SpringCleaningWorkPerformed> result;
+			virtual double getTimeEstimate() { 
+				return std::max(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE, SERVER_KNOBS->SPRING_CLEANING_VACUUM_TIME_ESTIMATE);
+			}
 		};
 		void action(SpringCleaningAction& a) {
 			double s = now();
-			double end = now() + SERVER_KNOBS->SPRING_CLEANING_TIME_ESTIMATE;
+			double lazyDeleteEnd = now() + SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE;
+			double vacuumEnd = now() + SERVER_KNOBS->SPRING_CLEANING_VACUUM_TIME_ESTIMATE;
 
-			int lazyDeletePages = 0;
-			int vacuumedPages = 0;
+			SpringCleaningWorkPerformed workPerformed;
 
 			double lazyDeleteTime = 0;
 			double vacuumTime = 0;
@@ -1722,8 +1739,13 @@ private:
 
 			loop {
 				double begin = now();
-				bool canDelete = !freeTableEmpty && (now() < end || lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MIN_LAZY_DELETE_PAGES) && lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES;
-				bool canVacuum = !vacuumFinished && (now() < end || vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MIN_VACUUM_PAGES) && vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MAX_VACUUM_PAGES;
+				bool canDelete = !freeTableEmpty 
+				                 && (now() < lazyDeleteEnd || workPerformed.lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MIN_LAZY_DELETE_PAGES) 
+				                 && workPerformed.lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES;
+
+				bool canVacuum = !vacuumFinished 
+				                 && (now() < vacuumEnd || workPerformed.vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MIN_VACUUM_PAGES) 
+				                 && workPerformed.vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MAX_VACUUM_PAGES;
 
 				if(!canDelete && !canVacuum) {
 					break;
@@ -1733,10 +1755,10 @@ private:
 					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
 					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
 
-					int pagesToDelete = std::max(1, std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE, SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - lazyDeletePages));
+					int pagesToDelete = std::max(1, std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE, SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - workPerformed.lazyDeletePages));
 					int pagesDeleted = cursor->lazyDelete(pagesToDelete) ;
 					freeTableEmpty = (pagesDeleted != pagesToDelete);
-					lazyDeletePages += pagesDeleted;
+					workPerformed.lazyDeletePages += pagesDeleted;
 					lazyDeleteTime += now() - begin;
 				}
 				else {
@@ -1747,7 +1769,7 @@ private:
 
 					vacuumFinished = conn.vacuum();
 					if(!vacuumFinished) {
-						++vacuumedPages;
+						++workPerformed.vacuumedPages;
 					}
 
 					vacuumTime += now() - begin;
@@ -1758,19 +1780,19 @@ private:
 
 			freeListPages = conn.freePages();
 
-			TEST(lazyDeletePages > 0); // Pages lazily deleted
-			TEST(vacuumedPages > 0); // Pages vacuumed
+			TEST(workPerformed.lazyDeletePages > 0); // Pages lazily deleted
+			TEST(workPerformed.vacuumedPages > 0); // Pages vacuumed
 			TEST(vacuumTime > 0); // Time spent vacuuming
 			TEST(lazyDeleteTime > 0); // Time spent lazy deleting
 
 			++springCleaningStats.springCleaningCount;
-			springCleaningStats.lazyDeletePages += lazyDeletePages;
-			springCleaningStats.vacuumedPages += vacuumedPages;
+			springCleaningStats.lazyDeletePages += workPerformed.lazyDeletePages;
+			springCleaningStats.vacuumedPages += workPerformed.vacuumedPages;
 			springCleaningStats.springCleaningTime += now() - s;
 			springCleaningStats.vacuumTime += vacuumTime;
 			springCleaningStats.lazyDeleteTime += lazyDeleteTime;
 
-			a.result.send(Void());
+			a.result.send(workPerformed);
 			++writesComplete;
 			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
 				TraceEvent("SpringCleaningActionFinished", dbgid).detail("Elapsed", now()-s);
@@ -1849,9 +1871,22 @@ IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, Key
 }
 
 ACTOR Future<Void> cleanPeriodically( KeyValueStoreSQLite* self ) {
+	wait(delayJittered(SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL));
 	loop {
-		wait( delayJittered(SERVER_KNOBS->CLEANING_INTERVAL) );
-		wait( self->doClean() );
+		KeyValueStoreSQLite::SpringCleaningWorkPerformed workPerformed = wait(self->doClean());
+
+		double duration = std::numeric_limits<double>::max();
+		if (workPerformed.lazyDeletePages >= SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE) {
+			duration = std::min(duration, SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_INTERVAL);
+		}
+		if (workPerformed.vacuumedPages > 0) {
+			duration = std::min(duration, SERVER_KNOBS->SPRING_CLEANING_VACUUM_INTERVAL);
+		}
+		if (duration == std::numeric_limits<double>::max()) {
+			duration = SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL;
+		}
+
+		wait(delayJittered(duration));
 	}
 }
 
@@ -1957,7 +1992,7 @@ Future<Standalone<VectorRef<KeyValueRef>>> KeyValueStoreSQLite::readRange( KeyRa
 	readThreads->post(p);
 	return f;
 }
-Future<Void> KeyValueStoreSQLite::doClean() {
+Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
 	++writesRequested;
 	auto p = new Writer::SpringCleaningAction;
 	auto f = p->result.getFuture();

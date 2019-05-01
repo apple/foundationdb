@@ -54,6 +54,7 @@ struct ProxyStats {
 	Counter mutationBytes;
 	Counter mutations;
 	Counter conflictRanges;
+	Counter keyServerLocationRequests;
 	Version lastCommitVersionAssigned;
 
 	LatencyBands commitLatencyBands;
@@ -65,8 +66,8 @@ struct ProxyStats {
 	  : cc("ProxyStats", id.toString()),
 		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
 		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
-		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), lastCommitVersionAssigned(0), 
-		commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
+		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationRequests("KeyServerLocationRequests", cc), 
+		lastCommitVersionAssigned(0), commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 	{
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
@@ -1220,118 +1221,118 @@ ACTOR static Future<Void> transactionStarter(
 	}
 }
 
-ACTOR static Future<Void> readRequestServer(
-	MasterProxyInterface proxy,
-	ProxyCommitData* commitData
-	)
-{
+ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, ProxyCommitData* commitData ) {
 	// Implement read-only parts of the proxy interface
-
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 
 	TraceEvent("ProxyReadyForReads", proxy.id());
 
 	loop {
-		choose{
-			when(GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture())) {
-				GetKeyServerLocationsReply rep;
-				if(!req.end.present()) {
-					auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
-					vector<StorageServerInterface> ssis;
-					ssis.reserve(r.value().src_info.size());
-					for(auto& it : r.value().src_info) {
-						ssis.push_back(it->interf);
-					}
-					rep.results.push_back(std::make_pair(r.range(), ssis));
-				} else if(!req.reverse) {
-					int count = 0;
-					for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
-						vector<StorageServerInterface> ssis;
-						ssis.reserve(r.value().src_info.size());
-						for(auto& it : r.value().src_info) {
-							ssis.push_back(it->interf);
-						}
-						rep.results.push_back(std::make_pair(r.range(), ssis));
-						count++;
-					}
-				} else {
-					int count = 0;
-					auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
-					while( count < req.limit && req.begin < r.end() ) {
-						vector<StorageServerInterface> ssis;
-						ssis.reserve(r.value().src_info.size());
-						for(auto& it : r.value().src_info) {
-							ssis.push_back(it->interf);
-						}
-						rep.results.push_back(std::make_pair(r.range(), ssis));
-						if(r == commitData->keyInfo.ranges().begin()) {
-							break;
-						}
-						count++;
-						--r;
-					}
-				}
-				req.reply.send(rep);
+		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
+		++commitData->stats.keyServerLocationRequests;
+		GetKeyServerLocationsReply rep;
+		if(!req.end.present()) {
+			auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
+			vector<StorageServerInterface> ssis;
+			ssis.reserve(r.value().src_info.size());
+			for(auto& it : r.value().src_info) {
+				ssis.push_back(it->interf);
 			}
-			when(GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture())) {
-				if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
-					GetStorageServerRejoinInfoReply rep;
-					rep.version = commitData->version;
-					rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
-					Standalone<VectorRef<KeyValueRef>> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
-					for(int i = history.size()-1; i >= 0; i-- ) {
-						rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
-					}
-					auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
-					if( localityKey.present() ) {
-						rep.newLocality = false;
-						int8_t locality = decodeTagLocalityListValue(localityKey.get());
-						if(locality != rep.tag.locality) {
-							uint16_t tagId = 0;
-							std::vector<uint16_t> usedTags;
-							auto tagKeys = commitData->txnStateStore->readRange(serverTagKeys).get();
-							for( auto& kv : tagKeys ) {
-								Tag t = decodeServerTagValue( kv.value );
-								if(t.locality == locality) {
-									usedTags.push_back(t.id);
-								}
-							}
-							auto historyKeys = commitData->txnStateStore->readRange(serverTagHistoryKeys).get();
-							for( auto& kv : historyKeys ) {
-								Tag t = decodeServerTagValue( kv.value );
-								if(t.locality == locality) {
-									usedTags.push_back(t.id);
-								}
-							}
-							std::sort(usedTags.begin(), usedTags.end());
-
-							int usedIdx = 0;
-							for(; usedTags.size() > 0 && tagId <= usedTags.end()[-1]; tagId++) {
-								if(tagId < usedTags[usedIdx]) {
-									break;
-								} else {
-									usedIdx++;
-								}
-							}
-							rep.newTag = Tag(locality, tagId);
-						}
-					} else {
-						rep.newLocality = true;
-						int8_t maxTagLocality = -1;
-						auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
-						for( auto& kv : localityKeys ) {
-							maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));
-						}
-						rep.newTag = Tag(maxTagLocality+1,0);
-					}
-					req.reply.send(rep);
-				} else {
-					req.reply.sendError(worker_removed());
+			rep.results.push_back(std::make_pair(r.range(), ssis));
+		} else if(!req.reverse) {
+			int count = 0;
+			for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
+				vector<StorageServerInterface> ssis;
+				ssis.reserve(r.value().src_info.size());
+				for(auto& it : r.value().src_info) {
+					ssis.push_back(it->interf);
 				}
+				rep.results.push_back(std::make_pair(r.range(), ssis));
+				count++;
+			}
+		} else {
+			int count = 0;
+			auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
+			while( count < req.limit && req.begin < r.end() ) {
+				vector<StorageServerInterface> ssis;
+				ssis.reserve(r.value().src_info.size());
+				for(auto& it : r.value().src_info) {
+					ssis.push_back(it->interf);
+				}
+				rep.results.push_back(std::make_pair(r.range(), ssis));
+				if(r == commitData->keyInfo.ranges().begin()) {
+					break;
+				}
+				count++;
+				--r;
 			}
 		}
+		req.reply.send(rep);
 		wait(yield());
+	}
+}
+
+ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitData* commitData ) {
+	// We can't respond to these requests until we have valid txnStateStore
+	wait(commitData->validState.getFuture());
+
+	loop {
+		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
+		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
+			GetStorageServerRejoinInfoReply rep;
+			rep.version = commitData->version;
+			rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
+			Standalone<VectorRef<KeyValueRef>> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+			for(int i = history.size()-1; i >= 0; i-- ) {
+				rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
+			}
+			auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
+			if( localityKey.present() ) {
+				rep.newLocality = false;
+				int8_t locality = decodeTagLocalityListValue(localityKey.get());
+				if(locality != rep.tag.locality) {
+					uint16_t tagId = 0;
+					std::vector<uint16_t> usedTags;
+					auto tagKeys = commitData->txnStateStore->readRange(serverTagKeys).get();
+					for( auto& kv : tagKeys ) {
+						Tag t = decodeServerTagValue( kv.value );
+						if(t.locality == locality) {
+							usedTags.push_back(t.id);
+						}
+					}
+					auto historyKeys = commitData->txnStateStore->readRange(serverTagHistoryKeys).get();
+					for( auto& kv : historyKeys ) {
+						Tag t = decodeServerTagValue( kv.value );
+						if(t.locality == locality) {
+							usedTags.push_back(t.id);
+						}
+					}
+					std::sort(usedTags.begin(), usedTags.end());
+
+					int usedIdx = 0;
+					for(; usedTags.size() > 0 && tagId <= usedTags.end()[-1]; tagId++) {
+						if(tagId < usedTags[usedIdx]) {
+							break;
+						} else {
+							usedIdx++;
+						}
+					}
+					rep.newTag = Tag(locality, tagId);
+				}
+			} else {
+				rep.newLocality = true;
+				int8_t maxTagLocality = -1;
+				auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
+				for( auto& kv : localityKeys ) {
+					maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));
+				}
+				rep.newTag = Tag(maxTagLocality+1,0);
+			}
+			req.reply.send(rep);
+		} else {
+			req.reply.sendError(worker_removed());
+		}
 	}
 }
 
@@ -1464,6 +1465,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(monitorRemoteCommitted(&commitData, db));
 	addActor.send(transactionStarter(proxy, db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, &commitData));
+	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 
 	// wait for txnStateStore recovery
