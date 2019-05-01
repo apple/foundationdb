@@ -1334,8 +1334,13 @@ void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
 std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreData> rd, int numAppliers) {
 	ASSERT(numAppliers > 0);
 	std::vector<Standalone<KeyRef>> lowerBounds;
+	int numSampledMutations = 0;
+	for (auto &count : rd->keyOpsCount) {
+		numSampledMutations += count.second;
+	}
+
 	//intervalLength = (numSampledMutations - remainder) / (numApplier - 1)
-	int intervalLength = std::max(rd->numSampledMutations / numAppliers, 1); // minimal length is 1
+	int intervalLength = std::max(numSampledMutations / numAppliers, 1); // minimal length is 1
 	int curCount = 0;
 	int curInterval = 0;
 
@@ -1343,9 +1348,9 @@ std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreDat
 			rd->describeNode().c_str(),
 			rd->numSampledMutations, numAppliers, intervalLength);
 	for (auto &count : rd->keyOpsCount) {
-		if (curInterval <= curCount / intervalLength) {
-			printf("[INFO] Node:%s calculateAppliersKeyRanges(): Add a new key range %d: curCount:%d\n",
-					rd->describeNode().c_str(), curInterval, curCount);
+		if (curCount >= curInterval * intervalLength) {
+			printf("[INFO] Node:%s calculateAppliersKeyRanges(): Add a new key range  [%d]:%s: curCount:%d\n",
+					rd->describeNode().c_str(), curInterval, count.first.toString().c_str(), curCount);
 			lowerBounds.push_back(count.first); // The lower bound of the current key range
 			curInterval++;
 		}
@@ -1769,7 +1774,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			rd->range2Applier.clear();
 			keyRangeReplies.clear(); // In case error happens in try loop
 			rd->cmdID.initPhase(RestoreCommandEnum::Get_Applier_KeyRange);
-			rd->cmdID.nextCmd();
+			//rd->cmdID.nextCmd();
 			for (int i = 0; i < applierIDs.size() && i < numKeyRanges; ++i) {
 				UID applierID = applierIDs[i];
 				rd->cmdID.nextCmd();
@@ -3130,6 +3135,8 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 			kvCount = 0;
 			state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+			applierMutationsSize[applierID] = 0;
 			for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
 				state uint64_t commitVersion = kvOp->first;
 				state int mIndex;
@@ -3267,6 +3274,8 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 	loop {
 		try {
 			cmdReplies.clear();
+			mutationsBuffer.pop_front(mutationsBuffer.size());
+			mutationsSize = 0;
 			packMutationNum = 0;
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier); 
 			// TODO: Consider using a different EndPoint for loader and applier communication.
@@ -3277,7 +3286,7 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 					kvm = kvOp->second[mIndex];
 					rd->cmdID.nextCmd();
-					if ( debug_verbose ) {
+					if ( debug_verbose || true ) { // Debug deterministic bug
 						printf("[VERBOSE_DEBUG] send mutation to applier, mIndex:%d mutation:%s\n", mIndex, kvm.toString().c_str());
 					}
 					mutationsBuffer.push_back(mutationsBuffer.arena(), kvm);
@@ -3538,11 +3547,13 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 	// Applier will calculate applier key range
 	printf("[INFO][Applier] CMD:%s, Node:%s Calculate key ranges for %d appliers\n",
 			req.cmdID.toString().c_str(), rd->describeNode().c_str(), req.numAppliers);
+
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 	if ( keyRangeLowerBounds.empty() ) {
 		keyRangeLowerBounds = _calculateAppliersKeyRanges(rd, req.numAppliers); // keyRangeIndex is the number of key ranges requested
 		rd->keyRangeLowerBounds = keyRangeLowerBounds;
 	}
+	
 	printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%ld\n",
 			rd->cmdID.toString().c_str(), rd->describeNode().c_str(), keyRangeLowerBounds.size());
 	req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));

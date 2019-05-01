@@ -305,8 +305,6 @@ std::string RestoreConfig::toString() {
 typedef RestoreConfig::RestoreFile RestoreFile;
 
 
-
-
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
 // The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp 
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
