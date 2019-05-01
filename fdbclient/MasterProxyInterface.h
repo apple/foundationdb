@@ -65,6 +65,7 @@ struct MasterProxyInterface {
 		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
 		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
 		commit.getEndpoint(TaskProxyCommitDispatcher);
+		getStorageServerRejoinInfo.getEndpoint(TaskProxyStorageRejoin);
 		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
 	}
 };

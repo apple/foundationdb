@@ -745,11 +745,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					sources.insert( req.sources[i] );
 
 				for( int i = 0; i < req.sources.size(); i++ ) {
-					if( !self->server_info.count( req.sources[i] ) ) {
-						TEST( true ); // GetSimilarTeams source server now unknown
-						TraceEvent(SevWarn, "GetTeam").detail("ReqSourceUnknown", req.sources[i]);
-					}
-					else {
+					if( self->server_info.count( req.sources[i] ) ) {
 						auto& teamList = self->server_info[ req.sources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
 							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
@@ -2321,6 +2317,8 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 				self->addTeam(team->getServers(), true, true);
 				TEST(true);
 			}
+
+			self->doBuildTeams = true;
 
 			if (self->badTeamRemover.isReady()) {
 				self->badTeamRemover = removeBadTeams(self);

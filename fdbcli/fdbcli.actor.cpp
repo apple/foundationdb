@@ -1665,32 +1665,42 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
@@ -1779,32 +1789,42 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
