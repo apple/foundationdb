@@ -30,6 +30,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 
+
 class RestoreConfig;
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
 extern std::vector<std::string> RestoreRoleStr;
