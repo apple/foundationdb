@@ -33,6 +33,21 @@
 #include "flow/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+struct LogRouterStats {
+	CounterCollection cc;
+	Future<Void> logger;
+
+	explicit LogRouterStats(UID id, NotifiedVersion* pVersion, NotifiedVersion* pMinPopped, Version* pMinKnownCommittedVersion, Version* pPoppedVersion)
+	  : cc("LogRouterStats", id.toString())
+	{
+		specialCounter(cc, "Version", [pVersion](){return pVersion->get(); });
+		specialCounter(cc, "MinPopped", [pMinPopped](){return pMinPopped->get(); });
+		specialCounter(cc, "MinKnownCommittedVersion", [pMinKnownCommittedVersion](){ return *pMinKnownCommittedVersion; });
+		specialCounter(cc, "PoppedVersion", [pPoppedVersion](){ return *pPoppedVersion; });
+		logger = traceCounters("LogRouterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
+	}
+};
+
 struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {
 		std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;
@@ -75,6 +90,7 @@ struct LogRouterData {
 	};
 
 	UID dbgid;
+	LogRouterStats stats;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
@@ -104,7 +120,9 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false) {
+	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
+	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
+		stats(dbgid, &version, &minPopped, &minKnownCommittedVersion, &poppedVersion) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
