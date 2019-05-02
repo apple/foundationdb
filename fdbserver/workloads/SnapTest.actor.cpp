@@ -81,6 +81,7 @@ public: // variables
 	UID snapUID; // UID used for snap name
 	std::string restartInfoLocation; // file location to store the snap restore info
 	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
+	bool skipCheck; // disable check if the exec fails
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -95,6 +96,7 @@ public: // ctor & dtor
 		restartInfoLocation =
 		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
 		        .toString();
+		skipCheck = false;
 	}
 
 public: // workload functions
@@ -112,6 +114,10 @@ public: // workload functions
 	}
 
 	ACTOR Future<bool> _check(Database cx, SnapTestWorkload* self) {
+		if (self->skipCheck) {
+			TraceEvent(SevWarnAlways, "SnapCheckIgnored");
+			return true;
+		}
 		state Transaction tr(cx);
 		// read the key SnapFailedTLog.$UID
 		loop {
@@ -141,6 +147,29 @@ public: // workload functions
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
+
+	ACTOR Future<Void> snapExecHelper(SnapTestWorkload* self, Database cx, StringRef keyRef, StringRef valueRef) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.execute(keyRef, valueRef);
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				try {
+					wait(tr.onError(e));
+				} catch (Error& e) {
+					if (e.code() == error_code_cluster_not_fully_recovered) {
+						TraceEvent(SevWarnAlways, "ClusterNotFullyRecovered");
+						self->skipCheck = true;
+						break;
+					}
+					throw;
+				}
+			}
+		}
+		return Void();
+	}
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
@@ -193,6 +222,7 @@ public: // workload functions
 			wait(delay(toDelay));
 
 			state int retry = 0;
+			state bool snapFailed = false;
 			loop {
 				self->snapUID = g_random->randomUniqueID();
 				try {
@@ -202,10 +232,12 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					++retry;
-					TraceEvent(retry > 100 ? SevWarn : SevInfo, "SnapCreateCommandFailed").detail("Error", e.what());
-					if (retry > 100) {
-						TraceEvent(SevError, "SnapCreateCommandExhausted").detail("Error", e.what());
-						throw operation_failed();
+					if (retry > 3) {
+						if (e.code() == error_code_cluster_not_fully_recovered) {
+							snapFailed = true;
+							break;
+						}
+						throw e;
 					}
 				}
 			}
@@ -214,13 +246,23 @@ public: // workload functions
 			ini.LoadFile(self->restartInfoLocation.c_str());
 			std::string uidStr = self->snapUID.toString();
 			ini.SetValue("RESTORE", "RestoreSnapUID", uidStr.c_str());
+			ini.SetValue("RESTORE", "BackupFailed", format("%d", snapFailed).c_str());
 			ini.SaveFile(self->restartInfoLocation.c_str());
 			// write the snapUID to a file
-			TraceEvent("Snapshot create succeeded");
+			TraceEvent("SnapshotCreateStatus").detail("Status", !snapFailed ? "Success" : "Failure");
 		} else if (self->testID == 2) {
 			// create odd keys after the snapshot
 			wait(self->_create_keys(cx, "snapKey", false /*even*/));
 		} else if (self->testID == 3) {
+			CSimpleIni ini;
+			ini.SetUnicode();
+			ini.LoadFile(self->restartInfoLocation.c_str());
+			bool backupFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
+			if (backupFailed) {
+				// since backup failed, skip the restore checking
+				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck");
+				return Void();
+			}
 			state KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
 			state KeySelector end = firstGreaterOrEqual(normalKeys.end);
 			state int cnt = 0;
@@ -257,8 +299,8 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
-			TraceEvent("SnapTestVerifyCntValue").detail("Value", cnt);
 			if (cnt != 1000) {
+				TraceEvent(SevError, "SnapTestVerifyCntValue").detail("Value", cnt);
 				throw operation_failed();
 			}
 		} else if (self->testID == 4) {
@@ -266,68 +308,32 @@ public: // workload functions
 			// corresponding enable, then TLog will automatically enable the
 			// popping of TLogs. this test case validates that we auto
 			// enable the popping of TLogs
-			tr.reset();
-			loop {
-				// disable pop of the TLog
-				try {
-					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=a36b2ca0e8dab0452ac3e12b6b926f4b");
-					tr.execute(execDisableTLogPop, payLoadRef);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
+			state Standalone<StringRef> payLoadRef = LiteralStringRef("empty-binary:uid=a36b2ca0e8dab0452ac3e12b6b926f4b");
+			wait(self->snapExecHelper(self, cx, execDisableTLogPop, payLoadRef));
 		} else if (self->testID == 5) {
 			// snapshot create without disabling pop of the TLog
-			tr.reset();
-			state Standalone<StringRef> uidStr = LiteralStringRef("d78b08d47f341158e9a54d4baaf4a4dd");
+			StringRef uidStr = LiteralStringRef("d78b08d47f341158e9a54d4baaf4a4dd");
 			self->snapUID = UID::fromString(uidStr.toString());
-			loop {
-				try {
-					Standalone<StringRef> snapPayload = LiteralStringRef("/bin/"
-					                                         "snap_create.sh:uid=").withSuffix(uidStr);
-					tr.execute(execSnap, snapPayload);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					TraceEvent("SnapCreate").detail("SnapCreateErrorSnapTLogStorage", e.what());
-					wait(tr.onError(e));
-				}
-			}
+			state Standalone<StringRef> snapPayload = LiteralStringRef("/bin/"
+														"snap_create.sh:uid=").withSuffix(uidStr);
+			wait(self->snapExecHelper(self, cx, execSnap, snapPayload));
 		} else if (self->testID == 6) {
 			// disable popping of TLog and snapshot create with mis-matching
-			tr.reset();
-			loop {
-				// disable pop of the TLog
-				try {
-					StringRef payLoadRef = LiteralStringRef("empty-binary:uid=f49d27ddf7a28b6549d930743e0ebdbe");
-					tr.execute(execDisableTLogPop, payLoadRef);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
+			payLoadRef = LiteralStringRef("empty-binary:uid=f49d27ddf7a28b6549d930743e0ebdbe");
+			wait(self->snapExecHelper(self, cx, execDisableTLogPop, payLoadRef));
+			if (self->skipCheck) {
+				return Void();
 			}
-			tr.reset();
-			uidStr = LiteralStringRef("ba61e9612a561d60bd83ad83e1b63568");
+
+			StringRef uidStr = LiteralStringRef("ba61e9612a561d60bd83ad83e1b63568");
 			self->snapUID = UID::fromString(uidStr.toString());
-			loop {
-				// snap create with different UID
-				try {
-					Standalone<StringRef> snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=").withSuffix(uidStr);
-					tr.execute(execSnap, snapPayload);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					TraceEvent("SnapCreate").detail("SnapCreateErrorSnapTLogStorage", e.what());
-					wait(tr.onError(e));
-				}
-			}
+			snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=").withSuffix(uidStr);
+			wait(self->snapExecHelper(self, cx, execSnap, snapPayload));
 		} else if (self->testID == 7) {
 			// create a snapshot with a non whitelisted binary path and operation
 			// should fail
 			state bool testedFailure = false;
+			snapFailed = false;
 			retry = 0;
 			loop {
 				self->snapUID = g_random->randomUniqueID();
@@ -338,16 +344,20 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					++retry;
-					if (retry >= 5) {
+					if (e.code() == error_code_cluster_not_fully_recovered) {
+						snapFailed = true;
 						break;
 					}
 					if (e.code() == error_code_transaction_not_permitted) {
 						testedFailure = true;
 						break;
 					}
+					if (retry >= 5) {
+						break;
+					}
 				}
 			}
-			ASSERT(testedFailure == true);
+			ASSERT(testedFailure || snapFailed);
 		}
 		wait(delay(0.0));
 		return Void();

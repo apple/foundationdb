@@ -1676,7 +1676,8 @@ int main(int argc, char* argv[]) {
 				std::string tmpFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(tmpFolder, "restartInfo.ini").c_str());
 				isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
-				if (isRestoring) {
+				bool snapFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
+				if (isRestoring && !snapFailed) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
 					returnList = platform::listDirectories(tmpFolder);

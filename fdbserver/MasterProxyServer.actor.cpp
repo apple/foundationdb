@@ -1071,7 +1071,7 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_not_permitted());
 		}
 		else if (committed[t] == ConflictBatch::TransactionNotFullyRecovered) {
-			trs[t].reply.sendError(transaction_not_fully_recovered());
+			trs[t].reply.sendError(cluster_not_fully_recovered());
 		}
 		else {
 			trs[t].reply.sendError(not_committed());
@@ -1675,15 +1675,19 @@ ACTOR Future<Void> masterProxyServerCore(
 					execCoords.push_back(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload)));
 				}
 			}
-			wait(timeoutError(waitForAll(execCoords), 10.0));
-			int numSucc = 0;
-			for (auto item : execCoords) {
-				if (item.isValid() && item.isReady()) {
-					++numSucc;
+			try {
+				wait(timeoutError(waitForAll(execCoords), 10.0));
+				int numSucc = 0;
+				for (auto item : execCoords) {
+					if (item.isValid() && item.isReady()) {
+						++numSucc;
+					}
 				}
+				bool succ = numSucc >= ((execCoords.size() + 1) / 2);
+				succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
+			} catch (Error& e) {
+				execReq.reply.sendError(e);
 			}
-			bool succ = numSucc >= ((execCoords.size() + 1) / 2);
-			succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;
