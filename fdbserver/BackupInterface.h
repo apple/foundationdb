@@ -27,6 +27,7 @@
 
 struct BackupInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct HaltBackupRequest> haltBackup;
 	struct LocalityData locality;
 	UID myId;
 
@@ -45,7 +46,20 @@ struct BackupInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, locality, myId);
+		serializer(ar, waitFailure, haltBackup, locality, myId);
+	}
+};
+
+struct HaltBackupRequest {
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	HaltBackupRequest() = default;
+	explicit HaltBackupRequest(UID uid) : requesterID(uid) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply);
 	}
 };
 

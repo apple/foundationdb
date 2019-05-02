@@ -39,7 +39,8 @@ enum {
 	tagLocalityRemoteLog = -3,
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
+	tagLocalityBackup = -7,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
 

@@ -91,10 +91,16 @@ ACTOR Future<Void> backupWorker(
 	TraceEvent("BackupWorkerStart", interf.id());
 	try {
 		addActor.send(pullAsyncData(&self));
+
 		loop choose {
 			when (wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
 				self.logSystem.set(ILogSystem::fromServerDBInfo(self.myId, db->get(), true));
+			}
+			when (HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
+				req.reply.send(Void());
+				TraceEvent("BackupWorkerHalted", interf.id()).detail("ReqID", req.requesterID);
+				break;
 			}
 			when (wait(error)) {}
 		}
@@ -102,8 +108,9 @@ ACTOR Future<Void> backupWorker(
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
 			TraceEvent("BackupWorkerTerminated", interf.id()).error(e, true);
-			return Void();
+		} else {
+			throw;
 		}
-		throw;
 	}
+	return Void();
 }
