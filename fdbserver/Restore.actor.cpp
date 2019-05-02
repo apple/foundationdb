@@ -1260,36 +1260,6 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 	printf("Notify_Loader_ApplierKeyRange: number of appliers:%d\n", appliers.size());
 	ASSERT( appliers.size() == ranges.size() && appliers.size() != 0 );
 
-	// loop {
-	// 	try {
-	// 		rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
-	// 		cmdReplies.clear();
-	// 		for (auto& nodeID : loaders) {
-	// 			rd->cmdID.nextCmd();
-	// 			ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-	// 			RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
-	// 			printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
-	// 			//cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, applierRange->second, range)) );
-	// 			cmdReplies.push_back( cmdInterf.setApplierKeyRangeVectorRequest.getReply(RestoreSetApplierKeyRangeVectorRequest(rd->cmdID, appliers, ranges)) );
-	// 		}
-	// 		printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
-	// 		std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-	// 		for (int i = 0; i < reps.size(); ++i) {
-	// 			printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
-	// 					reps[i].toString().c_str());
-	// 		}
-	// 		cmdReplies.clear();
-	// 		break;
-	// 	} catch (Error &e) {
-	// 		if (e.code() != error_code_io_timeout) {
-	// 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-	// 		} else {
-	// 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-	// 					rd->cmdID.toString().c_str(), e.code(), e.what());
-	// 		}
-	// 	}
-	// }
-
 	rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
 	state UID nodeID;
 	state int i = 0;
@@ -1698,8 +1668,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 			if ( !cmdReplies.empty() ) {
 				//TODO: change to getAny. NOTE: need to keep the still-waiting replies
-				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
-				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
+				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
+				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
@@ -2027,8 +1997,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 				// Question: How to set reps to different value based on cmdReplies.empty()?
 				if ( !cmdReplies.empty() ) {
-					//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
-					std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
+					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+					//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 					finishedLoaderIDs.clear();
 					cmdReplies.clear();
@@ -2102,8 +2072,8 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 				cmdReplies.push_back( cmdInterf.applyToDB.getReply(RestoreSimpleRequest(rd->cmdID)) );
 			}
 			printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", appliers.size());
-			//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
+			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+			//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
 			printf("[INFO] %ld appliers finished applying mutations to DB\n", appliers.size());
 
 			cmdReplies.clear();
@@ -3304,8 +3274,8 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 						if ( debug_verbose ) {
 							printf("[INFO][Loader] Waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
 						}
-						//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-						std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
+						std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+						//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
 						cmdReplies.clear();
 					}
 
@@ -4234,21 +4204,21 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					ASSERT(rd->getRole() == RestoreRole::Applier);
 					wait(handleCalculateApplierKeyRangeRequest(req, rd, ri));
 				}
-				when ( RestoreSendMutationRequest req = waitNext(ri.sendSampleMutation.getFuture()) ) {
-					requestTypeStr = "sendSampleMutation";
-					ASSERT(rd->getRole() == RestoreRole::Applier);
-					actors.add( handleSendSampleMutationRequest(req, rd, ri));
-				}
+				// when ( RestoreSendMutationRequest req = waitNext(ri.sendSampleMutation.getFuture()) ) {
+				// 	requestTypeStr = "sendSampleMutation";
+				// 	ASSERT(rd->getRole() == RestoreRole::Applier);
+				// 	actors.add( handleSendSampleMutationRequest(req, rd, ri));
+				// }
 				when ( RestoreSendMutationVectorRequest req = waitNext(ri.sendSampleMutationVector.getFuture()) ) {
 					requestTypeStr = "sendSampleMutationVector";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
 					actors.add( handleSendSampleMutationVectorRequest(req, rd, ri));
 				} 
-				when ( RestoreSendMutationRequest req = waitNext(ri.sendMutation.getFuture()) ) {
-					requestTypeStr = "sendMutation";
-					ASSERT(rd->getRole() == RestoreRole::Applier);
-					actors.add( handleSendMutationRequest(req, rd, ri) );
-				}
+				// when ( RestoreSendMutationRequest req = waitNext(ri.sendMutation.getFuture()) ) {
+				// 	requestTypeStr = "sendMutation";
+				// 	ASSERT(rd->getRole() == RestoreRole::Applier);
+				// 	actors.add( handleSendMutationRequest(req, rd, ri) );
+				// }
 				when ( RestoreSendMutationVectorRequest req = waitNext(ri.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
