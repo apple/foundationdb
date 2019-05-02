@@ -608,6 +608,24 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
+	for(auto& tLogSet : db->get().logSystemConfig.tLogs) {
+		for(auto& it : tLogSet.logRouters) {
+			if(it.present()) {
+				roles.addRole("router", it.interf());
+			}
+		}
+	}
+
+	for(auto& old : db->get().logSystemConfig.oldTLogs) {
+		for(auto& tLogSet : old.tLogs) {
+			for(auto& it : tLogSet.logRouters) {
+				if(it.present()) {
+					roles.addRole("router", it.interf());
+				}
+			}
+		}
+	}
+
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
 		roles.addRole( "proxy", proxy->first, proxy->second );
