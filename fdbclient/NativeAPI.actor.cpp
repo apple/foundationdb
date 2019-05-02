@@ -1964,7 +1964,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
+	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), numRetries(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
 }
@@ -1987,6 +1987,7 @@ void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	info = r.info;
 	backoff = r.backoff;
 	numErrors = r.numErrors;
+	numRetries = r.numRetries;
 	committedVersion = r.committedVersion;
 	versionstampPromise = std::move(r.versionstampPromise);
 	watches = r.watches;
@@ -2403,6 +2404,7 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
 	}
+	maxRetries = cx->transactionMaxRetries;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -2412,9 +2414,17 @@ TransactionOptions::TransactionOptions() {
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
+	double oldMaxRetries = maxRetries;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
+}
+
+void Transaction::onErrorReset() {
+	int32_t oldNumRetires = numRetries;
+	reset();
+	numRetries = oldNumRetires;
 }
 
 void Transaction::reset() {
@@ -2698,7 +2708,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				&& e.code() != error_code_database_locked
 				&& e.code() != error_code_proxy_memory_limit_exceeded
 				&& e.code() != error_code_transaction_not_permitted
-				&& e.code() != error_code_transaction_not_fully_recovered)
+				&& e.code() != error_code_cluster_not_fully_recovered)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2809,6 +2819,7 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
+			//self->onErrorReset();
 			self->reset();
 		}
 
@@ -3068,6 +3079,9 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 Future<Void> Transaction::onError( Error const& e ) {
+	if (numRetries < std::numeric_limits<int>::max()) {
+		numRetries++;
+	}
 	if (e.code() == error_code_success)
 	{
 		return client_invalid_operation();
@@ -3076,7 +3090,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind)
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_cluster_not_fully_recovered)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3086,9 +3101,15 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsResourceConstrained++;
 		if (e.code() == error_code_process_behind)
 			cx->transactionsProcessBehind++;
+		if (e.code() == error_code_cluster_not_fully_recovered) {
+			cx->transactionWaitsForFullRecovery++;
+			if (numRetries > options.maxRetries) {
+				return e;
+			}
+		}
 
 		double backoff = getBackoff(e.code());
-		reset();
+		onErrorReset();
 		return delay( backoff, info.taskID );
 	}
 	if (e.code() == error_code_transaction_too_old ||
@@ -3100,7 +3121,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsFutureVersions++;
 
 		double maxBackoff = options.maxBackoff;
-		reset();
+		onErrorReset();
 		return delay( std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID );
 	}
 
