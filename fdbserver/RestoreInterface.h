@@ -405,8 +405,8 @@ struct RestoreCommonReply {
 
 struct GetKeyRangeReply : RestoreCommonReply {
 	int index;
-	KeyRef lowerBound; // inclusive
-	KeyRef upperBound; // exclusive
+	Standalone<KeyRef> lowerBound; // inclusive
+	Standalone<KeyRef> upperBound; // exclusive
 
 	GetKeyRangeReply() : index(0), lowerBound(KeyRef()), upperBound(KeyRef()) {}
 	explicit GetKeyRangeReply(int index, KeyRef lowerBound,  KeyRef upperBound) : index(index), lowerBound(lowerBound), upperBound(upperBound) {}

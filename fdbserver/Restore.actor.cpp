@@ -127,7 +127,7 @@ struct StringRefReaderMX {
 	Error failure_error;
 };
 
-bool debug_verbose = false;
+bool debug_verbose = true;
 void printGlobalNodeStatus(Reference<RestoreData>);
 
 
@@ -1697,8 +1697,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 			if ( !cmdReplies.empty() ) {
 				//TODO: change to getAny. NOTE: need to keep the still-waiting replies
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
-				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
+				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
+				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
@@ -2026,8 +2026,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 
 				// Question: How to set reps to different value based on cmdReplies.empty()?
 				if ( !cmdReplies.empty() ) {
-					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
-					//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
+					//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+					std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
 
 					finishedLoaderIDs.clear();
 					cmdReplies.clear();
@@ -3124,10 +3124,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 	state std::map<UID, double> applierMutationsSize; // buffered mutation vector size for each applier
 	// Initialize the above two maps
 	state std::vector<UID> applierIDs = getWorkingApplierIDs(rd);
-	for (auto &applierID : applierIDs) {
-		applierMutationsBuffer[applierID] = Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>());
-		applierMutationsSize[applierID] = 0.0;
-	}
 	loop {
 		try {
 			packMutationNum = 0;
@@ -3135,8 +3131,13 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 			kvCount = 0;
 			state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-			applierMutationsSize[applierID] = 0;
+			// In case try-catch has error and loop back
+			applierMutationsBuffer.clear();
+			applierMutationsSize.clear();
+			for (auto &applierID : applierIDs) {
+				applierMutationsBuffer[applierID] = Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>());
+				applierMutationsSize[applierID] = 0.0;
+			}
 			for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
 				state uint64_t commitVersion = kvOp->first;
 				state int mIndex;
@@ -3300,7 +3301,8 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 						if ( debug_verbose ) {
 							printf("[INFO][Loader] Waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
 						}
-						std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+						//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+						std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
 						cmdReplies.clear();
 					}
 
@@ -3320,7 +3322,8 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 
 			if (!cmdReplies.empty()) {
 				printf("[INFO][Loader] Last waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
+				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
+				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
 				cmdReplies.clear();
 			}
 
@@ -3352,7 +3355,7 @@ ACTOR Future<Void> handleVersionBatchRequest(RestoreVersionBatchRequest req, Ref
 	// wait( delay(1.0) );
 	printf("[Batch:%d] Node:%s Start...\n", req.batchID, rd->describeNode().c_str());
 	while (rd->isInProgress(RestoreCommandEnum::RESET_VersionBatch)) {
-		printf("[DEBUG] NODE:%s sampleRangeFile wait for 5s\n",  rd->describeNode().c_str());
+		printf("[DEBUG] NODE:%s handleVersionBatchRequest wait for 5s\n",  rd->describeNode().c_str());
 		wait(delay(5.0));
 	}
 
@@ -3565,7 +3568,7 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 
 ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	state int numMutations = 0;
-	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds = rd->keyRangeLowerBounds;
+	//state std::vector<Standalone<KeyRef>> keyRangeLowerBounds = rd->keyRangeLowerBounds;
 
 	while (rd->isInProgress(RestoreCommandEnum::Get_Applier_KeyRange)) {
 		printf("[DEBUG] NODE:%s Calculate_Applier_KeyRange wait for 5s\n",  rd->describeNode().c_str());
@@ -3581,17 +3584,17 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 	// }
 	rd->setInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
 	
-	if ( req.applierIndex < 0 || req.applierIndex >= keyRangeLowerBounds.size() ) {
+	if ( req.applierIndex < 0 || req.applierIndex >= rd->keyRangeLowerBounds.size() ) {
 		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%ld\n",
-				rd->describeNode().c_str(), req.applierIndex,  keyRangeLowerBounds.size());
+				rd->describeNode().c_str(), req.applierIndex,  rd->keyRangeLowerBounds.size());
 	}
 	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
 	printf("[INFO][Applier] NodeID:%s replies Get_Applier_KeyRange. keyRangeIndex:%d lower_bound_of_keyRange:%s\n",
-			rd->describeNode().c_str(), req.applierIndex, getHexString(keyRangeLowerBounds[req.applierIndex]).c_str());
+			rd->describeNode().c_str(), req.applierIndex, getHexString(rd->keyRangeLowerBounds[req.applierIndex]).c_str());
 
-	KeyRef lowerBound = keyRangeLowerBounds[req.applierIndex];
-	KeyRef upperBound = (req.applierIndex + 1) < keyRangeLowerBounds.size() ? keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
+	KeyRef lowerBound = rd->keyRangeLowerBounds[req.applierIndex];
+	KeyRef upperBound = (req.applierIndex + 1) < rd->keyRangeLowerBounds.size() ? rd->keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
 
 	req.reply.send(GetKeyRangeReply(interf.id(), req.cmdID, req.applierIndex, lowerBound, upperBound));
 	rd->clearInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
