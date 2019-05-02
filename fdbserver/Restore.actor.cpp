@@ -2272,6 +2272,7 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, 
 		} catch(Error &e) {
 			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
 			rd->workers_interface.clear();
+			cmdReplies.clear();
 			wait( collectWorkerInterface(rd, cx) );
 		}
 	}
