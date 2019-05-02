@@ -46,6 +46,7 @@
     <ClCompile Include="UnitTest.cpp" />
     <ClCompile Include="version.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
+    <ClCompile Include="serialize.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CompressedInt.h" />

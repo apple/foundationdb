@@ -259,6 +259,8 @@ public:
 		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
 		bool completed = false;
+		double begin = timer_monotonic();
+
 		if( ctx.fallocateSupported && size >= lastFileSize ) {
 			result = fallocate( fd, 0, 0, size);
 			if (result != 0) {
@@ -278,6 +280,12 @@ public:
 		if ( !completed )
 			result = ftruncate(fd, size);
 
+		double end = timer_monotonic();
+		if(g_nondeterministic_random->random01() < end-begin) {
+			TraceEvent("SlowKAIOTruncate")
+				.detail("TruncateTime", end - begin)
+				.detail("TruncateBytes", size - lastFileSize);
+		}
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if(result != 0) {
@@ -639,7 +647,7 @@ private:
 
 	ACTOR static void poll( Reference<IEventFD> ev ) {
 		loop {
-			int64_t evfd_count = wait( ev->read() );
+			wait(success(ev->read()));
 
 			wait(delay(0, TaskDiskIOComplete));
 

@@ -249,7 +249,7 @@ class Column:
                 currentRow = lastRow
                 numFetched = unpackedCount
             except fdb.FDBError as e:
-                if e.code == 1007:  # past_version
+                if e.code == 1007:  # transaction_too_old
                     pass
                     # FIXME: Unpack the overlapping packed block and try again
                 tr.on_error(e.code).wait()

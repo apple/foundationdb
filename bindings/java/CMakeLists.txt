@@ -180,31 +180,24 @@ if(NOT OPEN_FOR_IDE)
   endif()
   if(WIN32)
     set(lib_destination "windows/amd64")
-    set(clib_destination "windows/amd64/fdb_c.dll")
   elseif(APPLE)
     set(lib_destination "osx/x86_64")
-    set(clib_destination "osx/x86_64/libfdb_c.jnilib")
   else()
     set(lib_destination "linux/amd64")
-    set(clib_destination "linux/amd64/libfdb_c.so")
   endif()
   set(lib_destination "${unpack_dir}/lib/${lib_destination}")
-  set(clib_destination "${unpack_dir}/lib/${clib_destination}")
   file(MAKE_DIRECTORY ${lib_destination})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Copy jni library for fat jar")
-  add_custom_command(OUTPUT ${clib_destination}
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_c> ${clib_destination}
-    COMMENT "Copy fdbc for fat jar")
-  add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied ${clib_destination})
+  add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
   set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
     WORKING_DIRECTORY ${unpack_dir}
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied ${clib_destination}
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
   add_custom_target(fat-jar ALL DEPENDS ${target_jar})
   add_dependencies(fat-jar fdb-java)
