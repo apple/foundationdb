@@ -33,8 +33,16 @@ EvictablePage::~EvictablePage() {
 		else
 			aligned_free(data);
 	}
-	// remove it from the LRU
-	pageCache->lruPages.erase(EvictablePageCache::List::s_iterator_to(*this));
+	if (EvictablePageCache::RANDOM == FLOW_KNOBS->CACHE_EVICTION_POLICY) {
+		if (index > -1) {
+			pageCache->pages[index] = pageCache->pages.back();
+			pageCache->pages[index]->index = index;
+			pageCache->pages.pop_back();
+		}
+	} else {
+		// remove it from the LRU
+		pageCache->lruPages.erase(EvictablePageCache::List::s_iterator_to(*this));
+	}
 }
 
 std::map< std::string, OpenFileInfo > AsyncFileCached::openFiles;
