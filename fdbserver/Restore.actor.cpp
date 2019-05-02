@@ -44,7 +44,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // These configurations for restore workers will  be set in initRestoreWorkerConfig() later.
-int min_num_workers = 3; //10; // TODO: This can become a configuration param later
+int MIN_NUM_WORKERS = 3; //10; // TODO: This can become a configuration param later
 int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 int FastRestore_Failure_Timeout = 3600; // seconds
 double loadBatchSizeMB = 1; // MB
@@ -954,7 +954,7 @@ ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<Re
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.clear(restoreWorkerKeyFor(interf.id())); 
-			tr.commit();
+			wait( tr.commit() ) ;
 			printf("Node:%s finish restore, clear the key for interf.id:%s and exit\n", rd->describeNode().c_str(),  interf.id().toString().c_str()); 
 			req.reply.send( RestoreCommonReply(interf.id(), req.cmdID) );
 			break;
@@ -969,7 +969,7 @@ ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<Re
  }
 
 // Read restoreWorkersKeys from DB to get each restore worker's restore interface and set it to rd->workers_interface
- ACTOR Future<Void> collectWorkerInterface(Reference<RestoreData> rd, Database cx) {
+ ACTOR Future<Void> collectWorkerInterface(Reference<RestoreData> rd, Database cx, int min_num_workers) {
 	state Transaction tr(cx);
 
 	state vector<RestoreInterface> agents; // agents is cmdsInterf
@@ -989,6 +989,7 @@ ACTOR Future<Void> handleFinishRestoreReq(RestoreSimpleRequest req, Reference<Re
 					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
 					// Save the RestoreInterface for the later operations
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
+					printf("collectWorkerInterface, interface id:%s\n", agents.back().id().toString().c_str());
 				}
 				break;
 			}
@@ -2154,7 +2155,7 @@ ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx,
 }
 
 void initRestoreWorkerConfig() {
-	min_num_workers = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
+	MIN_NUM_WORKERS = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
 	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 	FastRestore_Failure_Timeout = 3600; // seconds
 	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
@@ -2167,7 +2168,7 @@ void initRestoreWorkerConfig() {
 	//transactionBatchSizeThreshold = 1;
 
 	printf("Init RestoreWorkerConfig. min_num_workers:%d ratio_loader_to_applier:%d loadBatchSizeMB:%.2f loadBatchSizeThresholdB:%.2f transactionBatchSizeThreshold:%.2f\n",
-			min_num_workers, ratio_loader_to_applier, loadBatchSizeMB, loadBatchSizeThresholdB, transactionBatchSizeThreshold);
+			MIN_NUM_WORKERS, ratio_loader_to_applier, loadBatchSizeMB, loadBatchSizeThresholdB, transactionBatchSizeThreshold);
 }
 
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
@@ -2247,8 +2248,9 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, 
 	state std::vector<UID> workersIDs = getWorkerIDs(rd); // All workers ID
 	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 	state std::map<UID, RestoreInterface>::iterator workerInterf;
+	printGlobalNodeStatus(rd);
 	loop {
-		try {	
+		try {
 			cmdReplies.clear();
 			rd->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
 			
@@ -2273,7 +2275,7 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreData> rd, Database cx, 
 			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
 			rd->workers_interface.clear();
 			cmdReplies.clear();
-			wait( collectWorkerInterface(rd, cx) );
+			wait( collectWorkerInterface(rd, cx, 0) );
 		}
 	}
 
@@ -4307,7 +4309,7 @@ ACTOR Future<Void> masterCore(Reference<RestoreData> rd, RestoreInterface interf
 	rd->localNodeStatus.nodeID = interf.id();
 	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
 
-	wait( collectWorkerInterface(rd, cx) );
+	wait( collectWorkerInterface(rd, cx, MIN_NUM_WORKERS) );
 
 	Future<Void> workersFailureMonitor = monitorWorkerLiveness(rd);
 
