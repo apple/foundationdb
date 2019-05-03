@@ -52,19 +52,26 @@ struct EvictablePage {
 struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	using List = bi::list< EvictablePage, bi::member_hook< EvictablePage, bi::list_member_hook<>, &EvictablePage::member_hook>>;
 
-	EvictablePageCache() : pageSize(0), maxPages(0)	{
+	EvictablePageCache() : pageSize(0), maxPages(0) {}
+
+	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize) {
+		std::string cep = FLOW_KNOBS->CACHE_EVICTION_POLICY;
+		std::transform(cep.begin(), cep.end(), cep.begin(), ::tolower);
+		if (0 == cep.compare("random"))
+			cacheEvictionType = RANDOM;
+		else
+			cacheEvictionType = LRU;
+
 		cacheHits.init(LiteralStringRef("EvictablePageCache.CacheHits"));
 		cacheMisses.init(LiteralStringRef("EvictablePageCache.CacheMisses"));
 		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEviction"));
 	}
 
-	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize) {}
-
 	void allocate(EvictablePage* page) {
 		try_evict();
 		try_evict();
 		page->data = pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096,pageSize);
-		if (RANDOM == FLOW_KNOBS->CACHE_EVICTION_POLICY) {
+		if (RANDOM == cacheEvictionType) {
 			page->index = pages.size();
 			pages.push_back(page);
 		} else {
@@ -74,7 +81,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	}
 
 	void updateHit(EvictablePage* page) {
-		if (RANDOM != FLOW_KNOBS->CACHE_EVICTION_POLICY) {
+		if (RANDOM != cacheEvictionType) {
 			// on a hit, update page's location in the LRU so that it's most recent (tail)
 			lruPages.erase(List::s_iterator_to(*page));
 			lruPages.push_back(*page);
@@ -83,7 +90,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	}
 
 	void try_evict() {
-		if (RANDOM == FLOW_KNOBS->CACHE_EVICTION_POLICY) {
+		if (RANDOM == cacheEvictionType) {
 			if (pages.size() >= (uint64_t)maxPages && !pages.empty()) {
 				for (int i = 0; i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS; i++) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
 					int toEvict = g_random->randomInt(0, pages.size());
@@ -110,6 +117,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 		}
 	}
 
+	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
 	std::vector<EvictablePage*> pages;
 	List lruPages;
 	int pageSize;
@@ -117,7 +125,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	Int64MetricHandle cacheHits;
 	Int64MetricHandle cacheMisses;
 	Int64MetricHandle cacheEvictions;
-	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
+	CacheEvictionType cacheEvictionType;
 };
 
 struct OpenFileInfo : NonCopyable {

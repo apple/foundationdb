@@ -33,7 +33,7 @@ EvictablePage::~EvictablePage() {
 		else
 			aligned_free(data);
 	}
-	if (EvictablePageCache::RANDOM == FLOW_KNOBS->CACHE_EVICTION_POLICY) {
+	if (EvictablePageCache::RANDOM == pageCache->cacheEvictionType) {
 		if (index > -1) {
 			pageCache->pages[index] = pageCache->pages.back();
 			pageCache->pages[index]->index = index;
