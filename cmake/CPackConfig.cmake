@@ -20,10 +20,11 @@ elseif(CPACK_GENERATOR MATCHES "PackageMaker")
   set(CPACK_PREFLIGHT_SERVER_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall)
   set(CPACK_POSTFLIGHT_SERVER_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/postinstall)
   set(CPACK_POSTFLIGHT_CLIENTS_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall)
-# Commenting out this file until it works within packaging
+# Commenting out this readme file until it works within packaging
 #  set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/packaging/osx/resources/conclusion.rtf)
   set(CPACK_PRODUCTBUILD_RESOURCES_DIR ${CMAKE_SOURCE_DIR}/packaging/osx/resources)
-  set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_BINARY_DIR}/License.txt)
+# Changing the path of this file as CMAKE_BINARY_DIR does not seem to be defined
+  set(CPACK_RESOURCE_FILE_LICENSE License.txt)
 elseif(CPACK_GENERATOR MATCHES "TGZ")
   set(CPACK_STRIP_FILES TRUE)
   set(CPACK_COMPONENTS_ALL clients-tgz server-tgz)
