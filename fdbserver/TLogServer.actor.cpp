@@ -791,6 +791,15 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						lastVersion = std::max(currentVersion, lastVersion);
 						firstLocation = std::min(begin, firstLocation);
 
+						if ((wr.getLength() + sizeof(SpilledData) > SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH) ) {
+							*(uint32_t*)wr.getData() = refSpilledTagCount;
+							self->persistentData->set( KeyValueRef( persistTagMessageRefsKey( logData->logId, tagData->tag, lastVersion ), wr.toValue() ) );
+							tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
+							refSpilledTagCount = 0;
+							wr = BinaryWriter( AssumeVersion(logData->protocolVersion) );
+							wr << uint32_t(0);
+						}
+
 						Future<Void> f = yield(TaskUpdateStorage);
 						if(!f.isReady()) {
 							wait(f);
