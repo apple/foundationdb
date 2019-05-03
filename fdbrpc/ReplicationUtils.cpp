@@ -835,7 +835,6 @@ void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityD
 
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, std::vector<LocalityData>* vld) {
 	if (!policy) return;
-	std::set<std::string> keys = policy->attributeKeys();
 	for (LocalityData& ld : *vld) {
 		filterLocalityDataForPolicy(policy, &ld);
 	}

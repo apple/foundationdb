@@ -20,7 +20,9 @@
 
 #ifndef FDBSERVER_LOGSYSTEM_H
 #define FDBSERVER_LOGSYSTEM_H
-#pragma once
+
+#include <set>
+#include <vector>
 
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -31,6 +33,8 @@
 #include "fdbrpc/Replication.h"
 
 struct DBCoreState;
+struct TLogSet;
+struct CoreTLogSet;
 
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
@@ -51,6 +55,8 @@ public:
 	std::vector<std::vector<int>> satelliteTagLocations;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
+	LogSet(const TLogSet& tlogSet);
+	LogSet(const CoreTLogSet& coreSet);
 
 	std::string logRouterString() {
 		std::string result;
@@ -61,6 +67,15 @@ public:
 			result += logRouters[i]->get().id().toString();
 		}
 		return result;
+	}
+
+	bool hasLogRouter(UID id) {
+		for (const auto& router : logRouters) {
+			if (router->get().id() == id) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	std::string logServerString() {
@@ -284,7 +299,7 @@ struct ILogSystem {
 		virtual bool hasMessage() = 0;
 
 		//pre: only callable if hasMessage() returns true
-		//return the tags associated with the message for teh current sequence
+		//return the tags associated with the message for the current sequence
 		virtual const std::vector<Tag>& getTags() = 0;
 
 		//pre: only callable if hasMessage() returns true
@@ -682,6 +697,14 @@ struct ILogSystem {
 	virtual Tag getRandomRouterTag() = 0;
 
 	virtual void stopRejoins() = 0;
+
+	// Returns the pseudo tag to be popped for the given process class. If the
+	// process class doesn't use pseudo tag, return the same tag.
+	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) = 0;
+
+	virtual bool isPseudoLocality(int8_t locality) = 0;
+
+	virtual Version popPseudoLocalityTag(int8_t locality, Version upTo) = 0;
 };
 
 struct LengthPrefixedStringRef {
@@ -723,6 +746,11 @@ struct LogPushData : NonCopyable {
 	// addTag() adds a tag for the *next* message to be added
 	void addTag( Tag tag ) {
 		next_message_tags.push_back( tag );
+	}
+
+	template<class T>
+	void addTags(T tags) {
+		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
 	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {

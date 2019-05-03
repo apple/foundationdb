@@ -103,7 +103,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false) {
+	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -145,7 +145,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 
 	for(auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
-			self->messageBlocks.push_back( std::make_pair(version, block) );
+			self->messageBlocks.emplace_back(version, block);
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
@@ -158,7 +158,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 			}
 
 			if (version >= tagData->popped) {
-				tagData->version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
+				tagData->version_messages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size())));
 				if(tagData->version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tagData->version_messages.back().second.expectedSize());
 				}
@@ -167,7 +167,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 
 		msgSize -= msg.message.size();
 	}
-	self->messageBlocks.push_back( std::make_pair(version, block) );
+	self->messageBlocks.emplace_back(version, block);
 }
 
 ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
@@ -259,8 +259,8 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
-			for(auto t : tags) {
-				tagAndMsg.tags.push_back(Tag(tagLocalityRemoteLog, t));
+			for (const auto& t : tags) {
+				tagAndMsg.tags.emplace_back(tagLocalityRemoteLog, t);
 			}
 			messages.push_back(std::move(tagAndMsg));
 
@@ -378,7 +378,8 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 	self->poppedVersion = std::min(minKnownCommittedVersion, self->minKnownCommittedVersion);
 	if(self->logSystem->get() && self->allowPops) {
-		self->logSystem->get()->pop(self->poppedVersion, self->routerTag);
+		const Tag popTag = self->logSystem->get()->getPseudoPopTag(self->routerTag, ProcessClass::LogRouterClass);
+		self->logSystem->get()->pop(self->poppedVersion, popTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
