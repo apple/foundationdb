@@ -2405,6 +2405,9 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 		commitOnFirstProxy = true;
 	}
 	maxRetries = cx->transactionMaxRetries;
+	if (maxRetries == -1) {
+		maxRetries = 10;
+	}
 }
 
 TransactionOptions::TransactionOptions() {

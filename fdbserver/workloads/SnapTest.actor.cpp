@@ -126,8 +126,11 @@ public: // workload functions
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
-				ASSERT(val.present());
-				break;
+				if (val.present()) {
+					break;
+				}
+				// wait for the key to be written out by TLogs
+				wait(delay(0.1));
 			} catch (Error &e) {
 				wait(tr.onError(e));
 			}

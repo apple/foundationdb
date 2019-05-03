@@ -1173,17 +1173,22 @@ ACTOR Future<Void> workerServer(
 			}
 			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				state ExecCmdValueString execArg(req.execPayload);
-				int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
-				StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-				auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
-				auto te = TraceEvent("ExecTraceCoordinators");
-				te.detail("Uid", uidStr.toString());
-				te.detail("Status", err);
-				te.detail("Role", "coordinator");
-				te.detail("Value", coordFolder);
-				te.detail("ExecPayload", execArg.getCmdValueString().toString());
-				te.trackLatest(tokenStr.c_str());
-				req.reply.send(Void());
+				try {
+					int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
+					StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
+					auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
+					auto te = TraceEvent("ExecTraceCoordinators");
+					te.detail("Uid", uidStr.toString());
+					te.detail("Status", err);
+					te.detail("Role", "coordinator");
+					te.detail("Value", coordFolder);
+					te.detail("ExecPayload", execArg.getCmdValueString().toString());
+					te.trackLatest(tokenStr.c_str());
+					req.reply.send(Void());
+				} catch (Error& e) {
+					TraceEvent("ExecHelperError").error(e);
+					req.reply.sendError(broken_promise());
+				}
 			}
 			when( wait( errorForwarders.getResult() ) ) {}
 			when( wait( handleErrors ) ) {}

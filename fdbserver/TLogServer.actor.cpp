@@ -1208,18 +1208,17 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		// use toBePopped and issue all the pops
 		state std::map<Tag, Version>::iterator it;
 		state vector<Future<Void>> ignoredPops;
+		self->ignorePopRequest = false;
+		self->ignorePopUid = "";
+		self->ignorePopDeadline = 0.0;
 		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
 			TraceEvent("PlayIgnoredPop")
 				.detail("Tag", it->first.toString())
 				.detail("Version", it->second);
 			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
 		}
-		wait(waitForAll(ignoredPops));
 		self->toBePopped.clear();
-
-		self->ignorePopRequest = false;
-		self->ignorePopUid = "";
-		self->ignorePopDeadline = 0.0;
+		wait(waitForAll(ignoredPops));
 		TraceEvent("ResetIgnorePopRequest")
 		    .detail("Now", g_network->now())
 		    .detail("IgnorePopRequest", self->ignorePopRequest)
@@ -1760,22 +1759,21 @@ ACTOR Future<Void> execProcessingHelper(TLogData* self,
 					.detail("UidStr", uidStr.toString());
 			}
 
-			TraceEvent("EnableTLogPlayAllIgnoredPops");
+			TraceEvent("EnableTLogPlayAllIgnoredPops2");
 			// use toBePopped and issue all the pops
 			state std::map<Tag, Version>::iterator it;
 			state vector<Future<Void>> ignoredPops;
+			self->ignorePopRequest = false;
+			self->ignorePopDeadline = 0.0;
+			self->ignorePopUid = "";
 			for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
 				TraceEvent("PlayIgnoredPop")
 					.detail("Tag", it->first.toString())
 					.detail("Version", it->second);
 				ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
 			}
-			wait(waitForAll(ignoredPops));
 			self->toBePopped.clear();
-
-			self->ignorePopRequest = false;
-			self->ignorePopDeadline = 0.0;
-			self->ignorePopUid = "";
+			wait(waitForAll(ignoredPops));
 			TraceEvent("TLogExecCmdPopEnable")
 				.detail("ExecCmd", execCmd->toString())
 				.detail("UidStr", uidStr.toString())

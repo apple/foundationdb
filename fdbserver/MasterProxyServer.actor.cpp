@@ -813,9 +813,15 @@ ACTOR Future<Void> commitBatch(
 						// step 2: find the tag.id from locality info of the master
 						auto localityKey =
 							self->txnStateStore->readValue(tagLocalityListKeyFor(self->master.locality.dcId())).get();
+
 						int8_t locality = tagLocalityInvalid;
-						ASSERT(localityKey.present());
-						locality = decodeTagLocalityListValue(localityKey.get());
+						if (usableRegions > 1) {
+							if (!localityKey.present()) {
+								TraceEvent(SevError, "LocalityKeyNotPresentForMasterDCID");
+								ASSERT(localityKey.present());
+							}
+							locality = decodeTagLocalityListValue(localityKey.get());
+						}
 
 						std::set<Tag> allSources;
 						auto& m = (*pMutations)[mutationNum];
@@ -1659,6 +1665,7 @@ ACTOR Future<Void> masterProxyServerCore(
 			    ClusterConnectionString(coordinators.get().toString()).coordinators();
 			state std::set<NetworkAddress> coordinatorsAddrSet;
 			for (int i = 0; i < coordinatorsAddr.size(); i++) {
+				TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", coordinatorsAddr[i]);
 				coordinatorsAddrSet.insert(coordinatorsAddr[i]);
 			}
 
@@ -1670,23 +1677,34 @@ ACTOR Future<Void> masterProxyServerCore(
 			// coordinators
 			state vector<Future<Void>> execCoords;
 			for (int i = 0; i < workers.size(); i++) {
-				if (coordinatorsAddrSet.find(workers[i].interf.address()) != coordinatorsAddrSet.end()) {
-					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].interf.address());
-					execCoords.push_back(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload)));
+				NetworkAddress primary = workers[i].interf.address();
+				Optional<NetworkAddress> secondary = workers[i].interf.tLog.getEndpoint().addresses.secondaryAddress;
+				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
+					|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+					TraceEvent("ExecReqToCoordinator")
+						.detail("PrimaryWorkerAddr", primary)
+						.detail("SecondaryWorkerAddr", secondary);
+					execCoords.push_back(brokenPromiseToNever(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload))));
 				}
 			}
-			try {
-				wait(timeoutError(waitForAll(execCoords), 10.0));
-				int numSucc = 0;
-				for (auto item : execCoords) {
-					if (item.isValid() && item.isReady()) {
-						++numSucc;
+			if (execCoords.size() <= 0) {
+				TraceEvent(SevDebug, "CoordinatorWorkersNotFound");
+				execReq.reply.sendError(operation_failed());
+			} else {
+				try {
+					wait(timeoutError(waitForAll(execCoords), 10.0));
+					int numSucc = 0;
+					for (auto item : execCoords) {
+						if (item.isValid() && item.isReady()) {
+							++numSucc;
+						}
 					}
+					bool succ = (numSucc >= ((execCoords.size() + 1) / 2));
+					succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
+				} catch (Error& e) {
+					TraceEvent("WaitingForAllExecCoords").error(e);
+					execReq.reply.sendError(broken_promise());
 				}
-				bool succ = numSucc >= ((execCoords.size() + 1) / 2);
-				succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
-			} catch (Error& e) {
-				execReq.reply.sendError(e);
 			}
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
