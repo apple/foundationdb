@@ -1623,7 +1623,7 @@ int getRandomSeed() {
 	}
 	return randomSeed;
 }
-}; // namespace platform
+} // namespace platform
 
 std::string joinPath( std::string const& directory, std::string const& filename ) {
 	auto d = directory;
@@ -1831,7 +1831,7 @@ bool createDirectory( std::string const& directory ) {
 #endif
 }
 
-}; // namespace platform
+} // namespace platform
 
 const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
@@ -2131,9 +2131,9 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 		if(dir != "." && dir != "..")
 			findFilesRecursively(joinPath(path, dir), out);
 	}
-};
+}
 
-}; // namespace platform
+} // namespace platform
 
 
 void threadSleep( double seconds ) {
@@ -2171,7 +2171,7 @@ void makeTemporary( const char* filename ) {
 	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
 #endif
 }
-}; // namespace platform
+} // namespace platform
 
 #ifdef _WIN32
 THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
@@ -2355,7 +2355,7 @@ std::string getWorkingDirectory() {
 	return result;
 }
 
-}; // namespace platform
+} // namespace platform
 
 extern std::string format( const char *form, ... );
 
@@ -2379,7 +2379,7 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 	#error Port me!
 #endif
 }
-}; // namespace platform
+} // namespace platform
 
 #ifdef ALLOC_INSTRUMENTATION
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
@@ -2489,7 +2489,7 @@ void outOfMemory() {
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
-}; // namespace platform
+} // namespace platform
 
 extern "C" void criticalError(int exitCode, const char *type, const char *message) {
 	// Be careful!  This function may be called asynchronously from a thread or in other weird conditions
@@ -2615,14 +2615,14 @@ std::string get_backtrace() {
 	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
-}; // namespace platform
+} // namespace platform
 #else
 
 namespace platform {
 std::string get_backtrace() { return std::string(); }
 std::string format_backtrace(void **addresses, int numAddresses) { return std::string(); }
 void* getImageOffset() { return NULL; }
-}; // namespace platform
+} // namespace platform
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {
