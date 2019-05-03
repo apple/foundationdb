@@ -142,17 +142,17 @@ add_fdb_test(
   TEST_FILES restarting/StorefrontTestRestart-1.txt
              restarting/StorefrontTestRestart-2.txt)
 add_fdb_test(
-  TEST_FILES restarting/SnapTestSimpleRestart-1.txt
-             restarting/SnapTestSimpleRestart-2.txt)
+  TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
+             restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
 add_fdb_test(
-  TEST_FILES restarting/SnapTestRestart-1.txt
-             restarting/SnapTestRestart-2.txt)
+  TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
+             restarting/from_6.2.0/SnapTestRestart-2.txt)
 add_fdb_test(
-  TEST_FILES restarting/SnapCycleRestart-1.txt
-             restarting/SnapCycleRestart-2.txt)
+  TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
+             restarting/from_6.2.0/SnapCycleRestart-2.txt)
 add_fdb_test(
-  TEST_FILES restarting/SnapTestAttrition-1.txt
-             restarting/SnapTestAttrition-2.txt)
+  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
+             restarting/from_6.2.0/SnapTestAttrition-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
              restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
