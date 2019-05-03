@@ -45,7 +45,6 @@ struct GetKeyRangeReply;
 struct GetKeyRangeReply;
 struct RestoreSetRoleRequest;
 struct RestoreSimpleRequest;
-struct RestoreSendMutationRequest;
 struct RestoreLoadFileRequest;
 struct RestoreGetApplierKeyRangeRequest;
 struct RestoreSetApplierKeyRangeRequest;
@@ -123,7 +122,6 @@ struct RestoreInterface {
 	RequestStream<RestoreSetRoleRequest> setRole;
 	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
 	RequestStream<RestoreLoadFileRequest> sampleLogFile;
-	RequestStream<RestoreSendMutationRequest> sendSampleMutation;
 	RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
 
 	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
@@ -133,7 +131,6 @@ struct RestoreInterface {
 
 	RequestStream<RestoreLoadFileRequest> loadRangeFile;
 	RequestStream<RestoreLoadFileRequest> loadLogFile;
-	RequestStream<RestoreSendMutationRequest> sendMutation;
 	RequestStream<RestoreSendMutationVectorRequest> sendMutationVector;
 	RequestStream<RestoreSimpleRequest> applyToDB;
 
@@ -160,7 +157,6 @@ struct RestoreInterface {
 		setRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
 		sampleRangeFile.getEndpoint( TaskClusterController ); 
 		sampleLogFile.getEndpoint( TaskClusterController ); 
-		sendSampleMutation.getEndpoint( TaskClusterController ); 
 		sendSampleMutationVector.getEndpoint( TaskClusterController ); 
 
 		calculateApplierKeyRange.getEndpoint( TaskClusterController ); 
@@ -170,7 +166,6 @@ struct RestoreInterface {
 
 		loadRangeFile.getEndpoint( TaskClusterController ); 
 		loadLogFile.getEndpoint( TaskClusterController ); 
-		sendMutation.getEndpoint( TaskClusterController ); 
 		sendMutationVector.getEndpoint( TaskClusterController ); 
 		applyToDB.getEndpoint( TaskClusterController ); 
 		
@@ -184,9 +179,9 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, nodeID, heartbeat, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation, sendSampleMutationVector,
+		serializer(ar, nodeID, heartbeat, setRole, sampleRangeFile, sampleLogFile, sendSampleMutationVector,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest, setApplierKeyRangeVectorRequest,
-				loadRangeFile, loadLogFile, sendMutation, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
+				loadRangeFile, loadLogFile, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
 				finishRestore);
 	}
 };
@@ -251,24 +246,6 @@ struct RestoreLoadFileRequest : TimedRequest {
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		serializer(ar, cmdID, param, reply);
-	}
-};
-
-// Send mutation from loader to applier
-// Loader_Send_Sample_Mutation_To_Applier and Loader_Send_Mutations_To_Applier
-struct RestoreSendMutationRequest : TimedRequest {
-	CMDUID cmdID;
-	uint64_t commitVersion;
-	MutationRef mutation;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSendMutationRequest() : cmdID(CMDUID()), commitVersion(0), mutation(MutationRef()) {}
-	explicit RestoreSendMutationRequest(CMDUID cmdID, uint64_t commitVersion, MutationRef mutation) : cmdID(cmdID), commitVersion(commitVersion),  mutation(mutation) {}
-
-	template <class Ar> 
-	void serialize( Ar& ar ) {
-		serializer(ar, cmdID, commitVersion, mutation, reply);
 	}
 };
 

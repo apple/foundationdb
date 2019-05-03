@@ -3807,52 +3807,6 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 }
 
 // Applier receive mutation from loader
-ACTOR Future<Void> handleSendMutationRequest(RestoreSendMutationRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
-	state int numMutations = 0;
-
-	wait( delay(1.0) );
-	//ASSERT(req.cmdID.phase == RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-	if ( debug_verbose ) {
-		printf("[VERBOSE_DEBUG] Node:%s receive mutation:%s\n", rd->describeNode().c_str(), req.mutation.toString().c_str());
-	}
-
-	// NOTE: We have insert operation to rd->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
-	// Otherwise, race condition may happen!
-	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendMutation wait for 5s\n",  rd->describeNode().c_str());
-		wait(delay(0.2));
-	}
-	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-
-	// Handle duplicat cmd
-	if ( rd->isCmdProcessed(req.cmdID) ) {
-		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		//printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
-		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));	
-		return Void();
-	}
-
-	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-	state uint64_t commitVersion = req.commitVersion;
-	MutationRef mutation(req.mutation);
-	if ( rd->kvOps.find(commitVersion) == rd->kvOps.end() ) {
-		rd->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
-	}
-	rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
-	numMutations++;
-	if ( debug_verbose && numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
-		printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
-				rd->describeNode().c_str(), numMutations, mutation.toString().c_str());
-	}
-
-	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-	// Avoid race condition when this actor is called twice on the same command
-	rd->processedCmd[req.cmdID] = 1;
-	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-
-	return Void();
-}
-
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	state int numMutations = 0;
 
@@ -3903,51 +3857,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 	return Void();
 }
 
-ACTOR Future<Void> handleSendSampleMutationRequest(RestoreSendMutationRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
-	state int numMutations = 0;
-	rd->numSampledMutations = 0;
-	//wait( delay(1.0) );
-	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendSampleMutation wait for 5s\n",  rd->describeNode().c_str());
-		wait(delay(1.0));
-	}
-	rd->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
-
-	// Handle duplicate message
-	if (rd->isCmdProcessed(req.cmdID)) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-		return Void();
-	}
-
-	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-	state uint64_t commitVersion = req.commitVersion;
-	// TODO: Change the req.mutation to a vector of mutations
-	MutationRef mutation(req.mutation);
-
-	if ( rd->keyOpsCount.find(mutation.param1) == rd->keyOpsCount.end() ) {
-		rd->keyOpsCount.insert(std::make_pair(mutation.param1, 0));
-	}
-	// NOTE: We may receive the same mutation more than once due to network package lost.
-	// Since sampling is just an estimation and the network should be stable enough, we do NOT handle the duplication for now
-	// In a very unreliable network, we may get many duplicate messages and get a bad key-range splits for appliers. But the restore should still work except for running slower.
-	rd->keyOpsCount[mutation.param1]++;
-	rd->numSampledMutations++;
-
-	if ( debug_verbose && rd->numSampledMutations % 1000 == 1 ) {
-		printf("[Sampling][Applier] Node:%s Receives %d sampled mutations. cur_mutation:%s\n",
-				rd->describeNode().c_str(), rd->numSampledMutations, mutation.toString().c_str());
-	}
-
-	req.reply.send(RestoreCommonReply(interf.id(), req.cmdID));
-	rd->processedCmd[req.cmdID] = 1;
-
-	rd->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
-
-	return Void();
-}
-
-
 ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreData> rd, RestoreInterface interf) {
 	state int numMutations = 0;
 	rd->numSampledMutations = 0;
@@ -3957,7 +3866,7 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 	// NOTE: We have insert operation to rd->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
 	// Otherwise, race condition may happen!
 	while (rd->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendSampleMutation wait for 1s\n",  rd->describeNode().c_str());
+		printf("[DEBUG] NODE:%s handleSendSampleMutationVectorRequest wait for 1s\n",  rd->describeNode().c_str());
 		wait(delay(1.0));
 	}
 
@@ -4145,10 +4054,10 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 		
 		double loopTopTime = now();
 		double elapsedTime = loopTopTime - lastLoopTopTime;
-		// if( elapsedTime > 0.050 ) {
-		// 	if (g_random->random01() < 0.01)
-		// 		TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", rd->describeNode()).detail("Elapsed", elapsedTime);
-		// }
+		if( elapsedTime > 0.050 ) {
+			if (g_random->random01() < 0.01)
+				TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", rd->describeNode()).detail("Elapsed", elapsedTime);
+		}
 		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
 
@@ -4204,21 +4113,11 @@ ACTOR Future<Void> workerCore(Reference<RestoreData> rd, RestoreInterface ri, Da
 					ASSERT(rd->getRole() == RestoreRole::Applier);
 					wait(handleCalculateApplierKeyRangeRequest(req, rd, ri));
 				}
-				// when ( RestoreSendMutationRequest req = waitNext(ri.sendSampleMutation.getFuture()) ) {
-				// 	requestTypeStr = "sendSampleMutation";
-				// 	ASSERT(rd->getRole() == RestoreRole::Applier);
-				// 	actors.add( handleSendSampleMutationRequest(req, rd, ri));
-				// }
 				when ( RestoreSendMutationVectorRequest req = waitNext(ri.sendSampleMutationVector.getFuture()) ) {
 					requestTypeStr = "sendSampleMutationVector";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
 					actors.add( handleSendSampleMutationVectorRequest(req, rd, ri));
 				} 
-				// when ( RestoreSendMutationRequest req = waitNext(ri.sendMutation.getFuture()) ) {
-				// 	requestTypeStr = "sendMutation";
-				// 	ASSERT(rd->getRole() == RestoreRole::Applier);
-				// 	actors.add( handleSendMutationRequest(req, rd, ri) );
-				// }
 				when ( RestoreSendMutationVectorRequest req = waitNext(ri.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
 					ASSERT(rd->getRole() == RestoreRole::Applier);
