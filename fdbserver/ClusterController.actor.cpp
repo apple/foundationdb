@@ -58,6 +58,7 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
+	Future<Void> haltBackupWorker;
 
 	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
@@ -142,6 +143,7 @@ public:
 		void addBackupWorker(const BackupInterface& interf) {
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
+			ASSERT(newInfo.backupServers.size() == 0);  // only allow 1 worker for now. Remove when more workers are used.
 			auto it = newInfo.backupServers.begin();
 			for ( ; it != newInfo.backupServers.end(); it++) {
 				if (it->id() == interf.id()) {
@@ -1190,10 +1192,11 @@ public:
 	double startTime;
 	Optional<double> remoteStartTime;
 	Version datacenterVersionDifference;
-	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
+	bool versionDifferenceUpdated;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
+	Optional<UID> recruitingBackupWorkerID;
 	AsyncVar<bool> recruitRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
@@ -1960,7 +1963,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
 			self->clusterControllerDcId != w.locality.dcId()) {
-				TraceEvent("CC_HaltRegisteringRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
+			TraceEvent("CC_HaltRegisteringRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
 			.detail("DcID", printable(self->clusterControllerDcId))
 			.detail("ReqDcID", printable(w.locality.dcId()))
 			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
@@ -1983,8 +1986,15 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	}
 	if (req.backupInterf.present()) {
 		const BackupInterface& bci = req.backupInterf.get();
-		TraceEvent("CC_RegisterBackupWorker", self->id).detail("BCID", bci.id());
-		self->db.addBackupWorker(bci);
+		if (self->db.serverInfo->get().backupServers.size() == 0 &&
+		    req.backupInterf.get().locality.dcId() == self->clusterControllerDcId &&
+		    !self->recruitingBackupWorkerID.present()) {
+			TraceEvent("CC_RegisterBackupWorker", self->id).detail("BKID", bci.id());
+			self->db.addBackupWorker(bci);
+		} else if (!self->recruitingBackupWorkerID.present() || self->recruitingBackupWorkerID.get() != req.backupInterf.get().id()) {
+			TraceEvent("CC_HaltBackupWorker", self->id).detail("BKID", bci.id());
+			self->id_worker[w.locality.processId()].haltBackupWorker = brokenPromiseToNever(req.backupInterf.get().haltBackup.getReply(HaltBackupRequest(self->id)));
+		}
 	}
 }
 
@@ -2650,14 +2660,6 @@ ACTOR Future<BackupInterface> startBackupWorker(ClusterControllerData *self) {
 	TraceEvent("CC_StartBackupWorker", self->id);
 	loop {
 		try {
-			state bool no_worker = (self->db.serverInfo->get().backupServers.size() == 0);
-			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (no_worker && self->db.serverInfo->get().backupServers.size() > 0) {
-				return self->db.serverInfo->get().backupServers[0];
-			}
-
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			WorkerFitnessInfo backupWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Backup, ProcessClass::NeverAssign, self->db.config, id_used);
 			state WorkerDetails worker = backupWorker.worker;
@@ -2665,6 +2667,7 @@ ACTOR Future<BackupInterface> startBackupWorker(ClusterControllerData *self) {
 			InitializeBackupRequest req(g_random->randomUniqueID());
 			TraceEvent("CC_BackupRecruit", self->id).detail("Addr", worker.interf.address());
 
+			self->recruitingBackupWorkerID = req.reqId;
 			ErrorOr<BackupInterface> backupInterf = wait(worker.interf.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_BACKUP_JOIN_DELAY, 0));
 			if (backupInterf.present()) {
 				TraceEvent("CC_BackupWorkerRecruited", self->id).detail("Addr", worker.interf.address());
@@ -2694,7 +2697,9 @@ ACTOR Future<Void> monitorBackupWorker(ClusterControllerData *self) {
 			self->db.removeBackupWorker(workerId);
 		} else {
 			BackupInterface backupInterf = wait(startBackupWorker(self));
+			TraceEvent("CC_RegisterBackupWorker", self->id).detail("BKID", backupInterf.id());
 			self->db.addBackupWorker(backupInterf);
+			self->recruitingBackupWorkerID = Optional<UID>();
 		}
 	}
 }
