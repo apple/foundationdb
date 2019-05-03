@@ -536,7 +536,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "optimizing_team_collections",
                   "healthy_repartitioning",
                   "healthy_removing_server",
-                  "team_healthy",
+                  "healthy_team",
                   "healthy_rebalancing",
                   "healthy"
                ]
@@ -570,7 +570,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                           "optimizing_team_collections",
                           "healthy_repartitioning",
                           "healthy_removing_server",
-                          "team_healthy",
+                          "healthy_team",
                           "healthy_rebalancing",
                           "healthy"
                        ]
