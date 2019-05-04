@@ -24,6 +24,7 @@
 #include "flow/SystemMonitor.h"
 
 #include <stdio.h>
+#include <cinttypes>
 
 using namespace FDB;
 
@@ -40,7 +41,7 @@ ACTOR Future<Void> _test() {
 	// tr->setVersion(1);
 
 	Version ver = wait( tr->getReadVersion() );
-	printf("%lld\n", ver);
+	printf("%" PRId64 "\n", ver);
 
 	state std::vector< Future<Version> > versions;
 
