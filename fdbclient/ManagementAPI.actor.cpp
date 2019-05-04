@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
@@ -1347,7 +1349,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %d seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch( Error &e ) {
