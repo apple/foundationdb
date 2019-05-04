@@ -42,6 +42,20 @@ struct applyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+static Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache, IKeyValueStore* txnStateStore) {
+	Reference<StorageInfo> storageInfo;
+	auto cacheItr = storageCache->find(id);
+	if(cacheItr == storageCache->end()) {
+		storageInfo = Reference<StorageInfo>( new StorageInfo() );
+		storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+		storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+		(*storageCache)[id] = storageInfo;
+	} else {
+		storageInfo = cacheItr->second;
+	}
+	return storageInfo;
+}
+
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
@@ -62,36 +76,19 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						decodeKeyServersValue(m.param2, src, dest);
 
 						ASSERT(storageCache);
-						Reference<StorageInfo> storageInfo;
 						ServerCacheInfo info;
 						info.tags.reserve(src.size() + dest.size());
 						info.src_info.reserve(src.size());
 						info.dest_info.reserve(dest.size());
 
-						for(auto id : src) {
-							auto cacheItr = storageCache->find(id);
-							if(cacheItr == storageCache->end()) {
-								storageInfo = Reference<StorageInfo>( new StorageInfo() );
-								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-								(*storageCache)[id] = storageInfo;
-							} else {
-								storageInfo = cacheItr->second;
-							}
+						for (const auto& id : src) {
+							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
 							info.src_info.push_back( storageInfo );
 						}
-						for(auto id : dest) {
-							auto cacheItr = storageCache->find(id);
-							if(cacheItr == storageCache->end()) {
-								storageInfo = Reference<StorageInfo>( new StorageInfo() );
-								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-								(*storageCache)[id] = storageInfo;
-							} else {
-								storageInfo = cacheItr->second;
-							}
+						for (const auto& id : dest) {
+							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
 							info.dest_info.push_back( storageInfo );
@@ -269,15 +266,13 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					if (m.param1 == lastEpochEndKey) {
-						for (auto t : allTags)
-							toCommit->addTag(t);
+						toCommit->addTags(allTags);
 						toCommit->addTypedMessage(LogProtocolMessage());
 					}
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					for (auto t : allTags)
-						toCommit->addTag(t);
+					toCommit->addTags(allTags);
 					toCommit->addTypedMessage(privatized);
 				}
 			}

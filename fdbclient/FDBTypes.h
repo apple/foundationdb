@@ -33,7 +33,15 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
+enum {
+	tagLocalitySpecial = -1,
+	tagLocalityLogRouter = -2,
+	tagLocalityRemoteLog = -3,
+	tagLocalityUpgraded = -4,
+	tagLocalitySatellite = -5,
+	tagLocalityLogRouterMapped = -6,
+	tagLocalityInvalid = -99
+}; //The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
@@ -46,6 +54,10 @@ struct Tag {
 	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
 	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
 	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	int toTagDataIndex() {
+		return locality >= 0 ? 2 * locality : 1 - (2 * locality);
+	}
 
 	std::string toString() const {
 		return format("%d:%d", locality, id);

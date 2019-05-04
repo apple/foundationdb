@@ -481,7 +481,7 @@ ACTOR Future<Void> commitBatch(
 	for(auto it : versionReply.resolverChanges) {
 		auto rs = self->keyResolvers.modify(it.range);
 		for(auto r = rs.begin(); r != rs.end(); ++r)
-			r->value().push_back(std::make_pair(versionReply.resolverChangesVersion,it.dest));
+			r->value().emplace_back(versionReply.resolverChangesVersion,it.dest);
 	}
 
 	//TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
@@ -572,7 +572,7 @@ ACTOR Future<Void> commitBatch(
 
 		// These changes to txnStateStore will be committed by the other proxy, so we simply discard the commit message
 		auto fcm = self->logAdapter->getCommitMessage();
-		storeCommits.push_back(std::make_pair(fcm, self->txnStateStore->commit()));
+		storeCommits.emplace_back(fcm, self->txnStateStore->commit());
 		//discardCommit( dbgid, fcm, txnStateStore->commit() );
 
 		if (initialState) {
@@ -659,7 +659,7 @@ ACTOR Future<Void> commitBatch(
 	state Optional<Value> metadataVersionAfter = self->txnStateStore->readValue(metadataVersionKey).get();
 
 	auto fcm = self->logAdapter->getCommitMessage();
-	storeCommits.push_back(std::make_pair(fcm, self->txnStateStore->commit()));
+	storeCommits.emplace_back(fcm, self->txnStateStore->commit());
 	self->version = commitVersion;
 	if (!self->validState.isSet()) self->validState.send(Void());
 	ASSERT(commitVersion);
@@ -711,9 +711,8 @@ ACTOR Future<Void> commitBatch(
 
 					if (debugMutation("ProxyCommit", commitVersion, m))
 						TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-					for (auto& tag : tags) {
-						toCommit.addTag(tag);
-					}
+					
+					toCommit.addTags(tags);
 					if(self->cacheInfo[m.param1]) {
 						toCommit.addTag(cacheTag);
 					}
@@ -728,43 +727,21 @@ ACTOR Future<Void> commitBatch(
 						// Fast path
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						
-						auto& tags = ranges.begin().value().tags;
-						if(!tags.size()) {
-							for( auto info : ranges.begin().value().src_info ) {
-								tags.push_back( info->tag );
-							}
-							for( auto info : ranges.begin().value().dest_info ) {
-								tags.push_back( info->tag );
-							}
-							uniquify(tags);
-						}
-						
-						for (auto& tag : tags) {
-							toCommit.addTag(tag);
-						}
+
+						ranges.begin().value().populateTags();
+						toCommit.addTags(ranges.begin().value().tags);
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
 						std::set<Tag> allSources;
 						for (auto r : ranges) {
-							auto& tags = r.value().tags;
-							if(!tags.size()) {
-								for( auto info : r.value().src_info ) {
-									tags.push_back(info->tag);
-								}
-								for( auto info : r.value().dest_info ) {
-									tags.push_back(info->tag);
-								}
-								uniquify(tags);
-							}
-							allSources.insert(tags.begin(), tags.end());
+							r.value().populateTags();
+							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						for (auto& tag : allSources) {
-							toCommit.addTag(tag);
-						}
+
+						toCommit.addTags(allSources);
 					}
 					if(self->needsCacheTag(clearRange)) {
 						toCommit.addTag(cacheTag);
@@ -858,8 +835,7 @@ ACTOR Future<Void> commitBatch(
 				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
 					
 				auto& tags = self->tagsForKey(backupMutation.param1);
-				for (auto& tag : tags)
-					toCommit.addTag(tag);
+				toCommit.addTags(tags);
 				toCommit.addTypedMessage(backupMutation);
 
 //				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
@@ -952,7 +928,7 @@ ACTOR Future<Void> commitBatch(
 			self->txsPopVersions.pop_front();
 		}
 
-		self->txsPopVersions.push_back(std::make_pair(commitVersion, msg.popTo));
+		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
 	self->logSystem->pop(msg.popTo, txsTag);
 
@@ -1472,7 +1448,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for(auto r = rs.begin(); r != rs.end(); ++r)
-		r->value().push_back(std::make_pair<Version,int>(0,0));
+		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
@@ -1584,7 +1560,6 @@ ACTOR Future<Void> masterProxyServerCore(
 						Standalone<VectorRef<MutationRef>> mutations;
 						std::vector<std::pair<MapPair<Key,ServerCacheInfo>,int>> keyInfoData;
 						vector<UID> src, dest;
-						Reference<StorageInfo> storageInfo;
 						ServerCacheInfo info;
 						for(auto &kv : data) {
 							if( kv.key.startsWith(keyServersPrefix) ) {
@@ -1594,36 +1569,20 @@ ACTOR Future<Void> masterProxyServerCore(
 									info.tags.clear();
 									info.src_info.clear();
 									info.dest_info.clear();
-									for(auto& id : src) {
-										auto cacheItr = commitData.storageCache.find(id);
-										if(cacheItr == commitData.storageCache.end()) {
-											storageInfo = Reference<StorageInfo>( new StorageInfo() );
-											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-											commitData.storageCache[id] = storageInfo;
-										} else {
-											storageInfo = cacheItr->second;
-										}
+									for (const auto& id : src) {
+										auto storageInfo = getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
 										info.src_info.push_back( storageInfo );
 									}
-									for(auto& id : dest) {
-										auto cacheItr = commitData.storageCache.find(id);
-										if(cacheItr == commitData.storageCache.end()) {
-											storageInfo = Reference<StorageInfo>( new StorageInfo() );
-											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-											commitData.storageCache[id] = storageInfo;
-										} else {
-											storageInfo = cacheItr->second;
-										}
+									for (const auto& id : dest) {
+										auto storageInfo = getStorageInfo(id, &commitData.storageCache, commitData.txnStateStore);
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
 										info.dest_info.push_back( storageInfo );
 									}
 									uniquify(info.tags);
-									keyInfoData.push_back( std::make_pair(MapPair<Key,ServerCacheInfo>(k, info), 1) );
+									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
 								}
 							} else {
 								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
