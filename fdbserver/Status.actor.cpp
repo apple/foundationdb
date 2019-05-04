@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -169,7 +170,7 @@ public:
 	}
 
 	StatusCounter& parseText(const std::string& parsableText) {
-		sscanf(parsableText.c_str(), "%lf %lf %lld", &hz, &roughness, &counter);
+		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
 		return *this;
 	}
 
@@ -2351,7 +2352,7 @@ TEST_CASE("/status/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	printf("RESULT: %lld bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
+	printf("RESULT: %" PRId64 " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
 		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
 
 	return Void();

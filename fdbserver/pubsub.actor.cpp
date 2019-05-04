@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/pubsub.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -27,7 +28,7 @@ Value uInt64ToValue( uint64_t v ) {
 }
 uint64_t valueToUInt64( const StringRef& v ) {
 	uint64_t x = 0;
-	sscanf( v.toString().c_str(), "%llx", &x );
+	sscanf( v.toString().c_str(), "%" SCNx64, &x );
 	return x;
 }
 

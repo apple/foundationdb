@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/MemoryPager.h"
 #include "fdbserver/Knobs.h"
 
@@ -339,7 +340,7 @@ bool validatePage(Reference<const IPage> page, LogicalPageID pageID, Version ver
 
 	Version readVersion = *(Version*)(page->begin()+sizeof(LogicalPageID));
 	if(readVersion != version) {
-		fprintf(stderr, "Invalid Version detected on page %u: %lld (expected %lld)\n", pageID, readVersion, version);
+		fprintf(stderr, "Invalid Version detected on page %u: %" PRId64 "(expected %" PRId64 ")\n", pageID, readVersion, version);
 		valid = false;
 	}
 

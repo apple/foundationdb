@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-
+#include <cinttypes>
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/IndexedSet.h"
@@ -2325,7 +2325,7 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 			mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
 			mutation.type == MutationRef::DebugKey ? "DebugKey" :
 			"UnknownMutation";
-		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), "originalMutation", version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
+		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%" PRId64 "\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), "originalMutation", version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
 		printf("  shard: %s - %s\n", printable(shard.begin).c_str(), printable(shard.end).c_str());
 		if (mutation.type == MutationRef::ClearRange && mutation.param2 != shard.end)
 			printf("  eager: %s\n", printable( eagerReads->getKeyEnd( mutation.param2 ) ).c_str() );
