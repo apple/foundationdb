@@ -21,6 +21,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 #include <cmath>
+#include <cinttypes>
 
 FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
@@ -172,10 +173,10 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		int64_t v;
 		int n=0;
 		if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-			if (sscanf(value.c_str(), "0x%llx%n", &v, &n) != 1 || n != value.size())
+			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
 		} else {
-			if (sscanf(value.c_str(), "%lld%n", &v, &n) != 1 || n != value.size())
+			if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
 		}
 		if (int64_knobs.count(knob))

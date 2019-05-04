@@ -20,6 +20,7 @@
 
 #include "flow/flow.h"
 #include <stdarg.h>
+#include <cinttypes>
 
 INetwork *g_network = 0;
 IRandom *g_random = 0;
@@ -36,7 +37,7 @@ std::string UID::toString() const {
 UID UID::fromString( std::string const& s ) {
 	ASSERT( s.size() == 32 );
 	uint64_t a=0, b=0;
-	int r = sscanf( s.c_str(), "%16llx%16llx", &a, &b );
+	int r = sscanf( s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b );
 	ASSERT( r == 2 );
 	return UID(a, b);
 }
