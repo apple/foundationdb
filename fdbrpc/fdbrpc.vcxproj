@@ -24,6 +24,7 @@
     <ClCompile Include="generated-constants.cpp" />
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
+    <ClCompile Include="IDisk.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
     <ClCompile Include="libcoroutine\Coro.c" />
     <ClCompile Include="Locality.cpp" />
@@ -87,6 +88,7 @@
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="IAsyncFile.h" />
+    <ClInclude Include="IDisk.h" />
     <ClInclude Include="IRateControl.h" />
     <ClInclude Include="Platform.h" />
     <ClInclude Include="fdbrpc.h" />

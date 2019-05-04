@@ -23,6 +23,7 @@
     <ActorCompiler Include="networksender.actor.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="IDisk.h" />
     <ClCompile Include="Locality.cpp" />
     <ClCompile Include="libcoroutine\Common.c">
       <Filter>libcoroutine</Filter>
@@ -83,6 +84,7 @@
     <ClCompile Include="ReplicationUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="IDisk.h" />
     <ClInclude Include="LoadBalance.h" />
     <ClInclude Include="Locality.h" />
     <ClInclude Include="simulator.h" />
