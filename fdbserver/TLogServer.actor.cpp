@@ -795,6 +795,15 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						lastVersion = std::max(currentVersion, lastVersion);
 						firstLocation = std::min(begin, firstLocation);
 
+						if ((wr.getLength() + sizeof(SpilledData) > SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH) ) {
+							*(uint32_t*)wr.getData() = refSpilledTagCount;
+							self->persistentData->set( KeyValueRef( persistTagMessageRefsKey( logData->logId, tagData->tag, lastVersion ), wr.toValue() ) );
+							tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
+							refSpilledTagCount = 0;
+							wr = BinaryWriter( AssumeVersion(logData->protocolVersion) );
+							wr << uint32_t(0);
+						}
+
 						Future<Void> f = yield(TaskUpdateStorage);
 						if(!f.isReady()) {
 							wait(f);
@@ -1277,6 +1286,15 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		wait( delay(0.0, TaskLowPriority) );
 	}
 
+	if( req.begin <= logData->persistentDataDurableVersion && req.tag != txsTag) {
+		// Reading spilled data will almost always imply that the storage server is >5s behind the rest
+		// of the cluster.  We shouldn't prioritize spending CPU on helping this server catch up
+		// slightly faster over keeping the rest of the cluster operating normally.
+		// txsTag is only ever peeked on recovery, and we would still wish to prioritize requests
+		// that impact recovery duration.
+		wait(delay(0, TaskTLogSpilledPeekReply));
+	}
+
 	Version poppedVer = poppedVersion(logData, req.tag);
 	if(poppedVer > req.begin) {
 		TLogPeekReply rep;
@@ -1338,11 +1356,6 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			else
 				messages.serializeBytes( messages2.toValue() );
 		} else {
-			// Calculating checksums of read pages is potentially expensive, and storage servers with
-			// spilled data are likely behind and not contributing usefully to the cluster anyway.
-			// Thus, we penalize their priority slightly to make sure that commits have a higher priority
-			// than catching up old storage servers.
-			wait(delay(0, TaskTLogSpilledPeekReply));
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
 			Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
 					self->persistentData->readRange(KeyRangeRef(
