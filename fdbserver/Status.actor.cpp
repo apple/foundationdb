@@ -1244,8 +1244,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			}
 			else if (highestPriority >= PRIORITY_TEAM_HEALTHY) {
 				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "healthy_team";
-				stateSectionObj["description"] = "Teams are healthy";
+				stateSectionObj["name"] = "healthy";
 			}
 			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
 				stateSectionObj["healthy"] = true;

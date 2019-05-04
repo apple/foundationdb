@@ -510,7 +510,6 @@
                   "optimizing_team_collections",
                   "healthy_repartitioning",
                   "healthy_removing_server",
-                  "healthy_team",
                   "healthy_rebalancing",
                   "healthy"
                ]
@@ -544,7 +543,6 @@
                           "optimizing_team_collections",
                           "healthy_repartitioning",
                           "healthy_removing_server",
-                          "healthy_team",
                           "healthy_rebalancing",
                           "healthy"
                        ]
