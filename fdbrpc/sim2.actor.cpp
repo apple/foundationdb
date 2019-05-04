@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
@@ -528,7 +530,7 @@ private:
 		        ( (uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0 ) );  // Required by KAIO.
 		state UID opId = g_random->randomUniqueID();
 		if (randLog)
-			fprintf( randLog, "SFR1 %s %s %s %d %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
+			fprintf( randLog, "SFR1 %s %s %s %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
 
 		wait( waitUntilDiskReady( self->diskParameters, length ) );
 
@@ -562,7 +564,7 @@ private:
 		if (randLog) {
 			uint32_t a=0, b=0;
 			hashlittle2( data.begin(), data.size(), &a, &b );
-			fprintf( randLog, "SFW1 %s %s %s %d %d %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset );
+			fprintf( randLog, "SFW1 %s %s %s %d %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset );
 		}
 
 		if(self->delayOnWrite)
@@ -599,7 +601,7 @@ private:
 	ACTOR static Future<Void> truncate_impl( SimpleFile* self, int64_t size ) {
 		state UID opId = g_random->randomUniqueID();
 		if (randLog)
-			fprintf( randLog, "SFT1 %s %s %s %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
+			fprintf( randLog, "SFT1 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
 		if(self->delayOnWrite)
 			wait( waitUntilDiskReady( self->diskParameters, 0 ) );
@@ -665,7 +667,7 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog, "SFS2 %s %s %s %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), pos);
+			fprintf(randLog, "SFS2 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), pos);
 		INJECT_FAULT( io_error, "SimpleFile::size" );
 
 		return pos;
@@ -1622,7 +1624,7 @@ public:
 			//}
 
 			if (randLog)
-				fprintf( randLog, "T %f %d %s %lld\n", this->time, int(g_random->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
+				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(g_random->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
 	}
 
