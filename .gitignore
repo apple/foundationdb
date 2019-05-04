@@ -8,6 +8,31 @@ bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
 
+# CMake build artifacts
+build/*.ninja*
+build/*.exe
+build/*.cmake
+build/*.ctest
+build/*.txt
+build/*.cluster
+build/CMakeFiles/
+build/bin/
+build/bindings/
+build/FDBLibTLS/
+build/fdbbackup/
+build/fdbcli/
+build/fdbclient/
+build/fdbmonitor/
+build/fdbrpc/
+build/fdbserver/
+build/flow/
+build/lib/
+build/sandbox/
+build/tests/
+build/packages/
+build/Testing/
+build/logs/
+
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
