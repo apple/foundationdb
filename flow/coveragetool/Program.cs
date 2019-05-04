@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -46,7 +46,15 @@ namespace coveragetool
                 Console.WriteLine("  coveragetool [coveragefile] [inputpath]*");
                 return 100;
             }
-            Console.WriteLine("coveragetool {0}", string.Join(" ", args));
+
+            bool quiet = true;
+            if (Environment.GetEnvironmentVariable("VERBOSE") != null) {
+                quiet = false;
+            }
+
+            if (!quiet) {
+                Console.WriteLine("coveragetool {0}", string.Join(" ", args));
+            }
 
             string output = args[0];
             string[] inputPaths = args.Skip(1).Where(p=>!p.Contains(".g.") && !p.Contains(".amalgamation.")).ToArray();
@@ -79,8 +87,10 @@ namespace coveragetool
                 .Concat( changedFiles.SelectMany( f => ParseSource( f.Key ) ) )
                 .ToArray();
 
-            Console.WriteLine("  {0}/{1} files scanned", changedFiles.Count, inputPaths.Length);
-            Console.WriteLine("  {0} coverage cases found", cases.Length);
+            if (!quiet) {
+                Console.WriteLine("  {0}/{1} files scanned", changedFiles.Count, inputPaths.Length);
+                Console.WriteLine("  {0} coverage cases found", cases.Length);
+            }
 
             WriteOutput(output, cases, inputPaths);
 
