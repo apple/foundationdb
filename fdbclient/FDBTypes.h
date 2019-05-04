@@ -63,6 +63,7 @@ template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+static const Tag cacheTag {tagLocalitySpecial, 2};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 

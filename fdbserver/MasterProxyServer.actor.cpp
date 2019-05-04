@@ -204,6 +204,7 @@ struct ProxyCommitData {
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version,int>>> keyResolvers;
 	KeyRangeMap<ServerCacheInfo> keyInfo;
+	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, applyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
 	double lastCoalesceTime;
@@ -247,6 +248,16 @@ struct ProxyCommitData {
 			return r.tags;
 		}
 		return tags;
+	}
+
+	const bool needsCacheTag(KeyRangeRef range) {
+		auto ranges = cacheInfo.intersectingRanges(range);
+		for(auto r : ranges) {
+			if(r.value()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
@@ -548,7 +559,7 @@ ACTOR Future<Void> commitBatch(
 			for (int resolver = 0; resolver < resolution.size(); resolver++)
 				committed = committed && resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed)
-				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, NULL, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
+				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, NULL, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
 			
 			if( resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() && firstStateMutations ) {
 				ASSERT(committed);
@@ -628,7 +639,7 @@ ACTOR Future<Void> commitBatch(
 	{
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			commitCount++;
-			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
+			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
 		}
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
@@ -700,12 +711,17 @@ ACTOR Future<Void> commitBatch(
 
 					if (debugMutation("ProxyCommit", commitVersion, m))
 						TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-					for (auto& tag : tags)
+					for (auto& tag : tags) {
 						toCommit.addTag(tag);
+					}
+					if(self->cacheInfo[m.param1]) {
+						toCommit.addTag(cacheTag);
+					}
 					toCommit.addTypedMessage(m);
 				}
 				else if (m.type == MutationRef::ClearRange) {
-					auto ranges = self->keyInfo.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+					KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+					auto ranges = self->keyInfo.intersectingRanges(clearRange);
 					auto firstRange = ranges.begin();
 					++firstRange;
 					if (firstRange == ranges.end()) {
@@ -724,8 +740,9 @@ ACTOR Future<Void> commitBatch(
 							uniquify(tags);
 						}
 						
-						for (auto& tag : tags)
+						for (auto& tag : tags) {
 							toCommit.addTag(tag);
+						}
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
@@ -745,8 +762,12 @@ ACTOR Future<Void> commitBatch(
 						}
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						for (auto& tag : allSources)
+						for (auto& tag : allSources) {
 							toCommit.addTag(tag);
+						}
+					}
+					if(self->needsCacheTag(clearRange)) {
+						toCommit.addTag(cacheTag);
 					}
 					toCommit.addTypedMessage(m);
 				}
@@ -1614,7 +1635,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, NULL, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : NULL, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, &commitData.tag_popped, true );
+						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, NULL, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyInfo, &commitData.cacheInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : NULL, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, &commitData.tag_popped, true );
 					}
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();

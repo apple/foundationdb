@@ -677,6 +677,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->allTags.clear();
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(txsTag);
+		self->allTags.push_back(cacheTag);
 	}
 
 	if(self->forceRecovery) {
@@ -1330,6 +1331,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
+	
+	//FIXME: remove this code, caching the system keyspace as a test of functionality
+	tr.set(recoveryCommitRequest.arena, storageCacheKey(systemKeys.begin), storageCacheValue({0}));
+	tr.set(recoveryCommitRequest.arena, storageCacheKey(systemKeys.end), storageCacheValue({}));
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for(auto& dc : self->primaryDcId) {

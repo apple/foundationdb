@@ -46,7 +46,7 @@ struct applyMutationsData {
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
 static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
-	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
+	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, KeyRangeMap<bool>* cacheInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
 	Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Reference<StorageInfo>>* storageCache = NULL, std::map<Tag, Version>* tag_popped = NULL, bool initialCommit = false ) {
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
@@ -146,7 +146,18 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						}
 					}
 				}
-			}
+			} else if (m.param1.startsWith(storageCachePrefix)) {
+				if(cacheInfo) {
+					KeyRef k = m.param1.removePrefix(storageCachePrefix);
+					if(k != allKeys.end) {
+						KeyRef end = cacheInfo->rangeContaining(k).end();
+						vector<uint16_t> serverIndices;
+						decodeStorageCacheValue(m.param2, serverIndices);
+						cacheInfo->insert(KeyRangeRef(k,end),serverIndices.size() > 0);
+					}
+				}
+				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			} 
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {

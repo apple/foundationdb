@@ -44,6 +44,13 @@ const Value keyServersValue(
 void decodeKeyServersValue( const ValueRef& value,
 	vector<UID>& src, vector<UID>& dest  );
 
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+extern const KeyRangeRef storageCacheKeys;
+extern const KeyRef storageCachePrefix;
+const Key storageCacheKey( const KeyRef& k );
+const Value storageCacheValue( const vector<uint16_t>& serverIndices );
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices );
+
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysFalse;

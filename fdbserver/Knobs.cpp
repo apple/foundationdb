@@ -75,6 +75,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
 	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
+	init( MAX_CACHE_VERSIONS,                                   10e6 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );

@@ -58,6 +58,29 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 	}
 }
 
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
+const KeyRef storageCachePrefix = storageCacheKeys.begin;
+
+const Key storageCacheKey( const KeyRef& k ) {
+	return k.withPrefix( storageCachePrefix );
+}
+
+const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
+	BinaryWriter wr((IncludeVersion())); 
+	wr << serverIndices;
+	return wr.toValue();
+}
+
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices ) {
+	if (value.size()) {
+		BinaryReader rd(value, IncludeVersion());
+		rd >> serverIndices;
+	} else {
+		serverIndices.clear();
+	}
+}
+
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << logs;
