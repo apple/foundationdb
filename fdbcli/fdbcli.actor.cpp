@@ -40,6 +40,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 
+#include <cinttypes>
 #include <type_traits>
 #include <signal.h>
 
@@ -540,7 +541,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
 }
 
 void printHelpOverview() {
