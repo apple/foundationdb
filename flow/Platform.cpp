@@ -2841,13 +2841,26 @@ void setupSlowTaskProfiler() {
 #endif
 }
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__clang__)
 // There's no good place to put this, so it's here.
 // Ubuntu's packaging of libstdc++_pic offers different symbols than libstdc++.  Go figure.
 // Notably, it's missing a definition of std::istream::ignore(long), which causes compilation errors
 // in the bindings.  Thus, we provide weak versions of their definitions, so that if the
 // linked-against libstdc++ is missing their definitions, we'll be able to use the provided
 // ignore(long, int) version.
+//
+// Note that this hack is DISABLED when we use Clang. It is only needed when we statically link
+// to the _pic libraries, but only official FDB Linux binaries are built this way using GCC. If we
+// don't use the _pic libraries, then this hack is entirely unneeded -- likely the case when using
+// Clang on Linux.
+//
+// Doing this allows us to use LLVM's libc++ with Clang on Linux -- otherwise, providing
+// a weak symbol definition for an internal (non-public) class member fails (due to that member
+// being non-existant on libc++.) See upstream GitHub issue #1533 for more information.
+//
+// TODO FIXME: Obliterate this when the official build environment is upgraded beyond Ubuntu 14.04.
+// (This problem should be fixed in later LTS releases.)
+
 #include <istream>
 namespace std {
 typedef basic_istream<char, std::char_traits<char>> char_basic_istream;
