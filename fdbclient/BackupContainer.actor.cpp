@@ -33,6 +33,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include <algorithm>
+#include <cinttypes>
 #include <time.h>
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -60,13 +61,13 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 
 void BackupFileList::toStream(FILE *fout) const {
 	for(const RangeFile &f : ranges) {
-		fprintf(fout, "range %lld %s\n", f.fileSize, f.fileName.c_str());
+		fprintf(fout, "range %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
 	for(const LogFile &f : logs) {
-		fprintf(fout, "log %lld %s\n", f.fileSize, f.fileName.c_str());
+		fprintf(fout, "log %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
 	for(const KeyspaceSnapshotFile &f : snapshots) {
-		fprintf(fout, "snapshotManifest %lld %s\n", f.totalSize, f.fileName.c_str());
+		fprintf(fout, "snapshotManifest %" PRId64 " %s\n", f.totalSize, f.fileName.c_str());
 	}
 }
 
@@ -315,13 +316,13 @@ public:
 
 	// Get the root folder for a snapshot's data based on its begin version
 	static std::string snapshotFolderString(Version snapshotBeginVersion) {
-		return format("kvranges/snapshot.%018lld", snapshotBeginVersion);
+		return format("kvranges/snapshot.%018" PRId64 , snapshotBeginVersion);
 	}
 
 	// Extract the snapshot begin version from a path
 	static Version extractSnapshotBeginVersion(std::string path) {
 		Version snapshotBeginVersion;
-		if(sscanf(path.c_str(), "kvranges/snapshot.%018lld", &snapshotBeginVersion) == 1) {
+		if(sscanf(path.c_str(), "kvranges/snapshot.%018" SCNd64, &snapshotBeginVersion) == 1) {
 			return snapshotBeginVersion;
 		}
 		return invalidVersion;
@@ -337,7 +338,7 @@ public:
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) {
-		std::string fileName = format("range,%lld,%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
+		std::string fileName = format("range,%" PRId64 ",%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
 
 		// In order to test backward compatibility in simulation, sometimes write to the old path format
 		if(g_network->isSimulated() && g_random->coinflip()) {
@@ -353,7 +354,7 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "range,%lld,%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size()) {
+		if(sscanf(name.c_str(), "range,%" SCNd64 ",%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size()) {
 			out = f;
 			return true;
 		}
@@ -366,7 +367,7 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
+		if(sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
 			out = f;
 			return true;
 		}
@@ -378,7 +379,7 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
-		if(sscanf(name.c_str(), "snapshot,%lld,%lld,%lld%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size()) {
+		if(sscanf(name.c_str(), "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size()) {
 			out = f;
 			return true;
 		}
@@ -1125,7 +1126,7 @@ public:
 			int rs = wait(f->read((uint8_t *)s.data(), size, 0));
 			Version v;
 			int len;
-			if(rs == size && sscanf(s.c_str(), "%lld%n", &v, &len) == 1 && len == size)
+			if(rs == size && sscanf(s.c_str(), "%" SCNd64 "%n", &v, &len) == 1 && len == size)
 				return v;
 
 			TraceEvent(SevWarn, "BackupContainerInvalidProperty")
@@ -1852,7 +1853,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		state Version expireVersion = listing.snapshots[i].endVersion;
 
 		// Expire everything up to but not including the snapshot end version
-		printf("EXPIRE TO %lld\n", expireVersion);
+		printf("EXPIRE TO %" PRId64 "\n", expireVersion);
 		state Future<Void> f = c->expireData(expireVersion);
 		wait(ready(f));
 

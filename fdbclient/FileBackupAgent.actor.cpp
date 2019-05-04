@@ -26,6 +26,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
 
+#include <cinttypes>
 #include <ctime>
 #include <climits>
 #include "fdbrpc/IAsyncFile.h"
@@ -345,7 +346,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 	std::string errstr = "None";
 	if(lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
+		errstr = format("'%s' %" PRId64 "s ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
 
 	TraceEvent("FileRestoreProgress")
 		.detail("RestoreUID", uid)
@@ -4227,7 +4228,7 @@ public:
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
 				.detail("TargetVersion", targetVersion);
-			fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
+			fprintf(stderr, "ERROR: Restore version %" PRId64 " is not possible from %s\n", targetVersion, bc->getURL().c_str());
 			throw restore_invalid_version();
 		}
 
