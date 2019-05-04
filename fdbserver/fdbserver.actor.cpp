@@ -454,7 +454,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				state Arena arena;
 				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
 				Version ver = wait( tr.getReadVersion() );
-				fprintf(output, "<h3>Database version: %lld</h3>", ver);
+				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
 					Standalone<RangeResultRef> results = wait(
@@ -507,7 +507,7 @@ void parentWatcher(void *parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
 }
 
 static void printHelpTeaser( const char *name ) {

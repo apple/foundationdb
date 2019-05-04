@@ -34,6 +34,7 @@
 #include "fdbserver/PrefixTree.h"
 #include <string.h>
 #include "flow/actorcompiler.h"
+#include <cinttypes>
 
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
 template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
@@ -2019,18 +2020,18 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 		if(iLast == iEnd) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
 
@@ -2057,10 +2058,10 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	if(iLast != iEnd) {
 		errors += 1;
-		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
-	debug_printf("VerifyRangeReverse '%s' to '%s' @%lld\n", printable(start).c_str(), printable(end).c_str(), v);
+	debug_printf("VerifyRangeReverse '%s' to '%s' @%" PRId64 "\n", printable(start).c_str(), printable(end).c_str(), v);
 	// Randomly use a new cursor for the revere range read
 	if(g_random->coinflip()) {
 		cur = btree->readAtVersion(v);
@@ -2076,18 +2077,18 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	while(cur->isValid() && cur->getKey() >= start) {
 		if(r == results.rend()) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != r->key) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
 			break;
 		}
 		if(cur->getValue() != r->value) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
 
@@ -2097,7 +2098,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	if(r != results.rend()) {
 		errors += 1;
-		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
+		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
@@ -2124,16 +2125,16 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
 					++errors;
 					if(!cur->isValid())
-						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(), val.get().c_str(), ver);
 					else if(cur->getKey() != key)
-						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), key.c_str(), ver);
 					else if(cur->getValue() != val.get())
-						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
 				}
 			} else {
 				if(cur->isValid() && cur->getKey() == key) {
 					++errors;
-					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(), cur->getValue().toString().c_str(), ver);
 				}
 			}
 		}
@@ -2221,7 +2222,7 @@ TEST_CASE("!/redwood/correctness") {
 	state std::set<Key> keys;
 
 	state Version lastVer = wait(btree->getLatestVersion());
-	printf("Starting from version: %lld\n", lastVer);
+	printf("Starting from version: %" PRId64 "\n", lastVer);
 
 	state Version version = lastVer + 1;
 	state int mutationBytes = 0;
@@ -2324,7 +2325,7 @@ TEST_CASE("!/redwood/correctness") {
 				return Void();
 			});
 
-			printf("Cumulative: %d total mutation bytes, %lu key changes, %lld key bytes, %lld value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
+			printf("Cumulative: %d total mutation bytes, %lu key changes, %" PRId64 " key bytes, %" PRId64 " value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
 
 			// Recover from disk at random
 			if(useDisk && g_random->random01() < .1) {
@@ -2350,7 +2351,7 @@ TEST_CASE("!/redwood/correctness") {
 
 				Version v = wait(btree->getLatestVersion());
 				ASSERT(v == version);
-				printf("Recovered from disk.  Latest version %lld\n", v);
+				printf("Recovered from disk.  Latest version %" PRId64 "\n", v);
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
@@ -2422,7 +2423,7 @@ TEST_CASE("!/redwood/performance/set") {
 			wait(commit);
 			commit = btree->commit();
 			double elapsed = now() - startTime;
-			printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+			printf("Committed (cumulative) %" PRId64 " bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 
@@ -2433,7 +2434,7 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(closedFuture);
 
 	double elapsed = now() - startTime;
-	printf("Wrote (final) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+	printf("Wrote (final) %" PRId64 " bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 
 	return Void();
 }

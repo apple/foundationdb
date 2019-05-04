@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include <fstream>
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
@@ -65,7 +66,7 @@ Key doubleToTestKey( double p ) {
 
 double testKeyToDouble( const KeyRef& p ) {
 	uint64_t x = 0;
-	sscanf( p.toString().c_str(), "%llx", &x );
+	sscanf( p.toString().c_str(), "%" SCNx64, &x );
 	return *(double*)&x;
 }
 
@@ -163,7 +164,7 @@ uint64_t getOption( VectorRef<KeyValueRef> options, Key key, uint64_t defaultVal
 	for(int i = 0; i < options.size(); i++)
 		if( options[i].key == key ) {
 			uint64_t r;
-			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
+			if( sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
@@ -179,7 +180,7 @@ int64_t getOption( VectorRef<KeyValueRef> options, Key key, int64_t defaultValue
 	for(int i = 0; i < options.size(); i++)
 		if( options[i].key == key ) {
 			int64_t r;
-			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
+			if( sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
