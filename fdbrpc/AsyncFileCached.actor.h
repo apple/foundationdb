@@ -51,17 +51,22 @@ struct EvictablePage {
 
 struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	using List = bi::list< EvictablePage, bi::member_hook< EvictablePage, bi::list_member_hook<>, &EvictablePage::member_hook>>;
+	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
 
-	EvictablePageCache() : pageSize(0), maxPages(0) {}
-
-	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize) {
-		std::string cep = FLOW_KNOBS->CACHE_EVICTION_POLICY;
+	static CacheEvictionType evictionPolicyStringToEnum(const std::string &policy) {
+		std::string cep = policy;
 		std::transform(cep.begin(), cep.end(), cep.begin(), ::tolower);
-		if (0 == cep.compare("random"))
-			cacheEvictionType = RANDOM;
-		else
-			cacheEvictionType = LRU;
+		if (cep != "random" && cep != "lru")
+			throw invalid_cache_eviction_policy();
 
+		if (cep == "random")
+			return RANDOM;
+		return LRU;
+	}
+
+	EvictablePageCache() : pageSize(0), maxPages(0), cacheEvictionType(RANDOM) {}
+
+	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize), cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
 		cacheHits.init(LiteralStringRef("EvictablePageCache.CacheHits"));
 		cacheMisses.init(LiteralStringRef("EvictablePageCache.CacheMisses"));
 		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEviction"));
@@ -117,7 +122,6 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 		}
 	}
 
-	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
 	std::vector<EvictablePage*> pages;
 	List lruPages;
 	int pageSize;
@@ -125,7 +129,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	Int64MetricHandle cacheHits;
 	Int64MetricHandle cacheMisses;
 	Int64MetricHandle cacheEvictions;
-	CacheEvictionType cacheEvictionType;
+	const CacheEvictionType cacheEvictionType;
 };
 
 struct OpenFileInfo : NonCopyable {
