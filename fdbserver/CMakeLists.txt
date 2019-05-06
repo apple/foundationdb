@@ -59,7 +59,7 @@ set(FDBSERVER_SRCS
   RatekeeperInterface.h
   RecoveryState.h
   Restore.actor.cpp
-  RestoreInterface.h
+  RestoreWorkerInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h

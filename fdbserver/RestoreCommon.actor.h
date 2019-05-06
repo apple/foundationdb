@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
 	#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
-	#include "fdbserver/Restore.actor.g.h"
+	#include "fdbserver/RestoreCommon.actor.g.h"
 #elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
 	#define FDBSERVER_RESTORECOMMON_ACTOR_H
 

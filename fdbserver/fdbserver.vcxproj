@@ -54,6 +54,8 @@
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="Restore.actor.cpp" />
     <ActorCompiler Include="RestoreCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreLoader.actor.cpp" />
+    <ActorCompiler Include="RestoreApplier.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="MemoryPager.actor.cpp" />
@@ -197,7 +199,13 @@
     <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
-    <ClInclude Include="RestoreInterface.h" />
+    <ClInclude Include="RestoreWorkerInterface.h" />
+    <ActorCompiler Include="RestoreLoader.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreApplier.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ActorCompiler Include="RestoreCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>

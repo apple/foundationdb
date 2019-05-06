@@ -18,9 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/Restore.actor.h"
+#include "fdbserver/RestoreCommon.actor.h"
 
-//#include "fdbserver/RestoreInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 

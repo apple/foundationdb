@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RestoreInterface.h"
+#include "fdbserver/RestoreWorkerInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 
@@ -39,7 +39,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-#include "fdbserver/Restore.actor.h"
+#include "fdbserver/RestoreCommon.actor.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -153,11 +153,6 @@ const char *RestoreCommandEnumStr[] = {"Init",
 		"Loader_Notify_Appler_To_Apply_Mutation",
 		"Notify_Loader_ApplierKeyRange", "Notify_Loader_ApplierKeyRange_Done"
 };
-
-
-////--- Parse backup files
-
-// For convenience
 
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val); // { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { return (ERestoreState)val.getInt(0); }
@@ -773,10 +768,6 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
  				//printf("LogFile [key:%s, value:%s, version:%ld, op:NoOp]\n", k.printable().c_str(), v.printable().c_str(), logFile.version);
  //				printf("LogFile [KEY:%s, VALUE:%s, VERSION:%ld, op:NoOp]\n", getHexString(k).c_str(), getHexString(v).c_str(), logFile.version);
  //				printBackupMutationRefValueHex(v, " |\t");
- /*
- 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
- 				registerBackupMutation(data[i].value, logFile.version);
- */
  //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
  				bool concatenated = concatenateBackupMutationForLogFile(rd, data[i].value, data[i].key);
  				numConcatenated += ( concatenated ? 1 : 0);
@@ -2870,70 +2861,6 @@ bool allOpsAreKnown(Reference<RestoreData> rd) {
 
 	return ret;
 }
-
-
-
-//version_input is the file version
-void registerBackupMutation(Reference<RestoreData> rd, Standalone<StringRef> val_input, Version file_version) {
-	std::string prefix = "||\t";
-	std::stringstream ss;
-	const int version_size = 12;
-	const int header_size = 12;
-	StringRef val = val_input.contents();
-	StringRefReaderMX reader(val, restore_corrupted_data());
-
-	int count_size = 0;
-	// Get the version
-	uint64_t version = reader.consume<uint64_t>();
-	count_size += 8;
-	uint32_t val_length_decode = reader.consume<uint32_t>();
-	count_size += 4;
-
-	if ( rd->kvOps.find(file_version) == rd->kvOps.end() ) {
-		//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
-		rd->kvOps.insert(std::make_pair(file_version, VectorRef<MutationRef>()));
-	}
-
-	printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", file_version);
-	printf("To decode value:%s\n", getHexString(val).c_str());
-	if ( val_length_decode != (val.size() - 12) ) {
-		printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n",  val_length_decode, val.size());
-	} else {
-		printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
-	}
-
-	// Get the mutation header
-	while (1) {
-		// stop when reach the end of the string
-		if(reader.eof() ) { //|| *reader.rptr == 0xFF
-			//printf("Finish decode the value\n");
-			break;
-		}
-
-
-		uint32_t type = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
-		uint32_t kLen = reader.consume<uint32_t>();//reader.consumeNetworkUInkvOps[t32();
-		uint32_t vLen = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
-		const uint8_t *k = reader.consume(kLen);
-		const uint8_t *v = reader.consume(vLen);
-		count_size += 4 * 3 + kLen + vLen;
-
-		MutationRef m((MutationRef::Type) type, KeyRef(k, kLen), KeyRef(v, vLen)); //ASSUME: all operation in range file is set.
-		rd->kvOps[file_version].push_back_deep(rd->kvOps[file_version].arena(), m);
-
-		//		if ( kLen < 0 || kLen > val.size() || vLen < 0 || vLen > val.size() ) {
-		//			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
-		//		}
-		//
-		if ( debug_verbose ) {
-			printf("%s---RegisterBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
-				   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
-		}
-
-	}
-	//	printf("----------------------------------------------------------\n");
-}
-
 
 //key_input format: [logRangeMutation.first][hash_value_of_commit_version:1B][bigEndian64(commitVersion)][bigEndian32(part)]
 bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input) {

@@ -1,5 +1,5 @@
 /*
- * RestoreInterface.h
+ * RestoreWorkerInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_RestoreInterface_H
-#define FDBCLIENT_RestoreInterface_H
+#ifndef FDBSERVER_RestoreWorkerInterface_H
+#define FDBSERVER_RestoreWorkerInterface_H
 #pragma once
 
 #include <sstream>
