@@ -73,11 +73,10 @@ const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
 }
 
 void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices ) {
+	serverIndices.clear();
 	if (value.size()) {
 		BinaryReader rd(value, IncludeVersion());
 		rd >> serverIndices;
-	} else {
-		serverIndices.clear();
 	}
 }
 
