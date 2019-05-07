@@ -54,6 +54,7 @@
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -1425,6 +1426,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+
+		if (EvictablePageCache::RANDOM != EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY) &&
+			EvictablePageCache::LRU != EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY)) {
+			ASSERT(false);
+		}
 
 		if (role == SkipListTest) {
 			skipListTest();
