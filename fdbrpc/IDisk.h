@@ -45,4 +45,5 @@ enum class DiskType {
 
 Reference<IDisk> createSimulatedDisk(DiskType diskType);
 
+#include "flow/unactorcompiler.h"
 #endif
