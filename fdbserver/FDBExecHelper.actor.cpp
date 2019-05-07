@@ -102,33 +102,27 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 
 	if (!isSync && !g_network->isSimulated()) {
 		while (c.running() && runTime <= maxWaitTime) {
-			wait(delay(0.1));
-			runTime += 0.1;
+				wait(delay(0.1));
+				runTime += 0.1;
 		}
-		if (c.running()) {
-			c.terminate();
-			err = -1;
-		} else {
-			err = c.exit_code();
-		}
+	} else {
+		int maxWaitTimeInt = static_cast<int>(maxWaitTime + 1.0);
+		c.wait_for(std::chrono::seconds(maxWaitTimeInt));
+	}
+
+	if (c.running()) {
+		TraceEvent(SevWarnAlways, "ChildTermination")
+				.detail("Cmd", binPath)
+				.detail("Args", argsString);
+		c.terminate();
+		err = -1;
 		if (!c.wait_for(std::chrono::seconds(1))) {
 			TraceEvent(SevWarnAlways, "SpawnProcessFailedToExit")
 				.detail("Cmd", binPath)
 				.detail("Args", argsString);
 		}
 	} else {
-		state std::error_code errCode;
-		bool succ = c.wait_for(std::chrono::seconds(3), errCode);
-		err = errCode.value();
-		if (!succ) {
-			err = -1;
-			c.terminate();
-			if (!c.wait_for(std::chrono::seconds(1))) {
-				TraceEvent(SevWarnAlways, "SpawnProcessFailedToExit")
-					.detail("Cmd", binPath)
-					.detail("Args", argsString);
-			}
-		}
+		err = c.exit_code();
 	}
 	TraceEvent("SpawnProcess")
 		.detail("Cmd", binPath)
