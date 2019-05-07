@@ -22,6 +22,8 @@
 #define FDBSERVER_CLUSTERRECRUITMENTINTERFACE_H
 #pragma once
 
+#include <vector>
+
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
@@ -121,8 +123,8 @@ struct RecruitFromConfigurationRequest {
 
 struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;
-	vector<WorkerInterface> remoteTLogs;
-	vector<WorkerInterface> logRouters;
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -231,12 +233,12 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	vector<MasterProxyInterface> proxies;
-	vector<ResolverInterface> resolvers;
+	std::vector<MasterProxyInterface> proxies;
+	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
-	vector<UID> priorCommittedLogServers;
+	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
 
