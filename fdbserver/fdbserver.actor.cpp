@@ -1673,17 +1673,17 @@ int main(int argc, char* argv[]) {
 			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
-				std::string tmpFolder = abspath(dataFolder);
-				ini.LoadFile(joinPath(tmpFolder, "restartInfo.ini").c_str());
+				std::string absDataFolder = abspath(dataFolder);
+				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
 				bool snapFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
 				if (isRestoring && !snapFailed) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
-					returnList = platform::listDirectories(tmpFolder);
+					returnList = platform::listDirectories(absDataFolder);
 					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
-					TraceEvent("RestoringDataFolder").detail("DataFolder", tmpFolder);
+					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
 					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
 					// delete all files (except fdb.cluster) in non-snap directories
@@ -1695,7 +1695,7 @@ int main(int argc, char* argv[]) {
 							continue;
 						}
 
-						std::string childf = tmpFolder + "/" + returnList[i];
+						std::string childf = absDataFolder + "/" + returnList[i];
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
 						for (int j = 0; j < returnFiles.size(); j++) {
 							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
@@ -1711,15 +1711,23 @@ int main(int argc, char* argv[]) {
 						if (returnList[i] == "." || returnList[i] == "..") {
 							continue;
 						}
+						std::string dirSrc = absDataFolder + "/" + returnList[i];
+						// delete snap directories which are not part of restoreSnapUID
 						if (returnList[i].find(snapStr) == std::string::npos) {
 							if (returnList[i].find("snap") != std::string::npos) {
-								platform::eraseDirectoryRecursive(tmpFolder + returnList[i]);
+								platform::eraseDirectoryRecursive(dirSrc);
 							}
 							continue;
 						}
+						// remove empty/partial snap directories
+						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
+						if (childrenList.size() == 0) {
+							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
+							platform::eraseDirectoryRecursive(dirSrc);
+							continue;
+						}
 						std::string origDir = returnList[i].substr(0, 32);
-						std::string dirToRemove = tmpFolder + "/" + origDir;
-						std::string dirSrc = tmpFolder + "/" + returnList[i];
+						std::string dirToRemove = absDataFolder + "/" + origDir;
 						TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
 						platform::eraseDirectoryRecursive(dirToRemove);
 						renameFile(dirSrc, dirToRemove);
