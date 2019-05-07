@@ -234,13 +234,12 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					++retry;
-					if (retry > 3) {
-						if (e.code() == error_code_cluster_not_fully_recovered) {
+					if (e.code() == error_code_cluster_not_fully_recovered) {
+						++retry;
+						if (retry > 3) {
 							snapFailed = true;
 							break;
 						}
-						throw e;
 					}
 				}
 			}
