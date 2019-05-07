@@ -22,6 +22,8 @@
 #define FDBSERVER_CLUSTERRECRUITMENTINTERFACE_H
 #pragma once
 
+#include <vector>
+
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
@@ -84,12 +86,12 @@ struct RecruitFromConfigurationRequest {
 };
 
 struct RecruitFromConfigurationReply {
-	vector<WorkerInterface> tLogs;
-	vector<WorkerInterface> satelliteTLogs;
-	vector<WorkerInterface> proxies;
-	vector<WorkerInterface> resolvers;
-	vector<WorkerInterface> storageServers;
-	vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> storageServers;
+	std::vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
@@ -118,8 +120,8 @@ struct RecruitRemoteFromConfigurationRequest {
 };
 
 struct RecruitRemoteFromConfigurationReply {
-	vector<WorkerInterface> remoteTLogs;
-	vector<WorkerInterface> logRouters;
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -204,12 +206,12 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	vector<MasterProxyInterface> proxies;
-	vector<ResolverInterface> resolvers;
+	std::vector<MasterProxyInterface> proxies;
+	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
-	vector<UID> priorCommittedLogServers;
+	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
 
