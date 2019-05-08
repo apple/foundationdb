@@ -75,6 +75,7 @@ Fixes
 * Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
 * The ``configure`` command in ``fdbcli`` returned successfully even when the configuration was not changed for some error types. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
 * Safety protections in the ``configure`` command in ``fdbcli`` would trigger spuriously when changing between ``three_datacenter`` replication and a region configuration. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Status could report an incorrect reason for ongoing data movement. [6.1.5] `(PR #1544) <https://github.com/apple/foundationdb/pull/1544>`_
 
 Status
 ------
