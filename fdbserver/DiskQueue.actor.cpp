@@ -304,9 +304,10 @@ public:
 				self->writingPos = 0;
 
 				const int64_t activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped + self->fileExtensionBytes + self->fileShrinkBytes);
-				if (self->files[1].size > activeDataVolume) {
+				const int64_t desiredMaxFileSize = std::max( activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2 );
+				if (self->files[1].size > desiredMaxFileSize) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
-					int64_t maxShrink = std::max( pageFloor(self->files[1].size - activeDataVolume), self->fileShrinkBytes );
+					int64_t maxShrink = std::max( pageFloor(self->files[1].size - desiredMaxFileSize), self->fileShrinkBytes );
 					self->files[1].size -= maxShrink;
 					waitfor.push_back( self->files[1].f->truncate( self->files[1].size ) );
 				}
