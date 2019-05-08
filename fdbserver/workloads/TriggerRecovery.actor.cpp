@@ -29,11 +29,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	virtual std::string description() { return "TriggerRecoveryLoop"; }
 
 	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
-		loop {
-			DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-			self->originalNumOfResolvers = self->currentNumOfResolvers = config.getDesiredResolvers();
-			return Void();
-		}
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		self->originalNumOfResolvers = self->currentNumOfResolvers = config.getDesiredResolvers();
+		return Void();
 	}
 
 	virtual Future<Void> setup(Database const& cx) {
@@ -47,9 +45,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		loop {
 			state ReadYourWritesTransaction tr(cx);
 			try {
-				state Version v = wait(tr.getReadVersion());
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Version v = wait(tr.getReadVersion());
 				tr.makeSelfConflicting();
 				wait(tr.commit());
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ClusterVersion").detail("Version", v);
