@@ -279,6 +279,8 @@ public:
 			wait(file->sync());
 			wait(delay(FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
 		}
+
+		TraceEvent("DiskQueueReplaceTruncateEnded").detail("Filename", file->getFilename());
 	}
 
 	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
