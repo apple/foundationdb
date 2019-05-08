@@ -3356,7 +3356,7 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
-			wait(tr.commit());
+			wait(timeoutError(tr.commit(), 10));
 			break;
 		} catch (Error& e) {
 			TraceEvent("DisableTLogPopFailed").error(e);
