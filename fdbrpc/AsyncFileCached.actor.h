@@ -69,7 +69,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize), cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
 		cacheHits.init(LiteralStringRef("EvictablePageCache.CacheHits"));
 		cacheMisses.init(LiteralStringRef("EvictablePageCache.CacheMisses"));
-		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEviction"));
+		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 
 	void allocate(EvictablePage* page) {
@@ -82,7 +82,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 		} else {
 			lruPages.push_back(*page); // new page is considered the most recently used (placed at LRU tail)
 		}
-		cacheMisses++;
+		++cacheMisses;
 	}
 
 	void updateHit(EvictablePage* page) {
@@ -91,7 +91,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 			lruPages.erase(List::s_iterator_to(*page));
 			lruPages.push_back(*page);
 		}
-		cacheHits++;
+		++cacheHits;
 	}
 
 	void try_evict() {
@@ -100,7 +100,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 				for (int i = 0; i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS; i++) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
 					int toEvict = g_random->randomInt(0, pages.size());
 					if (pages[toEvict]->evict()) {
-						cacheEvictions++;
+						++cacheEvictions;
 						break;
 					}
 				}
@@ -114,7 +114,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 				     it != lruPages.end() && i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS;
 				     ++it, ++i) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
 					if (it->evict()) {
-						cacheEvictions++;
+						++cacheEvictions;
 						break;
 					}
 				}
