@@ -125,6 +125,7 @@ Fixes only impacting 6.1.0+
 * The background actor which removes redundant teams could leave data unbalanced. [6.1.3] `(PR #1479) <https://github.com/apple/foundationdb/pull/1479>`_
 * The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] `(PR #1527) <https://github.com/apple/foundationdb/pull/1527>`_
 * Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
+* TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
 
 Earlier release notes
 ---------------------
