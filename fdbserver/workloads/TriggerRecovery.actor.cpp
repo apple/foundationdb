@@ -10,6 +10,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	double startTime;
 	int numRecoveries;
 	double delayBetweenRecoveries;
+	double killAllProportion;
 	Optional<int32_t> originalNumOfResolvers;
 	Optional<int32_t> currentNumOfResolvers;
 
@@ -17,6 +18,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		startTime = getOption(options, LiteralStringRef("startTime"), 0.0);
 		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), g_random->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, LiteralStringRef("delayBetweenRecoveries"), 0.0);
+		killAllProportion = getOption(options, LiteralStringRef("killAllProportion"), 0.1);
 		ASSERT(numRecoveries > 0 && startTime >= 0 and delayBetweenRecoveries >= 0);
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
@@ -28,22 +30,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 
 	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
 		loop {
-			StatusObject s = wait(StatusClient::statusFetcher(cx.getPtr()->getConnectionFile()));
-			state StatusObjectReader statusObj(s);
-			state StatusObjectReader statusObjConfig;
-			state StatusObjectReader statusObjCluster;
-			state int32_t numResolvers = 0;
-			if (!(statusObj.get("cluster", statusObjCluster) && statusObjCluster.get("configuration", statusObjConfig))) {
-				TraceEvent(SevWarn, "TriggerRecoveryLoop_NoConfigurationPresent");
-				wait(delay(1.0));
-				continue;
-			}
-			if (!(statusObjConfig.get("resolvers", numResolvers) ||  statusObjConfig.get("auto_resolvers", numResolvers))) {
-				numResolvers = 1;
-			}
-			ASSERT(numResolvers > 0);
-			self->originalNumOfResolvers = numResolvers;
-			self->currentNumOfResolvers = numResolvers;
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+			self->originalNumOfResolvers = self->currentNumOfResolvers = config.getDesiredResolvers();
 			return Void();
 		}
 	}
@@ -59,7 +47,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		loop {
 			state ReadYourWritesTransaction tr(cx);
 			try {
-				Version v = wait(tr.getReadVersion());
+				state Version v = wait(tr.getReadVersion());
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.makeSelfConflicting();
+				wait(tr.commit());
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ClusterVersion").detail("Version", v);
 				break;
 			} catch (Error& e) {
@@ -124,10 +116,10 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		state int numRecoveriesDone = 0;
 		try {
 			loop {
-				if(g_random->random01() < 0.1) {
+				if (g_random->random01() < self->killAllProportion) {
 					wait(self->killAll(cx));
 				} else {
-				wait(self->changeResolverConfig(cx, self));
+					wait(self->changeResolverConfig(cx, self));
 				}
 				numRecoveriesDone++;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
