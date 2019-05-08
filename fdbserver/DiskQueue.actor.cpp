@@ -332,6 +332,7 @@ public:
 					if (maxShrink / SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES >
 							SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_EXTENTS) {
 						TEST(true);  // Replacing DiskQueue file
+						TraceEvent("DiskQueueReplaceFile", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", self->files[1].size).detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait( replaceFile(self->files[1].f) );
 						self->files[1].setFile(newFile);
 						self->files[1].size = 0;
