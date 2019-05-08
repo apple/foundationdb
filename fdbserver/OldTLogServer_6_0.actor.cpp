@@ -1433,7 +1433,6 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 								  Standalone<VectorRef<Tag>> execTags)
 {
 	state int err = 0;
-	state Future<int> cmdErr;
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
 	state UID execUID = UID::fromString(uidStr.toString());
 	state bool otherRoleExeced = false;
@@ -1443,7 +1442,8 @@ ACTOR Future<Void> tLogSnapHelper(TLogData* self,
 	ASSERT(!isExecOpInProgress(execUID));
 	if (!otherRoleExeced) {
 		setExecOpInProgress(execUID);
-		int err = wait(execHelper(execArg, self->dataFolder, "role=tlog"));
+		int tmpErr = wait(execHelper(execArg, self->dataFolder, "role=tlog"));
+		err = tmpErr;
 		clearExecOpInProgress(execUID);
 	}
 	TraceEvent("TLogCommitExecTraceTLog")
