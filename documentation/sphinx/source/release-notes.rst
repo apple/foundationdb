@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.4
+6.1.5
 =====
 
 Features
@@ -122,6 +122,8 @@ Fixes only impacting 6.1.0+
 * The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
 * The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
 * The background actor which removes redundant teams could leave data unbalanced. [6.1.3] `(PR #1479) <https://github.com/apple/foundationdb/pull/1479>`_
+* The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] `(PR #1527) <https://github.com/apple/foundationdb/pull/1527>`_
+* Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
 
 Earlier release notes
 ---------------------
