@@ -1,0 +1,11 @@
+testTitle=MakoTest
+    testName=Mako
+    testDuration=10.0
+    transactionsPerSecond=1000
+    rows=10000
+    sampling=100
+    valueBytes=16
+    keyBytes=16
+    operations=u16
+    actorPerClient=100
+    enableLogging=true
