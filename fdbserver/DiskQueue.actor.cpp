@@ -283,6 +283,13 @@ public:
 		TraceEvent("DiskQueueReplaceTruncateEnded").detail("Filename", file->getFilename());
 	}
 
+#if defined(_WIN32)
+	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+		// Windows doesn't support a rename over an open file.
+		wait( toReplace->truncate(0) );
+		return toReplace;
+	}
+#else
 	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
 		incrementalTruncate( toReplace );
 
@@ -292,6 +299,7 @@ public:
 
 		return replacement;
 	}
+#endif
 
 	Future<Void> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
 		return push( this, pageData, toSync );
