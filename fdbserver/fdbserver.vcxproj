@@ -104,6 +104,7 @@
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp" />

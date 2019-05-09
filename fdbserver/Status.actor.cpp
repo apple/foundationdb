@@ -608,6 +608,24 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
+	for(auto& tLogSet : db->get().logSystemConfig.tLogs) {
+		for(auto& it : tLogSet.logRouters) {
+			if(it.present()) {
+				roles.addRole("router", it.interf());
+			}
+		}
+	}
+
+	for(auto& old : db->get().logSystemConfig.oldTLogs) {
+		for(auto& tLogSet : old.tLogs) {
+			for(auto& it : tLogSet.logRouters) {
+				if(it.present()) {
+					roles.addRole("router", it.interf());
+				}
+			}
+		}
+	}
+
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
 		roles.addRole( "proxy", proxy->first, proxy->second );
@@ -1154,18 +1172,21 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		TraceEventFields md = dataInfo[2];
 
 		// If we have a MovingData message, parse it.
+		int64_t partitionsInFlight = 0;
+		int movingHighestPriority = 1000;
 		if (md.size())
 		{
 			int64_t partitionsInQueue = md.getInt64("InQueue");
-			int64_t partitionsInFlight = md.getInt64("InFlight");
 			int64_t averagePartitionSize = md.getInt64("AverageShardSize");
+			partitionsInFlight = md.getInt64("InFlight");
+			movingHighestPriority = md.getInt("HighestPriority");
 
 			if( averagePartitionSize >= 0 ) {
 				JsonBuilderObject moving_data;
 				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
 				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
 				moving_data.setKeyRawNumber("total_written_bytes",md.getValue("BytesWritten"));
-				moving_data.setKeyRawNumber("highest_priority",md.getValue("HighestPriority"));
+				moving_data["highest_priority"] = movingHighestPriority;
 
 				// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
 				statusObjData["moving_data"] = moving_data;
@@ -1188,6 +1209,12 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
+			
+			if(movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+				highestPriority = movingHighestPriority;
+			} else if(partitionsInFlight > 0) {
+				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
+			}
 
 			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
@@ -1242,6 +1269,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
 			}
+			else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
+ 				stateSectionObj["healthy"] = true;
+ 				stateSectionObj["name"] = "healthy";
+ 			}
 			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";

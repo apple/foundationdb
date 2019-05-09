@@ -432,6 +432,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
 
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
+		specialCounter(cc, "QueueCommittedVersion", [this](){ return this->queueCommittedVersion.get(); });
+		specialCounter(cc, "PersistentDataVersion", [this](){ return this->persistentDataVersion; });
+		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
+		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
@@ -996,6 +1000,15 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		wait( self->concurrentLogRouterReads.take() );
 		state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
 		wait( delay(0.0, TaskLowPriority) );
+	}
+
+	if( req.begin <= logData->persistentDataDurableVersion && req.tag != txsTag) {
+		// Reading spilled data will almost always imply that the storage server is >5s behind the rest
+		// of the cluster.  We shouldn't prioritize spending CPU on helping this server catch up
+		// slightly faster over keeping the rest of the cluster operating normally.
+		// txsTag is only ever peeked on recovery, and we would still wish to prioritize requests
+		// that impact recovery duration.
+		wait(delay(0, TaskTLogSpilledPeekReply));
 	}
 
 	Version poppedVer = poppedVersion(logData, req.tag);
