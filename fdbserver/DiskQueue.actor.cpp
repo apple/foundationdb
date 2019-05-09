@@ -336,19 +336,20 @@ public:
 
 				const int64_t activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped + self->fileExtensionBytes + self->fileShrinkBytes);
 				const int64_t desiredMaxFileSize = std::max( activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2 );
-				if (self->files[1].size > desiredMaxFileSize) {
+				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.001);
+				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
 					int64_t maxShrink = std::max( pageFloor(self->files[1].size - desiredMaxFileSize), self->fileShrinkBytes );
 					if ((maxShrink / SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES >
 							 SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_EXTENTS) ||
-					    BUGGIFY_WITH_PROB(0.1)) {
+					    (frivolouslyTruncate && g_random->random01() < 0.3)) {
 						TEST(true);  // Replacing DiskQueue file
 						TraceEvent("DiskQueueReplaceFile", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", self->files[1].size).detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait( replaceFile(self->files[1].f) );
 						self->files[1].setFile(newFile);
 						self->files[1].size = 0;
 					} else {
-						self->files[1].size -= maxShrink;
+						self->files[1].size -= std::min(maxShrink, self->files[1].size);
 						waitfor.push_back( self->files[1].f->truncate( self->files[1].size ) );
 					}
 				}

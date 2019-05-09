@@ -608,7 +608,7 @@ private:
 			wait( waitUntilDiskReady( self->diskParameters, 0 ) );
 
 		if( _chsize( self->h, (long) size ) == -1 ) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6);
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6).detail("Filename", self->filename).detail("Error", strerror(errno)).detail("Size", size).detail("Fd", self->h);
 			throw io_error();
 		}
 
