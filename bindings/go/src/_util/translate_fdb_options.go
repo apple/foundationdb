@@ -66,11 +66,7 @@ func writeOptBytes(w io.Writer, receiver string, function string, opt Option) {
 
 func writeOptInt(w io.Writer, receiver string, function string, opt Option) {
 	fmt.Fprintf(w, `func (o %s) %s(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(%d, b)
+	return o.setOpt(%d, int64ToBytes(param))
 }
 `, receiver, function, opt.Code)
 }
@@ -205,7 +201,6 @@ func main() {
 package fdb
 
 import (
-	"bytes"
 	"encoding/binary"
 )
 
