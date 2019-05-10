@@ -921,7 +921,10 @@ TraceEvent::~TraceEvent() {
 				severity = SevError;
 			}
 
-			TraceEvent::eventCounts[severity/10]++;
+			if(isNetworkThread()) {
+				TraceEvent::eventCounts[severity/10]++;
+			}
+
 			g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
 
 			if (g_traceLog.isOpen()) {
