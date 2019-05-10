@@ -153,6 +153,21 @@ struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type
 	static iterator begin(const Vec& v) { return v.begin(); }
 };
 
+template<class Key, class Compare, class Allocator>
+struct vector_like_traits<std::set<Key, Compare, Allocator>> : std::true_type {
+	using Vec = std::set<Key, Compare, Allocator>;
+	using value_type = Key;
+	using iterator = typename Vec::const_iterator;
+	using insert_iterator = std::insert_iterator<Vec>;
+
+	static size_t num_entries(const Vec& v) { return v.size(); }
+	template <class Context>
+	static void reserve(Vec&, size_t, Context&) {}
+
+	static insert_iterator insert(Vec& v) { return std::inserter(v, v.end()); }
+	static iterator begin(const Vec& v) { return v.begin(); }
+};
+
 template <>
 struct dynamic_size_traits<std::string> : std::true_type {
 private:
