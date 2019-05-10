@@ -1880,11 +1880,6 @@ ACTOR Future<Void> tLogCommit(
 		wait( delayJittered(.005, TaskTLogCommit) );
 	}
 
-	if(logData->stopped) {
-		req.reply.sendError( tlog_stopped() );
-		return Void();
-	}
-
 	// while exec op is being committed, no new transactions will be admitted.
 	// This property is useful for snapshot kind of operations which wants to
 	// take a snap of the disk image at a particular version (not data from
@@ -1895,6 +1890,11 @@ ACTOR Future<Void> tLogCommit(
 	if (logData->execOpCommitInProgress) {
 		wait(logData->execOpLock.take());
 		execOpLockTaken = true;
+	}
+
+	if(logData->stopped) {
+		req.reply.sendError( tlog_stopped() );
+		return Void();
 	}
 
 	state Version execVersion = invalidVersion;
