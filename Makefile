@@ -15,14 +15,14 @@ else
   $(error Not prepared to compile on $(ARCH))
 endif
 
-MONO := $(shell which mono)
+MONO := $(shell which mono 2>/dev/null)
 ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-MCS := $(shell which mcs)
+MCS := $(shell which mcs 2>/dev/null)
 ifeq ($(MCS),)
-  MCS := $(shell which dmcs) 
+  MCS := $(shell which dmcs 2>/dev/null)
 endif
 ifeq ($(MCS),)
   MCS := /usr/bin/mcs
@@ -70,7 +70,7 @@ else
 endif
 BOOSTDIR ?= ${BOOST_BASEDIR}/${BOOST_BASENAME}
 
-CCACHE := $(shell which ccache)
+CCACHE := $(shell which ccache 2>/dev/null)
 ifneq ($(CCACHE),)
   CCACHE_CC := $(CCACHE) $(CC)
   CCACHE_CXX := $(CCACHE) $(CXX)
