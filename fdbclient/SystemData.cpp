@@ -601,6 +601,14 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
+const KeyRangeRef restoreLoaderKeys(
+	LiteralStringRef("\xff\x02/restoreLoaders/"),
+	LiteralStringRef("\xff\x02/restoreLoaders0")
+);
+const KeyRangeRef restoreApplierKeys(
+	LiteralStringRef("\xff\x02/restoreAppliers/"),
+	LiteralStringRef("\xff\x02/restoreAppliers0")
+);
 const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
 
@@ -611,24 +619,64 @@ const KeyRangeRef restoreRequestKeys(
 		LiteralStringRef("\xff\x02/restoreRequests0")
 );
 
-// Encode restore agent key for agentID
-const Key restoreWorkerKeyFor( UID const& agentID ) {
+// Encode restore worker key for workerID
+const Key restoreWorkerKeyFor( UID const& workerID ) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreWorkersKeys.begin );
-	wr << agentID;
+	wr << workerID;
+	return wr.toValue();
+}
+
+// Encode restore role (loader or applier) for roleID
+const Key restoreLoaderKeyFor( UID const& roleID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreLoaderKeys.begin );
+	wr << roleID;
+	return wr.toValue();
+}
+
+const Key restoreApplierKeyFor( UID const& roleID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreApplierKeys.begin );
+	wr << roleID;
 	return wr.toValue();
 }
 
 // Encode restore agent value
-
-const Value restoreCommandInterfaceValue( RestoreInterface const& cmdInterf ) {
+const Value restoreWorkerInterfaceValue( RestoreWorkerInterface const& cmdInterf ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << cmdInterf;
 	return wr.toValue();
 }
 
-RestoreInterface decodeRestoreCommandInterfaceValue( ValueRef const& value ) {
-	RestoreInterface s;
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value ) {
+	RestoreWorkerInterface s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+const Value restoreLoaderInterfaceValue( RestoreLoaderInterface const& cmdInterf ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << cmdInterf;
+	return wr.toValue();
+}
+
+RestoreLoaderInterface decodeRestoreLoaderInterfaceValue( ValueRef const& value ) {
+	RestoreLoaderInterface s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+const Value restoreApplierInterfaceValue( RestoreApplierInterface const& cmdInterf ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << cmdInterf;
+	return wr.toValue();
+}
+
+RestoreApplierInterface decodeRestoreApplierInterfaceValue( ValueRef const& value ) {
+	RestoreApplierInterface s;
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
 	return s;

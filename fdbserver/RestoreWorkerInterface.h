@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_RestoreWorkerInterface_H
-#define FDBSERVER_RestoreWorkerInterface_H
+// Declare and define the interface for restore worker/loader/applier
+
+#ifndef FDBSERVER_RESTORE_WORKER_INTERFACE_H
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_H
 #pragma once
 
 #include <sstream>
@@ -30,11 +32,12 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 
+#include "fdbserver/RestoreUtil.h"
+//#include "fdbserver/RestoreRoleCommon.actor.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 class RestoreConfig;
-enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
-extern std::vector<std::string> RestoreRoleStr;
-BINARY_SERIALIZABLE( RestoreRole );
 
 
 // Timeout threshold in seconds for restore commands
@@ -43,8 +46,7 @@ extern int FastRestore_Failure_Timeout;
 struct RestoreCommonReply;
 struct GetKeyRangeReply;
 struct GetKeyRangeReply;
-struct RestoreSetRoleRequest;
-struct RestoreSimpleRequest;
+struct RestoreRecruitRoleRequest;
 struct RestoreLoadFileRequest;
 struct RestoreGetApplierKeyRangeRequest;
 struct RestoreSetApplierKeyRangeRequest;
@@ -54,124 +56,87 @@ struct RestoreCalculateApplierKeyRangeRequest;
 struct RestoreSendMutationVectorRequest;
 struct RestoreSetApplierKeyRangeVectorRequest;
 
-// RestoreCommandEnum is also used as the phase ID for CMDUID
-enum class RestoreCommandEnum {Init = 0,
-		Set_Role, Set_Role_Done,
-		Sample_Range_File, Sample_Log_File, Sample_File_Done,
-		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done, //7
-		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done, //10
-		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done, //12
-		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,//15
-		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,//17
-		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //19
-		Loader_Notify_Appler_To_Apply_Mutation,
-		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done, //22
-		Finish_Restore, RESET_VersionBatch, Set_WorkerInterface}; //23
-BINARY_SERIALIZABLE(RestoreCommandEnum);
 
-// Restore command's UID. uint64_t part[2];
-// part[0] is the phase id, part[1] is the command index in the phase.
-// TODO: Add another field to indicate version-batch round
-class CMDUID {
-public:
-	uint16_t batch;
-	uint16_t phase;
-	uint64_t cmdID;
-	CMDUID() : batch(0), phase(0), cmdID(0) { }
-	CMDUID( uint16_t a, uint64_t b ) { batch = 0; phase=a; cmdID=b; }
-	CMDUID(const CMDUID &cmd) { batch = cmd.batch; phase = cmd.phase; cmdID = cmd.cmdID; }
+struct RestoreWorkerInterface {
+	UID interfID;
 
-	void initPhase(RestoreCommandEnum phase);
+	RequestStream<RestoreSimpleRequest> heartbeat;
+	RequestStream<RestoreRecruitRoleRequest> recruitRole;
+	RequestStream<RestoreSimpleRequest> terminateWorker;
 
-	void nextPhase(); // Set to the next phase.
+	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
-	void nextCmd(); // Increase the command index at the same phase
+	UID id() const { return interfID; } //cmd.getEndpoint().token;
 
-	RestoreCommandEnum getPhase();
-	void setPhase(RestoreCommandEnum newPhase);
-	void setBatch(int newBatchIndex);
+	NetworkAddress address() const { return recruitRole.getEndpoint().addresses.address; }
 
-	uint64_t getIndex();
+	void initEndpoints() {
+		heartbeat.getEndpoint( TaskClusterController );
+		recruitRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
+		terminateWorker.getEndpoint( TaskClusterController ); 
 
-	std::string toString() const;
-
-	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase && cmdID == r.cmdID; }
-	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdID != r.cmdID; }
-	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdID < r.cmdID); }
-
-	//uint64_t hash() const { return first(); }
-	//uint64_t first() const { return part[0]; }
-	//uint64_t second() const { return part[1]; }
+		interfID = g_random->randomUniqueID();
+	}
 
 	template <class Ar>
-	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		serializer(ar, batch, phase, cmdID);
+	void serialize( Ar& ar ) {
+		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
 	}
 };
 
-template <class Ar> void load( Ar& ar, CMDUID& uid ) { uid.serialize_unversioned(ar); }
-template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>(uid).serialize_unversioned(ar); }
 
+struct RestoreRoleInterface {
+public:	
+	RestoreRole role;
 
-// NOTE: is cmd's Endpoint token the same with the request's token for the same node?
-struct RestoreInterface {
+	RestoreRoleInterface() {
+		role = RestoreRole::Invalid;
+	}
+};
+
+struct RestoreLoaderInterface : RestoreRoleInterface {
+public:	
 	UID nodeID;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 
-	RequestStream<RestoreSetRoleRequest> setRole;
 	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
 	RequestStream<RestoreLoadFileRequest> sampleLogFile;
-	RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
 
-	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
-	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
-	RequestStream<RestoreSetApplierKeyRangeRequest> setApplierKeyRangeRequest; // To delete
 	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 
 	RequestStream<RestoreLoadFileRequest> loadRangeFile;
 	RequestStream<RestoreLoadFileRequest> loadLogFile;
-	RequestStream<RestoreSendMutationVectorRequest> sendMutationVector;
-	RequestStream<RestoreSimpleRequest> applyToDB;
 
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 
-	RequestStream<RestoreSimpleRequest> setWorkerInterface;
+	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces; // TODO: Change to collectRestoreRoleInterfaces
 
 	RequestStream<RestoreSimpleRequest> finishRestore;
 
-	// ToDelete
-//	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
-//	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
+	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
-	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
+	UID id() const { return nodeID; }
 
-	UID id() const { return nodeID; } //cmd.getEndpoint().token;
-
-	NetworkAddress address() const { return setRole.getEndpoint().addresses.address; }
+	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
 		heartbeat.getEndpoint( TaskClusterController );
 		
-		setRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
 		sampleRangeFile.getEndpoint( TaskClusterController ); 
 		sampleLogFile.getEndpoint( TaskClusterController ); 
-		sendSampleMutationVector.getEndpoint( TaskClusterController ); 
 
-		calculateApplierKeyRange.getEndpoint( TaskClusterController ); 
-		getApplierKeyRangeRequest.getEndpoint( TaskClusterController ); 
-		setApplierKeyRangeRequest.getEndpoint( TaskClusterController );
 		setApplierKeyRangeVectorRequest.getEndpoint( TaskClusterController ); 
 
 		loadRangeFile.getEndpoint( TaskClusterController ); 
 		loadLogFile.getEndpoint( TaskClusterController ); 
-		sendMutationVector.getEndpoint( TaskClusterController ); 
-		applyToDB.getEndpoint( TaskClusterController ); 
 		
 		initVersionBatch.getEndpoint( TaskClusterController );
 
-		setWorkerInterface.getEndpoint( TaskClusterController ); 
+		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
+
 		finishRestore.getEndpoint( TaskClusterController ); 
 
 		nodeID = g_random->randomUniqueID();
@@ -179,10 +144,73 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, nodeID, heartbeat, setRole, sampleRangeFile, sampleLogFile, sendSampleMutationVector,
-				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest, setApplierKeyRangeVectorRequest,
-				loadRangeFile, loadLogFile, sendMutationVector, applyToDB, initVersionBatch, setWorkerInterface,
-				finishRestore);
+		serializer(ar, nodeID, heartbeat, sampleRangeFile, sampleLogFile,
+				setApplierKeyRangeVectorRequest, loadRangeFile, loadLogFile, 
+				initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+	}
+};
+
+
+struct RestoreApplierInterface : RestoreRoleInterface {
+public:
+	UID nodeID;
+
+	RequestStream<RestoreSimpleRequest> heartbeat;
+
+	RequestStream<RestoreCalculateApplierKeyRangeRequest> calculateApplierKeyRange;
+	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
+	RequestStream<RestoreSetApplierKeyRangeRequest> setApplierKeyRangeRequest;
+
+	RequestStream<RestoreSendMutationVectorRequest> sendSampleMutationVector;
+	RequestStream<RestoreSendMutationVectorRequest> sendMutationVector;
+
+	RequestStream<RestoreSimpleRequest> applyToDB;
+
+	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
+
+	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
+
+	RequestStream<RestoreSimpleRequest> finishRestore;
+
+
+	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
+
+	UID id() const { return nodeID; }
+
+	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
+
+	void initEndpoints() {
+		heartbeat.getEndpoint( TaskClusterController );
+	
+		calculateApplierKeyRange.getEndpoint( TaskClusterController ); 
+		getApplierKeyRangeRequest.getEndpoint( TaskClusterController ); 
+		setApplierKeyRangeRequest.getEndpoint( TaskClusterController );
+
+		sendSampleMutationVector.getEndpoint( TaskClusterController ); 
+		sendMutationVector.getEndpoint( TaskClusterController ); 
+
+		applyToDB.getEndpoint( TaskClusterController ); 
+		
+		initVersionBatch.getEndpoint( TaskClusterController );
+
+		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
+
+		finishRestore.getEndpoint( TaskClusterController ); 
+
+		nodeID = g_random->randomUniqueID();
+	}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, nodeID, heartbeat,  calculateApplierKeyRange, 
+				getApplierKeyRangeRequest, setApplierKeyRangeRequest,
+				sendSampleMutationVector, sendMutationVector,
+			    applyToDB, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+	}
+
+	std::string toString() {
+		return nodeID.toString();
 	}
 };
 
@@ -215,21 +243,26 @@ struct LoadingParam {
 };
 
 
-struct RestoreSetRoleRequest : TimedRequest {
+struct RestoreRecruitRoleRequest : TimedRequest {
 	CMDUID cmdID;
 	RestoreRole role;
-	int nodeIndex;
-	UID masterApplierID;
+	int nodeIndex; // Each role is a node
 
 	ReplyPromise<RestoreCommonReply> reply;
 
-	RestoreSetRoleRequest() : cmdID(CMDUID()), role(RestoreRole::Invalid) {}
-	explicit RestoreSetRoleRequest(CMDUID cmdID, RestoreRole role, int nodeIndex, UID masterApplierID) : 
-				cmdID(cmdID), role(role), nodeIndex(nodeIndex), masterApplierID(masterApplierID) {}
+	RestoreRecruitRoleRequest() : cmdID(CMDUID()), role(RestoreRole::Invalid) {}
+	explicit RestoreRecruitRoleRequest(CMDUID cmdID, RestoreRole role, int nodeIndex) : 
+				cmdID(cmdID), role(role), nodeIndex(nodeIndex){}
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		serializer(ar, cmdID, role, nodeIndex, masterApplierID, reply);
+		serializer(ar, cmdID, role, nodeIndex, reply);
+	}
+
+	std::string printable() {
+		std::stringstream ss;
+		ss << "CMDID:" <<  cmdID.toString() <<  " Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex;
+		return ss.str();
 	}
 };
 
@@ -265,20 +298,6 @@ struct RestoreSendMutationVectorRequest : TimedRequest {
 	}
 };
 
-// CalculateApplierKeyRange, applyToDB
-struct RestoreSimpleRequest : TimedRequest {
-	CMDUID cmdID;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSimpleRequest() : cmdID(CMDUID()) {}
-	explicit RestoreSimpleRequest(CMDUID cmdID) : cmdID(cmdID) {}
-
-	template <class Ar> 
-	void serialize( Ar& ar ) {
-		serializer(ar, cmdID, reply);
-	}
-};
 
 struct RestoreCalculateApplierKeyRangeRequest : TimedRequest {
 	CMDUID cmdID;
@@ -355,28 +374,6 @@ struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		serializer(ar, cmdID, applierIDs, ranges, reply);
-	}
-};
-
-
-
-// Reply type
-struct RestoreCommonReply { 
-	UID id; // unique ID of the server who sends the reply
-	CMDUID cmdID; // The restore command for the reply
-	
-	RestoreCommonReply() : id(UID()), cmdID(CMDUID()) {}
-	explicit RestoreCommonReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
-	
-	std::string toString() const {
-		std::stringstream ss;
-		ss << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString();
-		return ss.str();
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, id, cmdID);
 	}
 };
 

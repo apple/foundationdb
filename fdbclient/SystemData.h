@@ -27,6 +27,9 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/RestoreWorkerInterface.h"
+struct RestoreLoaderInterface;
+struct RestoreApplierInterface;
+struct RestoreMasterInterface;
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -275,6 +278,9 @@ extern const KeyRangeRef monitorConfKeys;
 
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
+extern const KeyRangeRef restoreRolesKeys;
+extern const KeyRangeRef restoreLoaderKeys;
+extern const KeyRangeRef restoreApplierKeys;
 
 extern const KeyRef restoreStatusKey;
 
@@ -282,9 +288,16 @@ extern const KeyRef restoreRequestTriggerKey;
 extern const KeyRef restoreRequestDoneKey;
 extern const KeyRangeRef restoreRequestKeys;
 
-const Key restoreWorkerKeyFor( UID const& agentID );
-const Value restoreCommandInterfaceValue( RestoreInterface const& server );
-RestoreInterface decodeRestoreCommandInterfaceValue( ValueRef const& value );
+const Key restoreWorkerKeyFor( UID const& workerID );
+const Key restoreLoaderKeyFor( UID const& roleID );
+const Key restoreApplierKeyFor( UID const& roleID );
+
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server );
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value );
+const Value restoreLoaderInterfaceValue(RestoreLoaderInterface const& server );
+RestoreLoaderInterface decodeRestoreLoaderInterfaceValue( ValueRef const& value );
+const Value restoreApplierInterfaceValue(RestoreApplierInterface const& server );
+RestoreApplierInterface decodeRestoreApplierInterfaceValue( ValueRef const& value );
 
 // MX: parallel restore
 const Value restoreRequestTriggerValue (int const numRequests);

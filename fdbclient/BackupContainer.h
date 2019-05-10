@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_BackupContainer_H
+#define FDBCLIENT_BackupContainer_H
 #pragma once
 
 #include "flow/flow.h"
@@ -26,6 +28,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
+
+class ReadYourWritesTransaction;
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
 Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Database const &db);
@@ -255,3 +259,4 @@ private:
 	std::string URL;
 };
 
+#endif

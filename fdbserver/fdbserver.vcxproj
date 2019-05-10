@@ -53,7 +53,10 @@
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="Restore.actor.cpp" />
+    <ActorCompiler Include="RestoreUtil.actor.cpp" />
     <ActorCompiler Include="RestoreCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreRoleCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreMaster.actor.cpp" />
     <ActorCompiler Include="RestoreLoader.actor.cpp" />
     <ActorCompiler Include="RestoreApplier.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
@@ -199,7 +202,13 @@
     <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
-    <ClInclude Include="RestoreWorkerInterface.h" />
+    <ClInclude Include="RestoreUtil.h" />
+    <ActorCompiler Include="RestoreRoleCommon.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+     <ActorCompiler Include="RestoreMaster.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ActorCompiler Include="RestoreLoader.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
@@ -209,6 +218,7 @@
     <ActorCompiler Include="RestoreCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+    <ClInclude Include="RestoreWorkerInterface.h" />
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />

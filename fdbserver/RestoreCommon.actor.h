@@ -32,7 +32,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
+
 
 // RestoreConfig copied from FileBackupAgent.actor.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing code
