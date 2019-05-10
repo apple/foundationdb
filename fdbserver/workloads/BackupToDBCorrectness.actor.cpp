@@ -51,15 +51,15 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		backupPrefix = getOption(options, LiteralStringRef("backupPrefix"), StringRef());
 		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5); //tests can hangs if set higher than 1 + BACKUP_MAP_KEY_LOWER_LIMIT
 		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
-		abortAndRestartAfter = getOption(options, LiteralStringRef("abortAndRestartAfter"), (!locked && g_random->random01() < 0.5) ? g_random->random01() * (restoreAfter - backupAfter) + backupAfter : 0.0);
-		differentialBackup = getOption(options, LiteralStringRef("differentialBackup"), g_random->random01() < 0.5 ? true : false);
+		abortAndRestartAfter = getOption(options, LiteralStringRef("abortAndRestartAfter"), (!locked && deterministicRandom()->random01() < 0.5) ? deterministicRandom()->random01() * (restoreAfter - backupAfter) + backupAfter : 0.0);
+		differentialBackup = getOption(options, LiteralStringRef("differentialBackup"), deterministicRandom()->random01() < 0.5 ? true : false);
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"),
-			differentialBackup ? g_random->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
+			differentialBackup ? deterministicRandom()->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
 		agentRequest = getOption(options, LiteralStringRef("simDrAgents"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 
 		// Use sharedRandomNumber if shareLogRange is true so that we can ensure backup and DR both backup the same range
-		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (g_random->random01() < 0.5);
+		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (deterministicRandom()->random01() < 0.5);
 
 		if (beforePrefix) {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
@@ -74,7 +74,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		KeyRef beginRange;
 		KeyRef endRange;
-		UID randomID = g_nondeterministic_random->randomUniqueID();
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		if (shareLogRange) {
 			if (beforePrefix)
@@ -91,8 +91,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++)
 			{
 				// Get a random range of a random sizes
-				beginRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
-				endRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
+				beginRange = KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
+				endRange = KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 
 				// Add the range to the array
 				backupRanges.push_back_deep(backupRanges.arena(), (beginRange < endRange) ? KeyRangeRef(beginRange, endRange) : KeyRangeRef(endRange, beginRange));
@@ -202,7 +202,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> doBackup(BackupToDBCorrectnessWorkload* self, double startDelay, DatabaseBackupAgent* backupAgent, Database cx,
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submitted) {
 
-		state UID	randomID = g_nondeterministic_random->randomUniqueID();
+		state UID	randomID = nondeterministicRandom()->randomUniqueID();
 
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		wait( delay( startDelay ));
@@ -442,7 +442,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_Arguments").detail("BackupTag", printable(self->backupTag)).detail("BackupAfter", self->backupAfter)
 			.detail("AbortAndRestartAfter", self->abortAndRestartAfter).detail("DifferentialAfter", self->stopDifferentialAfter);
 
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Increment the backup agent requets
 		if (self->agentRequest) {

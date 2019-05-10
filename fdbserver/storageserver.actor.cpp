@@ -501,7 +501,7 @@ public:
 	} counters;
 
 	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
-		:	instanceID(g_random->randomUniqueID().first()),
+		:	instanceID(deterministicRandom()->randomUniqueID().first()),
 			storage(this, storage), db(db),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
@@ -719,7 +719,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 		throw process_behind();
 	}
 
-	if(g_random->random01() < 0.001)
+	if(deterministicRandom()->random01() < 0.001)
 		TraceEvent("WaitForVersion1000x");
 	choose {
 		when ( wait( data->version.whenAtLeast(version) ) ) {
@@ -729,7 +729,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 			return version;
 		}
 		when ( wait( delay( SERVER_KNOBS->FUTURE_VERSION_DELAY ) ) ) {
-			if(g_random->random01() < 0.001)
+			if(deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 					.detail("Version", version)
 					.detail("MyVersion", data->version.get())
@@ -750,7 +750,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 			return version;
 		}
 		when ( wait( delay( SERVER_KNOBS->FUTURE_VERSION_DELAY ) ) ) {
-			if(g_random->random01() < 0.001)
+			if(deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 					.detail("Version", version)
 					.detail("MyVersion", data->version.get())
@@ -1016,7 +1016,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount;
-	//state UID rrid = g_random->randomUniqueID();
+	//state UID rrid = deterministicRandom()->randomUniqueID();
 	//state int originalLimit = limit;
 	//state int originalLimitBytes = *pLimitBytes;
 	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
@@ -2962,7 +2962,7 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data, IKeyValueStore* storag
 	state std::vector<Standalone<VectorRef<KeyValueRef>>> byteSampleSample;
 	wait( applyByteSampleResult(data, storage, persistByteSampleSampleKeys.begin, persistByteSampleSampleKeys.end, &byteSampleSample) );
 	byteSampleSampleRecovered.send(Void());
-	wait( delay( BUGGIFY ? g_random->random01() * 2.0 : 0.0001 ) );
+	wait( delay( BUGGIFY ? deterministicRandom()->random01() * 2.0 : 0.0001 ) );
 
 	size_t bytes_per_fetch = 0;
 	// Since the expected size also includes (as of now) the space overhead of the container, we calculate our own number here
@@ -2994,7 +2994,7 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data, IKeyValueStore* storag
 	TraceEvent("RecoveredByteSampleChunkedRead", data->thisServerID).detail("Ranges",sampleRanges.size());
 
 	if( BUGGIFY )
-		wait( delay( g_random->random01() * 10.0 ) );
+		wait( delay( deterministicRandom()->random01() * 10.0 ) );
 
 	return Void();
 }
@@ -3358,7 +3358,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 		double loopTopTime = now();
 		double elapsedTime = loopTopTime - lastLoopTopTime;
 		if( elapsedTime > 0.050 ) {
-			if (g_random->random01() < 0.01)
+			if (deterministicRandom()->random01() < 0.01)
 				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).detail("Elapsed", elapsedTime);
 		}
 		lastLoopTopTime = loopTopTime;
@@ -3701,7 +3701,7 @@ void versionedMapTest() {
 	for(int v=1; v<=1000; ++v) {
 		vm.createNewVersion(v);
 		for(int i=0; i<1000; i++) {
-			int k = g_random->randomInt(0, 2000000);
+			int k = deterministicRandom()->randomInt(0, 2000000);
 			/*for(int k2=k-5; k2<k+5; k2++)
 				if (vm.atLatest().find(k2) != vm.atLatest().end())
 					vm.erase(k2);*/

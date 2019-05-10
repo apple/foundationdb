@@ -242,19 +242,19 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 		std::string output("");
 		auto c=connectionString.begin();
 		while(c!=connectionString.end()) {
-			if(g_random->random01() < 0.1) // Add whitespace character
-				output += g_random->randomChoice(LiteralStringRef(" \t\n\r"));
-			if(g_random->random01() < 0.5) { // Add one of the input characters
+			if(deterministicRandom()->random01() < 0.1) // Add whitespace character
+				output += deterministicRandom()->randomChoice(LiteralStringRef(" \t\n\r"));
+			if(deterministicRandom()->random01() < 0.5) { // Add one of the input characters
 				output += *c;
 				++c;
 			}
-			if(g_random->random01() < 0.1) { // Add a comment block
+			if(deterministicRandom()->random01() < 0.1) { // Add a comment block
 				output += "#";
-				int charCount = g_random->randomInt(0, 20);
+				int charCount = deterministicRandom()->randomInt(0, 20);
 				for(int i = 0; i < charCount; i++) {
-					output += g_random->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
+					output += deterministicRandom()->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
 				}
-				output += g_random->randomChoice(LiteralStringRef("\n\r"));
+				output += deterministicRandom()->randomChoice(LiteralStringRef("\n\r"));
 			}
 		}
 

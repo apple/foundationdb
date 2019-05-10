@@ -973,7 +973,7 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
 				logData.second.send(req);
 				if(!logData.first.isValid() || logData.first.isReady()) {
-					UID logId = g_random->randomUniqueID();
+					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
 					details["StorageEngine"] = req.storeType.toString();
@@ -1282,7 +1282,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 		if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
 			Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
 			lockFile = _lockFile;
-			processIDUid = g_random->randomUniqueID();
+			processIDUid = deterministicRandom()->randomUniqueID();
 			BinaryWriter wr(IncludeVersion());
 			wr << processIDUid;
 			wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));

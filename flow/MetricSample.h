@@ -47,7 +47,7 @@ struct TransientMetricSample : MetricSample<T> {
 	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) { }
 
 	bool roll(int64_t metric) {
-		return g_nondeterministic_random->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+		return nondeterministicRandom()->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
 	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
@@ -102,7 +102,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	TransientThresholdMetricSample(int64_t metricUnitsPerSample, int64_t threshold) : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) { }
 
 	bool roll(int64_t metric) {
-		return g_nondeterministic_random->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+		return nondeterministicRandom()->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
 	}
 
 	template <class U>

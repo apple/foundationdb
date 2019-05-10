@@ -1030,7 +1030,7 @@ struct TuplePackFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1119,7 +1119,7 @@ struct TupleRangeFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1809,8 +1809,7 @@ int main( int argc, char** argv ) {
 	try {
 		platformInit();
 		registerCrashHandler();
-		g_random = new DeterministicRandom(1);
-		g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(1);
 
 		// Get arguments
 		if (argc < 3) {

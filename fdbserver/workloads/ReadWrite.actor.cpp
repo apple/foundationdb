@@ -184,8 +184,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 		// Validate that keyForIndex() is monotonic
 		for (int i = 0; i < 30; i++) {
-			int64_t a = g_random->randomInt64(0, nodeCount);
-			int64_t b = g_random->randomInt64(0, nodeCount);
+			int64_t a = deterministicRandom()->randomInt64(0, nodeCount);
+			int64_t b = deterministicRandom()->randomInt64(0, nodeCount);
 			if ( a > b ) {
 				std::swap(a, b);
 			}
@@ -303,7 +303,7 @@ struct ReadWriteWorkload : KVWorkload {
 			m.push_back(PerfMetric(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false));
 	}
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
 
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
@@ -464,7 +464,7 @@ struct ReadWriteWorkload : KVWorkload {
 	ACTOR Future<Void> _start( Database cx, ReadWriteWorkload *self ) {
 		// Read one record from the database to warm the cache of keyServers 
 		state std::vector<int64_t> keys;
-		keys.push_back( g_random->randomInt64(0, self->nodeCount) );
+		keys.push_back( deterministicRandom()->randomInt64(0, self->nodeCount) );
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
@@ -511,10 +511,10 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount){
-		if (forceHotProbability && g_random->random01() < forceHotProbability)
-			return g_random->randomInt64( 0, nodeCount*hotKeyFraction) / hotKeyFraction; // spread hot keys over keyspace
+		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
+			return deterministicRandom()->randomInt64( 0, nodeCount*hotKeyFraction) / hotKeyFraction; // spread hot keys over keyspace
 		else
-			return g_random->randomInt64( 0, nodeCount );
+			return deterministicRandom()->randomInt64( 0, nodeCount );
 	}
 
 	double sweepAlpha(double startTime) {
@@ -549,10 +549,10 @@ struct ReadWriteWorkload : KVWorkload {
 				}
 			}
 
-			if(!self->rampUpLoad || g_random->random01() < self->sweepAlpha(startTime))
+			if(!self->rampUpLoad || deterministicRandom()->random01() < self->sweepAlpha(startTime))
 			{
 				state double tstart = now();
-				state bool aTransaction = g_random->random01() > (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
+				state bool aTransaction = deterministicRandom()->random01() > (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
 
 				state vector<int64_t> keys;
 				state vector<Value> values;
@@ -575,12 +575,12 @@ struct ReadWriteWorkload : KVWorkload {
 					values.push_back(self->randomValue());
 
 				for (int op = 0; op<extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
-					extra_ranges.push_back(singleKeyRange( g_random->randomUniqueID().toString() ));
+					extra_ranges.push_back(singleKeyRange( deterministicRandom()->randomUniqueID().toString() ));
 
 				state Trans tr(cx);
 
 				if(tstart - self->clientBegin > self->debugTime && tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
-					debugID = g_random->randomUniqueID();
+					debugID = deterministicRandom()->randomUniqueID();
 					tr.debugTransaction(debugID);
 					g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
 				}

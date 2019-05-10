@@ -275,7 +275,7 @@ public:
 	}
 
 	explicit Connection( boost::asio::io_service& io_service )
-		: id(g_nondeterministic_random->randomUniqueID()), socket(io_service)
+		: id(nondeterministicRandom()->randomUniqueID()), socket(io_service)
 	{
 	}
 
@@ -611,7 +611,7 @@ void Net2::run() {
 		updateNow();
 		double now = this->currentTime;
 
-		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
+		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
 		if (sleepTime) trackMinPriority( 0, now );
@@ -689,11 +689,11 @@ void Net2::run() {
 			}
 
 			// to keep the thread liveness check happy
-			net2liveness = g_nondeterministic_random->random01();
+			net2liveness = nondeterministicRandom()->random01();
 		}
 #endif
 
-		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
+		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
 
 		trackMinPriority( minTaskID, nnow );
@@ -750,7 +750,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 
-		if ( !DEBUG_DETERMINISM && (g_nondeterministic_random->random01() < sampleRate ))
+		if ( !DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate ))
 			TraceEvent(elapsed > warnThreshold ? SevWarnAlways : SevInfo, "SlowTask").detail("TaskID", priority).detail("MClocks", elapsed/1e6).detail("Duration", duration).detail("SampleRate", sampleRate).detail("NumYields", numYields);
 	}
 }

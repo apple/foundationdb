@@ -374,7 +374,7 @@ bool PolicyAcross::selectReplicas(
 			if (g_replicationdebug > 6) {
 				LocalitySet::staticDisplayEntries(fromServers, mutableArray, "mutable");
 			}
-			recordIndex = g_random->randomInt(0, checksLeft);
+			recordIndex = deterministicRandom()->randomInt(0, checksLeft);
 			auto& entry = mutableArray[recordIndex];
 			auto value = fromServers->getValueViaGroupKey(entry, groupIndexKey);
 			if (value.present()) {

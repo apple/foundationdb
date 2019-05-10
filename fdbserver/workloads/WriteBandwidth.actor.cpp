@@ -81,7 +81,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 		m.push_back( PerfMetric( "Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false ) );
 	}
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
 
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
@@ -109,7 +109,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 	ACTOR Future<Void> writeClient( Database cx, WriteBandwidthWorkload *self ) {
 		loop {
 			state Transaction tr( cx );
-			state uint64_t startIdx = g_random->random01() * (self->nodeCount - self->keysPerTransaction);
+			state uint64_t startIdx = deterministicRandom()->random01() * (self->nodeCount - self->keysPerTransaction);
 			loop {
 				try {
 					state double start = now();

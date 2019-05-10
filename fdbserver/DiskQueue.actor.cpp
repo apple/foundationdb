@@ -164,9 +164,9 @@ public:
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
 		if (BUGGIFY)
-			fileExtensionBytes = 1<<10 * g_random->randomSkewedUInt32( 1, 40<<10 );
+			fileExtensionBytes = 1<<10 * deterministicRandom()->randomSkewedUInt32( 1, 40<<10 );
 		if (BUGGIFY)
-			fileShrinkBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
+			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32( 1, 10<<10 );
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.
@@ -666,7 +666,7 @@ public:
 		}
 
 		// Read up to 1MB into readingBuffer
-		int len = std::min<int64_t>( (files[readingFile].size/sizeof(Page) - readingPage)*sizeof(Page), BUGGIFY_WITH_PROB(1.0) ? sizeof(Page)*g_random->randomInt(1,4) : (1<<20) );
+		int len = std::min<int64_t>( (files[readingFile].size/sizeof(Page) - readingPage)*sizeof(Page), BUGGIFY_WITH_PROB(1.0) ? sizeof(Page)*deterministicRandom()->randomInt(1,4) : (1<<20) );
 		readingBuffer.clear();
 		readingBuffer.alignReserve( sizeof(Page), len );
 		void* p = readingBuffer.append(len);
@@ -687,7 +687,7 @@ public:
 
 			if (!self->readingBuffer.size()) {
 				state Future<Void> f = Void();
-				//if (BUGGIFY) f = delay( g_random->random01() * 0.1 );
+				//if (BUGGIFY) f = delay( deterministicRandom()->random01() * 0.1 );
 
 				int read = wait( self->fillReadingBuffer() );
 				ASSERT( read == self->readingBuffer.size() );

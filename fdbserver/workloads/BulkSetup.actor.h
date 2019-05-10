@@ -61,8 +61,8 @@ Future<uint64_t> setupRange( Database cx, T* workload, uint64_t begin, uint64_t 
 	loop {
 		state Transaction tr(cx);
 		try {
-			//if( g_random->random01() < 0.001 )
-			//	tr.debugTransaction( g_random->randomUniqueID() );
+			//if( deterministicRandom()->random01() < 0.001 )
+			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
 
 			state Standalone<KeyValueRef> sampleKV = (*workload)( begin );
 			Optional<Value> f = wait( tr.get( sampleKV.key ) );
@@ -236,13 +236,13 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		}
 	}
 
-	wait( delay( g_random->random01() / 4 ) );  // smear over .25 seconds
+	wait( delay( deterministicRandom()->random01() / 4 ) );  // smear over .25 seconds
 
 	state int BULK_SETUP_WORKERS = 40;
 	// See that each chunk inserted is about 10KB
 	int size_total = 0;
 	for( int i = 0; i < 100; i++ ) {
-		Standalone<KeyValueRef> sampleKV = (*workload)( startNode + (uint64_t)(g_random->random01()*(endNode - startNode)) );
+		Standalone<KeyValueRef> sampleKV = (*workload)( startNode + (uint64_t)(deterministicRandom()->random01()*(endNode - startNode)) );
 		size_total += sampleKV.key.size() + sampleKV.value.size();
 	}
 	state int BULK_SETUP_RANGE_SIZE = size_total == 0 ? 50 : std::max(1, 10000 / (size_total / 100));
@@ -258,7 +258,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 	// create a random vector of range-create jobs
 	for(uint64_t n=startNode; n<endNode; n+=BULK_SETUP_RANGE_SIZE)
 		jobs.push_back( std::make_pair( n, std::min(endNode, n+BULK_SETUP_RANGE_SIZE) ) );
-	g_random->randomShuffle(jobs);
+	deterministicRandom()->randomShuffle(jobs);
 
 	// fire up the workers and wait for them to eat all the jobs
 	double maxWorkerInsertRate = maxKeyInsertRate / BULK_SETUP_WORKERS / workload->clientCount;

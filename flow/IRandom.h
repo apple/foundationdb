@@ -97,9 +97,17 @@ public:
 	bool coinflip() { return (this->random01() < 0.5); }
 };
 
-extern IRandom* g_random;
-extern IRandom* g_nondeterministic_random;
-extern IRandom* g_debug_random;
 extern FILE* randLog;
+
+// Sets the seed for the deterministic random number generator on the current thread
+void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+
+// Returns the random number generator that can be seeded. This generator should only 
+// be used in contexts where the choice to call it is deterministic.
+IRandom* deterministicRandom();
+
+// A random number generator that cannot be manually seeded and may be called in 
+// non-deterministic contexts.
+IRandom* nondeterministicRandom();
 
 #endif

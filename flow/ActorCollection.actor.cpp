@@ -95,16 +95,16 @@ TEST_CASE("/flow/TraceEvent") {
 	strIdx.reserve(1e6);
 	for (i = 0; i < 100; ++i) {
 		for (int j = 0; j < 100; ++j) {
-			strings.emplace_back(g_random->randomAlphaNumeric(g_random->randomInt(1, 30)));
+			strings.emplace_back(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 30)));
 		}
 		wait(delay(0));
 	}
 	for (i = 0; i < 1e6; ++i) {
-		keyIdx.emplace_back(g_random->randomInt(0, strings.size()));
-		pairRnd.emplace_back(g_random->randomInt(-1000, 1000));
-		num.emplace_back(g_random->randomInt(0, 1000));
-		doub.emplace_back(g_random->random01());
-		strIdx.emplace_back(g_random->randomInt(0, strings.size()));
+		keyIdx.emplace_back(deterministicRandom()->randomInt(0, strings.size()));
+		pairRnd.emplace_back(deterministicRandom()->randomInt(-1000, 1000));
+		num.emplace_back(deterministicRandom()->randomInt(0, 1000));
+		doub.emplace_back(deterministicRandom()->random01());
+		strIdx.emplace_back(deterministicRandom()->randomInt(0, strings.size()));
 	}
 	TraceEvent("PairsFilled")
 		.detail("MemoryUsage", getMemoryUsage());
