@@ -156,8 +156,19 @@ public:
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "RestoreRoleData role:" << getRoleStr(role);
+		ss << "RestoreRoleData role:" << getRoleStr(role) << " nodeID:%s" << nodeID.toString();
 		return ss.str();
+	}
+
+	void printRestoreRoleInterfaces() {
+		printf("Dump restore loaders and appliers info:\n");
+		for (auto &loader : loadersInterf) {
+			printf("Loader:%s\n", loader.first.toString().c_str());
+		}
+
+		for (auto &applier : appliersInterf) {
+			printf("Applier:%s\n", applier.first.toString().c_str());
+		}
 	}
 
 	// TODO: To remove this function

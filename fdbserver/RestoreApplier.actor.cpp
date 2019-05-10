@@ -90,12 +90,15 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					requestTypeStr = "applyToDB";
 					actors.add( handleApplyToDBRequest(req, self, cx) );
 				}
-
 				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture()) ) {
 					requestTypeStr = "initVersionBatch";
 					wait(handleInitVersionBatchRequest(req, self));
 				}
-
+				when ( RestoreSimpleRequest req = waitNext(applierInterf.finishRestore.getFuture()) ) {
+					requestTypeStr = "finishRestore";
+					req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+					break;
+				}
 				// TODO: To modify the interface for the following 2 when condition
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.collectRestoreRoleInterfaces.getFuture()) ) {
 					// Step: Find other worker's workerInterfaces
@@ -104,7 +107,6 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					wait( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
 				}
 			}
-
 		} catch (Error &e) {
 			fprintf(stdout, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
 					requestTypeStr.c_str(), e.code(), e.what());

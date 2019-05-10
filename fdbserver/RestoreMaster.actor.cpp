@@ -697,7 +697,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 
 			if (numKeyRanges <= 0 || numKeyRanges >= self->appliersInterf.size() ) {
 				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%ld) from other phases. appliersInterf.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, self->appliersInterf.size());
-				continue;
+				UNREACHABLE();
 			}
 
 			if ( numKeyRanges < self->appliersInterf.size() ) {
@@ -719,20 +719,23 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 	// Ask master applier to return the key range for appliers
 	state std::vector<Future<GetKeyRangeReply>> keyRangeReplies;
 	state std::map<UID, RestoreApplierInterface>::iterator applier;
+	state int applierIndex = 0;
 	loop {
 		try {
 			self->range2Applier.clear();
 			keyRangeReplies.clear(); // In case error happens in try loop
 			self->cmdID.initPhase(RestoreCommandEnum::Get_Applier_KeyRange);
 			//self->cmdID.nextCmd();
-			state int applierindex = 0;
-			for ( applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++, applierindex++) {
+			for ( applier = self->appliersInterf.begin(), applierIndex = 0;
+				  applierIndex < numKeyRanges;
+				  applier++, applierIndex++) {
 				self->cmdID.nextCmd();
 				printf("[Sampling][Master] Node:%s, CMDID:%s Ask masterApplierInterf:%s for the lower boundary of the key range for applier:%s\n",
 						self->describeNode().c_str(), self->cmdID.toString().c_str(),
 						self->masterApplierInterf.toString().c_str(), applier->first.toString().c_str());
+				ASSERT( applier != self->appliersInterf.end() );
 				keyRangeReplies.push_back( self->masterApplierInterf.getApplierKeyRangeRequest.getReply(
-					RestoreGetApplierKeyRangeRequest(self->cmdID, applierindex)) );
+					RestoreGetApplierKeyRangeRequest(self->cmdID, applierIndex)) );
 			}
 			std::vector<GetKeyRangeReply> reps = wait( timeoutError( getAll(keyRangeReplies), FastRestore_Failure_Timeout) );
 
@@ -1164,7 +1167,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> s
 
 	self->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
 	state std::map<UID, RestoreLoaderInterface>::iterator loader;
-	for (loader = self->loadersInterf.begin(); loader != self->loadersInterf.begin(); loader++) {
+	for (loader = self->loadersInterf.begin(); loader != self->loadersInterf.end(); loader++) {
 		self->cmdID.nextCmd();
 		loop {
 			try {

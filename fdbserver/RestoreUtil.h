@@ -31,21 +31,20 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 
-
+// TODO: To remove unused command enum. and re-order the command sequence
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
-		Set_Role, Set_Role_Done,
 		Sample_Range_File, Sample_Log_File, Sample_File_Done,
-		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done, //7
-		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done, //10
-		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done, //12
-		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,//15
-		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,//17
-		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //19
+		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done, //5
+		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done, //8
+		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done, //10
+		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,//13
+		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,//15
+		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //17
 		Loader_Notify_Appler_To_Apply_Mutation,
-		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done, //22
-		Finish_Restore, Reset_VersionBatch, Set_WorkerInterface, Collect_RestoreRoleInterface,
-		Heart_Beat}; //23
+		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done, //20
+		Finish_Restore, Reset_VersionBatch, Set_WorkerInterface, Collect_RestoreRoleInterface, // 24
+		Heart_Beat, Recruit_Role_On_Worker}; 
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};

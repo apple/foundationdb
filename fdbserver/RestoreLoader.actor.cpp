@@ -94,7 +94,11 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 					requestTypeStr = "initVersionBatch";
 					wait(handleInitVersionBatchRequest(req, self));
 				}
-
+				when ( RestoreSimpleRequest req = waitNext(loaderInterf.finishRestore.getFuture()) ) {
+					requestTypeStr = "finishRestore";
+					req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+					break;
+				}
                 // TODO: To modify the following when conditions
 				when ( RestoreSimpleRequest req = waitNext(loaderInterf.collectRestoreRoleInterfaces.getFuture()) ) {
 					// Step: Find other worker's workerInterfaces

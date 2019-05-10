@@ -79,7 +79,6 @@ void printGlobalNodeStatus(Reference<RestoreWorkerData>);
 
 
 const char *RestoreCommandEnumStr[] = {"Init",
-		"Set_Role", "Set_Role_Done",
 		"Sample_Range_File", "Sample_Log_File", "Sample_File_Done",
 		"Loader_Send_Sample_Mutation_To_Applier", "Loader_Send_Sample_Mutation_To_Applier_Done",
 		"Calculate_Applier_KeyRange", "Get_Applier_KeyRange", "Get_Applier_KeyRange_Done",
@@ -120,6 +119,9 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 
 	CMDUID cmdID;
 
+	uint32_t inProgressFlag = 0; // To avoid race between duplicate message delivery that invokes the same actor multiple times
+	std::map<CMDUID, int> processedCmd;
+
 	UID id() const { return workerID; };
 
 	RestoreWorkerData() {
@@ -135,6 +137,30 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 		ss << "RestoreWorker workerID:" << workerID.toString();
 		return ss.str();
 	}
+
+	bool isCmdProcessed(CMDUID const &cmdID) {
+		return processedCmd.find(cmdID) != processedCmd.end();
+	}
+
+	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.
+	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		inProgressFlag |= (1UL << phase);
+	}
+
+	void clearInProgressFlag(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		inProgressFlag &= ~(1UL << phase);
+	}
+
+	bool isInProgress(RestoreCommandEnum phaseEnum) {
+		int phase = (int) phaseEnum;
+		ASSERT(phase < 32);
+		return (inProgressFlag & (1UL << phase));
+	}
+
 };
 
 
@@ -230,6 +256,7 @@ ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			ASSERT( !(self->loaderInterf.present() && self->applierInterf.present()) ); 
 			if ( self->loaderInterf.present() ) {
 				tr.set( restoreLoaderKeyFor(self->loaderInterf.get().id()), restoreLoaderInterfaceValue(self->loaderInterf.get()) );
 			}
@@ -252,15 +279,27 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 	printf("[INFO][Worker] Node:%s get role %s\n", self->describeNode().c_str(),
 			getRoleStr(req.role).c_str());
 
+	while (self->isInProgress(RestoreCommandEnum::Recruit_Role_On_Worker)) {
+		printf("[DEBUG] NODE:%s handleRecruitRoleRequest wait for 1s\n",  self->describeNode().c_str());
+		wait(delay(1.0));
+	}
+	if ( self->isCmdProcessed(req.cmdID) ) {
+		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+		return Void();
+	}
+	self->setInProgressFlag(RestoreCommandEnum::Recruit_Role_On_Worker);
+
 	if (req.role == RestoreRole::Loader) {
 		ASSERT( !self->loaderInterf.present() );
-		self->loaderData = Reference<RestoreLoaderData>(new RestoreLoaderData());
 		self->loaderInterf = RestoreLoaderInterface();
+		self->loaderInterf.get().initEndpoints();
+		self->loaderData = Reference<RestoreLoaderData>(new RestoreLoaderData(self->loaderInterf.get().id()));
 		actors->add( restoreLoaderCore(self->loaderData, self->loaderInterf.get(), cx) );
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT( !self->applierInterf.present() );
-		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData() );
 		self->applierInterf = RestoreApplierInterface();
+		self->applierInterf.get().initEndpoints();
+		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData(self->applierInterf.get().id()) );
 		actors->add( restoreApplierCore(self->applierData, self->applierInterf.get(), cx) );
 	} else {
 		TraceEvent(SevError, "FastRestore").detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
@@ -268,6 +307,8 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 
 	wait( commitRestoreRoleInterfaces(self, cx) ); // Commit the interface after the interface is ready to accept requests
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	self->processedCmd[req.cmdID] = 1;
+	self->clearInProgressFlag(RestoreCommandEnum::Recruit_Role_On_Worker);
 
 	return Void();
 }
@@ -337,10 +378,10 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	state RestoreRole role;
 	state UID nodeID;
 	printf("Node:%s Start configuring roles for workers\n", self->describeNode().c_str());
-	self->cmdID.initPhase(RestoreCommandEnum::Set_Role);
 	loop {
 		try {
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
+			self->cmdID.initPhase(RestoreCommandEnum::Recruit_Role_On_Worker);
 			for (auto &workerInterf : self->workers_workerInterface)  {
 				if ( nodeIndex < numLoader ) {
 					role = RestoreRole::Loader;

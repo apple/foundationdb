@@ -74,6 +74,20 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
+	RestoreMasterData() {
+		role = RestoreRole::Master;
+		nodeID = UID();
+
+		cmdID = CMDUID();
+
+		batchIndex = 0;
+		curWorkloadSize = 0;
+		curBackupFilesBeginIndex = 0;
+		curBackupFilesEndIndex = 0;
+		totalWorkloadSize = 0;
+		curWorkloadSize = 0;
+	}
+
 	std::string describeNode() {
 		std::stringstream ss;
 		ss << "Master versionBatch:"  << batchIndex;

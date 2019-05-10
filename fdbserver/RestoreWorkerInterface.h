@@ -118,6 +118,10 @@ public:
 	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
+	RestoreLoaderInterface () {
+		nodeID = g_random->randomUniqueID();
+	}
+
 	UID id() const { return nodeID; }
 
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
@@ -138,8 +142,6 @@ public:
 		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
 
 		finishRestore.getEndpoint( TaskClusterController ); 
-
-		nodeID = g_random->randomUniqueID();
 	}
 
 	template <class Ar>
@@ -176,6 +178,10 @@ public:
 	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
+	RestoreApplierInterface() {
+		nodeID = g_random->randomUniqueID();
+	}
+
 	UID id() const { return nodeID; }
 
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
@@ -197,8 +203,6 @@ public:
 		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
 
 		finishRestore.getEndpoint( TaskClusterController ); 
-
-		nodeID = g_random->randomUniqueID();
 	}
 
 	template <class Ar>

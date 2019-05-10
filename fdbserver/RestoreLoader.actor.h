@@ -71,9 +71,11 @@ public:
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	RestoreLoaderData() {
-		nodeID = g_random->randomUniqueID();
+	explicit RestoreLoaderData(UID loaderInterfID) {
+		nodeID = loaderInterfID;
 		nodeIndex = 0;
+
+		role = RestoreRole::Loader;
 	}
 
 	~RestoreLoaderData() {}

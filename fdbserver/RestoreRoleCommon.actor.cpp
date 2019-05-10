@@ -72,6 +72,7 @@ ACTOR Future<Void> _collectRestoreRoleInterfaces(Reference<RestoreRoleData> self
 				}
 			}
 			//wait(tr.commit());
+			self->printRestoreRoleInterfaces();
 			break;
 		} catch( Error &e ) {
 			printf("[WARNING] Node:%s handleCollectRestoreRoleInterfaceRequest() transaction error:%s\n", self->describeNode().c_str(), e.what());
