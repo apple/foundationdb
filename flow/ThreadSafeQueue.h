@@ -48,7 +48,7 @@ class ThreadSafeQueue : NonCopyable {
 	BaseNode* popNode() {
 		BaseNode* tail = this->tail;
 		BaseNode* next = tail->next.load();
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_BEFORE(&tail->next);
 #endif
 		if (tail == &this->stub) {
@@ -58,7 +58,7 @@ class ThreadSafeQueue : NonCopyable {
 			this->tail = next;
 			tail = next;
 			next = next->next.load();
-#ifdef VALGRIND
+#if VALGRIND
 			ANNOTATE_HAPPENS_BEFORE(&next->next);
 #endif
 		}
@@ -67,19 +67,19 @@ class ThreadSafeQueue : NonCopyable {
 			return tail;
 		}
 		BaseNode* head = this->head.load();
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_BEFORE(&this->head);
 #endif
 		if (tail != head) {
 			return nullptr;
 		}
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_AFTER(&this->stub.next);
 #endif
 		this->stub.next.store(nullptr);
 		pushNode(&this->stub);
 		next = tail->next.load();
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_BEFORE(&tail->next);
 #endif
 		if (next) {
@@ -91,11 +91,11 @@ class ThreadSafeQueue : NonCopyable {
 
 	// Pushes n at the end of the queue and returns the node immediately before it
 	BaseNode* pushNode( BaseNode* n ) {
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_AFTER(&head);
 #endif
 		BaseNode* prev = head.exchange(n);
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_BEFORE(&head);
 		ANNOTATE_HAPPENS_AFTER(&prev->next);
 #endif
@@ -104,7 +104,7 @@ class ThreadSafeQueue : NonCopyable {
 	}
 public:
 	ThreadSafeQueue() {
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_AFTER(&this->head);
 #endif
 		this->head.store(&this->stub);
@@ -130,12 +130,12 @@ public:
 			return false;  // We already have sleeping in the queue from a previous call to canSleep.  Pop it and then maybe you can sleep!
 		}
 		if (this->tail != &stub || this->tail->next.load()) {
-#ifdef VALGRIND
+#if VALGRIND
 			ANNOTATE_HAPPENS_BEFORE(&this->tail->next);
 #endif
 			return false;  // There is definitely something in the queue.  This is a rejection test not needed for correctness, but avoids calls to pushNode
 		}
-#ifdef VALGRIND
+#if VALGRIND
 		ANNOTATE_HAPPENS_BEFORE(&this->tail->next);
 #endif
 		// sleeping is definitely not in the queue, so we can safely try...
