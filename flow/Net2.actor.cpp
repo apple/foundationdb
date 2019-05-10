@@ -65,7 +65,7 @@ static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protoco
 #if defined(__linux__)
 #include <execinfo.h>
 
-volatile double net2liveness = 0;
+std::atomic<int64_t> net2liveness(0);
 
 volatile size_t net2backtraces_max = 10000;
 volatile void** volatile net2backtraces = NULL;
@@ -689,7 +689,7 @@ void Net2::run() {
 			}
 
 			// to keep the thread liveness check happy
-			net2liveness = g_nondeterministic_random->random01();
+			net2liveness.fetch_add(1);
 		}
 #endif
 
