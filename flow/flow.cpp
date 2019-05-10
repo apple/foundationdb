@@ -40,12 +40,12 @@ IRandom* deterministicRandom() {
 		if(!deterministicRandomSeed) {
 			static thread_local IRandom* preseedRandom = nullptr;
 			if(!preseedRandom) {
-				preseedRandom = new DeterministicRandom(1);
+				preseedRandom = new DeterministicRandom(1, true);
 			}
 
 			return preseedRandom;
 		}
-		random = new DeterministicRandom(deterministicRandomSeed);
+		random = new DeterministicRandom(deterministicRandomSeed, true);
 	}
 	return random;
 }

@@ -878,9 +878,5 @@ inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay)
 inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
 inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
 
-void setRandomSeed();
-IRandom* deterministicRandom();
-IRandom* nondeterministicRandom();
-
 #include "flow/genericactors.actor.h"
 #endif
