@@ -1,5 +1,6 @@
 FROM centos:6
-LABEL version=0.1.2
+LABEL version=0.1.3
+ENV DOCKER_IMAGEVER=0.1.3
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
@@ -8,7 +9,7 @@ RUN yum install -y yum-utils &&\
 	yum -y install centos-release-scl epel-release &&\
 	yum -y install devtoolset-7 mono-core java-1.8.0-openjdk-devel \
 		rh-python36-python-devel rh-ruby24 golang python27 \
-		rpm-build debbuild python-pip npm ccache distcc &&\
+		rpm-build debbuild python-pip npm &&\
 	pip install boto3==1.1.1
 
 USER root
@@ -39,4 +40,5 @@ RUN curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz >
     cd /tmp/libressl-2.8.2 && scl enable devtoolset-7 -- make -j`nproc` install &&\
     rm -rf /tmp/libressl-2.8.2 /tmp/libressl.tar.gz
 
+ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 CMD scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash
