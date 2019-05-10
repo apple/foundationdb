@@ -29,6 +29,10 @@ The views and conclusions contained in the software and documentation are those 
 
 #include <atomic>
 
+#if VALGRIND
+#include <drd.h>
+#endif
+  
 template <class T>
 class ThreadSafeQueue : NonCopyable {
 	struct BaseNode {
