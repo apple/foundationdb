@@ -9,7 +9,7 @@ RUN yum install -y yum-utils &&\
 	yum -y install centos-release-scl epel-release &&\
 	yum -y install devtoolset-7 mono-core java-1.8.0-openjdk-devel \
 		rh-python36-python-devel rh-ruby24 golang python27 \
-		rpm-build debbuild python-pip npm &&\
+		rpm-build debbuild python-pip npm dos2unix &&\
 	pip install boto3==1.1.1
 
 USER root
