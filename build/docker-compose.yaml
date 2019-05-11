@@ -26,6 +26,9 @@ services:
 
   build-docs:
     <<: *build-setup
+    volumes:
+      - ..:/foundationdb
+    working_dir: /foundationdb
     command: scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" docpackage'
 
 
