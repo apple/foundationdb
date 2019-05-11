@@ -158,7 +158,7 @@ class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
-		readingFile(-1), readingPage(-1), pushlock(1), writingPos(-1), dbgid(dbgid),
+		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
 		fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES), readingBuffer( dbgid ),
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
@@ -261,7 +261,6 @@ public:
 	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
 	int64_t readingPage;  // Page within readingFile that is the next page after readingBuffer
 
-	FlowLock pushlock;
 	int64_t writingPos;  // Position within files[1] that will be next written
 
 	int64_t fileExtensionBytes;
@@ -302,16 +301,11 @@ public:
 	}
 #endif
 
-	Future<Void> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+	Future<Future<Void>> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
 		return push( this, pageData, toSync );
 	}
 
-	ACTOR static Future<Void> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
-		state TrackMe trackMe(self);
-
-		wait( self->pushlock.take(g_network->getCurrentTask(), 1) );
-		state FlowLock::Releaser releaser(self->pushlock, 1);
-
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT( self->readingFile == 2 );
@@ -387,8 +381,7 @@ public:
 		waitfor.push_back( self->files[1].f->write( pageData.begin(), pageData.size(), self->writingPos ) );
 		self->writingPos += pageData.size();
 
-		wait( waitForAll(waitfor) );
-		return Void();
+		return waitForAll(waitfor);
 	}
 
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
@@ -415,11 +408,11 @@ public:
 
 			TEST( pageData.size() > sizeof(Page) ); // push more than one page of data
 
-			Future<Void> pushed = self->push( pageData, &syncFiles );
+			Future<Void> pushed = wait( self->push( pageData, &syncFiles ) );
 			pushing.send(Void());
-			wait( pushed );
 			ASSERT( syncFiles.size() >= 1 && syncFiles.size() <= 2 );
 			TEST(2==syncFiles.size());  // push spans both files
+			wait( pushed );
 
 			delete pageMem;
 			pageMem = 0;
