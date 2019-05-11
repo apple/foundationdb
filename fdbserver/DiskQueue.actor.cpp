@@ -287,7 +287,7 @@ public:
 #if defined(_WIN32)
 	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
 		// Windows doesn't support a rename over an open file.
-		wait( toReplace->truncate(0) );
+		wait( toReplace->truncate(4<<10) );
 		return toReplace;
 	}
 #else
