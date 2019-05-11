@@ -604,11 +604,16 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT1 %s %s %s %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
+		if (size == 0) {
+			// KAIO will return EINVAL, as len==0 is an error.
+			throw io_error();
+		}
+
 		if(self->delayOnWrite)
 			wait( waitUntilDiskReady( self->diskParameters, 0 ) );
 
 		if( _chsize( self->h, (long) size ) == -1 ) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6).detail("Filename", self->filename).detail("Error", strerror(errno)).detail("Size", size).detail("Fd", self->h);
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6).detail("Filename", self->filename).detail("Size", size).detail("Fd", self->h).GetLastError();
 			throw io_error();
 		}
 
