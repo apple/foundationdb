@@ -92,11 +92,11 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 
 				when ( RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture()) ) {
 					requestTypeStr = "initVersionBatch";
-					wait(handleInitVersionBatchRequest(req, self));
+					wait( handleInitVersionBatchRequest(req, self) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(loaderInterf.finishRestore.getFuture()) ) {
 					requestTypeStr = "finishRestore";
-					req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+					wait( handlerFinishRestoreRequest(req, self, cx) );
 					break;
 				}
                 // TODO: To modify the following when conditions

@@ -32,7 +32,7 @@
 class Database;
 struct RestoreWorkerData;
 
-// id is the id of the worker to be monitored
+// id is the id of the worker to be monitored	
 // This actor is used for both restore loader and restore applier
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	wait( delay(0.1) ); // To avoid warning
@@ -40,6 +40,34 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 
 	return Void();
 }
+
+ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx) {
+ 	state Transaction tr(cx);
+	
+	loop {
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if ( self->role == RestoreRole::Loader ) {
+				tr.clear(restoreLoaderKeyFor(self->id()));
+			} else if ( self->role == RestoreRole::Applier ) {
+				tr.clear(restoreApplierKeyFor(self->id()));
+			} else {
+				UNREACHABLE();
+			}
+			wait( tr.commit() ) ;
+			printf("Node:%s finish restore, clear the interface keys for all roles on the worker (id:%s) and the worker itself. Then exit\n", self->describeNode().c_str(),  self->id().toString().c_str()); 
+			req.reply.send( RestoreCommonReply(self->id(), req.cmdID) );
+			break;
+		} catch( Error &e ) {
+			printf("[WARNING] Node:%s finishRestoreHandler() transaction error:%s\n", self->describeNode().c_str(), e.what());
+			wait( tr.onError(e) );
+		}
+	};
+
+	return Void();
+ }
 
 // Restore Worker: collect restore role interfaces locally by reading the specific system keys
 ACTOR Future<Void> _collectRestoreRoleInterfaces(Reference<RestoreRoleData> self, Database cx) {

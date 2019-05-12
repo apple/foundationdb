@@ -96,7 +96,7 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.finishRestore.getFuture()) ) {
 					requestTypeStr = "finishRestore";
-					req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+					wait( handlerFinishRestoreRequest(req, self, cx) );
 					break;
 				}
 				// TODO: To modify the interface for the following 2 when condition

@@ -165,6 +165,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 
 
 // Restore worker
+// MX: This function is not used for now. Will change it to only clear restoreWorkerKey later.
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx) {
  	state Transaction tr(cx);
 	
