@@ -507,7 +507,7 @@ void parentWatcher(void *parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %lx\n", currentProtocolVersion);
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -918,7 +918,7 @@ int main(int argc, char* argv[]) {
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 		std::vector<std::string> blobCredentials; // used for fast restore workers
-		const char *blobCredsFromENV = nullptr;
+//		const char *blobCredsFromENV = nullptr;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
