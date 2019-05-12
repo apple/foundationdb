@@ -30,10 +30,11 @@
 #include "flow/Stats.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include <cstdint>
 
 // TODO: To remove unused command enum. and re-order the command sequence
 // RestoreCommandEnum is also used as the phase ID for CMDUID
-enum class RestoreCommandEnum {Init = 0,
+enum class RestoreCommandEnum : uint32_t {Init = 0,
 		Sample_Range_File, Sample_Log_File, Sample_File_Done,
 		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done, //5
 		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done, //8
@@ -50,7 +51,7 @@ BINARY_SERIALIZABLE(RestoreCommandEnum);
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
 BINARY_SERIALIZABLE( RestoreRole );
 
-extern std::vector<std::string> RestoreRoleStr;
+extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
 
 std::string getRoleStr(RestoreRole role);

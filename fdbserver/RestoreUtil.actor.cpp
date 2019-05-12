@@ -22,7 +22,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-std::vector<std::string> RestoreRoleStr = {"Invalid", "Master", "Loader", "Applier"};
+const std::vector<std::string> RestoreRoleStr = {"Invalid", "Master", "Loader", "Applier"};
 int numRoles = RestoreRoleStr.size();
 
 std::string getRoleStr(RestoreRole role) {
