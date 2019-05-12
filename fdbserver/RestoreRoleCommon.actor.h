@@ -38,6 +38,8 @@
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreWorkerInterface.h"
 
+#include "flow/actorcompiler.h" // has to be last include
+
 extern bool debug_verbose;
 extern double mutationVectorThreshold;
 
@@ -209,4 +211,5 @@ public:
 void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds);
 void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers);
 
+#include "flow/unactorcompiler.h"
 #endif

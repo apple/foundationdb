@@ -547,4 +547,5 @@ struct RestoreNodeStatus {
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
 
+#include "flow/unactorcompiler.h"
 #endif
