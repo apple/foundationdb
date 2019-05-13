@@ -342,7 +342,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 
 	while (self->isInProgress(cmdType)) {
 		printf("[DEBUG] NODE:%s loadLogFile wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
+		wait(delay(1.0));
 	}
 	
 	//Note: handle duplicate message delivery
@@ -406,6 +406,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID)); // master node is waiting
+	// TODO: NOTE: If we parse log file, the DB status will be incorrect.
 	if ( !isSampling ) {
 		self->processedFiles[param.filename] =  1;
 	}
