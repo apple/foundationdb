@@ -26,11 +26,10 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
-ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
+ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
 ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreLoaderData> self);
 
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreLoaderData> self,
@@ -71,7 +70,6 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleRangeFile.getFuture()) ) {
 					requestTypeStr = "sampleRangeFile";
 					self->initBackupContainer(req.param.url);
-					// actors.add( handleSampleRangeFileRequest(req, self) );
 					actors.add( handleLoadRangeFileRequest(req, self, true) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleLogFile.getFuture()) ) {
@@ -151,76 +149,6 @@ ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRan
 	self->processedCmd[req.cmdID] = 1;
 	self->clearInProgressFlag(RestoreCommandEnum::Notify_Loader_ApplierKeyRange);
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-
-	return Void();
-}
-
-// TODO: Remove the RestoreLoaderInterface param., which is not needed in the handler functions
-// Restore Loader
-ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
-	//printf("[INFO] Node:%s Got Restore Command: cmdID:%s.\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-
-	state LoadingParam param = req.param;
-	state int beginBlock = 0;
-	state int j = 0;
-	state int readLen = 0;
-	state int64_t readOffset = param.offset;
-
-	while (self->isInProgress(RestoreCommandEnum::Sample_Range_File)) {
-		printf("[DEBUG] NODE:%s sampleRangeFile wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
-	}
-
-	// Handle duplicate, assuming cmdUID is always unique for the same workload
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-		return Void();
-	} 
-
-	self->setInProgressFlag(RestoreCommandEnum::Sample_Range_File);
-	printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
-			self->describeNode().c_str(), param.toString().c_str());
-
-	// TODO: This can be expensive
-	state Reference<IBackupContainer> bc =  self->bc;
-	printf("[INFO] node:%s open backup container for url:%s\n",
-			self->describeNode().c_str(),
-			param.url.toString().c_str());
-
-
-	self->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
-	self->mutationMap.clear();
-	self->mutationPartMap.clear();
-
-	ASSERT( param.blockSize > 0 );
-	//state std::vector<Future<Void>> fileParserFutures;
-	if (param.offset % param.blockSize != 0) {
-		printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder:%ld\n",
-				param.offset, param.blockSize, param.offset % param.blockSize);
-	}
-
-	ASSERT( param.offset + param.blockSize >= param.length ); // We only sample one data block or less (at the end of the file) of a file.
-	for (j = param.offset; j < param.length; j += param.blockSize) {
-		readOffset = j;
-		readLen = std::min<int64_t>(param.blockSize, param.length - j);
-		wait( _parseRangeFileToMutationsOnLoader(self, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
-		++beginBlock;
-	}
-
-	printf("[Sampling][Loader] Node:%s finishes sample Range file:%s\n", self->describeNode().c_str(), param.filename.c_str());
-	// TODO: Send to applier to apply the mutations
-	printf("[Sampling][Loader] Node:%s will send sampled mutations to applier\n", self->describeNode().c_str());
-	wait( registerMutationsToMasterApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
-
-	//self->processedFiles.insert(std::make_pair(param.filename, 1));
-
-	//TODO: Send ack to master that loader has finished loading the data
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-	self->processedCmd[req.cmdID] = 1; // Recoself the processed comand to handle duplicate command
-	//self->kvOps.clear(); 
-
-	self->clearInProgressFlag(RestoreCommandEnum::Sample_Range_File);
 
 	return Void();
 }
@@ -392,7 +320,7 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 }
 
 
-ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling) {
 	printf("[INFO] Worker Node:%s starts handleLoadLogFileRequest\n", self->describeNode().c_str());
 
 	state LoadingParam param;
@@ -409,7 +337,9 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	readOffset = 0;
 	readOffset = param.offset;
 
-	while (self->isInProgress(RestoreCommandEnum::Assign_Loader_Log_File)) {
+	state RestoreCommandEnum cmdType = isSampling ? RestoreCommandEnum::Sample_Log_File : RestoreCommandEnum::Assign_Loader_Log_File;
+
+	while (self->isInProgress(cmdType)) {
 		printf("[DEBUG] NODE:%s loadLogFile wait for 5s\n",  self->describeNode().c_str());
 		wait(delay(5.0));
 	}
@@ -424,7 +354,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		return Void();
 	}
 
-	self->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
+	self->setInProgressFlag(cmdType;
 
 	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File loading param:%s\n",
 								self->describeNode().c_str(), req.cmdID.toString().c_str(),
@@ -469,10 +399,12 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	wait( registerMutationsToApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID)); // master node is waiting
-	self->processedFiles[param.filename] =  1;
+	if ( !isSampling ) {
+		self->processedFiles[param.filename] =  1;
+	}
 	self->processedCmd[req.cmdID] = 1;
 
-	self->clearInProgressFlag(RestoreCommandEnum::Assign_Loader_Log_File);
+	self->clearInProgressFlag(cmdType);
 	
 	return Void();
 }
