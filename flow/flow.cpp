@@ -19,6 +19,7 @@
  */
 
 #include "flow/flow.h"
+#include "flow/UnitTest.h"
 #include <stdarg.h>
 #include <cinttypes>
 
@@ -213,4 +214,79 @@ bool validationIsEnabled() {
 
 void enableBuggify( bool enabled ) {
 	buggifyActivated = enabled;
+}
+
+TEST_CASE("/flow/FlatBuffers/ErrorOr") {
+	{
+		ErrorOr<int> in(worker_removed());
+		ErrorOr<int> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(out.isError());
+		ASSERT(out.getError().code() == in.getError().code());
+	}
+	{
+		ErrorOr<uint32_t> in(g_random->randomUInt32());
+		ErrorOr<uint32_t> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(!out.isError());
+		ASSERT(out.get() == in.get());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/Optional") {
+	{
+		Optional<int> in;
+		Optional<int> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(!out.present());
+	}
+	{
+		Optional<uint32_t> in(g_random->randomUInt32());
+		Optional<uint32_t> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(out.present());
+		ASSERT(out.get() == in.get());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/Standalone") {
+	{
+		Standalone<StringRef> in(std::string("foobar"));
+		StringRef out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in == out);
+	}
+	{
+		StringRef in = LiteralStringRef("foobar");
+		Standalone<StringRef> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in == out);
+	}
+	return Void();
 }

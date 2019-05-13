@@ -43,7 +43,7 @@ ifeq ($(PLATFORM),Linux)
   CC ?= gcc
   CXX ?= g++
 
-  CXXFLAGS += -std=c++0x
+  CXXFLAGS += -std=c++17
 
   BOOST_BASEDIR ?= /opt
   TLS_LIBDIR ?= /usr/local/lib

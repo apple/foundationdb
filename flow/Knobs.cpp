@@ -91,7 +91,6 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	//GenericActors
-	init( MAX_DELIVER_DUPLICATE_DELAY,                         1.0 ); if( randomize && BUGGIFY ) MAX_DELIVER_DUPLICATE_DELAY = 10.0;
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 
 	//IAsyncFile

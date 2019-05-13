@@ -200,6 +200,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
+	virtual bool useObjectSerializer() const { return baseNetwork->useObjectSerializer(); }
 };
 
 struct NonserializableThing {};

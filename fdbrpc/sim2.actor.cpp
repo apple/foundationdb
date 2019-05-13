@@ -1078,6 +1078,10 @@ public:
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 	}
 
+	virtual bool useObjectSerializer() const {
+		return net2->useObjectSerializer();
+	}
+
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
 	{
@@ -1570,10 +1574,10 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
+	Sim2(bool objSerializer) : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
-		currentProcess = new ProcessInfo( "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "" );
-		g_network = net2 = newNet2(false, true);
+		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
+		g_network = net2 = newNet2(false, true, objSerializer);
 		Net2FileSystem::newFileSystem();
 		check_yield(0);
 	}
@@ -1678,9 +1682,9 @@ public:
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
 
-void startNewSimulator() {
+void startNewSimulator(bool objSerializer) {
 	ASSERT( !g_network );
-	g_network = g_pSimulator = new Sim2();
+	g_network = g_pSimulator = new Sim2(objSerializer);
 	g_simulator.connectionFailuresDisableDuration = g_random->random01() < 0.5 ? 0 : 1e6;
 }
 

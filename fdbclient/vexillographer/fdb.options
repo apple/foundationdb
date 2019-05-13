@@ -33,6 +33,9 @@ description is not currently required but encouraged.
     <Option name="local_address"  code="10" 
             paramType="String" paramDescription="IP:PORT" 
             description="Deprecated"/>
+    <Option name="use_object_serializer" code="11"
+            paramType="Int" paramDescription="0 is false, every other value is true"
+            description="enable the object serializer for network communication"/>
     <Option name="cluster_file" code="20"
             paramType="String" paramDescription="path to cluster file"
             description="Deprecated"/>

@@ -271,6 +271,9 @@ def run_simulation_test(basedir, options):
     if options.testtype == 'test':
         pargs.append('-C')
         pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
+    else:
+        pargs.append('-S')
+        pargs.append('random')
     td = TestDirectory(basedir)
     if options.buggify:
         pargs.append('-b')

@@ -25,6 +25,7 @@
 #include "fdbrpc/Locality.h"
 
 struct DataDistributorInterface {
+	constexpr static FileIdentifier file_identifier = 12383874;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
@@ -49,6 +50,7 @@ struct DataDistributorInterface {
 };
 
 struct HaltDataDistributorRequest {
+	constexpr static FileIdentifier file_identifier = 1904127;
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
