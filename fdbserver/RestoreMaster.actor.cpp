@@ -51,7 +51,13 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> s
 ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 
-
+// The server of the restore master. It drives the restore progress with the following steps:
+// 1) Collect interfaces of all RestoreLoader and RestoreApplier roles
+// 2) Notify each loader to collect interfaces of all RestoreApplier roles
+// 3) Wait on each RestoreRequest, which is sent by RestoreAgent operated by DBA
+// 4) Process each restore request in actor processRestoreRequest;
+// 5) After process all restore requests, finish restore by cleaning up the restore related system key
+//    and ask all restore roles to quit.
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
 	try {
 		wait( delay(1.0) );
@@ -102,7 +108,6 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 
 	return Void();
 }
-
 
 
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
@@ -445,7 +450,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 				}
 
 			} catch (Error &e) {
-				// TODO: Handle the command reply timeout error
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 						self->cmdID.toString().c_str(), e.code(), e.what());
 				curFileIndex = checkpointCurFileIndex;
@@ -665,7 +669,6 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 			}
 
 		} catch (Error &e) {
-			// Handle the command reply timeout error
 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 					self->cmdID.toString().c_str(), e.code(), e.what());
 			self->cmdID = checkpointCMDUID;
@@ -704,7 +707,6 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 
 			break;
 		} catch (Error &e) {
-			// Handle the command reply timeout error
 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 					self->cmdID.toString().c_str(), e.code(), e.what());
 			printf("[Sampling] [Warning] Retry on Calculate_Applier_KeyRange\n");
@@ -760,7 +762,6 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 
 			break;
 		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 					self->cmdID.toString().c_str(), e.code(), e.what());
 			printf("[Sampling] [Warning] Retry on Get_Applier_KeyRange\n");

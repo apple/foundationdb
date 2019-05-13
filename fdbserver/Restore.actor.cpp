@@ -217,7 +217,6 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 				cmdReplies.clear();
 				wIndex++;
 			} catch (Error &e) {
-				// Handle the command reply timeout error
 				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 							self->cmdID.toString().c_str(), e.code(), e.what());
 				printf("[Heartbeat: Node may be down][Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex,  workerInterf->first.toString().c_str(), workerInterf->second.id().toString().c_str());

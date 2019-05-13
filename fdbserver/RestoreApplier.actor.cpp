@@ -47,7 +47,6 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 	state ActorCollection actors(false);
 	state double lastLoopTopTime;
 	loop {
-		
 		double loopTopTime = now();
 		double elapsedTime = loopTopTime - lastLoopTopTime;
 		if( elapsedTime > 0.050 ) {
@@ -97,9 +96,7 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					wait( handlerFinishRestoreRequest(req, self, cx) );
 					break;
 				}
-				// TODO: To modify the interface for the following 2 when condition
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.collectRestoreRoleInterfaces.getFuture()) ) {
-					// Step: Find other worker's workerInterfaces
 					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their workerInterfaces into DB before we can read the workerInterface.
 					// TODO: Wait until all workers have registered their workerInterface.
 					wait( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
@@ -119,8 +116,8 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 	return Void();
 }
 
-
-
+// Based on the number of sampled mutations operated in the key space, split the key space evenly to k appliers
+// If the number of splitted key spaces is smaller than k, some appliers will not be used
 ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
@@ -144,7 +141,6 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 	printf("[INFO][Applier] CMD:%s, Node:%s Calculate key ranges for %d appliers\n",
 			req.cmdID.toString().c_str(), self->describeNode().c_str(), req.numAppliers);
 
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 	if ( keyRangeLowerBounds.empty() ) {
 		keyRangeLowerBounds = self->calculateAppliersKeyRanges(req.numAppliers); // keyRangeIndex is the number of key ranges requested
 		self->keyRangeLowerBounds = keyRangeLowerBounds;
@@ -159,6 +155,8 @@ ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplier
 	return Void();
 }
 
+// Reply with the key range for the aplier req.applierIndex.
+// This actor cannot return until the applier has calculated the key ranges for appliers
 ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 	//state std::vector<Standalone<KeyRef>> keyRangeLowerBounds = self->keyRangeLowerBounds;
@@ -181,7 +179,6 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%ld\n",
 				self->describeNode().c_str(), req.applierIndex,  self->keyRangeLowerBounds.size());
 	}
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
 
 	printf("[INFO][Applier] NodeID:%s replies Get_Applier_KeyRange. keyRangeIndex:%d lower_bound_of_keyRange:%s\n",
 			self->describeNode().c_str(), req.applierIndex, getHexString(self->keyRangeLowerBounds[req.applierIndex]).c_str());
@@ -196,12 +193,10 @@ ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequ
 
 }
 
-// Assign key range to applier
+// Assign key range to applier req.applierID
+// Idempodent operation. OK to re-execute the duplicate cmd
+// The applier should remember the key range it is responsible for
 ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
-	// Idempodent operation. OK to re-execute the duplicate cmd
-	// The applier should remember the key range it is responsible for
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
-	//self->applierStatus.keyRange = req.range;
 	while (self->isInProgress(RestoreCommandEnum::Assign_Applier_KeyRange)) {
 		printf("[DEBUG] NODE:%s handleSetApplierKeyRangeRequest wait for 1s\n",  self->describeNode().c_str());
 		wait(delay(1.0));
@@ -228,7 +223,6 @@ ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequ
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
-	//wait( delay(1.0) ); //Q: Why adding this delay will cause segmentation fault?
 	if ( debug_verbose ) {
 		printf("[VERBOSE_DEBUG] Node:%s receive mutation number:%d\n", self->describeNode().c_str(), req.mutations.size());
 	}
@@ -278,9 +272,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 	self->numSampledMutations = 0;
-	//wait( delay(1.0) );
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
-
+	
 	// NOTE: We have insert operation to self->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
 	// Otherwise, race condition may happen!
 	while (self->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {

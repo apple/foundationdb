@@ -695,7 +695,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 			break;
 
 		} catch (Error &e) {
-			// Handle the command reply timeout error
 			fprintf(stdout, "[ERROR] registerMutationsToApplier Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
 					self->cmdID.toString().c_str(), e.code(), e.what());
 		}
@@ -704,8 +703,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 	return Void();
 }
 
-
-
+// TODO: Add a unit test for this function
 void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mvector_arena, VectorRef<MutationRef> mvector, Arena& nodeIDs_arena, VectorRef<UID> nodeIDs) {
 	// mvector[i] should be mapped to nodeID[i]
 	ASSERT(mvector.empty());
