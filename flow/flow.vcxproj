@@ -30,6 +30,7 @@
     <ClCompile Include="IThreadPool.cpp" />
     <ClCompile Include="network.cpp" />
     <ClCompile Include="flow.cpp" />
+		<ClCompile Include="flat_buffers.cpp" />
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ClCompile Include="Hash3.c" />
     <ClCompile Include="IndexedSet.cpp" />
@@ -63,6 +64,7 @@
     <ClInclude Include="FaultInjection.h" />
     <ClInclude Include="network.h" />
     <ClInclude Include="flow.h" />
+		<ClInclude Include="flat_buffers.h" />
     <ActorCompiler Include="EventTypes.actor.h">
       <EnableCompile>false</EnableCompile>
       <EnableCompile>false</EnableCompile>
