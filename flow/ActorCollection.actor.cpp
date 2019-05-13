@@ -126,7 +126,7 @@ TEST_CASE("/flow/TraceEvent") {
 		wait(delay(0));
 	}
 	TraceEvent("TraceDuration")
-		.detail("Time", g_network->now() - startTime);
+		.detail("Duration", g_network->now() - startTime);
 	startTime = g_network->now();
 	for (i = 0; i < 1000000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
@@ -142,7 +142,7 @@ TEST_CASE("/flow/TraceEvent") {
 		wait(delay(0));
 	}
 	TraceEvent("TraceDuration")
-		.detail("Time", g_network->now() - startTime);
+		.detail("Duration", g_network->now() - startTime);
 	printf("benchmark done\n");
 	wait(delay(10));
 	return Void();
