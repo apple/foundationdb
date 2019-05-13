@@ -29,7 +29,7 @@
 ACTOR Future<Void> handleSampleRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self);
-ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
+ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
 ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreLoaderData> self);
 
@@ -71,7 +71,8 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleRangeFile.getFuture()) ) {
 					requestTypeStr = "sampleRangeFile";
 					self->initBackupContainer(req.param.url);
-					actors.add( handleSampleRangeFileRequest(req, self) );
+					// actors.add( handleSampleRangeFileRequest(req, self) );
+					actors.add( handleLoadRangeFileRequest(req, self, true) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleLogFile.getFuture()) ) {
 					self->initBackupContainer(req.param.url);
@@ -85,7 +86,7 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.loadRangeFile.getFuture()) ) {
 					requestTypeStr = "loadRangeFile";
 					self->initBackupContainer(req.param.url);
-					actors.add( handleLoadRangeFileRequest(req, self) );
+					actors.add( handleLoadRangeFileRequest(req, self, false) );
 				}
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.loadLogFile.getFuture()) ) {
 					requestTypeStr = "loadLogFile";
@@ -291,7 +292,7 @@ ACTOR Future<Void> handleSampleLogFileRequest(RestoreLoadFileRequest req, Refere
 }
 
 
-ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling) {
 	//printf("[INFO] Worker Node:%s starts handleLoadRangeFileRequest\n", self->describeNode().c_str());
 
 	state LoadingParam param;
@@ -308,9 +309,17 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	readOffset = 0;
 	readOffset = param.offset;
 
-	while (self->isInProgress(RestoreCommandEnum::Assign_Loader_Range_File)) {
-		printf("[DEBUG] NODE:%s loadRangeFile wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
+	state RestoreCommandEnum cmdType = RestoreCommandEnum::Init;
+
+	if ( isSampling ) {
+		cmdType = RestoreCommandEnum::Sample_Range_File;
+	} else {
+		cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
+	}
+
+	while (self->isInProgress(cmdType)) {
+		printf("[DEBUG] NODE:%s handleLoadRangeFileRequest wait for 5s\n",  self->describeNode().c_str());
+		wait(delay(1.0));
 	}
 
 	//Note: handle duplicate message delivery
@@ -323,17 +332,13 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 		return Void();
 	}
 
-	self->setInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
+	self->setInProgressFlag(cmdType);
 
-	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: Assign_Loader_Range_File, loading param:%s\n",
+	printf("[INFO][Loader] Node:%s, CMDUID:%s Execute: handleLoadRangeFileRequest, loading param:%s\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.toString().c_str());
 
 	bc = self->bc;
-	// printf("[INFO] Node:%s CMDUID:%s open backup container for url:%s\n",
-	// 		self->describeNode().c_str(), req.cmdID.toString().c_str(),
-	// 		param.url.toString().c_str());
-
 
 	self->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
 	self->mutationMap.clear();
@@ -360,13 +365,20 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 	// TODO: Send to applier to apply the mutations
 	// printf("[INFO][Loader] Node:%s CMDUID:%s will send range mutations to applier\n",
 	// 		self->describeNode().c_str(), self->cmdID.toString().c_str());
-	wait( registerMutationsToApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	if ( isSampling ) {
+		wait( registerMutationsToMasterApplier(self) );
+	} else {
+		wait( registerMutationsToApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	}
+	
 	wait ( delay(1.0) );
 	
-	self->processedFiles[param.filename] =  1;
+	if ( !isSampling ) {
+		self->processedFiles[param.filename] =  1;
+	}
 	self->processedCmd[req.cmdID] = 1;
 
-	self->clearInProgressFlag(RestoreCommandEnum::Assign_Loader_Range_File);
+	self->clearInProgressFlag(cmdType);
 	printf("[INFO][Loader] Node:%s CMDUID:%s clear inProgressFlag :%lx for Assign_Loader_Range_File.\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str(), self->inProgressFlag);
 
@@ -939,7 +951,7 @@ bool isRangeMutation(MutationRef m) {
 
 }
 
-
+// Parsing log file, which is the same for sampling and loading phases
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<RestoreLoaderData> self,
  									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
