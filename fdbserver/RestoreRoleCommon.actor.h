@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-// Delcare commone struct and functions used in fast restore
+// This file delcares common struct and functions shared by restore roles, i.e.,
+// RestoreMaster, RestoreLoader, RestoreApplier
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreRoleCommon_G_H)
@@ -32,9 +33,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreWorkerInterface.h"
 

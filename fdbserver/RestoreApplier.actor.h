@@ -1,5 +1,5 @@
 /*
- * RestoreApplierInterface.h
+ * RestoreApplier.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,23 +18,22 @@
  * limitations under the License.
  */
 
-// Declear RestoreApplier interface and actors
+// This file declears RestoreApplier interface and actors
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreApplierInterface_G_H)
-	#define FDBSERVER_RestoreApplierInterface_G_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_APPLIER_G_H)
+	#define FDBSERVER_RESTORE_APPLIER_G_H
 	#include "fdbserver/RestoreApplier.actor.g.h"
-#elif !defined(FDBSERVER_RestoreApplierInterface_H)
-	#define FDBSERVER_RestoreApplierInterface_H
+#elif !defined(FDBSERVER_RESTORE_APPLIER_H)
+	#define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreWorkerInterface.h"

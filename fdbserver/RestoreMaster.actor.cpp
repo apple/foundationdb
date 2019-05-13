@@ -18,17 +18,14 @@
  * limitations under the License.
  */
 
+// This file implements the functions for RestoreMaster role
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-
-// Backup agent header
 #include "fdbclient/BackupAgent.actor.h"
-//#include "FileBackupAgent.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
-
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreMaster.actor.h"

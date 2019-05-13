@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
+// This file defines the functions used by the RestoreApplier role.
+// RestoreApplier role starts at restoreApplierCore actor
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-
-// Backup agent header
 #include "fdbclient/BackupAgent.actor.h"
-//#include "FileBackupAgent.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
@@ -33,7 +32,6 @@
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
-
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

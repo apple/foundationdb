@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+// This file includes the code copied from the old restore in FDB 5.2
+// The functions and structure declared in this file can be shared by 
+// the old restore and the new performant restore systems
+
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
 	#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
@@ -25,13 +29,12 @@
 #elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
 	#define FDBSERVER_RESTORECOMMON_ACTOR_H
 
-#include "fdbclient/Tuple.h"
-
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
+#include "fdbclient/Tuple.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

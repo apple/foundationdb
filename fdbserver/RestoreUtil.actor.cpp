@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+// This file implements the functions defined in RestoreUtil.h
+
 #include "fdbserver/RestoreUtil.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.

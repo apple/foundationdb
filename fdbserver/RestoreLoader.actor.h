@@ -1,5 +1,5 @@
 /*
- * RestoreLoaderInterface.h
+ * RestoreLoader.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-// Declear RestoreLoader interface and actors
+// This file declares the actors used by the RestoreLoader role
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreLoaderInterface_G_H)
-	#define FDBSERVER_RestoreLoaderInterface_G_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_LOADER_G_H)
+	#define FDBSERVER_RESTORE_LOADER_G_H
 	#include "fdbserver/RestoreLoader.actor.g.h"
-#elif !defined(FDBSERVER_RestoreLoaderInterface_H)
-	#define FDBSERVER_RestoreLoaderInterface_H
+#elif !defined(FDBSERVER_RESTORE_LOADER_H)
+	#define FDBSERVER_RESTORE_LOADER_H
 
 #include <sstream>
 #include "flow/Stats.h"

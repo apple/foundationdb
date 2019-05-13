@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+// This file implements the functions and actors used by the RestoreLoader role.
+// The RestoreLoader role starts with the restoreLoaderCore actor
+
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/RestoreLoader.actor.h"
 
@@ -30,7 +33,7 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreLoaderData> self);
 
- ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreLoaderData> self,
+ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreLoaderData> self,
  									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset, int64_t readLen,
  									KeyRange restoreRange, Key addPrefix, Key removePrefix,

@@ -1,5 +1,5 @@
 /*
- * RestoreMasterInterface.h
+ * RestoreMaster.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,23 +18,22 @@
  * limitations under the License.
  */
 
-// Declear RestoreMaster interface and actors
+// This file declear RestoreMaster interface and actors
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreMasterInterface_G_H)
-	#define FDBSERVER_RestoreMasterInterface_G_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_MASTER_G_H)
+	#define FDBSERVER_RESTORE_MASTER_G_H
 	#include "fdbserver/RestoreMaster.actor.g.h"
-#elif !defined(FDBSERVER_RestoreMasterInterface_H)
-	#define FDBSERVER_RestoreMasterInterface_H
+#elif !defined(FDBSERVER_RESTORE_MASTER_H)
+	#define FDBSERVER_RESTORE_MASTER_H
 
 #include <sstream>
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 

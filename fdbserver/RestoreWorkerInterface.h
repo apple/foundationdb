@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-// Declare and define the interface for restore worker/loader/applier
+// This file declare and define the interface for RestoreWorker and restore roles
+// which are RestoreMaster, RestoreLoader, and RestoreApplier
 
 #ifndef FDBSERVER_RESTORE_WORKER_INTERFACE_H
 #define FDBSERVER_RESTORE_WORKER_INTERFACE_H
