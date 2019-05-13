@@ -75,7 +75,8 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleLogFile.getFuture()) ) {
 					self->initBackupContainer(req.param.url);
 					requestTypeStr = "sampleLogFile";
-					actors.add( handleSampleLogFileRequest(req, self) );
+					actors.add( handleLoadLogFileRequest(req, self, true) );
+					//actors.add( handleSampleLogFileRequest(req, self) );
 				}
 				when ( RestoreSetApplierKeyRangeVectorRequest req = waitNext(loaderInterf.setApplierKeyRangeVectorRequest.getFuture()) ) {
 					requestTypeStr = "setApplierKeyRangeVectorRequest";
@@ -89,7 +90,7 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.loadLogFile.getFuture()) ) {
 					requestTypeStr = "loadLogFile";
 					self->initBackupContainer(req.param.url);
-					actors.add( handleLoadLogFileRequest(req, self) );
+					actors.add( handleLoadLogFileRequest(req, self, false) );
 				}
 
 				when ( RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture()) ) {
@@ -354,7 +355,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 		return Void();
 	}
 
-	self->setInProgressFlag(cmdType;
+	self->setInProgressFlag(cmdType);
 
 	printf("[INFO][Loader] Node:%s CMDUID:%s Assign_Loader_Log_File loading param:%s\n",
 								self->describeNode().c_str(), req.cmdID.toString().c_str(),
@@ -389,14 +390,20 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	printf("[INFO][Loader] Node:%s CMDUID:%s finishes parsing the data block into kv pairs (version, serialized_mutations) for file:%s\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.filename.c_str());
-	parseSerializedMutation(self, false);
+
+	parseSerializedMutation(self, isSampling);
 
 	printf("[INFO][Loader] Node:%s CMDUID:%s finishes process Log file:%s\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str(),
 			param.filename.c_str());
 	printf("[INFO][Loader] Node:%s CMDUID:%s will send log mutations to applier\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str());
-	wait( registerMutationsToApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	
+	if ( isSampling ) {
+		wait( registerMutationsToMasterApplier(self) );
+	} else {
+		wait( registerMutationsToApplier(self) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	}
 
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID)); // master node is waiting
 	if ( !isSampling ) {
@@ -836,7 +843,7 @@ bool isRangeMutation(MutationRef m) {
 				printf("[PARSE WARNING] Skipped the mutation! OK for sampling workload but WRONG for restoring the workload\n");
 				continue;
 			} else {
-				printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
+				fprintf(stderr, "[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
 					commitVersion, commitVersion);
 			}
 		} else {
