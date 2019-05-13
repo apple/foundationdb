@@ -1381,8 +1381,7 @@ void execProcessingHelper(TLogData* self,
 					.detail("Version", req->version);
 			}
 			self->ignorePopUid = uidStr.toString();
-			// ignorePopRequest will be turned off after 30 seconds
-			self->ignorePopDeadline = g_network->now() + 30.0;
+			self->ignorePopDeadline = g_network->now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 			TraceEvent("TLogExecCmdPopDisable")
 				.detail("ExecCmd", execCmd->toString())
 				.detail("UidStr", uidStr.toString())
