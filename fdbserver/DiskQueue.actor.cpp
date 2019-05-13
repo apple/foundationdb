@@ -164,7 +164,7 @@ public:
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
 		if (BUGGIFY)
-			fileExtensionBytes = 1<<10 * g_random->randomSkewedUInt32( 1, 40<<10 );
+			fileExtensionBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
 		if (BUGGIFY)
 			fileShrinkBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
 		files[0].dbgFilename = filename(0);
@@ -283,21 +283,29 @@ public:
 		TraceEvent("DiskQueueReplaceTruncateEnded").detail("Filename", file->getFilename());
 	}
 
+#if defined(_WIN32)
+	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+		// Windows doesn't support a rename over an open file.
+		wait( toReplace->truncate(4<<10) );
+		return toReplace;
+	}
+#else
 	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
 		incrementalTruncate( toReplace );
 
-		Reference<IAsyncFile> _replacement = wait( IAsyncFileSystem::filesystem()->open( toReplace->getFilename(), IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0 ) );
+		Reference<IAsyncFile> _replacement = wait( IAsyncFileSystem::filesystem()->open( toReplace->getFilename(), IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0600 ) );
 		state Reference<IAsyncFile> replacement = _replacement;
 		wait( replacement->sync() );
 
 		return replacement;
 	}
+#endif
 
-	Future<Void> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+	Future<Future<Void>> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
 		return push( this, pageData, toSync );
 	}
 
-	ACTOR static Future<Void> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT( self->readingFile == 2 );
@@ -325,21 +333,27 @@ public:
 				std::swap(self->firstPages[0], self->firstPages[1]);
 				self->files[1].popped = 0;
 				self->writingPos = 0;
+				*self->firstPages[1] = *(const Page*)pageData.begin();
 
 				const int64_t activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped + self->fileExtensionBytes + self->fileShrinkBytes);
-				const int64_t desiredMaxFileSize = std::max( activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2 );
-				if (self->files[1].size > desiredMaxFileSize) {
+				const int64_t desiredMaxFileSize = pageCeiling( std::max( activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2 ) );
+				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
+				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
-					int64_t maxShrink = std::max( pageFloor(self->files[1].size - desiredMaxFileSize), self->fileShrinkBytes );
-					if (maxShrink / SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES >
-							SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_EXTENTS) {
+					int64_t maxShrink = pageFloor( std::max( self->files[1].size - desiredMaxFileSize, self->fileShrinkBytes ) );
+					if ((maxShrink > SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_BYTES) ||
+					    (frivolouslyTruncate && g_random->random01() < 0.3)) {
 						TEST(true);  // Replacing DiskQueue file
 						TraceEvent("DiskQueueReplaceFile", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", self->files[1].size).detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait( replaceFile(self->files[1].f) );
 						self->files[1].setFile(newFile);
-						self->files[1].size = 0;
+						waitfor.push_back( self->files[1].f->truncate( self->fileExtensionBytes ) );
+						self->files[1].size = self->fileExtensionBytes;
 					} else {
-						self->files[1].size -= maxShrink;
+						const int64_t startingSize = self->files[1].size;
+						self->files[1].size -= std::min(maxShrink, self->files[1].size);
+						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
+						TraceEvent("DiskQueueTruncate", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", startingSize).detail("NewFileSize", self->files[1].size);
 						waitfor.push_back( self->files[1].f->truncate( self->files[1].size ) );
 					}
 				}
@@ -355,9 +369,8 @@ public:
 					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", self->dbgid).suppressFor(1.0).detail("Filename", self->filename(1)).detail("Size", self->files[1].size);
 				}
 			}
-		}
-
-		if (self->writingPos == 0) {
+		} else if (self->writingPos == 0) {
+			// If this is the first write to a brand new disk queue file.
 			*self->firstPages[1] = *(const Page*)pageData.begin();
 		}
 
@@ -368,8 +381,7 @@ public:
 		waitfor.push_back( self->files[1].f->write( pageData.begin(), pageData.size(), self->writingPos ) );
 		self->writingPos += pageData.size();
 
-		wait( waitForAll(waitfor) );
-		return Void();
+		return waitForAll(waitfor);
 	}
 
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
@@ -396,11 +408,11 @@ public:
 
 			TEST( pageData.size() > sizeof(Page) ); // push more than one page of data
 
-			Future<Void> pushed = self->push( pageData, &syncFiles );
+			Future<Void> pushed = wait( self->push( pageData, &syncFiles ) );
 			pushing.send(Void());
-			wait( pushed );
 			ASSERT( syncFiles.size() >= 1 && syncFiles.size() <= 2 );
 			TEST(2==syncFiles.size());  // push spans both files
+			wait( pushed );
 
 			delete pageMem;
 			pageMem = 0;
