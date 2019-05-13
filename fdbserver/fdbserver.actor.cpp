@@ -1427,10 +1427,8 @@ int main(int argc, char* argv[]) {
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
 
-		if (EvictablePageCache::RANDOM != EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY) &&
-			EvictablePageCache::LRU != EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY)) {
-			ASSERT(false);
-		}
+		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
+		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
 		if (role == SkipListTest) {
 			skipListTest();
