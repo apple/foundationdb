@@ -78,6 +78,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
+	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
