@@ -75,7 +75,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH,           16<<10 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH = 500;
 	init( DISK_QUEUE_FILE_EXTENSION_BYTES,                    10<<20 ); // BUGGIFYd per file within the DiskQueue
 	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
-	init( DISK_QUEUE_MAX_TRUNCATE_EXTENTS,                     1<<10 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_EXTENTS = 0;
+	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
 
