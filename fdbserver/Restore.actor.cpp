@@ -230,7 +230,7 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 
 
 void initRestoreWorkerConfig() {
-	MIN_NUM_WORKERS = g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
+	MIN_NUM_WORKERS = 2;//g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
 	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 	NUM_LOADERS = 1;
 	NUM_APPLIERS = 1;
@@ -555,6 +555,11 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 					 // because a process will not execute leader's logic unless leaderInterf is invalid
 					leaderInterf = Optional<RestoreWorkerInterface>();
 					break;
+				}
+				Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
+				if ( agentValues.size() >= NUM_APPLIERS + NUM_LOADERS ) {
+					printf("[Worker] Worker interface key number:%d > expected workers\n", agentValues.size(), NUM_APPLIERS + NUM_LOADERS);
+					return Void();
 				}
 				printf("[Worker] Leader key exists:%s. Worker registers its restore workerInterface id:%s\n",
 						leaderInterf.get().id().toString().c_str(), workerInterf.id().toString().c_str());
