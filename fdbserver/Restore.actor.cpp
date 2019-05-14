@@ -556,9 +556,11 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 					leaderInterf = Optional<RestoreWorkerInterface>();
 					break;
 				}
-				Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
-				if ( agentValues.size() >= NUM_APPLIERS + NUM_LOADERS ) {
-					printf("[Worker] Worker interface key number:%d > expected workers\n", agentValues.size(), NUM_APPLIERS + NUM_LOADERS);
+				state Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
+				state Optional<Value> workerInterfValue = wait( tr.get(restoreWorkerKeyFor(workerInterf.id())) );
+				if ( agentValues.size() > NUM_APPLIERS + NUM_LOADERS && !workerInterfValue.present() ) {
+					// The worker exit immediately only when it has not registered its interface
+					printf("[Worker] Worker interface key number:%d > expected workers :%d\n", agentValues.size(), NUM_APPLIERS + NUM_LOADERS);
 					return Void();
 				}
 				printf("[Worker] Leader key exists:%s. Worker registers its restore workerInterface id:%s\n",
