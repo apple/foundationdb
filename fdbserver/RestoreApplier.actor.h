@@ -164,11 +164,11 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		}
 
 		//ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
-		if ( lowerBounds.size() >= numAppliers ) {
+		if ( lowerBounds.size() > numAppliers ) {
 			printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
 		}
 
-		while ( lowerBounds.size() >= numAppliers ) {
+		while ( lowerBounds.size() > numAppliers ) {
 			printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
 			lowerBounds.pop_back();
 		}

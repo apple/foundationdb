@@ -45,7 +45,7 @@ enum class RestoreCommandEnum : uint32_t {Init = 0,
 		Loader_Notify_Appler_To_Apply_Mutation,
 		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done, //20
 		Finish_Restore, Reset_VersionBatch, Set_WorkerInterface, Collect_RestoreRoleInterface, // 24
-		Heart_Beat, Recruit_Role_On_Worker}; 
+		Heart_Beat, Recruit_Role_On_Worker, Remove_Redundant_Worker}; 
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};

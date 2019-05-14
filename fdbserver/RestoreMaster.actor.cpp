@@ -695,7 +695,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 			printf("[Sampling][CMDRep] number of key ranges calculated by master applier:%d\n", rep.keyRangeNum);
 			numKeyRanges = rep.keyRangeNum;
 
-			if (numKeyRanges <= 0 || numKeyRanges >= self->appliersInterf.size() ) {
+			if (numKeyRanges <= 0 || numKeyRanges > self->appliersInterf.size() ) {
 				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%ld) from other phases. appliersInterf.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, self->appliersInterf.size());
 				UNREACHABLE();
 			}
