@@ -229,8 +229,8 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 void initRestoreWorkerConfig() {
 	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 	NUM_LOADERS = g_network->isSimulated() ? 3 : 10;
-	NUM_APPLIERS = 1;
-	//NUM_APPLIERS = g_network->isSimulated() ? 3 : 10;
+	//NUM_APPLIERS = 1;
+	NUM_APPLIERS = g_network->isSimulated() ? 3 : 10;
 	MIN_NUM_WORKERS  = NUM_LOADERS + NUM_APPLIERS;
 	FastRestore_Failure_Timeout = 3600; // seconds
 	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB

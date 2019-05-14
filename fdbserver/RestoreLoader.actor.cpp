@@ -490,7 +490,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						printf("[VERBOSE_DEBUG] mutation to sent to applier, mutation:%s\n", kvm.toString().c_str());
 					}
 					// Send the mutation to applier
-					if (isRangeMutation(kvm) && false) { // MX: Use false to skip the range mutation handling
+					if ( isRangeMutation(kvm) ) { // MX: Use false to skip the range mutation handling
 						// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 						// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
 						mvector.pop_front(mvector.size());
