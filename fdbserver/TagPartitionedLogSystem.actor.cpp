@@ -483,8 +483,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				TraceEvent("TLogPeekAllAddingCurrent", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestLogs", localSets[bestSet]->logServerString());
 				cursors.emplace_back(new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, lastBegin, end, parallelGetMore));
 			}
-			int i = 0;
-			while(begin < lastBegin) {
+			for (int i = 0; begin < lastBegin; i++) {
 				if(i == oldLogData.size()) {
 					if(tag == txsTag || tag.locality == tagLocalityTxs || tag == cacheTag) {
 						break;
@@ -514,7 +513,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(!localOldSets.size()) {
 					TraceEvent("TLogPeekAllNoLocalSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin);
 					if(!cursors.size() && !foundSpecial) {
-						i++;
 						continue;
 					}
 					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
@@ -531,7 +529,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 					lastBegin = thisBegin;
 				}
-				i++;
 			}
 
 			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
@@ -683,8 +680,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			Version lastBegin = tLogs[bestSet]->startVersion;
-			int i = 0;
-			while(begin < lastBegin) {
+			for (int i = 0; begin < lastBegin; i++) {
 				if(i == oldLogData.size()) {
 					if((tag == txsTag || tag.locality == tagLocalityTxs) && cursors.size()) {
 						break;
@@ -718,7 +714,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if(oldLogData[i].logRouterTags == 0 || logCount > 1 || foundSpecial) {
 						throw worker_removed();
 					}
-					i++;
 					continue;
 				}
 
@@ -735,7 +730,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 					lastBegin = thisBegin;
 				}
-				i++;
 			}
 
 			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );

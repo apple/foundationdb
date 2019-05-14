@@ -295,6 +295,7 @@ public:
 	// Backup Worker
 	double BACKUP_FAILURE_TIME;
 	double WAIT_FOR_BACKUP_JOIN_DELAY;
+	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
