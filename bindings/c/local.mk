@@ -86,7 +86,6 @@ bindings/c/foundationdb/fdb_c_options.g.h: bin/vexillographer.exe fdbclient/vexi
 
 bin/fdb_c_performance_test: bindings/c/test/performance_test.c bindings/c/test/test.h fdb_c
 	@echo "Compiling      fdb_c_performance_test"
-	@echo "$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c $(fdb_c_tests_LIBS)"
 	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c $(fdb_c_tests_LIBS)
 
 bin/fdb_c_ryw_benchmark: bindings/c/test/ryw_benchmark.c bindings/c/test/test.h fdb_c
