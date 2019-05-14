@@ -1,4 +1,3 @@
-
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "workloads.actor.h"
@@ -6,20 +5,19 @@
 #include "fdbserver/workloads/Mako.h"
 #include "flow/actorcompiler.h"
 
-
-static std::string opNames[] = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "CLEAR", "CLEARRANGE", "COMMIT"};
+static const std::string opNames[] = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "CLEAR", "CLEARRANGE", "COMMIT"};
 
 struct MakoWorkload : KVWorkload {
-	uint64_t rowCount, seqNumLen, sampleSize, actorPerClient;
+	uint64_t rowCount, seqNumLen, sampleSize, actorCount;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval;
 
 	double metricsStart, metricsDuration;
 
-	bool enableLogging, cancelWorkersAtDuration;
+	bool enableLogging, cancelWorkersAtDuration, commitGet;
 
 	vector<Future<Void>> clients;
 
-	PerfIntCounter xacts, errors, conflicts, commits, totalOps;
+	PerfIntCounter xacts, retries, conflicts, commits, totalOps;
 	vector<PerfIntCounter> opCounters;
 	vector<uint64_t> insertionCountsToMeasure;
 	vector<pair<uint64_t, double>> ratesAtKeyCounts;
@@ -28,7 +26,7 @@ struct MakoWorkload : KVWorkload {
 
 	// used for parse usr input tx and store
 	int operations[MAX_OP][2];
-	std::string unparsed_tx_str;
+	std::string unparsed_tx_str, mode;
 
 
 	// used for periodically trace metrics
@@ -36,7 +34,10 @@ struct MakoWorkload : KVWorkload {
 	Standalone<VectorRef<ContinuousSample<double>>> opLatencies;
 
 	MakoWorkload(WorkloadContext const& wcx)
-	: KVWorkload(wcx), xacts("Transactions"), errors("Errors"), conflicts("Conflicts"), commits("Commits"), totalOps("Operations") {
+	: KVWorkload(wcx),
+	xacts("Transactions"), retries("Retries"), conflicts("Conflicts"), commits("Commits"), totalOps("Operations"),
+	loadTime(0.0)
+	{
 		// init for metrics
 
 		// get parameters
@@ -44,17 +45,17 @@ struct MakoWorkload : KVWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 30.0);
 		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
 		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
+		mode = getOption(options, LiteralStringRef("mode"), LiteralStringRef("build")).contents().toString();
+		commitGet = getOption(options, LiteralStringRef("commitGet"), false);
 
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0) / clientCount;
 		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
 		actorCount = ceil(transactionsPerSecond * allowedLatency);
 		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
-        actorPerClient = getOption(options, LiteralStringRef("actorPerClient"), 1);
         sampleSize = getOption(options, LiteralStringRef("sampling"), 10);
 		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
 		cancelWorkersAtDuration = getOption( options, LiteralStringRef("cancelWorkersAtDuration"), false );
 
-		// valueString = (char *) malloc(sizeof(char) * (maxValueBytes+1));
 		valueString = std::string(maxValueBytes, '.');
 
 		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
@@ -80,20 +81,30 @@ struct MakoWorkload : KVWorkload {
 
 	std::string description() override { return "Mako"; }
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		// only populate data when we are in build mode
+		if (mode.compare("build"))
+			return Void();
+
+		return _setup(cx, this); 
+	}
 
 	Future<Void> start(Database const& cx) override {
+		// TODO: may need to delete this one
 		// only use one client for performence measurement
-		if (clientId == 0)
-			return _start(cx, this);
-		return Void();
+
+		// TODO: Do I need to read record to warm the cache of the keySystem
+		if (mode == "clean"){
+			if (clientId == 0)
+				return cleanup(cx, this);
+			else
+				return Void();
+		}
+
+		return _start(cx, this);
 	}
 
 	Future<bool> check(Database const& cx) override {
-		// TODO: to see whether it needs to check anything here
-		if (clientId)
-			return true;
-
 		if(!cancelWorkersAtDuration && now() < metricsStart + metricsDuration)
 			metricsDuration = now() - metricsStart;
 
@@ -101,8 +112,17 @@ struct MakoWorkload : KVWorkload {
 	}
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		if (clientId)
+		if (mode == "clean")
 			return;
+		else if (mode == "build"){
+			m.push_back( PerfMetric( "Mean load time (seconds)", loadTime, true ) );
+			// TODO: figure out this metric
+			auto ratesItr = ratesAtKeyCounts.begin();
+			for(; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
+				m.push_back(PerfMetric(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false));
+				return;
+		}
+		// metrics for mode = "run"
 		m.push_back(PerfMetric("Measured Duration", metricsDuration, true));
 		m.push_back(xacts.getMetric());
 		m.push_back(PerfMetric("Transactions/sec", xacts.getValue() / testDuration, true));
@@ -110,7 +130,8 @@ struct MakoWorkload : KVWorkload {
 		m.push_back(PerfMetric("Operations/sec", totalOps.getValue() / testDuration, true));
 		m.push_back(conflicts.getMetric());
 		m.push_back(PerfMetric("Conflicts/sec", conflicts.getValue() / testDuration, true));
-		m.push_back(errors.getMetric());
+		m.push_back(retries.getMetric());
+		
 		// m.push_back(commits.getMetric());
 		// m.push_back(PerfMetric())
 
@@ -133,52 +154,34 @@ struct MakoWorkload : KVWorkload {
 
 		//insert logging metrics
 		m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
-
 	}
-
-	ACTOR static Future<Void> tracePeriodically( MakoWorkload *self){
-		state double start = now();
-		state double elapsed = 0.0;
-		state int64_t last_ops = 0;
-		state int64_t last_xacts = 0;
-
-		loop {
-			elapsed += self->periodicLoggingInterval;
-			wait( delayUntil(start + elapsed));
-			// TODO: if there is any other traceEvent to add
-			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->opLatencies[OP_COMMIT].mean()).detail("Median", self->opLatencies[OP_COMMIT].median());
-
-			std::string ts = format("T=%04.0fs: ", elapsed);
-			self->periodicMetrics.push_back(PerfMetric(ts + "Transactions/sec", (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval, false));
-			self->periodicMetrics.push_back(PerfMetric(ts + "Operations/sec", (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval, false));
-
-			last_xacts = self->xacts.getValue();
-			last_ops = self->totalOps.getValue();
-		}
-	}
-
-	static void randstr(std::string& str, int len) {
-		// TODO: which way is better?
+	static void randStr(std::string& str, const int& len) {
 		char randomStr[len];
-		for (int i = 0; i < len; i++) {
+		for (int i = 0; i < len; ++i) {
 			randomStr[i] = '!' + g_random->randomInt(0, 'z' - '!'); /* generage a char from '!' to 'z' */
 		}
 		str.assign(randomStr, len);
 	}
+
+	static void randStr(char *str, const int& len){
+		for (int i = 0; i < len-1; ++i) {
+			str[i] = '!' + g_random->randomInt(0, 'z'-'!');  /* generage a char from '!' to 'z' */
+		}
+		// here len contains the null character
+		str[len-1] = '\0';
+	}
 	Value randomValue() {
-		int length = g_random->randomInt(minValueBytes, maxValueBytes + 1);
-		randstr(valueString, length);
+		const int length = g_random->randomInt(minValueBytes, maxValueBytes + 1);
+		randStr(valueString, length);
 		return StringRef((uint8_t*)valueString.c_str(), length);
 	}
 
-	Key ind2key(uint64_t ind) {
-		// TODO: lookup how mutateString/makeString works
-		// TODO: See how standalone passed as value
-		// TODO: See do we need null for this mutatestring
+	Key ind2key(const uint64_t& ind) {
 		Key result = makeString(keyBytes);
 		uint8_t* data = mutateString(result);
 		sprintf((char*)data, "mako%0*d", seqNumLen, ind);
-		for (int i = 4 + seqNumLen; i < keyBytes; i++) data[i] = 'x';
+		for (int i = 4 + seqNumLen; i < keyBytes; ++i)
+			data[i] = 'x';
 		return result;
 	}
 
@@ -192,10 +195,30 @@ struct MakoWorkload : KVWorkload {
 		return digits;
 	}
 	Standalone<KeyValueRef> operator()(uint64_t n) {
-		// return KeyValueRef( keyForIndex( n, false ), randomValue() );
 		return KeyValueRef(ind2key(n), randomValue());
 	}
 
+	ACTOR static Future<Void> tracePeriodically( MakoWorkload *self){
+		state double start = now();
+		state double elapsed = 0.0;
+		state int64_t last_ops = 0;
+		state int64_t last_xacts = 0;
+
+		loop {
+			elapsed += self->periodicLoggingInterval;
+			wait( delayUntil(start + elapsed));
+			// TODO: if there is any other traceEvent to add
+			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->opLatencies[OP_COMMIT].mean()).detail("Median", self->opLatencies[OP_COMMIT].median()).detail("Percentile5", self->opLatencies[OP_COMMIT].percentile(.05)).detail("Percentile95", self->opLatencies[OP_COMMIT].percentile(.95)).detail("Count", self->opCounters[OP_COMMIT].getValue()).detail("Elapsed", elapsed);
+			TraceEvent((self->description() + "_GRVLatency").c_str()).detail("Mean", self->opLatencies[OP_GETREADVERSION].mean()).detail("Median", self->opLatencies[OP_GETREADVERSION].median()).detail("Percentile5", self->opLatencies[OP_GETREADVERSION].percentile(.05)).detail("Percentile95", self->opLatencies[OP_GETREADVERSION].percentile(.95)).detail("Count", self->opCounters[OP_GETREADVERSION].getValue());
+			
+			std::string ts = format("T=%04.0fs: ", elapsed);
+			self->periodicMetrics.push_back(PerfMetric(ts + "Transactions/sec", (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval, false));
+			self->periodicMetrics.push_back(PerfMetric(ts + "Operations/sec", (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval, false));
+
+			last_xacts = self->xacts.getValue();
+			last_ops = self->totalOps.getValue();
+		}
+	}
 	ACTOR Future<Void> _setup(Database cx, MakoWorkload* self) {
 
 		state Promise<double> loadTime;
@@ -204,8 +227,9 @@ struct MakoWorkload : KVWorkload {
 		wait(bulkSetup(cx, self, self->rowCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay,
 		               self->maxInsertRate, self->insertionCountsToMeasure, ratesAtKeyCounts));
 
-		// TODO: Understand what these two paras do
+		// This is the setup time 
 		self->loadTime = loadTime.getFuture().get();
+		// This is the rates of importing keys
 		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
 
 		return Void();
@@ -213,8 +237,9 @@ struct MakoWorkload : KVWorkload {
 
 	ACTOR Future<Void> _start(Database cx, MakoWorkload* self) {
 		vector<Future<Void>> clients;
-		for (int c = 0; c < self->actorPerClient; ++c) {
-			clients.push_back(self->makoClient(cx, self, self->actorPerClient / self->transactionsPerSecond));
+		for (int c = 0; c < self->actorCount; ++c) {
+			// TODO: to see if we need throttling here, 
+			clients.push_back(self->makoClient(cx, self, self->actorCount / self->transactionsPerSecond, c));
 		}
 
 		if (self->enableLogging)
@@ -226,7 +251,7 @@ struct MakoWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> makoClient(Database cx, MakoWorkload* self, double unused_delay) {
+	ACTOR Future<Void> makoClient(Database cx, MakoWorkload* self, double delay, int actorIndex) {
 
 		state Key rkey;
 		state Value rval;
@@ -234,30 +259,32 @@ struct MakoWorkload : KVWorkload {
 		state bool doCommit;
 		state int i, count;
 		state uint64_t range, indBegin, indEnd;
+		state double lastTime = now();
 		state KeyRangeRef rkeyRangeRef;
-		// TODO: try to find out why I cannot use int array here with state
 		state vector<int> perOpCount(MAX_OP, 0);
 
+		TraceEvent("ClientStarting").detail("AcotrIndex", actorIndex).detail("ClientIndex", self->clientId).detail("NumActors", self->actorCount);
+
 		loop {
+			// used for throttling
+			wait(poisson(&lastTime, delay));
 			try{
-				// default to not commit for each transaction
-				doCommit = false;
+				// user-defined value: whether commit read-only ops or not; default is false
+				doCommit = self->commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
-					// TODO: check if operations initilize correctly
-					if (i == OP_COMMIT) continue;
-					// generate random key-val pair for operation
+					if (i == OP_COMMIT) 
+						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
-						// TODO: check if cast is fine
+						// generate random key-val pair for operation
 						rkey = self->ind2key(self->getRandomKey(self->rowCount));
-						// TODO: check this one safe since it only uses valueString
 						rval = self->randomValue();
 
-						// only used when range-oriented operations
 						range = (self->operations[i][1] > 0) ? self->operations[i][1] : 1;
 						indBegin = self->getRandomKey(self->rowCount);
-						indEnd = std::min(indBegin + range - 1, self->rowCount);
+						// KeyRangeRef(min, maxPlusOne)
+						indEnd = std::min(indBegin + range, self->rowCount);
 						rkeyRangeRef = KeyRangeRef(self->ind2key(indBegin), self->ind2key(indEnd));
-						//TODO: switch does not work fine in ACTOR framework, is it a bug?
+
 						if (i == OP_GETREADVERSION){
 							state double getReadVersionStart = now();
 							Version v = wait(tr.getReadVersion());
@@ -266,7 +293,6 @@ struct MakoWorkload : KVWorkload {
 						else if (i == OP_GET){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE){
-							// TODO: why does it use strinc here
 							wait(logLatency(tr.getRange(rkeyRangeRef, GetRangeLimits(-1,8000)), &self->opLatencies[i]));
 						}
 						else if (i == OP_SGET){
@@ -282,23 +308,56 @@ struct MakoWorkload : KVWorkload {
 						} else if (i == OP_INSERT){
 							// generate a unique key here
 							std::string unique_key;
-							randstr(unique_key, self->keyBytes-6);
-							StringRef unique_keyRef(unique_key);
-							// TODO: check if here is a problem, and look at the new operator for Arena
-							tr.set(unique_keyRef, rval, true);
+							randStr(unique_key, self->keyBytes-KEYPREFIXLEN);
+							tr.set(StringRef(unique_key), rval, true);
+							doCommit = true;
+						} else if (i == OP_INSERTRANGE){
+							char tempKey[self->keyBytes-KEYPREFIXLEN+1];
+							int rangeLen = digits(range);
+							randStr(tempKey, self->keyBytes-KEYPREFIXLEN+1);
+							for (int range_i = 0; range_i < range; ++range_i){
+								sprintf(tempKey + self->keyBytes - KEYPREFIXLEN - rangeLen, "%0.*d", rangeLen, range_i);
+								tr.set(StringRef(std::string(tempKey)), self->randomValue(), true);
+							}
 							doCommit = true;
 						} else if (i == OP_CLEAR){
 							// happens locally, we only care the tps for these ops
 							tr.clear(rkey, true);
 							doCommit = true;
+						} else if(i == OP_SETCLEAR){
+							state std::string st_key;
+							randStr(st_key, self->keyBytes-KEYPREFIXLEN);
+							tr.set(StringRef(st_key), rval, true);
+							// commit the change
+							wait(tr.commit());
+							tr.reset();
+							tr.clear(st_key, true);
+							doCommit = true;
 						} else if (i == OP_CLEARRANGE){
 							tr.clear(rkeyRangeRef, true);
+							doCommit = true;
+						} else if (i == OP_SETCLEARRANGE){
+							char tempKey[self->keyBytes-KEYPREFIXLEN+1];
+							int rangeLen = digits(range);
+							randStr(tempKey, self->keyBytes-KEYPREFIXLEN+1);
+							state std::string scr_start_key;
+							state std::string scr_end_key;
+							for (int range_i = 0; range_i < range; ++range_i){
+								sprintf(tempKey + self->keyBytes - KEYPREFIXLEN - rangeLen, "%0.*d", rangeLen, range_i);
+								tr.set(StringRef(std::string(tempKey)), self->randomValue(), true);
+								if (range_i == 0)
+									scr_start_key = std::string(tempKey);
+							}
+							scr_end_key = std::string(tempKey);
+							wait(tr.commit());
+							tr.reset();
+							tr.clear(KeyRangeRef(StringRef(scr_start_key), StringRef(scr_end_key)), true);
 							doCommit = true;
 						}
 						++perOpCount[i];
 					}
 				}
-				// TODO: to see whether we need to record only the middle 3/4 records
+
 				if (doCommit) {
 					state double commitStart = now();
 					wait(tr.commit());
@@ -312,19 +371,39 @@ struct MakoWorkload : KVWorkload {
 					self->totalOps += perOpCount[op];
 				}
 			} catch (Error& e) {
-				// TODO: add count for retry, see onError code to see if it cancels the job
+				// TODO: to see how to log the error here
 				if (e.code() == error_code_operation_cancelled)
 					throw;
-				
-				++self->errors;
-				if (e.code() == error_code_not_committed)
+				else if (e.code() == error_code_not_committed)
 					++self->conflicts;
+				
 				wait(tr.onError(e));
+				++self->retries;
 			}
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
 			tr.reset();
 		}
+	}
+
+	ACTOR Future<Void> cleanup(Database cx, MakoWorkload* self){
+		// TODO: check the length of possible longest key
+		state std::string startKey("mako\x00");
+		state std::string endKey("mako\xff");
+		state Transaction tr(cx);
+
+		loop{
+			try {
+				tr.clear(KeyRangeRef(KeyRef(startKey), KeyRef(endKey)));
+				wait(tr.commit());
+				break;
+			} catch (Error &e){
+				wait(tr.onError(e));
+				tr.reset();
+			}
+		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f, ContinuousSample<double>* opLatencies) {
@@ -345,7 +424,10 @@ struct MakoWorkload : KVWorkload {
 		return Void();
 	}
 
-	int64_t getRandomKey(uint64_t rowCount) { return g_random->randomInt64(0, rowCount); }
+	int64_t getRandomKey(uint64_t rowCount) {
+		// TODO: support other distribution like zipf
+		return g_random->randomInt64(0, rowCount); 
+	}
 	int parse_transaction() {
 		int len = unparsed_tx_str.length();
 		int i = 0;
@@ -448,13 +530,6 @@ struct MakoWorkload : KVWorkload {
 			fprintf(stderr, "ERROR: invalid transaction specification %s\n", unparsed_tx_str.c_str());
 			return -1;
 		}
-
-		// if (args->verbose == VERBOSE_DEBUG) {
-		//     for (op = 0; op < MAX_OP; op++) {
-		//     printf("DEBUG: OP: %d: %d: %d\n", op, args->txnspec.ops[op][0],
-		//             args->txnspec.ops[op][1]);
-		//     }
-		// }
 
 		return 0;
 	}
