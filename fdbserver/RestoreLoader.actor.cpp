@@ -407,9 +407,9 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID)); // master node is waiting
 	// TODO: NOTE: If we parse log file, the DB status will be incorrect.
-	if ( !isSampling ) {
+	//if ( !isSampling ) {
 		self->processedFiles[param.filename] =  1;
-	}
+	//}
 	self->processedCmd[req.cmdID] = 1;
 
 	self->clearInProgressFlag(cmdType);
