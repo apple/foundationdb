@@ -290,7 +290,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 struct RestoreSendMutationVectorRequest : TimedRequest {
 	CMDUID cmdID;
 	uint64_t commitVersion;
-	VectorRef<MutationRef> mutations;
+	Standalone<VectorRef<MutationRef>> mutations;
 
 	ReplyPromise<RestoreCommonReply> reply;
 

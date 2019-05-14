@@ -132,10 +132,15 @@ public:
 	}
 
 	void printAppliersKeyRange() {
-		printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
+		printf("[INFO] The mapping of KeyRange_start --> Applier ID: getHexString\n");
 		// applier type: std::map<Standalone<KeyRef>, UID>
 		for (auto &applier : range2Applier) {
 			printf("\t[INFO]%s -> %s\n", getHexString(applier.first).c_str(), applier.second.toString().c_str());
+		}
+		printf("[INFO] The mapping of KeyRange_start --> Applier ID: toString\n");
+		// applier type: std::map<Standalone<KeyRef>, UID>
+		for (auto &applier : range2Applier) {
+			printf("\t[INFO]%s -> %s\n", applier.first.toString().c_str(), applier.second.toString().c_str());
 		}
 	}
 };

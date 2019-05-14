@@ -255,10 +255,10 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 		MutationRef mutation = mutations[mIndex];
 		self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 		numMutations++;
-		if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
+		//if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
 			printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
 					self->describeNode().c_str(), numMutations, mutation.toString().c_str());
-		}
+		//}
 	}
 	
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
@@ -272,7 +272,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 	self->numSampledMutations = 0;
-	
+
 	// NOTE: We have insert operation to self->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
 	// Otherwise, race condition may happen!
 	while (self->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
