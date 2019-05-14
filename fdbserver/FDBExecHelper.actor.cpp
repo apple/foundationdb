@@ -102,12 +102,19 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 
 	if (!isSync && !g_network->isSimulated()) {
 		while (c.running() && runTime <= maxWaitTime) {
-				wait(delay(0.1));
-				runTime += 0.1;
+			wait(delay(0.1));
+			runTime += 0.1;
 		}
 	} else {
-		int maxWaitTimeInt = static_cast<int>(maxWaitTime + 1.0);
-		c.wait_for(std::chrono::seconds(maxWaitTimeInt));
+		if (g_network->isSimulated()) {
+			// to keep the simulator deterministic, wait till the process exits,
+			// hence giving a large wait time
+			c.wait_for(std::chrono::hours(24));
+			ASSERT(!c.running());
+		} else {
+			int maxWaitTimeInt = static_cast<int>(maxWaitTime + 1.0);
+			c.wait_for(std::chrono::seconds(maxWaitTimeInt));
+		}
 	}
 
 	if (c.running()) {
