@@ -1042,18 +1042,29 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 	loop {
 		try {
 			self->cmdID.initPhase( RestoreCommandEnum::Apply_Mutation_To_DB );
-			for (auto& applier : self->appliersInterf) {
-				RestoreApplierInterface &applierInterf = applier.second;
+			state std::map<UID, RestoreApplierInterface>::iterator applier;
+			for (applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++) {
+				RestoreApplierInterface &applierInterf = applier->second;
 	
-				printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", self->describeNode().c_str(), applier.first.toString().c_str());
-				cmdReplies.push_back( applier.second.applyToDB.getReply(RestoreSimpleRequest(self->cmdID)) );
-			}
-			printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
-			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-			printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
+				printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", self->describeNode().c_str(), applier->first.toString().c_str());
+				cmdReplies.push_back( applier->second.applyToDB.getReply(RestoreSimpleRequest(self->cmdID)) );
 
-			cmdReplies.clear();
+				// Ask applier to apply to DB one by one
+				printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
+				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
+				printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
+
+				cmdReplies.clear();
+
+			}
+			// Ask all appliers to apply to DB at once
+			// printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
+			// std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+			// //std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
+			// printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
+
+			// cmdReplies.clear();
 
 			wait(delay(5.0)); //TODO: Delete this wait and see if it can pass correctness
 
