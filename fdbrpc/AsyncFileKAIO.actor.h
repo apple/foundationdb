@@ -108,13 +108,13 @@ public:
 			open_filename = filename + ".part";
 		}
 
-		int fd = ::open( open_filename.c_str(), openFlags(flags) | O_DIRECT, mode );
+		int fd = ::open( open_filename.c_str(), openFlags(flags), mode );
 		if (fd<0) {
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below
 			TraceEvent ev("AsyncFileKAIOOpenFailed");
 			ev.error(e).detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
+			  .detailf("OSFlags", "%x", openFlags(flags)).detailf("Mode", "0%o", mode).GetLastError();
 			if(ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
@@ -635,7 +635,7 @@ private:
 	}
 
 	static int openFlags(int flags) {
-		int oflags = 0;
+		int oflags = O_DIRECT | O_CLOEXEC;
 		ASSERT( bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE) );  // readonly xor readwrite
 		if( flags & OPEN_EXCLUSIVE ) oflags |= O_EXCL;
 		if( flags & OPEN_CREATE )    oflags |= O_CREAT;

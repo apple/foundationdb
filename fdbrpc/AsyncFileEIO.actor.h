@@ -239,7 +239,7 @@ private:
 	}
 
 	static int openFlags(int flags) {
-		int oflags = 0;
+		int oflags = O_CLOEXEC;
 		ASSERT( bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE) );  // readonly xor readwrite
 		if( flags & OPEN_EXCLUSIVE ) oflags |= O_EXCL;
 		if( flags & OPEN_CREATE )    oflags |= O_CREAT;
