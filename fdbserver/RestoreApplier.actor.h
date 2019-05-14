@@ -60,9 +60,9 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
 
-	explicit RestoreApplierData(UID applierInterfID) {
+	explicit RestoreApplierData(UID applierInterfID, int assignedIndex) {
 		nodeID = applierInterfID;
-		nodeIndex = 0;
+		nodeIndex = assignedIndex;
 
 		role = RestoreRole::Applier;
 	}

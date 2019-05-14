@@ -71,11 +71,11 @@ public:
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	explicit RestoreLoaderData(UID loaderInterfID) {
+	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex) {
 		nodeID = loaderInterfID;
-		nodeIndex = 0;
-
+		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
+		cmdID.nodeIndex = nodeIndex;
 	}
 
 	~RestoreLoaderData() {}

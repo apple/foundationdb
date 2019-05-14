@@ -108,8 +108,8 @@ struct StringRefReaderMX {
 struct RestoreRoleData :  NonCopyable, public ReferenceCounted<RestoreRoleData> {
 public:	
 	RestoreRole role;
-	UID nodeID; // RestoreLoader role ID
-	int nodeIndex; // RestoreLoader role index, which is continuous and easy for debuggging
+	UID nodeID; // 
+	int nodeIndex; // The index (starts from 0) of each role should be unique. We use nodeIndex to ensure cmdID is not duplicate across loaders
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf;
 	std::map<UID, RestoreApplierInterface> appliersInterf;

@@ -61,12 +61,13 @@ std::string getRoleStr(RestoreRole role);
 // TODO: Add another field to indicate version-batch round
 class CMDUID {
 public:
+	uint16_t nodeIndex;
 	uint16_t batch;
 	uint16_t phase;
 	uint64_t cmdID;
-	CMDUID() : batch(0), phase(0), cmdID(0) { }
-	CMDUID( uint16_t a, uint64_t b ) { batch = 0; phase=a; cmdID=b; }
-	CMDUID(const CMDUID &cmd) { batch = cmd.batch; phase = cmd.phase; cmdID = cmd.cmdID; }
+	CMDUID() : nodeIndex(0), batch(0), phase(0), cmdID(0) { }
+	CMDUID( uint16_t a, uint64_t b ) { nodeIndex = 0, batch = 0; phase=a; cmdID=b; }
+	CMDUID(const CMDUID &cmd) { nodeIndex = cmd.nodeIndex; batch = cmd.batch; phase = cmd.phase; cmdID = cmd.cmdID; }
 
 	void initPhase(RestoreCommandEnum phase);
 
@@ -82,9 +83,14 @@ public:
 
 	std::string toString() const;
 
-	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase && cmdID == r.cmdID; }
-	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdID != r.cmdID; }
-	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdID < r.cmdID); }
+	bool operator == ( const CMDUID& r ) const { return nodeIndex == r.nodeIndex && batch == r.batch && phase == r.phase && cmdID == r.cmdID; }
+	bool operator != ( const CMDUID& r ) const { return nodeIndex != r.nodeIndex || batch != r.batch || phase != r.phase || cmdID != r.cmdID; }
+	bool operator < ( const CMDUID& r ) const {
+		return (nodeIndex < r.nodeIndex) ||
+			(nodeIndex == r.nodeIndex && batch < r.batch) || 
+			(nodeIndex == r.nodeIndex && batch == r.batch && phase < r.phase)
+			|| (nodeIndex == r.nodeIndex && batch == r.batch && phase == r.phase && cmdID < r.cmdID);
+	}
 
 	//uint64_t hash() const { return first(); }
 	//uint64_t first() const { return part[0]; }

@@ -78,6 +78,7 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		nodeID = UID();
 
 		cmdID = CMDUID();
+		cmdID.nodeIndex = -1; // uint16_t maximum value
 
 		batchIndex = 0;
 		curWorkloadSize = 0;

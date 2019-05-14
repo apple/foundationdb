@@ -297,13 +297,13 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		ASSERT( !self->loaderInterf.present() );
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
-		self->loaderData = Reference<RestoreLoaderData>(new RestoreLoaderData(self->loaderInterf.get().id()));
+		self->loaderData = Reference<RestoreLoaderData>( new RestoreLoaderData(self->loaderInterf.get().id(),  req.nodeIndex) );
 		actors->add( restoreLoaderCore(self->loaderData, self->loaderInterf.get(), cx) );
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT( !self->applierInterf.present() );
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
-		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData(self->applierInterf.get().id()) );
+		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData(self->applierInterf.get().id(), req.nodeIndex) );
 		actors->add( restoreApplierCore(self->applierData, self->applierInterf.get(), cx) );
 	} else {
 		TraceEvent(SevError, "FastRestore").detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
