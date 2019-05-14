@@ -92,6 +92,7 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> backupWorkers;
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
@@ -99,7 +100,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
+		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, backupWorkers, dcId, satelliteFallback);
 	}
 };
 
@@ -173,17 +174,16 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<BackupInterface> backupInterf;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
 	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	explicit RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, Optional<BackupInterface> bcInterf, bool degraded) :
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), backupInterf(bcInterf), degraded(degraded) {}
+	explicit RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, backupInterf, reply, degraded);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, reply, degraded);
 	}
 };
 

@@ -38,7 +38,6 @@ struct ServerDBInfo {
 	UID id;  // Changes each time any other member changes
 	ClusterControllerFullInterface clusterInterface;
 	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
-	std::vector<BackupInterface> backupServers;
 	Optional<DataDistributorInterface> distributor;  // The best guess of current data distributor.
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
@@ -58,7 +57,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, backupServers, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig);
+		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig);
 	}
 };
 

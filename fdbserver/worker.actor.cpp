@@ -356,7 +356,6 @@ ACTOR Future<Void> registrationClient(
 		WorkerInterface interf,
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
 		ProcessClass initialClass,
-		Reference<AsyncVar<Optional<BackupInterface>>> backupInterf,
 		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
 		Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
 		Reference<AsyncVar<bool>> degraded) {
@@ -366,14 +365,13 @@ ACTOR Future<Void> registrationClient(
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), backupInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;	
 				asyncPriorityInfo->set( reply.priorityInfo );
 			}
-			when ( wait( backupInterf->onChange() ) ) {}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
@@ -703,7 +701,6 @@ ACTOR Future<Void> workerServer(
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
-	state Reference<AsyncVar<Optional<BackupInterface>>> bcInterf(new AsyncVar<Optional<BackupInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -857,7 +854,7 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, bcInterf, ddInterf, rkInterf, degraded ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -965,20 +962,12 @@ ACTOR Future<Void> workerServer(
 				BackupInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
-				if (bcInterf->get().present()) {
-					recruited = bcInterf->get().get();
-					TEST(true);  // Recruited while already a backup worker.
-				} else {
-					startRole(Role::BACKUP, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.haltBackup);
+				startRole(Role::BACKUP, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.haltBackup);
 
-					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					errorForwarders.add(
-					    forwardError(errors, Role::BACKUP, recruited.id(),
-					                 setWhenDoneOrError(backupProcess, bcInterf, Optional<BackupInterface>())));
-					bcInterf->set(Optional<BackupInterface>(recruited));
-				}
+				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
 				req.reply.send(recruited);
 			}

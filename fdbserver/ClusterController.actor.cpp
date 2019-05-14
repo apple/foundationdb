@@ -58,7 +58,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Future<Void> haltBackupWorker;
 
 	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
@@ -136,43 +135,6 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			}
 			serverInfo->set( newInfo );
-		}
-
-		// Inserts the interface to backupServers in ascending order. No changes
-		// if the interface already exists.
-		void addBackupWorker(const BackupInterface& interf) {
-			ServerDBInfo newInfo = serverInfo->get();
-			newInfo.id = g_random->randomUniqueID();
-			ASSERT(newInfo.backupServers.size() == 0);  // only allow 1 worker for now. Remove when more workers are used.
-			auto it = newInfo.backupServers.begin();
-			for ( ; it != newInfo.backupServers.end(); it++) {
-				if (it->id() == interf.id()) {
-					return;
-				} else if (it->id() > interf.id()) {
-					break;
-				}
-			}
-			newInfo.backupServers.insert(it, interf);
-			TraceEvent("CC_BackupWorker", interf.id()).detail("N", newInfo.backupServers.size());
-			serverInfo->set(newInfo);
-		}
-
-		void removeBackupWorker(UID id) {
-			ServerDBInfo newInfo = serverInfo->get();
-			newInfo.id = g_random->randomUniqueID();
-			const int n = newInfo.backupServers.size();
-			bool found = false;
-			for (int i = 0; i < n; i++) {
-				if (newInfo.backupServers[i].id() == id) {
-					found = true;
-					if (i != n - 1) {
-						newInfo.backupServers[i] = newInfo.backupServers[n-1];
-					}
-					newInfo.backupServers.pop_back();
-				}
-			}
-			ASSERT(found);
-			serverInfo->set(newInfo);
 		}
 	};
 
@@ -1196,7 +1158,6 @@ public:
 	bool versionDifferenceUpdated;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
-	Optional<UID> recruitingBackupWorkerID;
 	AsyncVar<bool> recruitRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
@@ -1984,18 +1945,6 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
-	if (req.backupInterf.present()) {
-		const BackupInterface& bci = req.backupInterf.get();
-		if (self->db.serverInfo->get().backupServers.size() == 0 &&
-		    req.backupInterf.get().locality.dcId() == self->clusterControllerDcId &&
-		    !self->recruitingBackupWorkerID.present()) {
-			TraceEvent("CC_RegisterBackupWorker", self->id).detail("BKID", bci.id());
-			self->db.addBackupWorker(bci);
-		} else if (!self->recruitingBackupWorkerID.present() || self->recruitingBackupWorkerID.get() != req.backupInterf.get().id()) {
-			TraceEvent("CC_HaltBackupWorker", self->id).detail("BKID", bci.id());
-			self->id_worker[w.locality.processId()].haltBackupWorker = brokenPromiseToNever(req.backupInterf.get().haltBackup.getReply(HaltBackupRequest(self->id)));
-		}
-	}
 }
 
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
@@ -2656,54 +2605,6 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	}
 }
 
-ACTOR Future<BackupInterface> startBackupWorker(ClusterControllerData *self) {
-	TraceEvent("CC_StartBackupWorker", self->id);
-	loop {
-		try {
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo backupWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Backup, ProcessClass::NeverAssign, self->db.config, id_used);
-			state WorkerDetails worker = backupWorker.worker;
-
-			InitializeBackupRequest req(g_random->randomUniqueID());
-			TraceEvent("CC_BackupRecruit", self->id).detail("Addr", worker.interf.address());
-
-			self->recruitingBackupWorkerID = req.reqId;
-			ErrorOr<BackupInterface> backupInterf = wait(worker.interf.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_BACKUP_JOIN_DELAY, 0));
-			if (backupInterf.present()) {
-				TraceEvent("CC_BackupWorkerRecruited", self->id).detail("Addr", worker.interf.address());
-				return backupInterf.get();
-			}
-		}
-		catch (Error& e) {
-			TraceEvent("CC_BackupRecruitError", self->id).error(e);
-			if ( e.code() != error_code_no_more_servers ) {
-				throw;
-			}
-		}
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
-	}
-}
-
-ACTOR Future<Void> monitorBackupWorker(ClusterControllerData *self) {
-	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
-	}
-
-	loop {
-		if (self->db.serverInfo->get().backupServers.size() > 0) {
-			wait( waitFailureClient(self->db.serverInfo->get().backupServers[0].waitFailure, SERVER_KNOBS->BACKUP_FAILURE_TIME) );
-			const UID workerId = self->db.serverInfo->get().backupServers[0].id();
-			TraceEvent("CC_BackupWorkerDied", self->id).detail("WorkerId", workerId);
-			self->db.removeBackupWorker(workerId);
-		} else {
-			BackupInterface backupInterf = wait(startBackupWorker(self));
-			TraceEvent("CC_RegisterBackupWorker", self->id).detail("BKID", backupInterf.id());
-			self->db.addBackupWorker(backupInterf);
-			self->recruitingBackupWorkerID = Optional<UID>();
-		}
-	}
-}
-
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -2723,7 +2624,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
-	self.addActor.send( monitorBackupWorker(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
