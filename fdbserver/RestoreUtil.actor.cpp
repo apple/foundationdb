@@ -68,5 +68,5 @@ uint64_t CMDUID::getIndex() {
 }
 
 std::string CMDUID::toString() const {
-	return format("%04ld|%04ld|%016lld", batch, phase, cmdID);
+	return format("%04ld|%04ld|%04ld|%016lld", nodeIndex, batch, phase, cmdID);
 }

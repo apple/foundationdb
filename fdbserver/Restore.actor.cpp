@@ -165,9 +165,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 
 };
 
-
-// Restore worker
-// MX: This function is not used for now. Will change it to only clear restoreWorkerKey later.
+// Remove the worker interface from restoreWorkerKey and remove its roles interfaces from their keys.
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx) {
  	state Transaction tr(cx);
 	
@@ -228,12 +226,11 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 	}
  }
 
-
 void initRestoreWorkerConfig() {
-	//MIN_NUM_WORKERS = 2;//g_network->isSimulated() ? 3 : 120; //10; // TODO: This can become a configuration param later
 	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 	NUM_LOADERS = g_network->isSimulated() ? 3 : 10;
-	NUM_APPLIERS = g_network->isSimulated() ? 3 : 10;
+	NUM_APPLIERS = 1;
+	//NUM_APPLIERS = g_network->isSimulated() ? 3 : 10;
 	MIN_NUM_WORKERS  = NUM_LOADERS + NUM_APPLIERS;
 	FastRestore_Failure_Timeout = 3600; // seconds
 	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB

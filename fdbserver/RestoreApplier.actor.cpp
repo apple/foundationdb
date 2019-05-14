@@ -384,8 +384,8 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 						printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
 					}
 
-					if ( debug_verbose && count % 1000 == 1 ) {
-						printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops:%d\n",
+					if ( debug_verbose && count % 1000 == 0 ) {
+						printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops to apply:%d\n",
 								self->describeNode().c_str(), count, it->first, it->second.size());
 					}
 

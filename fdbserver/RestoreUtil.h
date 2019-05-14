@@ -98,7 +98,7 @@ public:
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		serializer(ar, batch, phase, cmdID);
+		serializer(ar, nodeIndex, batch, phase, cmdID);
 	}
 };
 template <class Ar> void load( Ar& ar, CMDUID& uid ) { uid.serialize_unversioned(ar); }
