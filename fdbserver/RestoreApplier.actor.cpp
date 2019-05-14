@@ -209,6 +209,7 @@ ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequ
 
 	self->range2Applier[req.range.begin] = req.applierID;
 
+	self->processedCmd.clear(); // The Loader_Register_Mutation_to_Applier command can be sent in both sampling and actual loading phases
 	self->processedCmd[req.cmdID] = 1;
 	self->clearInProgressFlag(RestoreCommandEnum::Assign_Applier_KeyRange);
 
@@ -236,8 +237,8 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 
 	// Handle duplicat cmd
 	if ( self->isCmdProcessed(req.cmdID) ) {
-		//printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		//printf("[DEBUG] Skipped mutation:%s\n", req.mutation.toString().c_str());
+		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
+		//printf("[DEBUG] Skipped duplicate cmd:%s\n", req.cmdID.toString().c_str());
 		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));	
 		return Void();
 	}
