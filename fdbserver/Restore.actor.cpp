@@ -402,8 +402,13 @@ ACTOR Future<Void> removeRedundantRestoreWorkers(Reference<RestoreWorkerData> se
 			// Get the updated key-value for restore worker interfaces
 			self->workers_workerInterface.clear();
 			wait( collectRestoreWorkerInterface(self, cx) );
-			printf("[RemoveRedundantWorkers] Finished\n");
-			break;
+			if ( self->workers_workerInterface.size() == NUM_LOADERS + NUM_APPLIERS ) {
+				printf("[RemoveRedundantWorkers] Finished\n");
+				break;
+			} else {
+				printf("Redo removeRedundantRestoreWorkers. workers_workerInterface.size:%d, NUM_LOADERS:%d NUM_APPLIERS:%d\n",
+					self->workers_workerInterface.size(), NUM_LOADERS, NUM_APPLIERS);
+			}
 		} catch (Error &e) {
 			// Handle the command reply timeout error
 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
