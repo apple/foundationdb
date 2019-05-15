@@ -379,6 +379,7 @@ struct ILogSystem {
 		UID randomID;
 		bool returnIfBlocked;
 
+		bool onlySpilled;
 		bool parallelGetMore;
 		int sequence;
 		Deque<Future<TLogPeekReply>> futureResults;

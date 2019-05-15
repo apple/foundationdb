@@ -1018,6 +1018,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 		rep.popped = poppedVer;
 		rep.end = poppedVer;
+		rep.onlySpilled = false;
 
 		if(req.sequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
@@ -1044,6 +1045,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	}
 
 	state Version endVersion = logData->version.get() + 1;
+	state bool onlySpilled = false;
 
 	//grab messages from disk
 	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
@@ -1053,7 +1055,11 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		// SOMEDAY: Only do this if an initial attempt to read from disk results in insufficient data and the required data is no longer in memory
 		// SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the result?
 
-		peekMessagesFromMemory( logData, req, messages2, endVersion );
+		if (req.onlySpilled) {
+			endVersion = logData->persistentDataDurableVersion + 1;
+		} else {
+			peekMessagesFromMemory( logData, req, messages2, endVersion );
+		}
 
 		Standalone<VectorRef<KeyValueRef>> kvs = wait(
 			self->persistentData->readRange(KeyRangeRef(
@@ -1068,10 +1074,12 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			messages.serializeBytes(kv.value);
 		}
 
-		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 			endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
-		else
+			onlySpilled = true;
+		} else {
 			messages.serializeBytes( messages2.toValue() );
+		}
 	} else {
 		peekMessagesFromMemory( logData, req, messages, endVersion );
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().address).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
@@ -1082,6 +1090,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 	reply.messages = messages.toValue();
 	reply.end = endVersion;
+	reply.onlySpilled = onlySpilled;
 
 	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().address);
 
