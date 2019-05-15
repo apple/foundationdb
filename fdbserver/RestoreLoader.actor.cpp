@@ -642,14 +642,20 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 	printf("SPLITMUTATION: orignal mutation:%s\n", m.toString().c_str());
 	std::map<Standalone<KeyRef>, UID>::iterator itlow, itup; //we will return [itlow, itup)
 	itlow = self->range2Applier.lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
-	if ( itlow != self->range2Applier.begin() && itlow->first > m.param1 ) { // m.param1 is not the smallest key \00
-		// (itlow-1) is the node whose key range includes m.param1
-		--itlow;
-	} else {
-		if ( m.param1 != LiteralStringRef("\00") || itlow->first != m.param1 ) { // MX: This is useless
-			printf("[ERROR] splitMutation has bug on range mutation:%s\n", m.toString().c_str());
+	if ( itlow->first > m.param1 ) {
+		if ( itlow != self->range2Applier.begin() ) {
+			--itlow;
 		}
 	}
+
+	// if ( itlow != self->range2Applier.begin() && itlow->first > m.param1 ) { // m.param1 is not the smallest key \00
+	// 	// (itlow-1) is the node whose key range includes m.param1
+	// 	--itlow;
+	// } else {
+	// 	if ( m.param1 != LiteralStringRef("\00") || itlow->first != m.param1 ) { // MX: This is useless
+	// 		printf("[ERROR] splitMutation has bug on range mutation:%s\n", m.toString().c_str());
+	// 	}
+	// }
 
 	itup = self->range2Applier.upper_bound(m.param2); // upper_bound returns the iterator that is > m.param2; return rmap::end if no keys are considered to go after m.param2.
 	printf("SPLITMUTATION: itlow_key:%s itup_key:%s\n", itlow->first.toString().c_str(), itup == self->range2Applier.end() ? "[end]" : itup->first.toString().c_str());
@@ -664,7 +670,13 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 	while (itlow != itup) {
 		Standalone<MutationRef> curm; //current mutation
 		curm.type = m.type;
-		curm.param1 = itlow->first;
+		// the first split mutation should starts with m.first. The later onces should start with the range2Applier boundary
+		if ( m.param1 > itlow->first ) {
+			curm.param1 = m.param1;
+		} else {
+			curm.param1 = itlow->first;
+		}
+		//curm.param1 = ((m.param1 > itlow->first) ? m.param1 : itlow->first); 
 		itlow++;
 		if (itlow == itup) {
 			ASSERT( m.param2 <= normalKeys.end );
