@@ -41,6 +41,4 @@ RUN curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz >
     rm -rf /tmp/libressl-2.8.2 /tmp/libressl.tar.gz
 
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
-ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
-ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
 CMD scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash
