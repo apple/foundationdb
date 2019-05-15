@@ -513,7 +513,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 							UID applierID = nodeIDs[splitMutationIndex];
 							printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex, mutation.toString().c_str(), applierID.toString().c_str());
 							applierCmdInterf = self->appliersInterf[applierID];
-							applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
+							applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
 							applierMutationsSize[applierID] += mutation.expectedSize();
 
 							kvCount++;
@@ -549,7 +549,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						printf("KV--Applier: K:%s ApplierID:%s\n", kvm.param1.toString().c_str(), applierID.toString().c_str());
 						kvCount++;
 
-						applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
+						applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
 						applierMutationsSize[applierID] += mutation.expectedSize();
 						if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
 							self->cmdID.nextCmd();
@@ -563,25 +563,26 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 							cmdReplies.clear();
 						}
 					}
+				} // Mutations at the same version
+
+				// In case the mutation vector is not larger than mutationVectorThreshold
+				// We must send out the leftover mutations any way; otherwise, the mutations at different versions will be mixed together
+				printf("[DEBUG][Loader] sendMutationVector sends the remaining applierMutationsBuffer, applierIDs.size:%d\n", applierIDs.size());
+				for (auto &applierID : applierIDs) {
+					if (applierMutationsBuffer[applierID].empty()) { //&& applierMutationsSize[applierID] >= 1
+						continue;
+					}
+					printf("[DEBUG][Loader] sendMutationVector for applierID:%s\n", applierID.toString().c_str());
+					self->cmdID.nextCmd();
+					cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+										RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
+					printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
+					applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+					applierMutationsSize[applierID] = 0;
+					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
+					cmdReplies.clear();
 				}
 
-			}
-
-			// In case the mutation vector is not larger than mutationVectorThreshold
-			printf("[DEBUG][Loader] sendMutationVector sends the remaining applierMutationsBuffer, applierIDs.size:%d\n", applierIDs.size());
-			for (auto &applierID : applierIDs) {
-				if (applierMutationsBuffer[applierID].empty()) { //&& applierMutationsSize[applierID] >= 1
-					continue;
-				}
-				printf("[DEBUG][Loader] sendMutationVector for applierID:%s\n", applierID.toString().c_str());
-				self->cmdID.nextCmd();
-				cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
-									RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
-				printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
-				applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-				applierMutationsSize[applierID] = 0;
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
-				cmdReplies.clear();
 			}
 
 			if (!cmdReplies.empty()) {
