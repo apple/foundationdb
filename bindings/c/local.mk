@@ -31,8 +31,14 @@ CLEAN_TARGETS += fdb_c_tests_clean
 
 ifeq ($(PLATFORM),linux)
   fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libgcc -Wl,-z,nodelete -lm -lpthread -lrt -ldl
-  ifeq ($(LIBSTDCPP_HACK),1)
-    fdb_c_LIBS += lib/libstdc++.a
+	# Link our custom libstdc++ statically in Ubuntu, if hacking
+  ifeq ("$(wildcard /etc/centos-release)", "")
+    ifeq ($(LIBSTDCPP_HACK),1)
+      fdb_c_LIBS += lib/libstdc++.a
+    endif
+	# Link stdc++ statically in Centos, if not hacking
+  else
+    fdb_c_STATIC_LIBS += -static-libstdc++
   endif
   fdb_c_tests_LIBS += -lpthread
 endif

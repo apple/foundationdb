@@ -1,13 +1,12 @@
 export
 PLATFORM := $(shell uname)
 ARCH := $(shell uname -m)
-ifeq ("$(wildcard /etc/centos-release)", "")
-	LIBSTDCPP_HACK = 1
-else
-	LIBSTDCPP_HACK = 0
-endif
-
 TOPDIR := $(shell pwd)
+
+# Allow custom libc++ hack for Ubuntu
+ifeq ("$(wildcard /etc/centos-release)", "")
+  LIBSTDCPP_HACK ?= 1
+endif
 
 ifeq ($(ARCH),x86_64)
   ARCH := x64
@@ -43,7 +42,7 @@ ifeq ($(PLATFORM),Linux)
   CC ?= gcc
   CXX ?= g++
 
-  CXXFLAGS += -std=c++0x
+  CXXFLAGS += -std=c++17
 
   BOOST_BASEDIR ?= /opt
   TLS_LIBDIR ?= /usr/local/lib
