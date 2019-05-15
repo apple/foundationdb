@@ -18,6 +18,12 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <set>
+#include <vector>
+
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -35,7 +41,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -682,6 +687,12 @@ public:
 			result.resolvers.push_back(resolvers[i].interf);
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].interf);
+
+		// TODO: revisit the number of workers. Consider the number of log routers?
+		auto backupWorkers =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, tlogs.size(), req.configuration, id_used);
+		std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
+		               [](const WorkerDetails& w) { return w.interf; });
 
 		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
 		for(int i = 0; i < oldLogRouters.size(); i++) {

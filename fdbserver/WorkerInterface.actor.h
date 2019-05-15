@@ -134,6 +134,8 @@ struct InitializeLogRouterRequest {
 
 struct InitializeBackupRequest {
 	UID reqId;
+	uint64_t recoveryCount;
+	Version startVersion;
 	ReplyPromise<struct BackupInterface> reply;
 
 	InitializeBackupRequest() = default;
@@ -141,7 +143,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, reply);
+		serializer(ar, reqId, recoveryCount, startVersion, reply);
 	}
 };
 

@@ -79,13 +79,44 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount,
+                                BackupInterface myInterface) {
+	loop {
+		bool isDisplaced =
+		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
+		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		if (isDisplaced) {
+			for (auto& log : db->get().logSystemConfig.tLogs) {
+				if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), myInterface.id())) {
+					isDisplaced = false;
+					break;
+				}
+			}
+		}
+		if (isDisplaced) {
+			for (auto& old : db->get().logSystemConfig.oldTLogs) {
+				for (auto& log : old.tLogs) {
+					if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), myInterface.id())) {
+						isDisplaced = false;
+						break;
+					}
+				}
+			}
+		}
+		if (isDisplaced) {
+			throw worker_removed();
+		}
+		wait(db->onChange());
+	}
+}
+
 ACTOR Future<Void> backupWorker(
 	BackupInterface interf, InitializeBackupRequest req,
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	state BackupData self(interf.id(), req);
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection( addActor.getFuture() );
+	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
 
 	TraceEvent("BackupWorkerStart", interf.id());
@@ -93,19 +124,22 @@ ACTOR Future<Void> backupWorker(
 		addActor.send(pullAsyncData(&self));
 
 		loop choose {
-			when (wait(dbInfoChange)) {
+			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
 				self.logSystem.set(ILogSystem::fromServerDBInfo(self.myId, db->get(), true));
 			}
-			when (HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
+			when(HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
 				req.reply.send(Void());
 				TraceEvent("BackupWorkerHalted", interf.id()).detail("ReqID", req.requesterID);
 				break;
 			}
-			when (wait(error)) {}
+			when(wait(checkRemoved(db, req.recoveryCount, interf))) {
+				TraceEvent("BackupWorkerRemoved", interf.id());
+				break;
+			}
+			when(wait(error)) {}
 		}
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
 			TraceEvent("BackupWorkerTerminated", interf.id()).error(e, true);
 		} else {
