@@ -15,13 +15,19 @@
 #define OP_SGETRANGE 4
 #define OP_UPDATE 5
 #define OP_INSERT 6
-#define OP_CLEAR 7
-#define OP_CLEARRANGE 8
-
-#define OP_COMMIT 9
-#define MAX_OP 10 /* update this when adding a new operation */
+#define OP_INSERTRANGE 7
+#define OP_CLEAR 8
+#define OP_SETCLEAR 9
+#define OP_CLEARRANGE 10
+#define OP_SETCLEARRANGE 11
+#define OP_COMMIT 12
+#define MAX_OP 13 /* update this when adding a new operation */
 
 #define OP_COUNT 0
 #define OP_RANGE 1
+
+#define KEYPREFIXLEN 4
+
+#define BUFFERSIZE 10000
 
 #endif /* MAKO_H */
