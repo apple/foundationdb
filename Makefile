@@ -55,8 +55,8 @@ else ifeq ($(PLATFORM),Darwin)
   CC := /usr/bin/clang
   CXX := /usr/bin/clang
 
-  CFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
-  CXXFLAGS += -mmacosx-version-min=10.7 -std=c++17 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
+  CFLAGS += -mmacosx-version-min=10.14 -stdlib=libc++
+  CXXFLAGS += -mmacosx-version-min=10.14 -std=c++17 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
