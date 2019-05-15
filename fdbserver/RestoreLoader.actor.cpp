@@ -511,7 +511,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++ ) {
 							MutationRef mutation = mvector[splitMutationIndex];
 							UID applierID = nodeIDs[splitMutationIndex];
-							printf("SPLITTED MUTATION: %d: mutation:%s\n", splitMutationIndex, mutation.toString().c_str());
+							printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex, mutation.toString().c_str(), applierID.toString().c_str());
 							applierCmdInterf = self->appliersInterf[applierID];
 							applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
 							applierMutationsSize[applierID] += mutation.expectedSize();
@@ -667,6 +667,7 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 	// 	++itup; //make sure itup is >= m.param2, that is, itup is the next key range >= m.param2
 	// }
 
+	std::map<Standalone<KeyRef>, UID>::iterator itApplier;
 	while (itlow != itup) {
 		Standalone<MutationRef> curm; //current mutation
 		curm.type = m.type;
@@ -676,6 +677,7 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 		} else {
 			curm.param1 = itlow->first;
 		}
+		itApplier = itlow;
 		//curm.param1 = ((m.param1 > itlow->first) ? m.param1 : itlow->first); 
 		itlow++;
 		if (itlow == itup) {
@@ -689,7 +691,7 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 		printf("SPLITMUTATION: mvector.push_back:%s\n", curm.toString().c_str());
 		ASSERT( curm.param1 <= curm.param2 );
 		mvector.push_back_deep(mvector_arena, curm);
-		nodeIDs.push_back(nodeIDs_arena, itlow->second);
+		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
 	}
 
 	printf("SPLITMUTATION: mvector.size:%d\n", mvector.size());

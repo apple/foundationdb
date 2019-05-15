@@ -431,6 +431,16 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 								.detail("MValue", getHexString(m.param2));
 					}
 				}
+
+				if ( transactionSize > 0 ) { // the commit batch should NOT across versions
+					wait(tr->commit());
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					prevIt = it;
+					prevIndex = index;
+					transactionSize = 0;
+				}
 				index = 0;
 			}
 			// Last transaction
