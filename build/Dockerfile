@@ -8,8 +8,9 @@ RUN yum install -y yum-utils &&\
 	yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
 	yum -y install centos-release-scl epel-release &&\
 	yum -y install devtoolset-8 java-1.8.0-openjdk-devel \
-		rh-python36-python-devel mono-core rh-ruby24 golang python27 \
-		rpm-build debbuild python-pip npm dos2unix valgrind-devel &&\
+		rh-python36-python-devel devtoolset-8-valgrind-devel \
+		mono-core rh-ruby24 golang python27 rpm-build debbuild \
+		python-pip npm dos2unix valgrind-devel &&\
 	pip install boto3==1.1.1
 
 USER root
