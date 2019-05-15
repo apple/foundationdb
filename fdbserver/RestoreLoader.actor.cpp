@@ -448,7 +448,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 	printf("[INFO][Loader] Node:%s self->masterApplierInterf:%s, registerMutationsToApplier\n",
 			self->describeNode().c_str(), self->masterApplierInterf.toString().c_str());
 
-	state RestoreApplierInterface applierCmdInterf;
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 10;
 	state int kvCount = 0;
@@ -512,7 +511,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 							MutationRef mutation = mvector[splitMutationIndex];
 							UID applierID = nodeIDs[splitMutationIndex];
 							printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex, mutation.toString().c_str(), applierID.toString().c_str());
-							applierCmdInterf = self->appliersInterf[applierID];
 							applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
 							applierMutationsSize[applierID] += mutation.expectedSize();
 
@@ -523,7 +521,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 							if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
 								state int tmpNumMutations = applierMutationsBuffer[applierID].size();
 								self->cmdID.nextCmd();
-								cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+								cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
 									RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
 								applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
 								applierMutationsSize[applierID] = 0;
@@ -545,7 +543,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						ASSERT( itlow->first <= kvm.param1 );
 						MutationRef mutation = kvm;
 						UID applierID = itlow->second;
-						applierCmdInterf = self->appliersInterf[applierID];
 						printf("KV--Applier: K:%s ApplierID:%s\n", kvm.param1.toString().c_str(), applierID.toString().c_str());
 						kvCount++;
 
@@ -553,7 +550,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						applierMutationsSize[applierID] += mutation.expectedSize();
 						if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
 							self->cmdID.nextCmd();
-							cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+							cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
 												RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
 							printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
 							applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
@@ -570,11 +567,12 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 				printf("[DEBUG][Loader] sendMutationVector sends the remaining applierMutationsBuffer, applierIDs.size:%d\n", applierIDs.size());
 				for (auto &applierID : applierIDs) {
 					if (applierMutationsBuffer[applierID].empty()) { //&& applierMutationsSize[applierID] >= 1
+						ASSERT( applierMutationsSize[applierID] == 0 );
 						continue;
 					}
-					printf("[DEBUG][Loader] sendMutationVector for applierID:%s\n", applierID.toString().c_str());
+					printf("[DEBUG][Loader] sendMutationVector size:%d for applierID:%s\n", applierMutationsBuffer[applierID].size(), applierID.toString().c_str());
 					self->cmdID.nextCmd();
-					cmdReplies.push_back(applierCmdInterf.sendMutationVector.getReply(
+					cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
 										RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
 					printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
 					applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
@@ -582,8 +580,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
 					cmdReplies.clear();
 				}
-
-			}
+			} // all versions of mutations
 
 			if (!cmdReplies.empty()) {
 				printf("[INFO][Loader] Last Waits for applier to receive %ld range mutations\n", cmdReplies.size());

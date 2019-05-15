@@ -237,7 +237,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 
 	// Handle duplicat cmd
 	if ( self->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
+		printf("[DEBUG] NODE:% handleSendMutationVectorRequest skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
 		//printf("[DEBUG] Skipped duplicate cmd:%s\n", req.cmdID.toString().c_str());
 		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));	
 		return Void();
