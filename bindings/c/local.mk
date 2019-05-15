@@ -24,15 +24,21 @@ fdb_c_CFLAGS := $(fdbclient_CFLAGS)
 fdb_c_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)
 fdb_c_STATIC_LIBS := $(TLS_LIBS)
-fdb_c_tests_LIBS := -Llib -lfdb_c
+fdb_c_tests_LIBS := -Llib -lfdb_c -lstdc++
 fdb_c_tests_HEADERS := -Ibindings/c
 
 CLEAN_TARGETS += fdb_c_tests_clean
 
 ifeq ($(PLATFORM),linux)
   fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libgcc -Wl,-z,nodelete -lm -lpthread -lrt -ldl
-  ifeq ($(LIBSTDCPP_HACK),1)
-    fdb_c_LIBS += lib/libstdc++.a
+	# Link our custom libstdc++ statically in Ubuntu, if hacking
+  ifeq ("$(wildcard /etc/centos-release)", "")
+    ifeq ($(LIBSTDCPP_HACK),1)
+      fdb_c_LIBS += lib/libstdc++.a
+    endif
+	# Link stdc++ statically in Centos, if not hacking
+  else
+    fdb_c_STATIC_LIBS += -static-libstdc++
   endif
   fdb_c_tests_LIBS += -lpthread
 endif
@@ -86,11 +92,11 @@ bindings/c/foundationdb/fdb_c_options.g.h: bin/vexillographer.exe fdbclient/vexi
 
 bin/fdb_c_performance_test: bindings/c/test/performance_test.c bindings/c/test/test.h fdb_c
 	@echo "Compiling      fdb_c_performance_test"
-	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c $(fdb_c_tests_LIBS) 
+	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c $(fdb_c_tests_LIBS)
 
 bin/fdb_c_ryw_benchmark: bindings/c/test/ryw_benchmark.c bindings/c/test/test.h fdb_c
 	@echo "Compiling      fdb_c_ryw_benchmark"
-	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/ryw_benchmark.c $(fdb_c_tests_LIBS) 
+	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/ryw_benchmark.c $(fdb_c_tests_LIBS)
 
 packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz: bin/fdb_c_performance_test bin/fdb_c_ryw_benchmark
 	@echo "Packaging      $@"
