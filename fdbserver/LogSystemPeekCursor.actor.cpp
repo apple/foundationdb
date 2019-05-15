@@ -235,7 +235,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
 	if( hasMessage() )
 		return Void();
 	if( !more.isValid() || more.isReady() ) {
-		more = parallelGetMore ? serverPeekParallelGetMore(this, taskID) : serverPeekGetMore(this, taskID);
+		more = (parallelGetMore || onlySpilled) ? serverPeekParallelGetMore(this, taskID) : serverPeekGetMore(this, taskID);
 	}
 	return more;
 }
