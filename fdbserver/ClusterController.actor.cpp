@@ -18,6 +18,12 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <set>
+#include <vector>
+
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -35,7 +41,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -773,6 +778,17 @@ public:
 					}
 				}
 			}
+		}
+
+		// TODO: revisit the number of workers. Consider the number of log routers?
+		auto backupWorkers =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, tlogs.size(), req.configuration, id_used);
+		std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
+		               [](const WorkerDetails& w) { return w.interf; });
+
+		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
+		for(int i = 0; i < oldLogRouters.size(); i++) {
+			result.oldLogRouters.push_back(oldLogRouters[i].interf);
 		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&

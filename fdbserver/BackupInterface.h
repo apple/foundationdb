@@ -37,6 +37,7 @@ struct BackupInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
+	UID getToken() const { return haltBackup.getEndpoint().token; }
 	bool operator== (const BackupInterface& r) const {
 		return id() == r.id();
 	}

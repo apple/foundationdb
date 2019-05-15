@@ -82,6 +82,7 @@ struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
+	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	TLogVersion tLogVersion;
@@ -95,12 +96,16 @@ struct TLogSet {
 	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(), locality);
+		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",
+		              tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(),
+		              backupWorkers.size(), locality);
 	}
 
 	bool operator == ( const TLogSet& rhs ) const {
-		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
-			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
+		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
+		    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
+		    startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ||
+		    logRouters.size() != rhs.logRouters.size() || backupWorkers.size() != rhs.backupWorkers.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
@@ -113,6 +118,14 @@ struct TLogSet {
 		}
 		for(int j = 0; j < logRouters.size(); j++ ) {
 			if (logRouters[j].id() != rhs.logRouters[j].id() || logRouters[j].present() != rhs.logRouters[j].present() || ( logRouters[j].present() && logRouters[j].interf().commit.getEndpoint().token != rhs.logRouters[j].interf().commit.getEndpoint().token ) ) {
+				return false;
+			}
+		}
+		for (int j = 0; j < backupWorkers.size(); j++) {
+			if (backupWorkers[j].id() != rhs.backupWorkers[j].id() ||
+			    backupWorkers[j].present() != rhs.backupWorkers[j].present() ||
+			    (backupWorkers[j].present() &&
+			     backupWorkers[j].interf().getToken() != rhs.backupWorkers[j].interf().getToken())) {
 				return false;
 			}
 		}
@@ -148,6 +161,9 @@ struct TLogSet {
 				serializer(ar, tLogVersion);
 			}
 			ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
+		}
+		if (ar.protocolVersion() > 0x0FDB00B061070001LL) {
+			serializer(ar, backupWorkers);
 		}
 	}
 };
