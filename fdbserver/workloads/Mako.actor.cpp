@@ -382,9 +382,9 @@ struct MakoWorkload : KVWorkload {
 	}
 
 	ACTOR Future<Void> cleanup(Database cx, MakoWorkload* self){
-		// TODO: check the length of possible longest key
-		state std::string startKey("mako\x00");
-		state std::string endKey("mako\xff");
+		// clear all data in the database
+		state std::string startKey("");
+		state std::string endKey("\xff");
 		state Transaction tr(cx);
 
 		loop{
