@@ -154,7 +154,7 @@ public:
 	ACTOR static Future<Void> async_fsync_parent( std::string filename ) {
 		std::string folder = parentDirectory( filename );
 		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
-		state int folderFD = ::open( folder.c_str(), O_DIRECTORY, 0 );
+		state int folderFD = ::open( folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0 );
 		if (folderFD<0)
 			throw io_error();
 		try {

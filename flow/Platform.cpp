@@ -1606,7 +1606,7 @@ int getRandomSeed() {
 		}
 	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);	// randomSeed cannot be 0 since we use mersenne twister in DeterministicRandom. Get a new one if randomSeed is 0.
 #else
-	int devRandom = open("/dev/urandom", O_RDONLY);
+	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
 	do {
 		retryCount++;
 		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed) ) {
@@ -1659,13 +1659,21 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
+#if defined(__linux__)
+#define FOPEN_CLOEXEC_MODE "e"
+#elif defined(_WIN32)
+#define FOPEN_CLOEXEC_MODE "N"
+#else
+#define FOPEN_CLOEXEC_MODE ""
+#endif
+
 void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
-		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
+		f = textmode ? fopen( tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE ) : fopen( tempfilename.c_str(), "wb" FOPEN_CLOEXEC_MODE );
 		if(!f)
 			throw io_error();
 	#ifdef _WIN32
@@ -2206,7 +2214,7 @@ void deprioritizeThread() {
 }
 
 bool fileExists(std::string const& filename) {
-	FILE* f = fopen(filename.c_str(), "rb");
+	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE );
 	if (!f) return false;
 	fclose(f);
 	return true;
@@ -2245,7 +2253,7 @@ int64_t fileSize(std::string const& filename) {
 
 std::string readFileBytes( std::string const& filename, int maxSize ) {
 	std::string s;
-	FILE* f = fopen(filename.c_str(), "rb");
+	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
 	if (!f) throw file_not_readable();
 	try {
 		fseek(f, 0, SEEK_END);
@@ -2265,7 +2273,7 @@ std::string readFileBytes( std::string const& filename, int maxSize ) {
 }
 
 void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	FILE* f = fopen(filename.c_str(), "wb");
+	FILE* f = fopen(filename.c_str(), "wb" FOPEN_CLOEXEC_MODE);
 	if (!f)
 	{
 		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();

@@ -515,7 +515,7 @@ private:
 		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(g_random->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion( int flags ) {
-		int outFlags = O_BINARY;
+		int outFlags = O_BINARY | O_CLOEXEC;
 		if( flags&OPEN_READWRITE ) outFlags |= O_RDWR;
 		if( flags&OPEN_CREATE ) outFlags |= O_CREAT;
 		if( flags&OPEN_READONLY ) outFlags |= O_RDONLY;
