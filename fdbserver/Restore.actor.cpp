@@ -236,7 +236,7 @@ void initRestoreWorkerConfig() {
 	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
 	loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 	mutationVectorThreshold = g_network->isSimulated() ? 100 : 10 * 1024; // Bytes // correctness passed when the value is 1
-	transactionBatchSizeThreshold = 1; //g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
+	transactionBatchSizeThreshold = g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
 
 	// Debug
 	//loadBatchSizeThresholdB = 1;
