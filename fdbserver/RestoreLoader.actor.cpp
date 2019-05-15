@@ -537,12 +537,16 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 						std::map<Standalone<KeyRef>, UID>::iterator itlow = self->range2Applier.lower_bound(kvm.param1); // lower_bound returns the iterator that is >= m.param1
 						// make sure itlow->first <= m.param1
 						if ( itlow == self->range2Applier.end() || itlow->first > kvm.param1 ) {
+							if ( itlow == self->range2Applier.begin() ) {
+								printf("KV-Applier: SHOULD NOT HAPPEN. kvm.param1:%s\n", kvm.param1.toString().c_str());
+							}
 							--itlow;
 						}
 						ASSERT( itlow->first <= kvm.param1 );
 						MutationRef mutation = kvm;
 						UID applierID = itlow->second;
 						applierCmdInterf = self->appliersInterf[applierID];
+						printf("KV--Applier: K:%s ApplierID:%s\n", kvm.param1.toString().c_str(), applierID.toString().c_str());
 						kvCount++;
 
 						applierMutationsBuffer[applierID].push_back(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
@@ -589,6 +593,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self)
 			printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
 					self->describeNode().c_str(), self->cmdID.toString().c_str(), kvCount);
 
+			self->kvOps.clear();
 			break;
 
 		} catch (Error &e) {
