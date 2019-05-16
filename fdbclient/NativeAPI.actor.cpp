@@ -3189,6 +3189,20 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 	return ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit );
 }
 
+ACTOR Future< Standalone<RangeResultRef> > waitStorageMetricsList(
+	Database cx,
+	KeyRange keys,
+	int shardLimit )
+{
+	// TODO: add use for or remove shardLimit
+	GetDDMetricsReply rep = wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics, GetDDMetricsRequest(keys)));
+	return rep.storageMetricsList;
+}
+
+Future< Standalone<RangeResultRef> > Transaction::getStorageMetricsList(KeyRange const& keys, int shardLimit) {
+	return ::waitStorageMetricsList(cx, keys, shardLimit);
+}
+
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
 {
 	loop {

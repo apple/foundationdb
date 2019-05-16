@@ -51,6 +51,7 @@ struct MasterProxyInterface {
 	RequestStream< struct TxnStateRequest >  txnState;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -62,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, getDDMetrics);
 	}
 
 	void initEndpoints() {
@@ -295,6 +296,33 @@ struct GetHealthMetricsRequest
 	void serialize(Ar& ar)
 	{
 		serializer(ar, reply, detailed);
+	}
+};
+
+struct GetDDMetricsReply
+{
+	constexpr static FileIdentifier file_identifier = 7277713;
+	Standalone<RangeResultRef> storageMetricsList;
+
+	GetDDMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, storageMetricsList);
+	}
+};
+
+struct GetDDMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 14536812;
+	KeyRange keys;
+	ReplyPromise<struct GetDDMetricsReply> reply;
+
+	GetDDMetricsRequest() {}
+	explicit GetDDMetricsRequest(KeyRange const& keys) : keys(keys) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply);
 	}
 };
 

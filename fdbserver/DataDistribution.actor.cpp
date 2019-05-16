@@ -3517,7 +3517,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 }
 
-ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
+ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, PromiseStream<GetMetricsListRequest> getShardMetricsList)
 {
 	state double lastLimited = 0;
 	self->addActor.send( monitorBatchLimitedTime(self->dbInfo, &lastLimited) );
@@ -3676,7 +3676,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getShardMetricsList, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
@@ -3722,11 +3722,12 @@ static std::set<int> const& normalDataDistributorErrors() {
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
+	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
 
 	try {
 		TraceEvent("DataDistributor_Running", di.id());
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
-		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
 		loop choose {
 			when ( wait(distributor || collection) ) {
@@ -3737,6 +3738,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(Void());
 				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
 				break;
+			}
+			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
+				Standalone<RangeResultRef> result = wait(brokenPromiseToNever(getShardMetricsList.getReply( GetMetricsListRequest(req.keys))));
+				GetDataDistributorMetricsReply rep;
+				rep.storageMetricsList = result;
+				req.reply.send(rep);
 			}
 		}
 	}

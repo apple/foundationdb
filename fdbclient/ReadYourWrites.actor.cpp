@@ -1273,7 +1273,20 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			return Standalone<RangeResultRef>();
 		}
 	}
-	
+
+	auto stats_prefix = LiteralStringRef("\xff\xff/dd_stats/");
+	if (begin.getKey().startsWith(stats_prefix) &&
+		end.getKey().startsWith(stats_prefix)) {
+		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+			auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
+			// TODO: find appropriate use for shardLimit, currently not used
+			return tr.getStorageMetricsList(keys, 10);
+		}
+		else {
+			return Standalone<RangeResultRef>();
+		}
+	}
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

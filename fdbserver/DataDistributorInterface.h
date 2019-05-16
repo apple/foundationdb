@@ -23,12 +23,14 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/FDBTypes.h"
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
+	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
@@ -45,7 +47,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltDataDistributor, locality);
+		serializer(ar, waitFailure, haltDataDistributor, locality, dataDistributorMetrics);
 	}
 };
 
@@ -60,6 +62,32 @@ struct HaltDataDistributorRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct GetDataDistributorMetricsReply {
+	constexpr static FileIdentifier file_identifier = 1284337;
+	Standalone<RangeResultRef> storageMetricsList;
+
+	GetDataDistributorMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,storageMetricsList);
+	}
+};
+
+struct GetDataDistributorMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 1059267;
+	KeyRange keys;
+	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
+
+	GetDataDistributorMetricsRequest() {}
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys) : keys(keys) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply);
 	}
 };
 
