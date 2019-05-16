@@ -31,14 +31,16 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include <cstdint>
+#include <cstdarg>
 
-//Debug printf for restore
-#define RESTORE_DEBUG
-#ifdef RESTORE_DEBUG
-#define dbprintf(fmt, ...) fprintf(stdout, "%s: "fmt, __FUNCTION__, __VA_ARGS__)
-#else
-#define dbprintf(fmt, ...) 
-#endif
+
+inline void dbprintf(const char* fmt) {
+	printf(fmt);
+}
+
+inline void dbprintf(const char* fmt, va_list va) {
+	printf(fmt, va);
+}
 
 
 // TODO: To remove unused command enum. and re-order the command sequence

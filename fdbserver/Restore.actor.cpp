@@ -133,7 +133,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	}
 
 	~RestoreWorkerData() {
-		dbprintf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
+		printf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
 	}
 
 	std::string describeNode() {

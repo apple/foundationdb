@@ -26,6 +26,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreMaster.actor.h"
@@ -1144,7 +1145,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, D
 			}
 			printf("[INFO] Wait for %ld applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			printf("All appliers have been assigned for ranges");
+			printf("All appliers have been assigned for ranges\n");
 			
 			break;
 		} catch (Error &e) {
@@ -1222,7 +1223,7 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
 				cmdReplies.clear();
 			}
-			printf("All restore workers have quited\n");
+			dbprintf("All restore workers have quited\n");
 
 			break;
 		} catch(Error &e) {
