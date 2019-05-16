@@ -23,9 +23,20 @@
 
 namespace fdb_versions {
 
+// Whenever a new breaking feature is introduced in FDB for which we need code
+// that tests whether the serialized version of the code was serialized with
+// that feature, the author should add this macro with the name of the feature
+// to the corresponding version. Users can than later call `version->hasFeature()`
+// on a deserialized `ProtocolVersion` to test for the feature.
 #define VERSION_FEATURE(x)                                                                                             \
 	constexpr bool has##x() const { return static_cast<const P*>(this)->version() >= protocolVersion; }
 
+// A version-class. These need to be ordered by version and the ordering
+// happens through inheritance. Each of these structs need to know about
+// the `ProtocolVersion`-class (through the template parameter) and it has
+// to be names `P` (otherwise the VERSION_FEATURE macro won't work anymore).
+// These classes are used to determine if a feature was available at a certain
+// protocol version. It does determine that through static polymorphism.
 template<class P>
 struct v5_5 {
 	static constexpr uint64_t protocolVersion = 0x0FDB00A551000000LL;
@@ -50,11 +61,18 @@ struct v6_0 : v5_6<P> {
 template <class P>
 struct v6_1 : v6_0<P> {};
 
+// This tyoedef needs to be updated whenever a new version is added
 template <class P>
 using latest_version = v6_1<P>;
 
 } // namespace fdb_versions
 
+// ProtocolVersion wraps a uint64_t to make it type safe. It has to inherit
+// from the newest version object and it will know about the current version.
+// The default constuctor will initialize the version to 0 (which is an invalid
+// version). ProtocolVersion objects should never be compared to version numbers
+// directly. Instead one should always use the type-safe version types from which
+// this class inherits all.
 class ProtocolVersion : public fdb_versions::latest_version<ProtocolVersion> {
 	uint64_t _version;
 public: // constants

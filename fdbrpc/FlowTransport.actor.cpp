@@ -326,8 +326,8 @@ struct Peer : NonCopyable {
 			pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
 			pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
 		} else {
-			pkt.canonicalRemotePort =
-			    0; // a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			// a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			pkt.canonicalRemotePort = 0;
 			pkt.setCanonicalRemoteIp(IPAddress(0));
 		}
 
