@@ -93,6 +93,7 @@ struct PageChecksumCodec {
 		int dataLen = pageLen - sizeof(SumType);
 		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
+		bool usingCrc = false;
 
 		if (write) {
 			// Always write a CRC32 checksum for new pages
@@ -107,20 +108,17 @@ struct PageChecksumCodec {
 			// was used, so check that first. If this checksum fails, there is still
 			// some chance the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
+			usingCrc = true;
 			sum.part1 = 0;
 			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			if (sum == *pSumInPage) return true;
-			SumType hashLittle2Sum;
-			hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
-			hashLittle2Sum.part2 = 0x5ca1ab1e;
-			hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
-			if (hashLittle2Sum == *pSumInPage) return true;
-		} else {
-			sum.part1 = pageNumber; // DO NOT CHANGE
-			sum.part2 = 0x5ca1ab1e;
-			hashlittle2(pData, dataLen, &sum.part1, &sum.part2);
-			if (sum == *pSumInPage) return true;
 		}
+
+		SumType hashLittle2Sum;
+		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
+		hashLittle2Sum.part2 = 0x5ca1ab1e;
+		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
+		if (hashLittle2Sum == *pSumInPage) return true;
 
 		TraceEvent(SevError, "SQLitePageChecksumFailure")
 		    .error(checksum_failed())
@@ -130,7 +128,7 @@ struct PageChecksumCodec {
 		    .detail("PageNumber", pageNumber)
 		    .detail("PageSize", pageLen)
 		    .detail("ChecksumInPage", pSumInPage->toString())
-		    .detail("ChecksumCalculated", sum.toString());
+		    .detail("ChecksumCalculated", usingCrc ? sum.toString() : hashLittle2Sum.toString());
 		return false;
 	}
 
