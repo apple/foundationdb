@@ -25,7 +25,7 @@
 #include <array>
 #include <string>
 #include <stdint.h>
-#include <boost/variant.hpp>
+#include <variant>
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"

@@ -26,7 +26,7 @@
 #include <memory>
 #include <functional>
 #include <vector>
-#include <boost/variant.hpp>
+#include <variant>
 
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
