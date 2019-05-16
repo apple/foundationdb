@@ -409,7 +409,7 @@ public:
 	Deque<std::pair<Version,Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage server
 
-	uint64_t logProtocol;
+	ProtocolVersion logProtocol;
 
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
@@ -3163,7 +3163,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	data->sk = serverKeysPrefixFor( data->thisServerID ).withPrefix(systemKeys.begin);  // FFFF/serverKeys/[this server]/
 
 	if (fLogProtocol.get().present())
-		data->logProtocol = BinaryReader::fromStringRef<uint64_t>(fLogProtocol.get().get(), Unversioned());
+		data->logProtocol = BinaryReader::fromStringRef<ProtocolVersion>(fLogProtocol.get().get(), Unversioned());
 
 	if (fPrimaryLocality.get().present())
 		data->primaryLocality = BinaryReader::fromStringRef<int8_t>(fPrimaryLocality.get().get(), Unversioned());

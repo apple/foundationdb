@@ -264,7 +264,7 @@ private:
 };
 
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	IClientApi *api;
 	std::string libPath;
 	bool external;
