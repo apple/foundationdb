@@ -91,17 +91,16 @@ struct PageChecksumCodec {
 
 		char *pData = (char *)data;
 		int dataLen = pageLen - sizeof(SumType);
-		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
 		if (write) {
 			// Always write a CRC32 checksum for new pages
-			sum.part1 = 0; // Indicates CRC32 is being used
-			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			*pSumInPage = sum;
+			pSumInPage->part1 = 0; // Indicates CRC32 is being used
+			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			return true;
 		}
 
+		SumType sum;
 		if (pSumInPage->part1 == 0) {
 			// part1 being 0 indicates with high probability that a CRC32 checksum
 			// was used, so check that first. If this checksum fails, there is still
