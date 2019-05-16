@@ -98,7 +98,7 @@ struct PageChecksumCodec {
 			// Always write a CRC32 checksum for new pages
 			sum.part1 = 0; // Indicates CRC32 is being used
 			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			memcpy(pSumInPage, &sum, sizeof(SumType));
+			*pSumInPage = sum;
 			return true;
 		}
 
