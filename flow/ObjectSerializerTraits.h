@@ -26,7 +26,7 @@
 #include <memory>
 #include <functional>
 #include <vector>
-#include <variant>
+#include <boost/variant.hpp>
 
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
@@ -195,5 +195,3 @@ struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
 		member = a;
 	}
 };
-
-
