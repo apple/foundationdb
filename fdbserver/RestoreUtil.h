@@ -32,6 +32,15 @@
 #include "fdbrpc/IAsyncFile.h"
 #include <cstdint>
 
+//Debug printf for restore
+#define RESTORE_DEBUG
+#ifdef RESTORE_DEBUG
+#define dbprintf(fmt, ...) fprintf(stdout, "%s: "fmt, __FUNCTION__, __VA_ARGS__)
+#else
+#define dbprintf(fmt, ...) 
+#endif
+
+
 // TODO: To remove unused command enum. and re-order the command sequence
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum : uint32_t {Init = 0,

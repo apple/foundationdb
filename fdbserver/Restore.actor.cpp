@@ -50,15 +50,17 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// NOTE: The initRestoreWorkerConfig function will reset the configuration params in simulation
 // These configurations for restore workers will  be set in initRestoreWorkerConfig() later.
-int MIN_NUM_WORKERS = 2; //10; // TODO: This can become a configuration param later
+
 int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
-int NUM_LOADERS = 1;
-int NUM_APPLIERS = 1;
+int NUM_LOADERS = 120;
+int NUM_APPLIERS = 40;
+int MIN_NUM_WORKERS = NUM_LOADERS + NUM_APPLIERS; //10; // TODO: This can become a configuration param later
 int FastRestore_Failure_Timeout = 3600; // seconds
-double loadBatchSizeMB = 1; // MB
+double loadBatchSizeMB = 10 * 1024; // MB
 double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
-double mutationVectorThreshold =  100; // Bytes // correctness passed when the value is 1
+double mutationVectorThreshold =  1 * 1024 * 1024; // Bytes // correctness passed when the value is 1
 double transactionBatchSizeThreshold =  512; // Byte
 
 int restoreStatusIndex = 0;
@@ -131,7 +133,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	}
 
 	~RestoreWorkerData() {
-		printf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
+		dbprintf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
 	}
 
 	std::string describeNode() {
@@ -228,15 +230,15 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 
 void initRestoreWorkerConfig() {
 	ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
-	NUM_LOADERS = g_network->isSimulated() ? 3 : 10;
+	NUM_LOADERS = g_network->isSimulated() ? 3 : NUM_LOADERS;
 	//NUM_APPLIERS = 1;
-	NUM_APPLIERS = g_network->isSimulated() ? 3 : 10;
+	NUM_APPLIERS = g_network->isSimulated() ? 3 : NUM_APPLIERS;
 	MIN_NUM_WORKERS  = NUM_LOADERS + NUM_APPLIERS;
 	FastRestore_Failure_Timeout = 3600; // seconds
-	loadBatchSizeMB = g_network->isSimulated() ? 1 : 10 * 1000.0; // MB
+	loadBatchSizeMB = g_network->isSimulated() ? 1 : loadBatchSizeMB; // MB
 	loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
-	mutationVectorThreshold = g_network->isSimulated() ? 100 : 10 * 1024; // Bytes // correctness passed when the value is 1
-	transactionBatchSizeThreshold = g_network->isSimulated() ? 512 : 1 * 1024 * 1024; // Byte
+	mutationVectorThreshold = g_network->isSimulated() ? 100 : mutationVectorThreshold; // Bytes // correctness passed when the value is 1
+	transactionBatchSizeThreshold = g_network->isSimulated() ? 512 : transactionBatchSizeThreshold; // Byte
 
 	// Debug
 	//loadBatchSizeThresholdB = 1;
