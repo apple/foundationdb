@@ -62,6 +62,7 @@ extern const char* getHGVersion();
 using std::make_pair;
 using std::max;
 using std::min;
+using std::pair;
 
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
