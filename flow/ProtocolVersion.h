@@ -61,7 +61,7 @@ struct v6_0 : v5_6<P> {
 template <class P>
 struct v6_1 : v6_0<P> {};
 
-// This tyoedef needs to be updated whenever a new version is added
+// This typedef needs to be updated whenever a new version is added
 template <class P>
 using latest_version = v6_1<P>;
 
