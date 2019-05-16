@@ -93,7 +93,6 @@ struct PageChecksumCodec {
 		int dataLen = pageLen - sizeof(SumType);
 		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
-		bool usingCrc = false;
 
 		if (write) {
 			// Always write a CRC32 checksum for new pages
@@ -108,7 +107,6 @@ struct PageChecksumCodec {
 			// was used, so check that first. If this checksum fails, there is still
 			// some chance the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
-			usingCrc = true;
 			sum.part1 = 0;
 			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			if (sum == *pSumInPage) return true;
@@ -120,15 +118,17 @@ struct PageChecksumCodec {
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
 		if (hashLittle2Sum == *pSumInPage) return true;
 
-		TraceEvent(SevError, "SQLitePageChecksumFailure")
-		    .error(checksum_failed())
+		TraceEvent tr(SevError, "SQLitePageChecksumFailure");
+		tr.error(checksum_failed())
 		    .detail("CodecPageSize", pageSize)
 		    .detail("CodecReserveSize", reserveSize)
 		    .detail("Filename", filename)
 		    .detail("PageNumber", pageNumber)
 		    .detail("PageSize", pageLen)
 		    .detail("ChecksumInPage", pSumInPage->toString())
-		    .detail("ChecksumCalculated", usingCrc ? sum.toString() : hashLittle2Sum.toString());
+		    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+		if (pSumInPage->part1 == 0)
+			tr.detail("ChecksumCalculatedCRC", sum.toString());
 		return false;
 	}
 
