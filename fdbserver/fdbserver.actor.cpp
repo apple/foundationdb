@@ -54,6 +54,7 @@
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -1465,6 +1466,9 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+
+		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
+		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
 		if (role == SkipListTest) {
 			skipListTest();

@@ -131,6 +131,7 @@ ERROR( transaction_invalid_version, 2020, "Transaction does not have a valid com
 ERROR( no_commit_version, 2021, "Transaction is read-only and therefore does not have a commit version" )
 ERROR( environment_variable_network_option_failed, 2022, "Environment variable network option could not be set" )
 ERROR( transaction_read_only, 2023, "Attempted to commit a transaction specified as read-only" )
+ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only random and lru are supported" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
