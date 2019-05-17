@@ -128,7 +128,7 @@ Fixes only impacting 6.1.0+
 * Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
 * TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
 * Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
-* Adding a read conflict range for the metadata version key. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
 
 Earlier release notes
 ---------------------
