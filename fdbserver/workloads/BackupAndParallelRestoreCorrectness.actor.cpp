@@ -191,7 +191,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	static void dumpDBKVs(Standalone<RangeResultRef> data, BackupAndParallelRestoreCorrectnessWorkload* self) {
-		bool hasDiff = false;
+		// bool hasDiff = false;
 		//Get the new KV pairs in the DB
 		std::map<Standalone<KeyRef>, Standalone<ValueRef>> newDbKVs;
 		for ( auto kvRef = data.contents().begin(); kvRef != data.contents().end(); kvRef++ ) {

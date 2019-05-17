@@ -231,14 +231,15 @@ void printMutationListRefHex(MutationListRef m, std::string prefix) {
 //Note: The data is stored in little endian! You need to convert it to BigEndian so that you know how long the param1 and param2 is and how to format them!
 void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string prefix) {
 	std::stringstream ss;
-	const int version_size = 12;
-	const int header_size = 12;
+	//const int version_size = 12;
+	//const int header_size = 12;
 	StringRef val = val_input.contents();
 	StringRefReaderMX reader(val, restore_corrupted_data());
 
 	int count_size = 0;
 	// Get the version
-	uint64_t version = reader.consume<uint64_t>();
+	//uint64_t version = reader.consume<uint64_t>();
+	reader.consume<uint64_t>(); // consume the first 64bits which is version.
 	count_size += 8;
 	uint32_t val_length_decode = reader.consume<uint32_t>();
 	count_size += 4;
@@ -286,8 +287,8 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 
 void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	std::stringstream ss;
-	const int version_size = 12;
-	const int header_size = 12;
+	// const int version_size = 12;
+	// const int header_size = 12;
 	StringRef val = key_input.contents();
 	StringRefReaderMX reader(val, restore_corrupted_data());
 
@@ -299,7 +300,7 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	count_size += 4;
 
 	printf("----------------------------------------------------------\n");
-	printf("To decode value:%s\n", getHexString(val).c_str());
+	printf("To decode value:%s at version:%ld\n", getHexString(val).c_str(), version);
 	if ( val_length_decode != (val.size() - 12) ) {
 		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
 	} else {

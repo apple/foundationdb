@@ -707,8 +707,8 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 bool concatenateBackupMutationForLogFile(Reference<RestoreLoaderData> self, Standalone<StringRef> val_input, Standalone<StringRef> key_input) {
 	std::string prefix = "||\t";
 	std::stringstream ss;
-	const int version_size = 12;
-	const int header_size = 12;
+	// const int version_size = 12;
+	// const int header_size = 12;
 	StringRef val = val_input.contents();
 	StringRefReaderMX reader(val, restore_corrupted_data());
 	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); //read key_input!
@@ -808,8 +808,8 @@ bool isRangeMutation(MutationRef m) {
  	printf("[INFO] Parse the concatenated log data\n");
  	std::string prefix = "||\t";
 	std::stringstream ss;
-	const int version_size = 12;
-	const int header_size = 12;
+	// const int version_size = 12;
+	// const int header_size = 12;
 	int kvCount = 0;
 
 	for ( auto& m : self->mutationMap ) {
@@ -824,7 +824,8 @@ bool isRangeMutation(MutationRef m) {
 		int count_size = 0;
 		// Get the include version in the batch commit, which is not the commitVersion.
 		// commitVersion is in the key
-		uint64_t includeVersion = reader.consume<uint64_t>();
+		//uint64_t includeVersion = reader.consume<uint64_t>();
+		reader.consume<uint64_t>();
 		count_size += 8;
 		uint32_t val_length_decode = reader.consume<uint32_t>(); //Parse little endian value, confirmed it is correct!
 		count_size += 4;
