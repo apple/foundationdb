@@ -80,14 +80,15 @@ struct GetDataDistributorMetricsReply {
 struct GetDataDistributorMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 1059267;
 	KeyRange keys;
+	int shardLimit;
 	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
 
 	GetDataDistributorMetricsRequest() {}
-	explicit GetDataDistributorMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply);
+		serializer(ar, keys, shardLimit, reply);
 	}
 };
 

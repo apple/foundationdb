@@ -3194,9 +3194,11 @@ ACTOR Future< Standalone<RangeResultRef> > waitStorageMetricsList(
 	KeyRange keys,
 	int shardLimit )
 {
-	// TODO: add use for or remove shardLimit
-	GetDDMetricsReply rep = wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics, GetDDMetricsRequest(keys)));
-	return rep.storageMetricsList;
+	ErrorOr<GetDDMetricsReply> rep = wait(errorOr(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics, GetDDMetricsRequest(keys, shardLimit))));
+	if (rep.isError()) {
+		throw rep.getError();
+	}
+	return rep.get().storageMetricsList;
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getStorageMetricsList(KeyRange const& keys, int shardLimit) {

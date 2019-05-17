@@ -1279,8 +1279,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		end.getKey().startsWith(stats_prefix)) {
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
 			auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
-			// TODO: find appropriate use for shardLimit, currently not used
-			return tr.getStorageMetricsList(keys, 10);
+			try {
+				return tr.getStorageMetricsList(keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT);
+			} catch( Error &e ) {
+				return e;
+			}
 		}
 		else {
 			return Standalone<RangeResultRef>();

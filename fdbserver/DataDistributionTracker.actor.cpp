@@ -655,7 +655,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 	try {
 		loop {
 			// no shard identifier as of yet, use simple numbering system
-			int shardNum = 0;
+			int shardNum = 1;
 			// list of metrics, regenerate on loop when full range unsuccessful
 			Standalone<RangeResultRef> result;
 			Future<Void> onChange;
@@ -673,6 +673,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					)
 				);
 				++shardNum;
+				if ( shardNum > req.shardLimit ) {
+					break;
+				}
 			}
 
 			if( !onChange.isValid() ) {
@@ -693,7 +696,7 @@ ACTOR Future<Void> fetchShardMetricsList( DataDistributionTracker* self, GetMetr
 	choose {
 		when( wait( fetchShardMetricsList_impl( self, req ) ) ) {}
 		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT ) ) ) {
-			// TODO: implement proper behaviour on timeout
+			req.reply.sendError(timed_out());
 		}
 	}
 	return Void();

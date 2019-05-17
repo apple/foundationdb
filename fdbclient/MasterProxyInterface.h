@@ -315,14 +315,15 @@ struct GetDDMetricsReply
 struct GetDDMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 14536812;
 	KeyRange keys;
+	int shardLimit;
 	ReplyPromise<struct GetDDMetricsReply> reply;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply);
+		serializer(ar, keys, shardLimit, reply);
 	}
 };
 

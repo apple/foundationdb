@@ -123,10 +123,11 @@ struct GetMetricsRequest {
 
 struct GetMetricsListRequest {
 	KeyRange keys;
+	int shardLimit;
 	Promise< Standalone<RangeResultRef> > reply;
 
 	GetMetricsListRequest() {}
-	GetMetricsListRequest( KeyRange const& keys ) : keys(keys) {}
+	GetMetricsListRequest( KeyRange const& keys, const int shardLimit ) : keys(keys), shardLimit(shardLimit) {}
 };
 
 struct TeamCollectionInterface {

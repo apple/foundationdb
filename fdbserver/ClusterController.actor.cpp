@@ -57,7 +57,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Future<GetDataDistributorMetricsReply> ddMetrics;
 
 	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :

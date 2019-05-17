@@ -1335,10 +1335,14 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
-				GetDataDistributorMetricsReply reply = wait(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys)));
-				GetDDMetricsReply newReply;
-				newReply.storageMetricsList = reply.storageMetricsList;
-				req.reply.send(newReply);
+				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
+				if ( reply.isError() ) {
+					req.reply.sendError(reply.getError());
+				} else {
+					GetDDMetricsReply newReply;
+					newReply.storageMetricsList = reply.get().storageMetricsList;
+					req.reply.send(newReply);
+				}
 			}
 		}
 	}

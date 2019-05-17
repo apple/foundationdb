@@ -3740,10 +3740,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
-				Standalone<RangeResultRef> result = wait(brokenPromiseToNever(getShardMetricsList.getReply( GetMetricsListRequest(req.keys))));
-				GetDataDistributorMetricsReply rep;
-				rep.storageMetricsList = result;
-				req.reply.send(rep);
+				ErrorOr<Standalone<RangeResultRef>> result = wait(errorOr(brokenPromiseToNever(getShardMetricsList.getReply( GetMetricsListRequest(req.keys, req.shardLimit)))));
+				if ( result.isError() ) {
+					req.reply.sendError(result.getError());
+				} else {
+					GetDataDistributorMetricsReply rep;
+					rep.storageMetricsList = result.get();
+					req.reply.send(rep);
+				}
 			}
 		}
 	}
