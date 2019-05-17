@@ -117,17 +117,18 @@ struct PageChecksumCodec {
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
 		if (hashLittle2Sum == *pSumInPage) return true;
 
-		TraceEvent tr(SevError, "SQLitePageChecksumFailure");
-		tr.error(checksum_failed())
-		    .detail("CodecPageSize", pageSize)
-		    .detail("CodecReserveSize", reserveSize)
-		    .detail("Filename", filename)
-		    .detail("PageNumber", pageNumber)
-		    .detail("PageSize", pageLen)
-		    .detail("ChecksumInPage", pSumInPage->toString())
-		    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
-		if (pSumInPage->part1 == 0)
-			tr.detail("ChecksumCalculatedCRC", sum.toString());
+		if (!silent) {
+			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			trEvent.error(checksum_failed())
+			    .detail("CodecPageSize", pageSize)
+			    .detail("CodecReserveSize", reserveSize)
+			    .detail("Filename", filename)
+			    .detail("PageNumber", pageNumber)
+			    .detail("PageSize", pageLen)
+			    .detail("ChecksumInPage", pSumInPage->toString())
+			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+		}
 		return false;
 	}
 
