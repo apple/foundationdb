@@ -20,6 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
+#include "fdbrpc/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -90,32 +91,44 @@ struct PageChecksumCodec {
 
 		char *pData = (char *)data;
 		int dataLen = pageLen - sizeof(SumType);
-		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
-		// Write sum directly to page or to sum variable based on mode
-		SumType *sumOut = write ? pSumInPage : &sum;
-		sumOut->part1 = pageNumber; //DO NOT CHANGE
-		sumOut->part2 = 0x5ca1ab1e;
-		hashlittle2(pData, dataLen, &sumOut->part1, &sumOut->part2);
-
-		// Verify if not in write mode
-		if(!write && sum != *pSumInPage) {
-			if(!silent)
-				TraceEvent (SevError, "SQLitePageChecksumFailure")
-					.error(checksum_failed())
-					.detail("CodecPageSize", pageSize)
-					.detail("CodecReserveSize", reserveSize)
-					.detail("Filename", filename)
-					.detail("PageNumber", pageNumber)
-					.detail("PageSize", pageLen)
-					.detail("ChecksumInPage", pSumInPage->toString())
-					.detail("ChecksumCalculated", sum.toString());
-
-			return false;
+		if (write) {
+			// Always write a hashlittle2 checksum for new pages
+			pSumInPage->part1 = pageNumber; // DO NOT CHANGE
+			pSumInPage->part2 = 0x5ca1ab1e;
+			hashlittle2(pData, dataLen, &pSumInPage->part1, &pSumInPage->part2);
+			return true;
 		}
 
-		return true;
+		SumType sum;
+		if (pSumInPage->part1 == 0) {
+			// part1 being 0 indicates with high probability that a CRC32 checksum
+			// was used, so check that first. If this checksum fails, there is still
+			// some chance the page was written with hashlittle2, so fall back to checking
+			// hashlittle2
+			sum.part1 = 0;
+			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (sum == *pSumInPage) return true;
+		}
+
+		SumType hashLittle2Sum;
+		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
+		hashLittle2Sum.part2 = 0x5ca1ab1e;
+		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
+		if (hashLittle2Sum == *pSumInPage) return true;
+
+		TraceEvent tr(SevError, "SQLitePageChecksumFailure");
+		tr.error(checksum_failed())
+		    .detail("CodecPageSize", pageSize)
+		    .detail("CodecReserveSize", reserveSize)
+		    .detail("Filename", filename)
+		    .detail("PageNumber", pageNumber)
+		    .detail("PageSize", pageLen)
+		    .detail("ChecksumInPage", pSumInPage->toString())
+		    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+		if (pSumInPage->part1 == 0) tr.detail("ChecksumCalculatedCRC", sum.toString());
+		return false;
 	}
 
 	static void * codec(void *vpSelf, void *data, Pgno pageNumber, int op) {
