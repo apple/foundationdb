@@ -336,7 +336,6 @@ public: // workload functions
 			// should fail
 			state bool testedFailure = false;
 			snapFailed = false;
-			retry = 0;
 			loop {
 				self->snapUID = g_random->randomUniqueID();
 				try {
@@ -345,16 +344,12 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					++retry;
 					if (e.code() == error_code_cluster_not_fully_recovered) {
 						snapFailed = true;
 						break;
 					}
 					if (e.code() == error_code_transaction_not_permitted) {
 						testedFailure = true;
-						break;
-					}
-					if (retry >= 5) {
 						break;
 					}
 				}
