@@ -3928,6 +3928,8 @@ public:
 				doc.setKey("Tag", tag.tagName);
 
 				if(uidAndAbortedFlag.present()) {
+					doc.setKey("UID", uidAndAbortedFlag.get().first.toString().c_str());
+
 					state BackupConfig config(uidAndAbortedFlag.get().first);
 
 					state EBackupState backupState = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
