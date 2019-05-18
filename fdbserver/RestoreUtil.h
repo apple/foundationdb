@@ -34,13 +34,6 @@
 #include <cstdarg>
 
 
-inline void dbprintf(const char* fmt) {
-	printf(fmt);
-}
-
-inline void dbprintf(const char* fmt, va_list va) {
-	printf(fmt, va);
-}
 
 
 // TODO: To remove unused command enum. and re-order the command sequence

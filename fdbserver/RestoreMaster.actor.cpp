@@ -1223,7 +1223,7 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
 				cmdReplies.clear();
 			}
-			dbprintf("All restore workers have quited\n");
+			printf("All restore workers have quited\n");
 
 			break;
 		} catch(Error &e) {

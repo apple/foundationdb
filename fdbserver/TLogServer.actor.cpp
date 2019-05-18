@@ -1596,6 +1596,8 @@ ACTOR Future<Void> tLogCommit(
 		return Void();
 	}
 
+	// The logic of increasing logData->version must be atomic in a process, i.e, not including wait() or yield.
+	// Otherwise, the duplicate req (with the same preVersion) can be executed twice
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
