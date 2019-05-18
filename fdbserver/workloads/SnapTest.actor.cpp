@@ -162,7 +162,8 @@ public: // workload functions
 				try {
 					wait(tr.onError(e));
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered) {
+					if (e.code() == error_code_cluster_not_fully_recovered
+						|| e.code() == error_code_txn_exec_log_anti_quorum) {
 						TraceEvent(SevWarnAlways, "ClusterNotFullyRecovered");
 						self->skipCheck = true;
 						break;
@@ -234,7 +235,8 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered) {
+					if (e.code() == error_code_cluster_not_fully_recovered ||
+						e.code() == error_code_txn_exec_log_anti_quorum) {
 						++retry;
 						if (retry > 3) {
 							snapFailed = true;
@@ -344,7 +346,8 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered) {
+					if (e.code() == error_code_cluster_not_fully_recovered ||
+						e.code() == error_code_txn_exec_log_anti_quorum) {
 						snapFailed = true;
 						break;
 					}

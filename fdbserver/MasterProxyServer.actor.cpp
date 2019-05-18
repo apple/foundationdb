@@ -785,6 +785,13 @@ ACTOR Future<Void> commitBatch(
 					state StringRef binPath = execArg.getBinaryPath();
 					state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
 
+					auto result =
+						self->txnStateStore->readValue(LiteralStringRef("log_anti_quorum").withPrefix(configKeysPrefix)).get();
+					state int logAntiQuorum = 0;
+					if (result.present()) {
+						logAntiQuorum = atoi(result.get().toString().c_str());
+					}
+
 					if (m.param1 != execDisableTLogPop
 						&& m.param1 != execEnableTLogPop
 						&& !isWhitelisted(self->whitelistedBinPathVec, binPath)) {
@@ -800,6 +807,13 @@ ACTOR Future<Void> commitBatch(
 						TraceEvent("ExecTransactionNotFullyRecovered")
 							.detail("TransactionNum", transactionNum);
 						committed[transactionNum] = ConflictBatch::TransactionNotFullyRecovered;
+					} else if (logAntiQuorum > 0) {
+						// exec op is not supported when logAntiQuorum is configured
+						// FIXME: Add support for exec ops in the presence of log anti quorum
+						TraceEvent("ExecOpNotSupportedWithLogAntiQuorum")
+							.detail("LogAntiQuorum", logAntiQuorum)
+							.detail("TransactionNum", transactionNum);
+						committed[transactionNum] = ConflictBatch::TransactionExecLogAntiQuorum;
 					} else {
 						// Send the ExecOp to
 						// - all the storage nodes in a single region and
@@ -1079,7 +1093,9 @@ ACTOR Future<Void> commitBatch(
 		else if (committed[t] == ConflictBatch::TransactionNotFullyRecovered) {
 			trs[t].reply.sendError(cluster_not_fully_recovered());
 		}
-		else {
+		else if (committed[t] == ConflictBatch::TransactionExecLogAntiQuorum) {
+			trs[t].reply.sendError(txn_exec_log_anti_quorum());
+		} else {
 			trs[t].reply.sendError(not_committed());
 		}
 
