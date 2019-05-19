@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.6
+6.1.7
 =====
 
 Features
@@ -50,6 +50,7 @@ Performance
 * Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
 * SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
 * Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Avoid closing saturated network connections which have not received ping packets. [6.1.7] `(PR #1601) <https://github.com/apple/foundationdb/pull/1601>`_
 
 Fixes
 -----
@@ -127,6 +128,7 @@ Fixes only impacting 6.1.0+
 * Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
 * TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
 * Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
 
 Earlier release notes
 ---------------------
