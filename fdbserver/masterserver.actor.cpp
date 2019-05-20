@@ -197,7 +197,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::vector<MasterProxyInterface> proxies;
 	std::vector<MasterProxyInterface> provisionalProxies;
 	std::vector<ResolverInterface> resolvers;
-	std::vector<BackupInterface> backupWorkers;
 
 	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
 
@@ -336,23 +335,6 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, self->primaryLocality, tagLocalitySpecial, self->allTags, self->recruitmentStalled ) );
 		self->logSystem = newLogSystem;
 	}
-	return Void();
-}
-
-ACTOR Future<Void> newBackupWorkers(Reference<MasterData> self, RecruitFromConfigurationReply recruits) {
-	std::vector<Future<BackupInterface>> initializationReplies;
-	for (int i = 0; i < recruits.backupWorkers.size(); i++) {
-		InitializeBackupRequest req(g_random->randomUniqueID());
-		TraceEvent("BackupReplies", self->dbgid).detail("WorkerID", recruits.backupWorkers[i].id());
-		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(recruits.backupWorkers[i].backup.getReplyUnlessFailedFor(
-		                        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
-	}
-
-	std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
-	self->backupWorkers = newRecruits;
-
 	return Void();
 }
 
@@ -625,7 +607,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	wait( newSeedServers( self, recruits, seedServers ) );
 	state vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges) && newBackupWorkers(self, recruits));
+	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 	return confChanges;
 }
 
@@ -1112,6 +1094,7 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert( error_code_master_tlog_failed );
 		s.insert( error_code_master_proxy_failed );
 		s.insert( error_code_master_resolver_failed );
+		s.insert( error_code_master_backup_worker_failed );
 		s.insert( error_code_recruitment_failed );
 		s.insert( error_code_no_more_servers );
 		s.insert( error_code_master_recovery_failed );
@@ -1508,9 +1491,9 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
 		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
 		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
+		TEST(err.code() == error_code_master_backup_worker_failed);  // Master: terminated because of a backup worker failure
 
-		if (normalMasterErrors().count(err.code()))
-		{
+		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);
 			return Void();
 		}

@@ -96,7 +96,7 @@ struct TLogSet {
 	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",
+		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %d locality: %d",
 		              tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(),
 		              backupWorkers.size(), locality);
 	}

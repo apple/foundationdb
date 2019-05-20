@@ -355,6 +355,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( LAST_LIMITED_RATIO,                                    2.0 );
 
 	// Backup Worker
+	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_FAILURE_TIME,                                   1.0 );
 	init( WAIT_FOR_BACKUP_JOIN_DELAY,                            1.0 );
 

@@ -110,10 +110,8 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 	}
 }
 
-ACTOR Future<Void> backupWorker(
-	BackupInterface interf, InitializeBackupRequest req,
-	Reference<AsyncVar<ServerDBInfo>> db)
-{
+ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest req,
+                                Reference<AsyncVar<ServerDBInfo>> db) {
 	state BackupData self(interf.id(), req);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
@@ -122,6 +120,7 @@ ACTOR Future<Void> backupWorker(
 	TraceEvent("BackupWorkerStart", interf.id());
 	try {
 		addActor.send(pullAsyncData(&self));
+		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
 		loop choose {
 			when(wait(dbInfoChange)) {

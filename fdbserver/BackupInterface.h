@@ -25,13 +25,14 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 
+// The interface for backup workers.
 struct BackupInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBackupRequest> haltBackup;
 	struct LocalityData locality;
 	UID myId;
 
-	BackupInterface() {}
+	BackupInterface() = default;
 	explicit BackupInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}

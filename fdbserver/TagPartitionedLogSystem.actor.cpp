@@ -81,11 +81,14 @@ LogSet::LogSet(const TLogSet& tLogSet) :
 	locality(tLogSet.locality), startVersion(tLogSet.startVersion),
 	satelliteTagLocations(tLogSet.satelliteTagLocations)
 {
-	for(const auto& log : tLogSet.tLogs) {
+	for (const auto& log : tLogSet.tLogs) {
 		logServers.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(log));
 	}
-	for(const auto& log : tLogSet.logRouters) {
+	for (const auto& log : tLogSet.logRouters) {
 		logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(log));
+	}
+	for (const auto& log : tLogSet.backupWorkers) {
+		backupWorkers.emplace_back(new AsyncVar<OptionalInterface<BackupInterface>>(log));
 	}
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
@@ -117,9 +120,11 @@ TLogSet::TLogSet(const LogSet& rhs) :
 	for (const auto& tlog : rhs.logServers) {
 		tLogs.push_back(tlog->get());
 	}
-
 	for (const auto& logRouter : rhs.logRouters) {
 		logRouters.push_back(logRouter->get());
+	}
+	for (const auto& worker : rhs.backupWorkers) {
+		backupWorkers.push_back(worker->get());
 	}
 }
 
@@ -397,6 +402,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
 					} else {
 						changes.push_back(t->onChange());
+					}
+				}
+				for (const auto& worker : it->backupWorkers) {
+					if (worker->get().present()) {
+						failed.push_back(waitFailureClient(
+						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
+						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+					} else {
+						changes.push_back(worker->onChange());
 					}
 				}
 			}
@@ -1833,6 +1847,30 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return localTags;
 	}
 
+	ACTOR static Future<Void> newBackupWorkers(Reference<LogSet> logSet, RecruitFromConfigurationReply recruits,
+	                                           LogEpoch recoveryCount) {
+		std::vector<Future<BackupInterface>> initializationReplies;
+		for (const auto& worker : recruits.backupWorkers) {
+			InitializeBackupRequest req(g_random->randomUniqueID());
+			req.recoveryCount = recoveryCount;
+			req.startVersion = logSet->startVersion;
+			TraceEvent("BackupRecruitment").detail("WorkerID", worker.id()).detail("RecoveryCount", recoveryCount)
+			.detail("StartVersion", req.startVersion);
+			initializationReplies.push_back(transformErrors(
+			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
+			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			    master_recovery_failed()));
+		}
+
+		std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
+		for (const auto& interf : newRecruits) {
+			logSet->backupWorkers.emplace_back(
+			    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t remoteLocality, std::vector<Tag> allTags ) {
 		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
@@ -2162,6 +2200,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < recr.tLogs.size(); i++ )
 			initializationReplies.push_back( transformErrors( throwErrorOr( recr.tLogs[i].tLog.getReplyUnlessFailedFor( reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
+		state Future<Void> recruitBackup = newBackupWorkers(logSystem->tLogs[0], recr, recoveryCount);
 		state std::vector<Future<Void>> recoveryComplete;
 
 		if(region.satelliteTLogReplicationFactor > 0) {
@@ -2235,6 +2274,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		wait( waitForAll( initializationReplies ) || oldRouterRecruitment );
+		wait(recruitBackup);
 
 		for( int i = 0; i < initializationReplies.size(); i++ ) {
 			logSystem->tLogs[0]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
