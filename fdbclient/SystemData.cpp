@@ -587,6 +587,7 @@ const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
 const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
+const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00");
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
 

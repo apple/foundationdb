@@ -304,7 +304,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 		}
 	}
 
-	state Future<Void> tooLong = delay(4.5);
+	state Future<Void> tooLong = delay(60);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state bool oldReplicationUsesDcId = false;
 	loop {

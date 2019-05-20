@@ -174,7 +174,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn( ISimulator::ProcessInfo* process )
-		: process(process), dbgid( g_random->randomUniqueID() ), opened(false), closedByCaller(false)
+		: process(process), dbgid( g_random->randomUniqueID() ), opened(false), closedByCaller(false), stopReceive(Never())
 	{
 		pipes = sender(this) && receiver(this);
 	}
@@ -209,6 +209,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
+		stopReceive = delay(1.0);
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
@@ -285,6 +286,7 @@ private:
 	Future<Void> leakedConnectionTracker;
 
 	Future<Void> pipes;
+	Future<Void> stopReceive;
 
 	int availableSendBufferForPeer() const { return sendBufSize - (writtenBytes.get() - receivedBytes.get()); }  // SOMEDAY: acknowledgedBytes instead of receivedBytes
 
@@ -317,6 +319,9 @@ private:
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
 			wait( delay( g_clogging.getRecvDelay( self->process->address, self->peerProcess->address ) ) );
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
+			if(self->stopReceive.isReady()) {
+				wait(Future<Void>(Never()));
+			}
 			self->receivedBytes.set( pos );
 			wait( Future<Void>(Void()) );  // Prior notification can delete self and cancel this actor
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
