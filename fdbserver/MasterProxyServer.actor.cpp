@@ -1593,7 +1593,7 @@ ACTOR Future<Void> masterProxyServerCore(
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
 		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface))
-		throw worker_removed();
+			throw worker_removed();
 		wait(db->onChange());
 	}
 }
