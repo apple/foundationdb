@@ -570,6 +570,11 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 			choose {
 				when( ClientDBInfo ni = wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().openDatabase.getReply( req ) ) : Never() ) ) {
 					TraceEvent("ClientInfoChange").detail("ChangeID", ni.id);
+					if (FlowTransport::transport().isClient()) {
+						for (const auto& proxy : ni.proxies) {
+							IFailureMonitor::failureMonitor().setStatus(proxy.address(), FailureStatus(false));
+						}
+					}
 					outInfo->set(ni);
 				}
 				when( wait( clusterInterface->onChange() ) ) {

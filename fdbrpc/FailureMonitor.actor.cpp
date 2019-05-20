@@ -62,6 +62,36 @@ Future<Void> IFailureMonitor::onFailedFor( Endpoint const& endpoint, double sust
 	return waitForContinuousFailure( this, endpoint, sustainedFailureDuration, slope );
 }
 
+ACTOR Future<Void> expireFailedDelayedMonitor(std::map<NetworkAddress, double>* expireMap) {
+	state std::set<NetworkAddress> toRemove;
+	loop {
+		for (const auto& p : *expireMap) {
+			if (p.second <= now()) {
+				toRemove.insert(p.first);
+			}
+		}
+
+		for (const auto& addr : toRemove) {
+			expireMap->erase(addr);
+			IFailureMonitor::failureMonitor().setStatus(addr, FailureStatus(false));
+		}
+
+		toRemove.clear();
+		wait(delay(2));
+	}
+}
+
+SimpleFailureMonitor::SimpleFailureMonitor()
+	: endpointKnownFailed() {
+
+	if (FlowTransport::transport().isClient())
+		expireMonitor = expireFailedDelayedMonitor(&expireMap);
+}
+
+SimpleFailureMonitor::~SimpleFailureMonitor() {
+	expireMonitor.cancel();
+}
+
 void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStatus const& status ) {
 
 	//if (status.failed)
@@ -159,4 +189,9 @@ bool SimpleFailureMonitor::permanentlyFailed( Endpoint const& endpoint ) {
 void SimpleFailureMonitor::reset() {
 	addressStatus = std::unordered_map< NetworkAddress, FailureStatus >();
 	endpointKnownFailed.resetNoWaiting();
+	expireMap.clear();
+}
+
+void SimpleFailureMonitor::expireFailedDelayed(const NetworkAddress& address) {
+	expireMap[address] = now() + 60;
 }
