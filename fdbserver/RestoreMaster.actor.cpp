@@ -61,10 +61,10 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
 	try {
-		wait( delay(1.0) );
+		// wait( delay(1.0) );
 		wait( _collectRestoreRoleInterfaces(self, cx) );
 
-		wait( delay(1.0) );
+		// wait( delay(1.0) );
 		wait( askLoadersToCollectRestoreAppliersInterfaces(self) );
 
 		state int restoreId = 0;
@@ -94,7 +94,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 
 			printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
 			TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
-			wait( delay(5.0) );
+			// wait( delay(5.0) );
 			//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.
 			//Otherwise, this special workload never returns and tester will think the test workload is stuck and the tester will timesout
 			break; //TODO: this break will be removed later since we need the restore agent to run all the time!
@@ -197,7 +197,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 
 			wait( initializeVersionBatch(self) );
 
-			wait( delay(1.0) );
+			// wait( delay(1.0) );
 
 			wait( distributeWorkloadPerVersionBatch(self, cx, request, restoreConfig) );
 
@@ -282,7 +282,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state double startTimeBeforeSampling = now();
 	
 	wait( sampleWorkload(self, request, restoreConfig, sampleSizeMB) );
-	wait( delay(1.0) );
+	// wait( delay(1.0) );
 
 	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
 	state double startTimeAfterSampling = now();
@@ -290,12 +290,12 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
 	startTime = now();
 	wait( assignKeyRangeToAppliers(self, cx) );
-	wait( delay(1.0) );
+	// wait( delay(1.0) );
 	printf("[Progress] distributeWorkloadPerVersionBatch assignKeyRangeToAppliers time:%.2f seconds\n", now() - startTime);
 
 	startTime = now();
 	wait( notifyAppliersKeyRangeToLoader(self, cx) );
-	wait( delay(1.0) );
+	// wait( delay(1.0) );
 	printf("[Progress] distributeWorkloadPerVersionBatch notifyAppliersKeyRangeToLoader time:%.2f seconds\n", now() - startTime);
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
@@ -336,7 +336,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 				if ( allLoadReqsSent ) {
 					break; // All load requests have been handled
 				}
-				wait(delay(1.0));
+				// wait(delay(1.0));
 
 				cmdReplies.clear();
 				printf("[INFO] Number of backup files:%ld\n", self->files.size());
@@ -465,12 +465,12 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		}
 	}
 
-	wait( delay(1.0) );
+	//wait( delay(1.0) );
 	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
 
 	ASSERT( cmdReplies.empty() );
 	
-	wait( delay(5.0) );
+	//wait( delay(5.0) );
 	// Notify the applier to applly mutation to DB
 
 	startTime = now();
@@ -535,7 +535,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 			if ( allLoadReqsSent ) {
 				break; // All load requests have been handled
 			}
-			wait(delay(1.0));
+			//wait(delay(1.0));
 
 			cmdReplies.clear();
 
@@ -680,7 +680,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 		}
 	}
 
-	wait(delay(1.0));
+	// wait(delay(1.0));
 
 	// Ask master applier to calculate the key ranges for appliers
 	state int numKeyRanges = 0;
@@ -771,7 +771,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 	printf("[Sampling] self->range2Applier has been set. Its size is:%d\n", self->range2Applier.size());
 	self->printAppliersKeyRange();
 
-	wait(delay(1.0));
+	// wait(delay(1.0));
 
 	return Void();
 
@@ -782,7 +782,7 @@ ACTOR Future<Void> askLoadersToCollectRestoreAppliersInterfaces(Reference<Restor
 	state int index = 0;
 	loop {
 		try {
-			wait(delay(1.0));
+			// wait(delay(1.0));
 			index = 0;
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
 			for(auto& loaderInterf : self->loadersInterf) {
@@ -1015,7 +1015,7 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
 	loop {
 		try {
-			wait(delay(1.0));
+			// wait(delay(1.0));
 			std::vector<Future<RestoreCommonReply>> cmdReplies;
 			self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
 			for (auto &loader : self->loadersInterf) {
@@ -1067,7 +1067,7 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 
 			// cmdReplies.clear();
 
-			wait(delay(5.0)); //TODO: Delete this wait and see if it can pass correctness
+			// wait(delay(5.0)); //TODO: Delete this wait and see if it can pass correctness
 
 			break;
 		} catch (Error &e) {
