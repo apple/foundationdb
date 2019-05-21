@@ -389,7 +389,7 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
 								self->describeNode().c_str(), count, it->first, it->second.size());
 					}
 
-					if ( debug_verbose ) {
+					if ( debug_verbose || true ) {
 						printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", self->describeNode().c_str(), m.toString().c_str());
 					}
 

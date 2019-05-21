@@ -52,6 +52,8 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> s
 ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 
+
+
 // The server of the restore master. It drives the restore progress with the following steps:
 // 1) Collect interfaces of all RestoreLoader and RestoreApplier roles
 // 2) Notify each loader to collect interfaces of all RestoreApplier roles
@@ -1010,29 +1012,74 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
+// Send each request in requests via channel of the request's interface
+// The UID in a request is the UID of the interface to handle the request
+ACTOR template <class Interface, class Request>
+//Future< REPLY_TYPE(Request) > 
+Future<Void> getBatchReplies(
+	RequestStream<Request> Interface::* channel,
+	std::map<UID, Interface> interfaces,
+	std::map<UID, Request> requests) {
+
+	loop{
+		try {		
+			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
+			for(auto& request : requests) {
+				RequestStream<Request> const* stream = & (interfaces[request.first].*channel);
+				cmdReplies.push_back( stream->getReply(request.second) );
+			}
+
+			std::vector<REPLY_TYPE(Request)> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+			break;
+		} catch (Error &e) {
+			fprintf(stdout, "Error code:%d, error message:%s\n", e.code(), e.what());
+		}
+	}
+
+	return Void();
+} 
 
 
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
-	loop {
-		try {
-			// wait(delay(1.0));
-			std::vector<Future<RestoreCommonReply>> cmdReplies;
-			self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
-			for (auto &loader : self->loadersInterf) {
-				cmdReplies.push_back( loader.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
-			}
-			for (auto &applier : self->appliersInterf) {
-				cmdReplies.push_back( applier.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
-			}
+	self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
 
-			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			printf("Initilaize Version Batch done\n");
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Current phase: initializeVersionBatch, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-		}
+	std::map<UID, RestoreVersionBatchRequest> applierRequests;
+	for (auto &applier : self->appliersInterf) {
+		self->cmdID.nextCmd();
+		applierRequests[applier.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
 	}
+	wait( getBatchReplies(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, applierRequests) );
+
+	std::map<UID, RestoreVersionBatchRequest> loaderRequests;
+	for (auto &loader : self->loadersInterf) {
+		self->cmdID.nextCmd();
+		loaderRequests[loader.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
+	}
+	wait( getBatchReplies(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, loaderRequests) );
+
+	// loop {
+	// 	try {
+	// 		// wait(delay(1.0));
+	// 		std::vector<Future<RestoreCommonReply>> cmdReplies;
+	// 		self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
+
+			
+	// 		for (auto &loader : self->loadersInterf) {
+	// 			cmdReplies.push_back( loader.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
+	// 		}
+			
+	// 		// for (auto &applier : self->appliersInterf) {
+	// 		// 	cmdReplies.push_back( applier.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
+	// 		// }
+
+	// 		std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+	// 		printf("Initilaize Version Batch done\n");
+	// 		break;
+	// 	} catch (Error &e) {
+	// 		fprintf(stdout, "[ERROR] Node:%s, Current phase: initializeVersionBatch, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
+	// 				self->cmdID.toString().c_str(), e.code(), e.what());
+	// 	}
+	// }
 
 	return Void();
 }
@@ -1043,22 +1090,30 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 	loop {
 		try {
 			self->cmdID.initPhase( RestoreCommandEnum::Apply_Mutation_To_DB );
-			state std::map<UID, RestoreApplierInterface>::iterator applier;
-			for (applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++) {
-				RestoreApplierInterface &applierInterf = applier->second;
-	
-				printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", self->describeNode().c_str(), applier->first.toString().c_str());
-				cmdReplies.push_back( applier->second.applyToDB.getReply(RestoreSimpleRequest(self->cmdID)) );
-
-				// Ask applier to apply to DB one by one
-				printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-				printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
-
-				cmdReplies.clear();
-
+			// Prepare the applyToDB requests
+			std::map<UID, RestoreSimpleRequest> requests;
+			for (auto& applier : self->appliersInterf) {
+				self->cmdID.nextCmd();
+				requests[applier.first] = RestoreSimpleRequest(self->cmdID);
 			}
+			wait( getBatchReplies(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
+
+			// state std::map<UID, RestoreApplierInterface>::iterator applier;
+			// for (applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++) {
+			// 	RestoreApplierInterface &applierInterf = applier->second;
+	
+			// 	printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", self->describeNode().c_str(), applier->first.toString().c_str());
+			// 	cmdReplies.push_back( applier->second.applyToDB.getReply(RestoreSimpleRequest(self->cmdID)) );
+
+			// 	// Ask applier to apply to DB one by one
+			// 	printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
+			// 	std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+			// 	//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
+			// 	printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
+
+			// 	cmdReplies.clear();
+
+			// }
 			// Ask all appliers to apply to DB at once
 			// printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
 			// std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
