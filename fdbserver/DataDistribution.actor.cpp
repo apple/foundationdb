@@ -2733,9 +2733,11 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			state Future<Void> healthyZoneTimeout = Never();
 			if(val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
 				if(p.second > tr.getReadVersion().get()) {
+					healthyZoneTimeout = delay((p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND);
 					self->healthyZone.set(p.first);
 				} else {
 					self->healthyZone.set(Optional<Key>());
@@ -2743,9 +2745,10 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			} else {
 				self->healthyZone.set(Optional<Key>());
 			}
+			
 			state Future<Void> watchFuture = tr.watch(healthyZoneKey);
 			wait(tr.commit());
-			wait(watchFuture);
+			wait(watchFuture || healthyZoneTimeout);
 			tr.reset();
 		} catch(Error& e) {
 			wait( tr.onError(e) );
