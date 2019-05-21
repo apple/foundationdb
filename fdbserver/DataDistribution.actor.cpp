@@ -2825,24 +2825,15 @@ ACTOR Future<Void> storageServerFailureTracker(
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
-		state double startTime = now();
 		Future<Void> healthChanged = Never();
 		if(status->isFailed) {
 			ASSERT(!inHealthyZone);
 			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
 		} else if(!inHealthyZone) {
-			healthChanged = waitFailureClient(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution);
+			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);
 		}
 		choose {
 			when ( wait(healthChanged) ) {
-				double elapsed = now() - startTime;
-				if(!status->isFailed && elapsed < SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME) {
-					wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
-					if(!IFailureMonitor::failureMonitor().getState( interf.waitFailure.getEndpoint() ).isFailed()) {
-						continue;
-					}
-				}
-
 				status->isFailed = !status->isFailed;
 				if(!status->isFailed && !server->teams.size()) {
 					self->doBuildTeams = true;
