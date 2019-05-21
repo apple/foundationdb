@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.7
+6.1.8
 =====
 
 Features
@@ -129,6 +129,7 @@ Fixes only impacting 6.1.0+
 * TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
 * Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
 * Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* The TLog's disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] `(PR #1617) <https://github.com/apple/foundationdb/pull/1617>`_
 
 Earlier release notes
 ---------------------
