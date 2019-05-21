@@ -362,6 +362,7 @@ namespace actorcompiler
             writer.WriteLine("public:");
             LineNumber(writer, actor.SourceLine);
             WriteStateConstructor(writer);
+            WriteStateDestructor(writer);
             WriteFunctions(writer);
             foreach (var st in state)
             {
@@ -782,10 +783,12 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
+                cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
                 cbFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(cbFunc), cx.catchFErr, cx.tryLoopDepth, () => {
                     cbFunc.WriteLine("{0};", ch.Body.call("value", "0"));
                 }, false);
+                cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
 
                 var errFunc = new Function
                 {
@@ -799,11 +802,13 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", errFunc.name, ch.Index), errFunc);
                 errFunc.Indent(codeIndent);
+                errFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
                 errFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(errFunc), cx.catchFErr, cx.tryLoopDepth, () =>
                 {
                     errFunc.WriteLine("{0};", cx.catchFErr.call("err", "0"));
                 }, false);
+                errFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
             }
 
             bool firstChoice = true;
@@ -1159,7 +1164,9 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
+            constructor.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
             constructor.WriteLine("this->{0};", body.call());
+            constructor.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1200,7 +1207,25 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
+            constructor.WriteLine("FDB_TRACE_PROBE1(actor_create, \"{0}\");", actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
+        }
+
+        void WriteStateDestructor(TextWriter writer) {
+            Function destructor = new Function
+            {
+                name = String.Format("~{0}", stateClassName),
+                returnType = "",
+                formalParameters = new string[0],
+                endIsUnreachable = true,
+                publicName = true,
+            };
+            destructor.Indent(codeIndent);
+            destructor.Indent(-1);
+            destructor.WriteLine("{");
+            destructor.Indent(+1);
+            destructor.WriteLine(String.Format("FDB_TRACE_PROBE1(actor_destroy, \"{0}\");", actor.name));
+            WriteFunction(writer, destructor, destructor.BodyText);
         }
 
         IEnumerable<Statement> Flatten(Statement stmt)
