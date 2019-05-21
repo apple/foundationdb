@@ -34,7 +34,7 @@ namespace fdb_versions {
 // A version-class. These need to be ordered by version and the ordering
 // happens through inheritance. Each of these structs need to know about
 // the `ProtocolVersion`-class (through the template parameter) and it has
-// to be names `P` (otherwise the VERSION_FEATURE macro won't work anymore).
+// to be named `P` (otherwise the VERSION_FEATURE macro won't work anymore).
 // These classes are used to determine if a feature was available at a certain
 // protocol version. It does determine that through static polymorphism.
 template<class P>
