@@ -299,7 +299,9 @@ struct GetHealthMetricsRequest
 	}
 };
 
-struct ExecRequest {
+struct ExecRequest
+{
+	constexpr static FileIdentifier file_identifier = 22403900;
 	Arena arena;
 	StringRef execPayload;
 	ReplyPromise<Void> reply;
