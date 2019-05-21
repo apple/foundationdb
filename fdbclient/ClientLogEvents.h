@@ -127,9 +127,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return serializer(Event::serialize(ar), latency, valueSize, key);
+				return serializer(Event::serialize(ar), readId, latency, valueSize, key, storageContacted);
 			else
-				return serializer(ar, latency, valueSize, key);
+				return serializer(ar, readId, latency, valueSize, key, storageContacted);
 		}
 
 		int readId;
@@ -141,6 +141,7 @@ namespace FdbClientLogEvents {
 		override void logEvent(std::string id) const {
 			TraceEvent("TransactionTrace_GetValue")
 				.detail("TransactionID", id)
+				.detail("ReadID", readId)
 				.detail("Latency", latency)
 				.detail("ValueSizeBytes", valueSize)
 				.detail("Key", printable(key))
