@@ -144,7 +144,7 @@ Parameters and client bindings
 ------------------------------
 
 Automatic TLS certificate refresh
-------------------------------
+---------------------------------
 
 The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
 
