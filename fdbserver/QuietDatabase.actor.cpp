@@ -124,8 +124,18 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 	return inputBytes - durableBytes;
 }
 
+//Computes the popped version lag for tlogs
+int64_t getPoppedVersionLag( const TraceEventFields& md ) {
+	int64_t persistentDataDurableVersion, queuePoppedVersion;
+
+	sscanf(md.getValue("PersistentDataDurableVersion").c_str(), "%lld", &persistentDataDurableVersion);
+	sscanf(md.getValue("QueuePoppedVersion").c_str(), "%lld", &queuePoppedVersion);
+
+	return persistentDataDurableVersion - queuePoppedVersion;
+}
+
 // This is not robust in the face of a TLog failure
-ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -150,17 +160,19 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
 	state int64_t maxQueueSize = 0;
+	state int64_t maxPoppedVersionLag = 0;
 	state int i = 0;
 	for(; i < messages.size(); i++) {
 		try {
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
+			maxPoppedVersionLag = std::max( maxPoppedVersionLag, getPoppedVersionLag( messages[i].get() ) );
 		} catch( Error &e ) {
 			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxTLogQueue").detail("Tlog", tlogs[i].id());
 			throw;
 		}
 	}
 
-	return maxQueueSize;
+	return std::make_pair( maxQueueSize, maxPoppedVersionLag );
 }
 
 ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, bool use_system_priority = false) {
@@ -397,7 +409,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar
 }
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
-	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
+	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6 ) {
 	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
@@ -417,26 +429,27 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID).detail("Locality", distributorWorker.locality.toString());
 
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, distributorWorker);
-			state Future<int64_t> tLogQueueSize = getMaxTLogQueueSize( cx, dbInfo );
+			state Future<std::pair<int64_t,int64_t>> tLogQueueInfo = getTLogQueueInfo( cx, dbInfo );
 			state Future<int64_t> dataDistributionQueueSize = getDataDistributionQueueSize( cx, distributorWorker, dataInFlightGate == 0);
 			state Future<bool> teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
 			state Future<int64_t> storageQueueSize = getMaxStorageServerQueueSize( cx, dbInfo );
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, distributorWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, distributorWorker, distributorUID );
 
-			wait(success(dataInFlight) && success(tLogQueueSize) && success(dataDistributionQueueSize) &&
+			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
 			     success(storageServersRecruiting));
 			TraceEvent(("QuietDatabase" + phase).c_str())
 			    .detail("DataInFlight", dataInFlight.get())
-			    .detail("MaxTLogQueueSize", tLogQueueSize.get())
+			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
+					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
 			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
 			    .detail("TeamCollectionValid", teamCollectionValid.get())
 			    .detail("MaxStorageQueueSize", storageQueueSize.get())
 			    .detail("DataDistributionActive", dataDistributionActive.get())
 			    .detail("StorageServersRecruiting", storageServersRecruiting.get());
 
-			if (dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate ||
+			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
 			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
 			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
@@ -469,6 +482,6 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 }
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string phase, int64_t dataInFlightGate,
-	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize ) {
-	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
+	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize, int64_t maxPoppedVersionLag ) {
+	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize, maxPoppedVersionLag);
 }

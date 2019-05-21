@@ -115,7 +115,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 2e6, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
 			}
 			catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -219,11 +219,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					//Check that nothing is in the TLog queues
-					int64_t maxTLogQueueSize = wait(getMaxTLogQueueSize(cx, self->dbInfo));
-					if(maxTLogQueueSize > 1e5)  // FIXME: Should be zero?
+					std::pair<int64_t,int64_t> maxTLogQueueInfo = wait(getTLogQueueInfo(cx, self->dbInfo));
+					if(maxTLogQueueInfo.first > 1e5)  // FIXME: Should be zero?
 					{
-						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueSize);
+						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueInfo.first);
 						self->testFailure("Non-zero tlog queue size");
+					}
+
+					if(maxTLogQueueInfo.second > 30e6)
+					{
+						TraceEvent("ConsistencyCheck_PoppedVersionLag").detail("PoppedVersionLag", maxTLogQueueInfo.second);
+						self->testFailure("large popped version lag");
 					}
 
 					//Check that nothing is in the storage server queues
