@@ -425,15 +425,16 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
 			     success(storageServersRecruiting));
+
 			TraceEvent(("QuietDatabase" + phase).c_str())
-			    .detail("DataInFlight", dataInFlight.get())
-			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
+					.detail("DataInFlight", dataInFlight.get())
+					.detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
 					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
-			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-			    .detail("TeamCollectionValid", teamCollectionValid.get())
-			    .detail("MaxStorageQueueSize", storageQueueSize.get())
-			    .detail("DataDistributionActive", dataDistributionActive.get())
-			    .detail("StorageServersRecruiting", storageServersRecruiting.get());
+					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+					.detail("TeamCollectionValid", teamCollectionValid.get())
+					.detail("MaxStorageQueueSize", storageQueueSize.get())
+					.detail("DataDistributionActive", dataDistributionActive.get())
+					.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
