@@ -56,6 +56,16 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 	}
 }
 
+ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime, int taskID){
+	loop {
+		wait(waitFailureClient(waitFailure, 0, 0, taskID));
+		wait(delay(failureReactionTime, taskID) || IFailureMonitor::failureMonitor().onStateEqual( waitFailure.getEndpoint(), FailureStatus(false)));
+		if(IFailureMonitor::failureMonitor().getState( waitFailure.getEndpoint() ).isFailed()) {
+			return Void();
+		}
+	}
+}
+
 ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, int taskID){
 	loop {
 		try {	
