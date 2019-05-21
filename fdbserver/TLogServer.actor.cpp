@@ -1903,7 +1903,7 @@ ACTOR Future<Void> tLogCommit(
 	state Standalone<VectorRef<Tag>> execTags;
 	state vector<Future<Void>> playIgnoredPops;
 
-	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on critical section between here self->version.set() below!)
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
