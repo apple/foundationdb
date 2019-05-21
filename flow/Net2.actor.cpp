@@ -626,7 +626,9 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
+		int queueSize = ready.size();
 
+		FDB_TRACE_PROBE1(process_actor_queue_start, queueSize);
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
@@ -643,8 +645,13 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
 
-			if (check_yield(TaskPriority::Max, true)) { ++countYields; break; }
+			if (check_yield(TaskPriority::Max, true)) {
+				FDB_TRACE_PROBE(process_actor_queue_yield);
+				++countYields; break;
+			}
 		}
+		queueSize = ready.size();
+		FDB_TRACE_PROBE1(process_actor_queue_done, queueSize);
 
 		trackMinPriority(minTaskID, now);
 
