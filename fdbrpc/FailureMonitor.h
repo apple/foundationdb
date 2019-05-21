@@ -120,9 +120,6 @@ public:
 	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration + (elapsedTime*sustainedFailureSlope)
 	Future<Void> onFailedFor( Endpoint const& endpoint, double sustainedFailureDuration, double sustainedFailureSlope = 0.0 );
 
-	// Expires failed status of peers after certain delay.
-	virtual void expireFailedDelayed(NetworkAddress const& address) = 0;
-
 	// Returns the failure monitor that the calling machine should use
 	static IFailureMonitor& failureMonitor() { return *static_cast<IFailureMonitor*>((void*) g_network->global(INetwork::enFailureMonitor)); }
 };
@@ -130,6 +127,7 @@ public:
 // SimpleFailureMonitor is the sole implementation of IFailureMonitor.  It has no
 //   failure detection logic; it just implements the interface and reacts to setStatus() etc.
 // Initially all addresses are considered failed, but all endpoints of a non-failed address are considered OK.
+
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
 	SimpleFailureMonitor();
@@ -144,15 +142,11 @@ public:
 	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint );
 	virtual bool onlyEndpointFailed( Endpoint const& endpoint );
 	virtual bool permanentlyFailed( Endpoint const& endpoint );
-	virtual void expireFailedDelayed(NetworkAddress const& address);
 
 	void reset();
 private:
 	std::unordered_map< NetworkAddress, FailureStatus > addressStatus;
 	YieldedAsyncMap< Endpoint, bool > endpointKnownFailed;
-
-	std::map<NetworkAddress, double> expireMap;
-	Future<Void> expireMonitor;
 
 	friend class OnStateChangedActorActor;
 };

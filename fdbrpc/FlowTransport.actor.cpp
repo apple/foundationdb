@@ -465,21 +465,23 @@ struct Peer : NonCopyable {
 		TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 			.detail("PeerAddr", self->destination)
 			.detail("ConnSet", (bool)conn);
+
+		// This is used only at client side and is used to override waiting for unsent data to update failure monitoring status. Overriding is only
+		// useful when making first connection ever, or an existing connection fails. If `connect` itself fails, it is clear peer is down anyway.
+		state bool clientReconnectDelay = false;
 		loop {
 			try {
 				if (!conn) {  // Always, except for the first loop with an incoming connection
 					self->outgoingConnectionIdle = true;
-					// Wait until there is something to send
 
+					// Wait until there is something to send.
 					while ( self->unsent.empty() ) {
+						Future<Void>  clientReconnectDelayF = FlowTransport::transport().isClient() && self->destination.isPublic() && clientReconnectDelay
+							? delay(0)
+							: Never();
 						choose {
-							when (wait( self->dataToSend.onTrigger() )) {
-								//
-							}
-							when (wait(FlowTransport::transport().isClient() ? delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now())) : Never())) {
-								if (self->destination.isPublic())
-									break;
-							}
+							when (wait( self->dataToSend.onTrigger() )) { }
+							when (wait( clientReconnectDelayF )) { break; }
 						}
 					}
 
@@ -497,6 +499,7 @@ struct Peer : NonCopyable {
 						}
 						if (self->unsent.empty()) {
 							_conn->close();
+							clientReconnectDelay = false;
 							continue;
 						} else {
 							conn = _conn;
@@ -505,6 +508,9 @@ struct Peer : NonCopyable {
 						}
 					} else {
 						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+						if (FlowTransport::transport().isClient()) {
+							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+						}
 						throw connection_failed();
 					}
 
@@ -544,10 +550,6 @@ struct Peer : NonCopyable {
 					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
 				}
 
-				if (FlowTransport::transport().isClient() && e.code() == error_code_connection_failed) {
-					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
-				}
-
 				if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
 					auto& it = self->transport->closedPeers[self->destination];
 					if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
@@ -560,6 +562,9 @@ struct Peer : NonCopyable {
 				}
 
 				if (conn) {
+					if (FlowTransport::transport().isClient()) {
+						clientReconnectDelay = true;
+					}
 					conn->close();
 					conn = Reference<IConnection>();
 				}
@@ -571,9 +576,6 @@ struct Peer : NonCopyable {
 					TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
 					self->connect.cancel();
 					self->transport->peers.erase(self->destination);
-					if (FlowTransport::transport().isClient() && e.code() == error_code_connection_failed) {
-						IFailureMonitor::failureMonitor().expireFailedDelayed(self->destination);
-					}
 					delete self;
 					return Void();
 				}
@@ -1015,6 +1017,10 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
+	if (FlowTransport::transport().isClient()) {
+		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+	}
+
 	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
 	Peer* peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
