@@ -747,24 +747,8 @@ ACTOR Future<Void> commitBatch(
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 
-<<<<<<< HEAD
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
-=======
-						auto& tags = ranges.begin().value().tags;
-						if(!tags.size()) {
-							for( auto info : ranges.begin().value().src_info ) {
-								tags.push_back( info->tag );
-							}
-							for( auto info : ranges.begin().value().dest_info ) {
-								tags.push_back( info->tag );
-							}
-							uniquify(tags);
-						}
-						
-						for (auto& tag : tags)
-							toCommit.addTag(tag);
->>>>>>> c6dc6bf3... Exec op to tag only local storage nodes
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary

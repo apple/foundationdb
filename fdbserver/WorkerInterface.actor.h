@@ -241,6 +241,7 @@ struct TraceBatchDumpRequest {
 };
 
 struct ExecuteRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
 	ReplyPromise<Void> reply;
 
 	Arena arena;
