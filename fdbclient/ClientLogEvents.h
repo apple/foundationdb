@@ -163,17 +163,18 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventGetKey : public Event {
-		EventGetKey(double ts, int readId, Key key, NetworkAddress storageContacted) :
-			Event(GET_KEY, ts), readId(readId), key(key), storageContacted(storageContacted) {} 
+		EventGetKey(double ts, int readId, double latency, Key key, NetworkAddress storageContacted) :
+			Event(GET_KEY, ts), readId(readId), latency(latency), key(key), storageContacted(storageContacted) {}
 
 		template <typename Ar> Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return serializer(Event::serialize(ar), readId, key, storageContacted);
+				return serializer(Event::serialize(ar), latency, readId, key, storageContacted);
 			else
-				return serializer(ar, readId, key, storageContacted);
+				return serializer(ar, readId, latency, key, storageContacted);
 		}
 
 		int readId;
+		double latency;
 		Key key;
 		NetworkAddress storageContacted;
 
@@ -181,6 +182,7 @@ namespace FdbClientLogEvents {
 			TraceEvent("TransactionTrace_GetKey")
 				.detail("TransactionID", id)
 				.detail("ReadId", readId)
+				.detail("Latency", latency)
 				.detail("BytesFetched", key.size())
 				.detail("Key", printable(key))
 				.detail("StorageContacted", storageContacted);
@@ -227,18 +229,19 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventGetSubRange : public Event {
-		EventGetSubRange(double ts, int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
-			Event(GET_SUBRANGE, ts), readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
+		EventGetSubRange(double ts, int readId, double latency, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
+			Event(GET_SUBRANGE, ts), readId(readId), latency(latency), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
 		EventGetSubRange() {}
 
 		template <typename Ar> Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return serializer(Event::serialize(ar), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
+				return serializer(Event::serialize(ar), readId, latency, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
 			else
-				return serializer(ar, readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
+				return serializer(ar, readId, latency, bytesFetched, keysFetched, beginKey, endKey, storageContacted);
 		}
 
 		int readId;
+		double latency;
 		int bytesFetched;
 		int keysFetched;
 		Key beginKey;
@@ -249,6 +252,7 @@ namespace FdbClientLogEvents {
 			TraceEvent("TransactionTrace_GetSubRange")
 				.detail("TransactionID", id)
 				.detail("ReadId", readId)
+				.detail("Latency", latency)
 				.detail("BytesFetched", bytesFetched)
 				.detail("KeysFetched", keysFetched)
 				.detail("BeginKey", printable(beginKey))

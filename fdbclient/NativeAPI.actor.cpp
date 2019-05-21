@@ -1408,12 +1408,14 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+			state double startTimeD;
 			++cx->transactionPhysicalReads;
 			TrackedReply<GetKeyRequest> trackedReply = wait( trackedLoadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			GetKeyReply reply = trackedReply.reply;
+			double latency = now() - startTimeD;
 			if (trLogInfo) {
 				trLogInfo->addLog(FdbClientLogEvents::EventGetKey {
-					now(), trLogInfo->requestStats.getNextReadId(), k.getKey(), trackedReply.address
+					now(), trLogInfo->requestStats.getNextReadId(), latency, k.getKey(), trackedReply.address
 				});
 			}
 			if( info.debugID.present() )
@@ -1841,9 +1843,11 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						.detail("Servers", beginServer.second->description());*/
 				}
 
+				state double startTimeD = now();
 				++cx->transactionPhysicalReads;
 				TrackedReply<GetKeyValuesRequest> trackedReply = wait( trackedLoadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 				GetKeyValuesReply rep = trackedReply.reply;
+				double latency = now() - startTimeD;
 				if (trLogInfo) {
 					auto bytesFetched = 0;
 					for (const auto &kv : rep.data) {
@@ -1854,7 +1858,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					auto endKey = rep.data.empty() ? Key() : rep.data.rbegin()->key;
 					auto storageContacted = trackedReply.address;
 					trLogInfo->addLog(FdbClientLogEvents::EventGetSubRange {
-						now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
+						now(), readId, latency, bytesFetched, keysFetched, beginKey, endKey, storageContacted
 					});
 				}
 
