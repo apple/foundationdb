@@ -22,22 +22,20 @@
 
 package fdb
 
-/*
- #cgo LDFLAGS: -lfdb_c -lm
- #define FDB_API_VERSION 610
- #include <foundationdb/fdb_c.h>
- #include <string.h>
-
- extern void unlockMutex(void*);
-
- void go_callback(FDBFuture* f, void* m) {
-     unlockMutex(m);
- }
-
- void go_set_callback(void* f, void* m) {
-     fdb_future_set_callback(f, (FDBCallback)&go_callback, m);
- }
-*/
+//  #cgo LDFLAGS: -lfdb_c -lm
+//  #define FDB_API_VERSION 610
+//  #include <foundationdb/fdb_c.h>
+//  #include <string.h>
+//
+//  extern void unlockMutex(void*);
+//
+//  void go_callback(FDBFuture* f, void* m) {
+//      unlockMutex(m);
+//  }
+//
+//  void go_set_callback(void* f, void* m) {
+//      fdb_future_set_callback(f, (FDBCallback)&go_callback, m);
+//  }
 import "C"
 
 import (
