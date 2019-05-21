@@ -74,19 +74,20 @@ private:
 
 namespace FdbClientLogEvents {
 	typedef int EventType;
-	enum {	GET_VERSION_LATENCY	= 0,
-			GET_VALUE			= 1,
-			GET_KEY			= 2,
-			GET_RANGE_FINISHED	= 3,
-			GET_RANGE			= 4,
-			COMMIT_LATENCY		= 5,
-			CONTACTED_PROXY	= 6,
-			ERROR_GET			= 7,
-			ERROR_GET_RANGE	= 8,
-			ERROR_COMMIT		= 9,
+    enum {
+	    GET_VERSION_LATENCY = 0,
+	    GET_VALUE = 1,
+	    GET_KEY = 2,
+	    GET_RANGE = 3,
+	    GET_SUBRANGE = 4,
+	    COMMIT_LATENCY = 5,
+	    CONTACTED_PROXY = 6,
+	    ERROR_GET = 7,
+	    ERROR_GET_RANGE = 8,
+	    ERROR_COMMIT = 9,
 
-			EVENTTYPEEND	// End of EventType
-	     };
+	    EVENTTYPEEND // End of EventType
+    };
 
 	struct Event {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
@@ -198,9 +199,9 @@ namespace FdbClientLogEvents {
 		}
 	};
 
-	struct EventGetRangeFinished : public Event {
-		EventGetRangeFinished(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_FINISHED, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
-		EventGetRangeFinished() { }
+	struct EventGetRange : public Event {
+		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
+		EventGetRange() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -215,7 +216,7 @@ namespace FdbClientLogEvents {
 		Key endKey;
 
 		override void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRangeFinished")
+			TraceEvent("TransactionTrace_GetRange")
 				.detail("TransactionID", id)
 				.detail("Latency", latency)
 				.detail("RangeSizeBytes", rangeSize)
@@ -224,10 +225,10 @@ namespace FdbClientLogEvents {
 		}
 	};
 
-	struct EventGetRange : public Event {
-		EventGetRange(double ts, int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
-			Event(GET_RANGE, ts), readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
-		EventGetRange() {}
+	struct EventGetSubRange : public Event {
+		EventGetSubRange(double ts, int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
+			Event(GET_SUBRANGE, ts), readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
+		EventGetSubRange() {}
 
 		template <typename Ar> Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -244,7 +245,7 @@ namespace FdbClientLogEvents {
 		NetworkAddress storageContacted;
 
 		override void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange")
+			TraceEvent("TransactionTrace_GetSubRange")
 				.detail("TransactionID", id)
 				.detail("ReadId", readId)
 				.detail("BytesFetched", bytesFetched)

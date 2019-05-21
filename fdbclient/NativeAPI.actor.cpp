@@ -1725,7 +1725,7 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 		int rangeSize = 0;
 		for (const KeyValueRef &kv : result.contents())
 			rangeSize += kv.key.size() + kv.value.size();
-		trLogInfo->addLog(FdbClientLogEvents::EventGetRangeFinished(startTime, now()-startTime, rangeSize, begin.getKey(), end.getKey()));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, now()-startTime, rangeSize, begin.getKey(), end.getKey()));
 	}
 
 	if( !snapshot ) {
@@ -1853,7 +1853,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					auto beginKey = rep.data.empty() ? Key() : rep.data.begin()->key;
 					auto endKey = rep.data.empty() ? Key() : rep.data.rbegin()->key;
 					auto storageContacted = trackedReply.address;
-					trLogInfo->addLog(FdbClientLogEvents::EventGetRange {
+					trLogInfo->addLog(FdbClientLogEvents::EventGetSubRange {
 						now(), readId, bytesFetched, keysFetched, beginKey, endKey, storageContacted
 					});
 				}
