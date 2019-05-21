@@ -77,6 +77,8 @@ ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self
 ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self, ActorCollection *actors, Database cx);
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers = 2);
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self);
+ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx, RestoreWorkerInterface myWorkerInterf);
+ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx);
 
 bool debug_verbose = true;
 void printGlobalNodeStatus(Reference<RestoreWorkerData>);
@@ -297,12 +299,31 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		ASSERT( !self->loaderInterf.present() );
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
+		RestoreLoaderInterface &recruited = self->loaderInterf.get();
+		DUMPTOKEN(recruited.sampleRangeFile);
+		DUMPTOKEN(recruited.sampleLogFile);
+		DUMPTOKEN(recruited.setApplierKeyRangeVectorRequest);
+		DUMPTOKEN(recruited.loadRangeFile);
+		DUMPTOKEN(recruited.loadLogFile);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
+		DUMPTOKEN(recruited.finishRestore);
 		self->loaderData = Reference<RestoreLoaderData>( new RestoreLoaderData(self->loaderInterf.get().id(),  req.nodeIndex) );
 		actors->add( restoreLoaderCore(self->loaderData, self->loaderInterf.get(), cx) );
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT( !self->applierInterf.present() );
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
+		RestoreApplierInterface &recruited = self->applierInterf.get();
+		DUMPTOKEN(recruited.calculateApplierKeyRange);
+		DUMPTOKEN(recruited.getApplierKeyRangeRequest);
+		DUMPTOKEN(recruited.setApplierKeyRangeRequest);
+		DUMPTOKEN(recruited.sendSampleMutationVector);
+		DUMPTOKEN(recruited.sendMutationVector);
+		DUMPTOKEN(recruited.applyToDB);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
+		DUMPTOKEN(recruited.finishRestore);
 		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData(self->applierInterf.get().id(), req.nodeIndex) );
 		actors->add( restoreApplierCore(self->applierData, self->applierInterf.get(), cx) );
 	} else {
@@ -479,6 +500,29 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	return Void();
 }
 
+// RestoreWorkerLeader is the worker that runs RestoreMaster role
+ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx) {
+	self->masterData = Reference<RestoreMasterData>(new RestoreMasterData());
+	// We must wait for enough time to make sure all restore workers have registered their workerInterfaces into the DB
+	printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
+			workerInterf.id().toString().c_str());
+	wait( delay(10.0) );
+
+	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", workerInterf.id().toString().c_str());
+
+	wait( collectRestoreWorkerInterface(self, cx, MIN_NUM_WORKERS) );
+
+	wait( removeRedundantRestoreWorkers(self, cx) );
+
+	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
+
+	// recruitRestoreRoles must be after collectWorkerInterface
+	wait( recruitRestoreRoles(self) );
+
+	wait( startRestoreMaster(self->masterData, cx) );
+
+	return Void();
+}
 
 ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, RestoreWorkerInterface interf, Database cx) {
 	state double lastLoopTopTime;
@@ -526,91 +570,70 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 	return Void();
 }
 
-ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
-	state Database cx = cx_input;
-	state RestoreWorkerInterface workerInterf;
-	workerInterf.initEndpoints();
-	state Optional<RestoreWorkerInterface> leaderInterf;
-	//Global data for the worker
+ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
+	state ActorCollection actors(false);
+	state Future<Void> myWork = Never();
+	state Reference<AsyncVar<RestoreWorkerInterface>> leader = Reference<AsyncVar<RestoreWorkerInterface>>( 
+																new AsyncVar<RestoreWorkerInterface>() );
+
+	state RestoreWorkerInterface myWorkerInterf;
+	myWorkerInterf.initEndpoints();
 	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
-
-	self->workerID = workerInterf.id();
-
+	self->workerID = myWorkerInterf.id();
 	initRestoreWorkerConfig(); //TODO: Change to a global struct to store the restore configuration
 
-	// Compete in registering its restoreInterface as the leader.
-	state Transaction tr(cx);
+	//actors.add( doRestoreWorker(leader, myWorkerInterf) );
+	//actors.add( monitorleader(leader, cx, myWorkerInterf) );
+	wait( monitorleader(leader, cx, myWorkerInterf) );
+
+	printf("Wait for leader\n");
+	wait(delay(1));
+	if (leader->get() == myWorkerInterf) {
+		// Restore master worker: doLeaderThings();
+		myWork = startRestoreWorkerLeader(self, myWorkerInterf, cx);
+	} else {
+		// Restore normal worker (for RestoreLoader and RestoreApplier roles): doWorkerThings();
+		myWork = startRestoreWorker(self, myWorkerInterf, cx);
+	}
+
+	wait(myWork);
+	return Void();
+}
+
+
+
+// RestoreMaster is the leader
+ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx, RestoreWorkerInterface myWorkerInterf) {
+ 	state ReadYourWritesTransaction tr(cx);
+	//state Future<Void> leaderWatch;
+	state RestoreWorkerInterface leaderInterf;
 	loop {
 		try {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
-			if(leader.present()) {
-				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leader.get(), IncludeVersion());
-				// NOTE: Handle the situation that the leader's commit of its key causes error(commit_unknown_result)
-				// In this situation, the leader will try to register its key again, which will never succeed.
-				// We should let leader escape from the infinite loop
-				if ( leaderInterf.get().id() == workerInterf.id() ) {
-					printf("[Worker] NodeID:%s is the leader and has registered its key in commit_unknown_result error. Let it set the key again\n",
-							leaderInterf.get().id().toString().c_str());
-					tr.set(restoreLeaderKey, BinaryWriter::toValue(workerInterf, IncludeVersion()));
-					wait(tr.commit());
-					 // reset leaderInterf to invalid for the leader process
-					 // because a process will not execute leader's logic unless leaderInterf is invalid
-					leaderInterf = Optional<RestoreWorkerInterface>();
-					break;
-				}
-				state Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
-				state Optional<Value> workerInterfValue = wait( tr.get(restoreWorkerKeyFor(workerInterf.id())) );
-				if ( agentValues.size() > NUM_APPLIERS + NUM_LOADERS && !workerInterfValue.present() ) {
-					// The worker exit immediately only when it has not registered its interface
-					printf("[Worker] Worker interface key number:%d > expected workers :%d\n", agentValues.size(), NUM_APPLIERS + NUM_LOADERS);
-					return Void();
-				}
-				printf("[Worker] Leader key exists:%s. Worker registers its restore workerInterface id:%s\n",
-						leaderInterf.get().id().toString().c_str(), workerInterf.id().toString().c_str());
-				tr.set(restoreWorkerKeyFor(workerInterf.id()), restoreWorkerInterfaceValue(workerInterf));
-				wait(tr.commit());
-				break;
+			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
+			if(leaderValue.present()) {
+				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leaderValue.get(), IncludeVersion());
+				// Register my interface as an worker
+				tr.set(restoreWorkerKeyFor(myWorkerInterf.id()), restoreWorkerInterfaceValue(myWorkerInterf));
+			} else {
+				// Workers compete to be the leader
+				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));
+				leaderInterf = myWorkerInterf;
 			}
-			printf("[Worker] NodeID:%s competes register its workerInterface as leader\n", workerInterf.id().toString().c_str());
-			tr.set(restoreLeaderKey, BinaryWriter::toValue(workerInterf, IncludeVersion()));
-			wait(tr.commit());
+			//leaderWatch = tr.watch(restoreLeaderKey);
+			wait( tr.commit() );
+			leader->set(leaderInterf);
+			//wait( leaderWatch );
 			break;
 		} catch( Error &e ) {
 			// We may have error commit_unknown_result, the commit may or may not succeed!
 			// We must handle this error, otherwise, if the leader does not know its key has been registered, the leader will stuck here!
 			printf("[INFO] NodeID:%s restoreWorker select leader error, error code:%d error info:%s\n",
-					workerInterf.id().toString().c_str(), e.code(), e.what());
+					myWorkerInterf.id().toString().c_str(), e.code(), e.what());
 			wait( tr.onError(e) );
 		}
-	}
-
-	
-	if(leaderInterf.present()) { // Logic for restoer workers (restore loader and restore applier)
-		wait( startRestoreWorker(self, workerInterf, cx) );
-	} else { // Logic for restore master
-		self->masterData = Reference<RestoreMasterData>(new RestoreMasterData());
-		// We must wait for enough time to make sure all restore workers have registered their workerInterfaces into the DB
-		printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
-				workerInterf.id().toString().c_str());
-		wait( delay(10.0) );
-
-		printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", workerInterf.id().toString().c_str());
-
-		wait( collectRestoreWorkerInterface(self, cx, MIN_NUM_WORKERS) );
-
-		wait( removeRedundantRestoreWorkers(self, cx) );
-
-		state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
-
-		// configureRoles must be after collectWorkerInterface
-		// TODO: remove the delay() Why do I need to put an extra wait() to make sure the above wait is executed after the below wwait?
-		wait( delay(1.0) );
-		wait( recruitRestoreRoles(self) );
-
-		wait( startRestoreMaster(self->masterData, cx) );
 	}
 
 	return Void();

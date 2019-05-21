@@ -38,8 +38,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-class RestoreConfig;
+#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
+class RestoreConfig;
 
 // Timeout threshold in seconds for restore commands
 extern int FastRestore_Failure_Timeout;
@@ -85,7 +86,6 @@ struct RestoreWorkerInterface {
 		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
 	}
 };
-
 
 struct RestoreRoleInterface {
 public:	
