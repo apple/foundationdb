@@ -640,16 +640,8 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 }
 
 ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data ) {
-	// txsTag is spilled by value, so by definition, its poppable location is always up to the persistentDataVersion.
+	// txsTag is spilled by value, so we do not need to track its popped location.
 	if (data->tag == txsTag) {
-		auto locationIter = logData->versionLocation.lower_bound(std::max<Version>(data->popped, logData->persistentDataVersion));
-		if (locationIter != logData->versionLocation.end()) {
-			data->poppedLocation = locationIter->value.first;
-		} else {
-			// We have no data, so whatever our previous value was is better than anything new we know how
-			// to assign.  Ideally, we'd use the most recent commit location, but that's surprisingly
-			// difficult to track.
-		}
 		return Void();
 	}
 
@@ -709,17 +701,17 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	}
 	wait(waitForAll(updates));
 
-	auto lastItem = logData->versionLocation.lastItem();
 	IDiskQueue::location minLocation = 0;
 	Version minVersion = 0;
-	if(lastItem != logData->versionLocation.end()) {
-		minLocation = lastItem->value.second;
-		minVersion = lastItem->key;
+	auto locationIter = logData->versionLocation.lower_bound(logData->persistentDataVersion);
+	if (locationIter != logData->versionLocation.end()) {
+		minLocation = locationIter->value.first;
+		minVersion = locationIter->key;
 	}
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData && tagData->tag != txsTag && (tagData->versionMessages.size() > 0 || !tagData->nothingPersistent)) {
+			if (tagData && tagData->tag != txsTag && !tagData->nothingPersistent) {
 				minLocation = std::min(minLocation, tagData->poppedLocation);
 				minVersion = std::min(minVersion, tagData->popped);
 			}
