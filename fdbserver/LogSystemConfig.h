@@ -152,7 +152,7 @@ struct TLogSet {
 	void serialize( Ar& ar ) {
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
-			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
+			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion, backupWorkers);
 		} else {
 			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
@@ -161,9 +161,6 @@ struct TLogSet {
 				serializer(ar, tLogVersion);
 			}
 			ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
-		}
-		if (ar.protocolVersion() > 0x0FDB00B061070001LL) {
-			serializer(ar, backupWorkers);
 		}
 	}
 };

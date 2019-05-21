@@ -87,6 +87,7 @@ struct ClusterControllerFullInterface {
 
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
+	std::vector<WorkerInterface> backupWorkers;
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
 	std::vector<WorkerInterface> proxies;
@@ -99,8 +100,9 @@ struct RecruitFromConfigurationReply {
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
+	void serialize(Ar& ar) {
+		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
+		           satelliteFallback, backupWorkers);
 	}
 };
 

@@ -149,6 +149,7 @@ struct InitializeLogRouterRequest {
 };
 
 struct InitializeBackupRequest {
+	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
 	uint64_t recoveryCount;
 	Version startVersion;

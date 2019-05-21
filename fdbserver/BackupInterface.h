@@ -27,6 +27,7 @@
 
 // The interface for backup workers.
 struct BackupInterface {
+	constexpr static FileIdentifier file_identifier = 6762745;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBackupRequest> haltBackup;
 	struct LocalityData locality;
@@ -53,6 +54,7 @@ struct BackupInterface {
 };
 
 struct HaltBackupRequest {
+	constexpr static FileIdentifier file_identifier = 4212277;
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
