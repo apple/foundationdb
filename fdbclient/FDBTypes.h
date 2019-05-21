@@ -21,11 +21,14 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
-using std::vector;
-using std::pair;
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
@@ -72,6 +75,32 @@ struct Tag {
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
+
+template <>
+struct struct_like_traits<Tag> : std::true_type {
+	using Member = Tag;
+	using types = pack<uint16_t, int8_t>;
+
+	template <int i>
+	static const index_t<i, types>& get(const Member& m) {
+		if constexpr (i == 0) {
+			return m.id;
+		} else {
+			static_assert(i == 1);
+			return m.locality;
+		}
+	}
+
+	template <int i, class Type>
+	static const void assign(Member& m, const Type& t) {
+		if constexpr (i == 0) {
+			m.id = t;
+		} else {
+			static_assert(i == 1);
+			m.locality = t;
+		}
+	}
+};
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
@@ -523,6 +552,7 @@ struct Traceable<RangeResultRef> : std::true_type {
 };
 
 struct KeyValueStoreType {
+	constexpr static FileIdentifier file_identifier = 6560359;
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum StoreType {
 		SSD_BTREE_V1,
@@ -734,7 +764,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {

@@ -52,6 +52,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+using std::pair;
 using std::make_pair;
 
 #pragma region Data Structures
@@ -199,11 +200,11 @@ private:
 };
 
 struct UpdateEagerReadInfo {
-	vector<KeyRef> keyBegin;
-	vector<Key> keyEnd; // these are for ClearRange
+	std::vector<KeyRef> keyBegin;
+	std::vector<Key> keyEnd; // these are for ClearRange
 
-	vector<pair<KeyRef, int>> keys;
-	vector<Optional<Value>> value;
+	std::vector<std::pair<KeyRef, int>> keys;
+	std::vector<Optional<Value>> value;
 
 	Arena arena;
 
@@ -223,13 +224,13 @@ struct UpdateEagerReadInfo {
 				// CompareAndClear is likely to be used after another atomic operation on same key.
 				keys.back().second = std::max(keys.back().second, m.param2.size() + 1);
 			} else {
-				keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size() + 1));
+				keys.emplace_back(m.param1, m.param2.size() + 1);
 			}
 		} else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
 		           (m.type == MutationRef::ByteMax))
-			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
+			keys.emplace_back(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
 		else if (isAtomicOp((MutationRef::Type) m.type))
-			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size()));
+			keys.emplace_back(m.param1, m.param2.size());
 	}
 
 	void finishKeyBegin() {
@@ -2239,8 +2240,8 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 	// version.  The latter depends on data->newestAvailableVersion, so loop over the ranges of that.
 	// SOMEDAY: Could this just use shards?  Then we could explicitly do the removeDataRange here when an adding/transferred shard is cancelled
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
-	vector<std::pair<KeyRange,Version>> changeNewestAvailable;
-	vector<KeyRange> removeRanges;
+	std::vector<std::pair<KeyRange,Version>> changeNewestAvailable;
+	std::vector<KeyRange> removeRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value()==latestVersion || r->value() >= version;
@@ -2255,7 +2256,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 			if (dataAvailable) {
 				ASSERT( r->value() == latestVersion);  // Not that we care, but this used to be checked instead of dataAvailable
 				ASSERT( data->mutableData().getLatestVersion() > version || context == CSK_RESTORE );
-				changeNewestAvailable.push_back(make_pair(range, version));
+				changeNewestAvailable.emplace_back(range, version);
 				removeRanges.push_back( range );
 			}
 			data->addShard( ShardInfo::newNotAssigned(range) );
@@ -2263,7 +2264,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version==0){ // bypass fetchkeys; shard is known empty at version 0
-				changeNewestAvailable.push_back(make_pair(range, latestVersion));
+				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard( ShardInfo::newReadWrite(range, data) );
 				setAvailableStatus(data, range, true);
 			} else {
@@ -2272,7 +2273,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 					data->addShard( ShardInfo::newAdding(data, range) );
 			}
 		} else {
-			changeNewestAvailable.push_back(make_pair(range, latestVersion));
+			changeNewestAvailable.emplace_back(range, latestVersion);
 			data->addShard( ShardInfo::newReadWrite(range, data) );
 		}
 	}
@@ -2438,7 +2439,7 @@ private:
 				rollback( data, rollbackVersion, currentVersion );
 			}
 
-			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
+			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
 			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
@@ -3694,7 +3695,7 @@ void versionedMapTest() {
 	printf("SS Ptree node is %zu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
 
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
-	const int ASIZE = NSIZE<=64 ? 64 : NextPowerOfTwo<NSIZE>::Result;
+	const int ASIZE = NSIZE<=64 ? 64 : NextFastAllocatedSize<NSIZE>::Result;
 
 	auto before = FastAllocator< ASIZE >::getTotalMemory();
 

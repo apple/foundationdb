@@ -204,7 +204,7 @@ public:
 		return tag.id % logServers.size();
 	}
 
-	void updateLocalitySet( vector<LocalityData> const& localities ) {
+	void updateLocalitySet( std::vector<LocalityData> const& localities ) {
 		LocalityMap<int>* logServerMap;
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
@@ -418,7 +418,7 @@ struct ILogSystem {
 
 	struct MergedPeekCursor : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
 		Reference<LogSet> logSet;
-		vector< Reference<IPeekCursor> > serverCursors;
+		std::vector< Reference<IPeekCursor> > serverCursors;
 		std::vector<LocalityEntry> locations;
 		std::vector< std::pair<LogMessageVersion, int> > sortedVersions;
 		Tag tag;
@@ -429,9 +429,9 @@ struct ILogSystem {
 		UID randomID;
 		int tLogReplicationFactor;
 
-		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
+		MergedPeekCursor( std::vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
-		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
+		MergedPeekCursor( std::vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( uint64_t version );
@@ -636,7 +636,7 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
 		// Same contract as peek(), but for a set of tags
 
-	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
+	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, std::vector<std::pair<Version,Tag>> history = std::vector<std::pair<Version,Tag>>() ) = 0;
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
 
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) = 0;
@@ -690,7 +690,7 @@ struct ILogSystem {
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 		// Returns when the log system configuration has changed due to a tlog rejoin.
 
-	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
+	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) = 0;
 
 	virtual bool hasRemoteLogs() = 0;
 
@@ -807,10 +807,10 @@ struct LogPushData : NonCopyable {
 
 private:
 	Reference<ILogSystem> logSystem;
-	vector<Tag> next_message_tags;
-	vector<Tag> prev_tags;
-	vector<BinaryWriter> messagesWriter;
-	vector<int> msg_locations;
+	std::vector<Tag> next_message_tags;
+	std::vector<Tag> prev_tags;
+	std::vector<BinaryWriter> messagesWriter;
+	std::vector<int> msg_locations;
 	uint32_t subsequence;
 };
 

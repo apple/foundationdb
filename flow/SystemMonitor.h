@@ -74,6 +74,9 @@ struct NetworkData {
 	int64_t countFileCachePageReadsMerged;
 	int64_t countFileCacheFinds;
 	int64_t countFileCacheReadBytes;
+	int64_t countFilePageCacheHits;
+	int64_t countFilePageCacheMisses;
+	int64_t countFilePageCacheEvictions;
 	int64_t countConnEstablished;
 	int64_t countConnClosedWithError;
 	int64_t countConnClosedWithoutError;
@@ -121,6 +124,9 @@ struct NetworkData {
 		countFileCachePageReadsMerged = getValue(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
 		countFileCacheFinds = getValue(LiteralStringRef("AsyncFile.CountCacheFinds"));
 		countFileCacheReadBytes = getValue(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
+		countFilePageCacheHits = getValue(LiteralStringRef("EvictablePageCache.CacheHits"));
+		countFilePageCacheMisses = getValue(LiteralStringRef("EvictablePageCache.CacheMisses"));
+		countFilePageCacheEvictions = getValue(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 };
 
