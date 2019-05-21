@@ -427,6 +427,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
+	Version queuePoppedVersion;
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; //tag.locality | tag.id
@@ -481,7 +482,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, uint64_t protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
-			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
+			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
@@ -498,6 +499,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PersistentDataVersion", [this](){ return this->persistentDataVersion; });
 		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
+		specialCounter(cc, "QueuePoppedVersion", [this](){ return this->queuePoppedVersion; });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
@@ -638,16 +640,8 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 }
 
 ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data ) {
-	// txsTag is spilled by value, so by definition, its poppable location is always up to the persistentDataVersion.
+	// txsTag is spilled by value, so we do not need to track its popped location.
 	if (data->tag == txsTag) {
-		auto locationIter = logData->versionLocation.lower_bound(std::max<Version>(data->popped, logData->persistentDataVersion));
-		if (locationIter != logData->versionLocation.end()) {
-			data->poppedLocation = locationIter->value.first;
-		} else {
-			// We have no data, so whatever our previous value was is better than anything new we know how
-			// to assign.  Ideally, we'd use the most recent commit location, but that's surprisingly
-			// difficult to track.
-		}
 		return Void();
 	}
 
@@ -707,13 +701,19 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	}
 	wait(waitForAll(updates));
 
-	auto lastItem = logData->versionLocation.lastItem();
-	IDiskQueue::location minLocation = lastItem == logData->versionLocation.end() ? 0 : lastItem->value.second;
+	IDiskQueue::location minLocation = 0;
+	Version minVersion = 0;
+	auto locationIter = logData->versionLocation.lower_bound(logData->persistentDataVersion);
+	if (locationIter != logData->versionLocation.end()) {
+		minLocation = locationIter->value.first;
+		minVersion = locationIter->key;
+	}
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData) {
+			if (tagData && tagData->tag != txsTag && !tagData->nothingPersistent) {
 				minLocation = std::min(minLocation, tagData->poppedLocation);
+				minVersion = std::min(minVersion, tagData->popped);
 			}
 		}
 	}
@@ -726,6 +726,7 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 			lastCommittedLocation = locationIter->value.first;
 		}
 		self->persistentQueue->pop( std::min(minLocation, lastCommittedLocation) );
+		logData->queuePoppedVersion = std::max(logData->queuePoppedVersion, minVersion);
 	}
 
 	return Void();
@@ -752,6 +753,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 		for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			state Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
 			if(tagData) {
+				wait(tagData->eraseMessagesBefore( tagData->popped, self, logData, TaskUpdateStorage ));
 				state Version currentVersion = 0;
 				// Clear recently popped versions from persistentData if necessary
 				updatePersistentPopped( self, logData, tagData );

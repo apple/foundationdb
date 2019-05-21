@@ -437,6 +437,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PersistentDataVersion", [this](){ return this->persistentDataVersion; });
 		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
+		specialCounter(cc, "QueuePoppedVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
