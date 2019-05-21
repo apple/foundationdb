@@ -531,7 +531,7 @@ inline static void* aligned_alloc(size_t alignment, size_t size) {
 	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
 	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
 	// powers of 2 of any size will fail as they would on other platforms.  This change does not
-	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
+	// break the platform::aligned_alloc() contract as all addresses which are aligned to
 	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
 	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
 		alignment = sizeof(void *);
@@ -623,6 +623,51 @@ EXTERNC void setProfilingEnabled(int enabled);
 
 #if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
 #error Clean builds must define NDEBUG, and not define various debug macros
+#endif
+
+// DTrace probing
+#if defined(DTRACE_PROBES)
+#include <sys/sdt.h>
+#define FDB_TRACE_PROBE(probe)		\
+  DTRACE_PROBE(foundationdb,probe)
+#define FDB_TRACE_PROBE1(probe,parm1)	\
+  DTRACE_PROBE1(foundationdb,probe,parm1)
+#define FDB_TRACE_PROBE2(probe,parm1,parm2)	\
+  DTRACE_PROBE2(foundationdb,probe,parm1,parm2)
+#define FDB_TRACE_PROBE3(probe,parm1,parm2,parm3) \
+  DTRACE_PROBE3(foundationdb,probe,parm1,parm2,parm3)
+#define FDB_TRACE_PROBE4(probe,parm1,parm2,parm3,parm4)	\
+  DTRACE_PROBE4(foundationdb,probe,parm1,parm2,parm3,parm4)
+#define FDB_TRACE_PROBE5(probe,parm1,parm2,parm3,parm4,parm5)	\
+  DTRACE_PROBE5(foundationdb,probe,parm1,parm2,parm3,parm4,parm5)
+#define FDB_TRACE_PROBE6(probe,parm1,parm2,parm3,parm4,parm5,parm6) \
+  DTRACE_PROBE6(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6)
+#define FDB_TRACE_PROBE7(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7) \
+  DTRACE_PROBE7(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7)
+#define FDB_TRACE_PROBE8(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8) \
+  DTRACE_PROBE8(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8)
+#define FDB_TRACE_PROBE9(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9) \
+  DTRACE_PROBE9(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9)
+#define FDB_TRACE_PROBE10(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10) \
+  DTRACE_PROBE10(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10)
+#define FDB_TRACE_PROBE11(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11) \
+  DTRACE_PROBE11(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11)
+#define FDB_TRACE_PROBE12(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12) \
+  DTRACE_PROBE12(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12)
+#else
+#define FDB_TRACE_PROBE(probe)
+#define FDB_TRACE_PROBE1(probe,parm1)
+#define FDB_TRACE_PROBE2(probe,parm1,parm2)
+#define FDB_TRACE_PROBE3(probe,parm1,parm2,parm3)
+#define FDB_TRACE_PROBE4(probe,parm1,parm2,parm3,parm4)
+#define FDB_TRACE_PROBE5(probe,parm1,parm2,parm3,parm4,parm5)
+#define FDB_TRACE_PROBE6(probe,parm1,parm2,parm3,parm4,parm5,parm6)
+#define FDB_TRACE_PROBE7(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7)
+#define FDB_TRACE_PROBE8(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8)
+#define FDB_TRACE_PROBE9(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9)
+#define FDB_TRACE_PROBE10(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10)
+#define FDB_TRACE_PROBE11(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11)
+#define FDB_TRACE_PROBE12(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12)
 #endif
 
 #endif /* FLOW_PLATFORM_H */
