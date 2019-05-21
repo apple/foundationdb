@@ -28,6 +28,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<WorkerDetails>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
@@ -95,8 +96,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
 		TraceEventFields md = wait( timeoutError(distributorWorker.eventLogRequest.getReply(
 			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
-		int64_t dataInFlight;
-		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
+		int64_t dataInFlight = boost::lexical_cast<int64_t>(md.getValue("TotalBytes"));
 		return dataInFlight;
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id()).error(e).detail("Reason", "Failed to extract DataInFlight");
@@ -126,10 +126,8 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 
 //Computes the popped version lag for tlogs
 int64_t getPoppedVersionLag( const TraceEventFields& md ) {
-	int64_t persistentDataDurableVersion, queuePoppedVersion;
-
-	sscanf(md.getValue("PersistentDataDurableVersion").c_str(), "%lld", &persistentDataDurableVersion);
-	sscanf(md.getValue("QueuePoppedVersion").c_str(), "%lld", &queuePoppedVersion);
+	int64_t persistentDataDurableVersion = boost::lexical_cast<int64_t>(md.getValue("PersistentDataDurableVersion"));
+	int64_t queuePoppedVersion = boost::lexical_cast<int64_t>(md.getValue("QueuePoppedVersion"));
 
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
@@ -250,12 +248,10 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
-		int64_t inQueue;
-		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
+		int64_t inQueue = boost::lexical_cast<int64_t>(movingDataMessage.getValue("InQueue"));
 
 		if(reportInFlight) {
-			int64_t inFlight;
-			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%lld", &inFlight);
+			int64_t inFlight = boost::lexical_cast<int64_t>(movingDataMessage.getValue("InFlight"));
 			inQueue += inFlight;
 		}
 
@@ -286,23 +282,13 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber;
-			int64_t desiredTeamNumber;
-			int64_t maxTeamNumber;
-			int64_t currentMachineTeamNumber;
-			int64_t healthyMachineTeamCount;
-			int64_t desiredMachineTeamNumber;
-			int64_t maxMachineTeamNumber;
-			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld",
-			       &currentMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld",
-			       &healthyMachineTeamCount);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld",
-			       &desiredMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
+			int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
+			int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
+			int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
+			int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
+			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
+			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
