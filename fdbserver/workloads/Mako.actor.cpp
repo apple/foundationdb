@@ -8,8 +8,9 @@
 
 enum {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_UPDATE, OP_INSERT, OP_INSERTRANGE, OP_CLEAR, OP_SETCLEAR, OP_CLEARRANGE, OP_SETCLEARRANGE, OP_COMMIT, MAX_OP};
 enum {OP_COUNT, OP_RANGE};
-static constexpr int BUFFERSIZE = 10000;
+static constexpr int MAXKEYVALUESIZE = 1000;
 static constexpr int KEYPREFIXLEN = 4;
+static constexpr int GETRANGELIMIT = 10000;
 static const char* opNames[MAX_OP] = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "INSERTRANGE", "CLEAR", "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE", "COMMIT"};
 static const std::string KEYPREFIX = "mako";
 struct MakoWorkload : KVWorkload {
@@ -59,16 +60,16 @@ struct MakoWorkload : KVWorkload {
 		// If true, record latency metrics per periodicLoggingInterval; For details, see tracePeriodically()
 		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
 		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
-		// used to store randomly generated value
-		valueString = std::string(maxValueBytes, '.');
 		// The inserted key is formatted as: fixed prefix('mako') + sequential number + padding('x')
 		// assume we want to insert 10000 rows with keyBytes set to 16, 
 		// then the key goes from 'mako00000xxxxxxx' to 'mako09999xxxxxxx'
 		seqNumLen = digits(rowCount);
 		// check keyBytes, maxValueBytes is valid
 		ASSERT(seqNumLen + KEYPREFIXLEN <= keyBytes);
-		ASSERT(keyBytes <= BUFFERSIZE);
-		ASSERT(maxValueBytes <= BUFFERSIZE);
+		ASSERT(keyBytes <= MAXKEYVALUESIZE);
+		ASSERT(maxValueBytes <= MAXKEYVALUESIZE);
+		// used to store randomly generated value
+		valueString = std::string(maxValueBytes, '.');
 		// user input: a sequence of operations to be executed; e.g. "g10i5" means to do GET 10 times and Insert 5 times
 		// One operation type is defined as "<Type><Count>" or "<Type><Count>:<Range>".
 		// When Count is omitted, it's equivalent to setting it to 1.  (e.g. "g" is equivalent to "g1")
@@ -172,20 +173,18 @@ struct MakoWorkload : KVWorkload {
 	}
 
 	Value randomValue() {
-		// TODO : add limit on maxvaluebytes
 		const int length = g_random->randomInt(minValueBytes, maxValueBytes + 1);
 		randStr(valueString, length);
 		return StringRef(reinterpret_cast<const uint8_t*>(valueString.c_str()), length);
 	}
 
-	Key ind2key(const uint64_t& ind) {
-		// allocate one more byte for potential null-character added by sprintf
-		Key result = makeString(keyBytes+1);
+	Key getKeyForIndex(const uint64_t& ind) {
+		Key result = makeString(keyBytes);
 		char* data = reinterpret_cast<char*>(mutateString(result));
-		sprintf(data, (KEYPREFIX + "%0*d").c_str(), seqNumLen, ind);
+		format((KEYPREFIX + "%0*d").c_str(), seqNumLen, ind).copy(data, KEYPREFIXLEN + seqNumLen);
 		for (int i = KEYPREFIXLEN + seqNumLen; i < keyBytes; ++i)
 			data[i] = 'x';
-		return StringRef(result.begin(), keyBytes);
+		return result;
 	}
 
 	/* number of digits */
@@ -198,7 +197,7 @@ struct MakoWorkload : KVWorkload {
 		return digits;
 	}
 	Standalone<KeyValueRef> operator()(uint64_t n) {
-		return KeyValueRef(ind2key(n), randomValue());
+		return KeyValueRef(getKeyForIndex(n), randomValue());
 	}
 
 	ACTOR static Future<Void> tracePeriodically( MakoWorkload *self){
@@ -263,7 +262,7 @@ struct MakoWorkload : KVWorkload {
 
 	ACTOR Future<Void> makoClient(Database cx, MakoWorkload* self, double delay, int actorIndex) {
 
-		state Key rkey;
+		state Key rkey, rkey2;
 		state Value rval;
 		state ReadYourWritesTransaction tr(cx);
 		state bool doCommit;
@@ -287,15 +286,16 @@ struct MakoWorkload : KVWorkload {
 						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
 						// generate random key-val pair for operation
-						rkey = self->ind2key(self->getRandomKey(self->rowCount));
+						indBegin = self->getRandomKey(self->rowCount);
+						rkey = self->getKeyForIndex(indBegin);
 						rval = self->randomValue();
+						indEnd = std::min(indBegin + range, self->rowCount);
+						rkey2 = self->getKeyForIndex(indEnd);
+						// KeyRangeRef(min, maxPlusOne)
+						rkeyRangeRef = KeyRangeRef(rkey, rkey2);
 
 						range = (self->operations[i][1] > 0) ? self->operations[i][1] : 1;
 						rangeLen = digits(range);
-						indBegin = self->getRandomKey(self->rowCount);
-						// KeyRangeRef(min, maxPlusOne)
-						indEnd = std::min(indBegin + range, self->rowCount);
-						rkeyRangeRef = KeyRangeRef(self->ind2key(indBegin), self->ind2key(indEnd));
 
 						if (i == OP_GETREADVERSION){
 							wait(logLatency(tr.getReadVersion(), &self->opLatencies[i]));
@@ -303,15 +303,14 @@ struct MakoWorkload : KVWorkload {
 						else if (i == OP_GET){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE){
-							wait(logLatency(tr.getRange(rkeyRangeRef, GetRangeLimits(-1,8000)), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, GETRANGELIMIT, false), &self->opLatencies[i]));
 						}
 						else if (i == OP_SGET){
 							wait(logLatency(tr.get(rkey, true), &self->opLatencies[i]));
 						} else if (i == OP_SGETRANGE){
 							//do snapshot get range here
-							wait(logLatency(tr.getRange(rkeyRangeRef, GetRangeLimits(-1,8000), true), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, GETRANGELIMIT, true), &self->opLatencies[i]));
 						} else if (i == OP_UPDATE){
-							// get followed by set, TODO: do I need to add counter of get here
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[OP_GET]));
 							tr.set(rkey, rval);
 							doCommit = true;
@@ -324,7 +323,7 @@ struct MakoWorkload : KVWorkload {
 							char *rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
 							randStr(rkeyPtr + KEYPREFIXLEN, self->keyBytes-KEYPREFIXLEN);
 							for (int range_i = 0; range_i < range; ++range_i){
-								sprintf(rkeyPtr + self->keyBytes - rangeLen, "%0.*d", rangeLen, range_i);
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								tr.set(rkey, self->randomValue());
 							}
 							doCommit = true;
@@ -351,7 +350,7 @@ struct MakoWorkload : KVWorkload {
 							state std::string scr_start_key;
 							state std::string scr_end_key;
 							for (int range_i = 0; range_i < range; ++range_i){
-								sprintf(rkeyPtr + self->keyBytes - rangeLen, "%0.*d", rangeLen, range_i);
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								tr.set(rkey, self->randomValue());
 								if (range_i == 0)
 									scr_start_key = rkey.toString();
