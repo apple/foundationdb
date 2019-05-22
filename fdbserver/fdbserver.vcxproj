@@ -218,7 +218,9 @@
     <ActorCompiler Include="RestoreCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-    <ClInclude Include="RestoreWorkerInterface.h" />
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />

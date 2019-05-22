@@ -163,17 +163,20 @@ struct CycleWorkload : TestWorkload {
 			}
 			if (data[i].key != key(i)) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed").detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 			double d = testKeyToDouble(data[i].value, keyPrefix);
 			i = (int)d;
 			if ( i != d || i<0 || i>=nodeCount) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 		}
 		if (i != 0) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable());
+			logTestData(data);
 			return false;
 		}
 		return true;

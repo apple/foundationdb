@@ -333,6 +333,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
 		state long curOffset = 0;
 		state bool allLoadReqsSent = false;
+		state Version prevVersion = 0; // Start version for range or log file is 0
 		loop {
 			try {
 				if ( allLoadReqsSent ) {
@@ -360,6 +361,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					}
 					LoadingParam param;
 					//self->files[curFileIndex].cursor = 0; // This is a hacky way to make sure cursor is correct in current version when we load 1 file at a time
+					// MX: May Need to specify endVersion as well because the 
 					param.url = request.url;
 					param.version = self->files[curFileIndex].version;
 					param.filename = self->files[curFileIndex].fileName;
@@ -372,6 +374,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					param.addPrefix = addPrefix;
 					param.removePrefix = removePrefix;
 					param.mutationLogPrefix = mutationLogPrefix;
+					
 					if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
 						printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth filename:%s\n",
 								param.length, param.offset, self->files[curFileIndex].fileSize, curFileIndex,
@@ -386,9 +389,11 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					if (self->files[curFileIndex].isRange) {
 						cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
 						self->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Range_File);
+						
 					} else {
 						cmdType = RestoreCommandEnum::Assign_Loader_Log_File;
 						self->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Log_File);
+						
 					}
 
 					if ( (phaseType == RestoreCommandEnum::Assign_Loader_Log_File && self->files[curFileIndex].isRange) 
@@ -398,6 +403,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 						curOffset = 0;
 					} else { // load the type of file in the phaseType
 						self->cmdID.nextCmd();
+						param.prevVersion = prevVersion; 
+						prevVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
+						param.endVersion = prevVersion;
 						printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
 							curFileIndex, self->files[curFileIndex].toString().c_str(), 
 							param.toString().c_str(), loaderID.toString().c_str()); // VERY USEFUL INFO
@@ -853,7 +861,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			wait(tr.onError(e));
 		}
 	}
-	
+
 	return restoreRequests;
 }
 
@@ -972,33 +980,6 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 
 	return Void();
 }
-
-// Send each request in requests via channel of the request's interface
-// The UID in a request is the UID of the interface to handle the request
-ACTOR template <class Interface, class Request>
-//Future< REPLY_TYPE(Request) > 
-Future<Void> getBatchReplies(
-	RequestStream<Request> Interface::* channel,
-	std::map<UID, Interface> interfaces,
-	std::map<UID, Request> requests) {
-
-	loop{
-		try {		
-			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			for(auto& request : requests) {
-				RequestStream<Request> const* stream = & (interfaces[request.first].*channel);
-				cmdReplies.push_back( stream->getReply(request.second) );
-			}
-
-			std::vector<REPLY_TYPE(Request)> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "Error code:%d, error message:%s\n", e.code(), e.what());
-		}
-	}
-
-	return Void();
-} 
 
 
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {

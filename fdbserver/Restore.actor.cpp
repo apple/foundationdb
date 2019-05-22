@@ -41,7 +41,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
@@ -644,3 +644,4 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 	wait(_restoreWorker(cx, locality));
 	return Void();
 }
+

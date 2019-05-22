@@ -40,11 +40,13 @@ ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequ
 ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplierKeyRangeRequest req, Reference<RestoreApplierData> self);
 ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self);
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self);
+ACTOR Future<Void> handleSendMutationVectorVersionedRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
 ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx);
 
 
 ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, RestoreApplierInterface applierInterf, Database cx) {
 	state ActorCollection actors(false);
+	state Future<Void> exitRole = Never();
 	state double lastLoopTopTime;
 	loop {
 		double loopTopTime = now();
@@ -60,28 +62,29 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 			choose {
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.heartbeat.getFuture()) ) {
 					requestTypeStr = "heartbeat";
-					wait(handleHeartbeat(req, applierInterf.id()));
+					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
 				when ( RestoreGetApplierKeyRangeRequest req = waitNext(applierInterf.getApplierKeyRangeRequest.getFuture()) ) {
 					requestTypeStr = "getApplierKeyRangeRequest";
-					wait(handleGetApplierKeyRangeRequest(req, self));
+					actors.add(handleGetApplierKeyRangeRequest(req, self));
 				}
 				when ( RestoreSetApplierKeyRangeRequest req = waitNext(applierInterf.setApplierKeyRangeRequest.getFuture()) ) {
 					requestTypeStr = "setApplierKeyRangeRequest";
-					wait(handleSetApplierKeyRangeRequest(req, self));
+					actors.add(handleSetApplierKeyRangeRequest(req, self));
 				}
 
 				when ( RestoreCalculateApplierKeyRangeRequest req = waitNext(applierInterf.calculateApplierKeyRange.getFuture()) ) {
 					requestTypeStr = "calculateApplierKeyRange";
-					wait(handleCalculateApplierKeyRangeRequest(req, self));
+					actors.add(handleCalculateApplierKeyRangeRequest(req, self));
 				}
 				when ( RestoreSendMutationVectorRequest req = waitNext(applierInterf.sendSampleMutationVector.getFuture()) ) {
 					requestTypeStr = "sendSampleMutationVector";
 					actors.add( handleSendSampleMutationVectorRequest(req, self));
 				} 
-				when ( RestoreSendMutationVectorRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
+				when ( RestoreSendMutationVectorVersionedRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
-					actors.add( handleSendMutationVectorRequest(req, self) );
+					//actors.add( handleSendMutationVectorRequest(req, self) );
+					actors.add( handleSendMutationVectorVersionedRequest(req, self) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.applyToDB.getFuture()) ) {
 					requestTypeStr = "applyToDB";
@@ -89,17 +92,19 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture()) ) {
 					requestTypeStr = "initVersionBatch";
-					wait(handleInitVersionBatchRequest(req, self));
+					actors.add(handleInitVersionBatchRequest(req, self));
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.finishRestore.getFuture()) ) {
 					requestTypeStr = "finishRestore";
-					wait( handlerFinishRestoreRequest(req, self, cx) );
-					break;
+					exitRole =  handlerFinishRestoreRequest(req, self, cx);
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.collectRestoreRoleInterfaces.getFuture()) ) {
 					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their workerInterfaces into DB before we can read the workerInterface.
 					// TODO: Wait until all workers have registered their workerInterface.
-					wait( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
+					actors.add( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
+				}
+				when ( wait(exitRole) ) {
+					break;
 				}
 			}
 		} catch (Error &e) {
@@ -112,7 +117,6 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 			}
 		}
 	}
-
 	return Void();
 }
 
@@ -267,6 +271,60 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequ
 	self->processedCmd[req.cmdID] = 1;
 	self->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
 
+	return Void();
+}
+
+// ATTENTION: If a loader sends mutations of range and log files at the same time,
+// Race condition may happen in this actor? 
+// MX: Maybe we won't have race condition even in the above situation because all actors run on 1 thread
+// as long as we do not wait or yield when operate the shared data, it should be fine.
+ACTOR Future<Void> handleSendMutationVectorVersionedRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
+	state int numMutations = 0;
+
+	if ( debug_verbose ) {
+		// NOTE: Print out the current version and received req is helpful in debugging
+		printf("[VERBOSE_DEBUG] handleSendMutationVectorVersionedRequest Node:%s at rangeVersion:%ld logVersion:%ld receive mutation number:%d, req:%s\n",
+			self->describeNode().c_str(), self->rangeVersion.get(), self->logVersion.get(), req.mutations.size(), req.toString().c_str());
+	}
+
+	if ( req.isRangeFile ) {
+		wait( self->rangeVersion.whenAtLeast(req.prevVersion) );
+	} else {
+		wait( self->logVersion.whenAtLeast(req.prevVersion) );
+	}
+
+	// ASSUME: Log file is processed before range file. We do NOT mix range and log file.
+	//ASSERT_WE_THINK( self->rangeVersion.get() > 0 && req.isRangeFile );
+
+	if ( (req.isRangeFile &&  self->rangeVersion.get() == req.prevVersion) ||
+	     (!req.isRangeFile && self->logVersion.get() == req.prevVersion) )  {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+		state Version commitVersion = req.version;
+		VectorRef<MutationRef> mutations(req.mutations);
+		printf("[DEBUG] Node:%s receive %d mutations at version:%ld\n", self->describeNode().c_str(), mutations.size(), commitVersion);
+		if ( self->kvOps.find(commitVersion) == self->kvOps.end() ) {
+			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+		}
+		state int mIndex = 0;
+		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+			MutationRef mutation = mutations[mIndex];
+			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
+			numMutations++;
+			//if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
+				printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
+						self->describeNode().c_str(), numMutations, mutation.toString().c_str());
+			//}
+		}
+
+		// Notify the same actor and unblock the request at the next version
+		if ( req.isRangeFile ) {
+			self->rangeVersion.set(req.version);
+		} else {
+			self->logVersion.set(req.version);
+		}
+	}
+
+	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
 	return Void();
 }
 

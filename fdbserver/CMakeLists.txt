@@ -71,7 +71,7 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.h
   RestoreLoader.actor.cpp
   Restore.actor.cpp
-  RestoreWorkerInterface.h
+  RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h

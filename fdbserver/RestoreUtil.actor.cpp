@@ -37,7 +37,7 @@ std::string getRoleStr(RestoreRole role) {
 
 // CMDUID implementation
 void CMDUID::initPhase(RestoreCommandEnum newPhase) {
-	printf("CMDID, current phase:%d, new phase:%d\n", phase, newPhase);
+	//printf("CMDID, current phase:%d, new phase:%d\n", phase, newPhase);
 	phase = (uint16_t) newPhase;
 	cmdID = 0;
 }

@@ -36,13 +36,16 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
 extern double transactionBatchSizeThreshold;
 
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> { 
+	NotifiedVersion rangeVersion; // All requests of mutations in range file below this version has been processed
+	NotifiedVersion logVersion; // All requests of mutations in log file below this version has been processed
+
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
@@ -64,10 +67,13 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		nodeID = applierInterfID;
 		nodeIndex = assignedIndex;
 
+		// Q: Why do we need to initMetric?
+		//version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
+
 		role = RestoreRole::Applier;
 	}
 
-	~RestoreApplierData() {}
+	~RestoreApplierData() = default;
 
 	std::string describeNode() {
 		std::stringstream ss;

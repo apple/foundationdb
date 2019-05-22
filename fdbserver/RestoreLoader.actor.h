@@ -38,7 +38,7 @@
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbclient/BackupContainer.h"
 
 #include "flow/actorcompiler.h" // has to be last include
