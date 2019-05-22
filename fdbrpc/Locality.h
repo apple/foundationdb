@@ -25,10 +25,11 @@
 #include "flow/flow.h"
 
 struct ProcessClass {
+	constexpr static FileIdentifier file_identifier = 6697257;
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RateKeeperClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RatekeeperClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, RateKeeper, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -50,7 +51,7 @@ public:
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
-		else if (s=="ratekeeper") _class = RateKeeperClass;
+		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 	}
 
@@ -68,7 +69,7 @@ public:
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
-		else if (classStr=="ratekeeper") _class = RateKeeperClass;
+		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -101,7 +102,7 @@ public:
 			case ClusterControllerClass: return "cluster_controller";
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
-			case RateKeeperClass: return "ratekeeper";
+			case RatekeeperClass: return "ratekeeper";
 			default: return "invalid";
 		}
 	}
@@ -193,39 +194,40 @@ public:
 	void serialize(Ar& ar) {
 		// Locality is persisted in the database inside StorageServerInterface, so changes here have to be
 		// versioned carefully!
-		if (ar.protocolVersion() >= 0x0FDB00A446020001LL) {
-			Standalone<StringRef> key;
-			Optional<Standalone<StringRef>> value;
-			uint64_t mapSize = (uint64_t)_data.size();
-			serializer(ar, mapSize);
-			if (ar.isDeserializing) {
-				for (size_t i = 0; i < mapSize; i++) {
-					serializer(ar, key, value);
-					_data[key] = value;
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, _data);
+		} else {
+			if (ar.protocolVersion() >= 0x0FDB00A446020001LL) {
+				Standalone<StringRef> key;
+				Optional<Standalone<StringRef>> value;
+				uint64_t mapSize = (uint64_t)_data.size();
+				serializer(ar, mapSize);
+				if (ar.isDeserializing) {
+					for (size_t i = 0; i < mapSize; i++) {
+						serializer(ar, key, value);
+						_data[key] = value;
+					}
+				} else {
+					for (auto it = _data.begin(); it != _data.end(); it++) {
+						key = it->first;
+						value = it->second;
+						serializer(ar, key, value);
+					}
 				}
-			}
-			else {
-				for (auto it = _data.begin(); it != _data.end(); it++) {
-					key = it->first;
-					value = it->second;
-					serializer(ar, key, value);
-				}
-			}
-		}
-		else {
-			ASSERT(ar.isDeserializing);
-			UID	zoneId, dcId, processId;
-			serializer(ar, zoneId, dcId);
-			set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
-			set(keyDcId, Standalone<StringRef>(dcId.toString()));
+			} else {
+				ASSERT(ar.isDeserializing);
+				UID zoneId, dcId, processId;
+				serializer(ar, zoneId, dcId);
+				set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
+				set(keyDcId, Standalone<StringRef>(dcId.toString()));
 
-			if (ar.protocolVersion() >= 0x0FDB00A340000001LL) {
-				serializer(ar, processId);
-				set(keyProcessId, Standalone<StringRef>(processId.toString()));
-			}
-			else {
-				int _machineClass = ProcessClass::UnsetClass;
-				serializer(ar, _machineClass);
+				if (ar.protocolVersion() >= 0x0FDB00A340000001LL) {
+					serializer(ar, processId);
+					set(keyProcessId, Standalone<StringRef>(processId.toString()));
+				} else {
+					int _machineClass = ProcessClass::UnsetClass;
+					serializer(ar, _machineClass);
+				}
 			}
 		}
 	}

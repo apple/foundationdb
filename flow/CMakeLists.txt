@@ -63,6 +63,8 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   actorcompiler.h
   error_definitions.h
+  flat_buffers.h
+  flat_buffers.cpp
   flow.cpp
   flow.h
   genericactors.actor.cpp
@@ -70,6 +72,7 @@ set(FLOW_SRCS
   network.cpp
   network.h
   serialize.h
+  serialize.cpp
   stacktrace.amalgamation.cpp
   stacktrace.h
   version.cpp)

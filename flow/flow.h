@@ -44,12 +44,21 @@
 #include "flow/Deque.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
+#include "flow/FileIdentifier.h"
 
 #include <boost/version.hpp>
 
 using namespace std::rel_ops;
 
-#define TEST( condition ) if (!(condition)); else { static TraceEvent* __test = &(TraceEvent("CodeCoverage").detail("File", __FILE__).detail("Line",__LINE__).detail("Condition", #condition)); }
+#define TEST(condition)                                                                                                \
+	if (!(condition)) {                                                                                                \
+	} else {                                                                                                           \
+		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
+		                                  .detail("File", __FILE__)                                                    \
+		                                  .detail("Line", __LINE__)                                                    \
+		                                  .detail("Condition", #condition));                                           \
+		(void)__test;                                                                                                  \
+	}
 
 /*
 usage:
@@ -106,6 +115,7 @@ Standalone<StringRef> concatenate( Iter b, Iter const& e ) {
 
 class Void {
 public:
+	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
 	void serialize(Ar&) {}
 };
@@ -113,7 +123,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr {
+class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
@@ -180,11 +190,39 @@ public:
 
 	bool isError() const { return error.code() != invalid_error_code; }
 	bool isError(int code) const { return error.code() == code; }
-	Error getError() const { ASSERT(isError()); return error; }
+	const Error& getError() const { ASSERT(isError()); return error; }
 
 private:
 	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
 	Error error;
+};
+
+template <class T>
+struct union_like_traits<ErrorOr<T>> : std::true_type {
+	using Member = ErrorOr<T>;
+	using alternatives = pack<Error, T>;
+	static uint8_t index(const Member& variant) { return variant.present() ? 1 : 0; }
+	static bool empty(const Member& variant) { return false; }
+
+	template <int i>
+	static const index_t<i, alternatives>& get(const Member& m) {
+		if constexpr (i == 0) {
+			return m.getError();
+		} else {
+			static_assert(i == 1, "ErrorOr only has two members");
+			return m.get();
+		}
+	}
+
+	template <int i, class Alternative>
+	static const void assign(Member& m, const Alternative& a) {
+		if constexpr (i == 0) {
+			m = a;
+		} else {
+			static_assert(i == 1);
+			m = a;
+		}
+	}
 };
 
 template <class T>

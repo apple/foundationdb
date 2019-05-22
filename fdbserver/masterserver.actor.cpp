@@ -308,7 +308,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
 			self->dcId_locality[recr.dcId] = loc;
-			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", printable(recr.dcId)).detail("Loc", loc);
+			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", recr.dcId).detail("Loc", loc);
 		}
 
 		if( !self->dcId_locality.count(remoteDcId) ) {
@@ -317,7 +317,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
 			self->dcId_locality[remoteDcId] = loc;
-			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", printable(remoteDcId)).detail("Loc", loc);
+			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", remoteDcId).detail("Loc", loc);
 		}
 
 		std::vector<UID> exclusionWorkerIds;
@@ -326,10 +326,12 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() * std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())), exclusionWorkerIds) ) );
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
+		self->logSystem = Reference<ILogSystem>();  // Cancels the actors in the previous log system.
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->primaryLocality, self->dcId_locality[remoteDcId], self->allTags, self->recruitmentStalled ) );
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
+		self->logSystem = Reference<ILogSystem>();  // Cancels the actors in the previous log system.
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, self->primaryLocality, tagLocalitySpecial, self->allTags, self->recruitmentStalled ) );
 		self->logSystem = newLogSystem;
 	}
@@ -520,7 +522,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				!std::any_of(t->read_conflict_ranges.begin(), t->read_conflict_ranges.end(), [](KeyRangeRef const& r){return r.contains(lastEpochEndKey);}))
 			{
 				for(auto m = t->mutations.begin(); m != t->mutations.end(); ++m) {
-					TraceEvent("PM_CTM", parent->dbgid).detail("MType", m->type).detail("Param1", printable(m->param1)).detail("Param2", printable(m->param2));
+					TraceEvent("PM_CTM", parent->dbgid).detail("MType", m->type).detail("Param1", m->param1).detail("Param2", m->param2);
 					if (isMetadataMutation(*m)) {
 						// We keep the mutations and write conflict ranges from this transaction, but not its read conflict ranges
 						Standalone<CommitTransactionRef> out;
@@ -611,7 +613,7 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSyste
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
 		locality->set( PeekSpecialInfo(loc.first,loc.second,ver) );
-		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality0", loc.first).detail("Locality1", loc.second).detail("Version", ver);
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", dcId).detail("Locality0", loc.first).detail("Locality1", loc.second).detail("Version", ver);
 		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange() );
 	}
 }
@@ -700,7 +702,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	//auto kvs = self->txnStateStore->readRange( systemKeys );
 	//for( auto & kv : kvs.get() )
-	//	TraceEvent("MasterRecoveredTXS", self->dbgid).detail("K", printable(kv.key)).detail("V", printable(kv.value));
+	//	TraceEvent("MasterRecoveredTXS", self->dbgid).detail("K", kv.key).detail("V", kv.value);
 
 	self->txnStateLogAdapter->setNextVersion( oldLogSystem->getEnd() );  //< FIXME: (1) the log adapter should do this automatically after recovery; (2) if we make KeyValueStoreMemory guarantee immediate reads, we should be able to get rid of the discardCommit() below and not need a writable log adapter
 
@@ -847,7 +849,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 				TEST(true);  // Emergency transaction processing during recovery
 				TraceEvent("EmergencyTransaction", self->dbgid);
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
-					TraceEvent("EmergencyTransactionMutation", self->dbgid).detail("MType", m->type).detail("P1", printable(m->param1)).detail("P2", printable(m->param2));
+					TraceEvent("EmergencyTransactionMutation", self->dbgid).detail("MType", m->type).detail("P1", m->param1).detail("P2", m->param2);
 
 				DatabaseConfiguration oldConf = self->configuration;
 				self->configuration = self->originalConfiguration;
@@ -1048,7 +1050,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskResolutionMetrics)) );
 					KeyRangeRef moveRange = range.second ? KeyRangeRef( range.first.begin, split.key ) : KeyRangeRef( split.key, range.first.end );
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
-					TraceEvent("MovingResolutionRange").detail("Src", src).detail("Dest", dest).detail("Amount", amount).detail("StartRange", printable(range.first)).detail("MoveRange", printable(moveRange)).detail("Used", split.used).detail("KeyResolverRanges", key_resolver.size());
+					TraceEvent("MovingResolutionRange").detail("Src", src).detail("Dest", dest).detail("Amount", amount).detail("StartRange", range.first).detail("MoveRange", moveRange).detail("Used", split.used).detail("KeyResolverRanges", key_resolver.size());
 					amount -= split.used;
 					if(moveRange != range.first || amount <= 0 )
 						break;
@@ -1056,7 +1058,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 				for(auto& it : movedRanges)
 					key_resolver.insert(it.range, it.dest);
 				//for(auto& it : key_resolver.ranges())
-				//	TraceEvent("KeyResolver").detail("Range", printable(it.range())).detail("Value", it.value());
+				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
 
 				self->resolverChangesVersion = self->version + 1;
 				for (auto& p : self->proxies)
@@ -1282,7 +1284,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 		.detail("PrimaryLocality", self->primaryLocality)
-		.detail("DcId", printable(self->myInterface.locality.dcId()))
+		.detail("DcId", self->myInterface.locality.dcId())
 		.trackLatest("MasterRecoveryState");
 
 	// Recovery transaction
@@ -1295,7 +1297,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	if (self->lastEpochEnd != 0) {
 		if(self->forceRecovery) {
 			BinaryWriter bw(Unversioned());
-			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toStringRef());
+			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toValue());
 		}
 
 		// This transaction sets \xff/lastEpochEnd, which the shard servers can use to roll back speculatively
@@ -1305,7 +1307,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		// This transaction is by itself in a batch (has its own version number), which simplifies storage servers slightly (they assume there are no modifications to serverKeys in the same batch)
 		// The proxy also expects the lastEpochEndKey mutation to be first in the transaction
 		BinaryWriter bw(Unversioned());
-		tr.set(recoveryCommitRequest.arena, lastEpochEndKey, (bw << self->lastEpochEnd).toStringRef());
+		tr.set(recoveryCommitRequest.arena, lastEpochEndKey, (bw << self->lastEpochEnd).toValue());
 
 		if(self->forceRecovery) {
 			tr.set(recoveryCommitRequest.arena, rebootWhenDurableKey, StringRef());

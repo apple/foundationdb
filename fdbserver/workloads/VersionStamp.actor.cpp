@@ -229,7 +229,7 @@ struct VersionStampWorkload : TestWorkload {
 							auto last_element_iter = all_values.cend();  last_element_iter--;
 							ASSERT(value_pair_iter == last_element_iter);
 						}
-						Version commitVersion = value_pair_iter->first;
+						// Version commitVersion = value_pair_iter->first;
 						Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
 
 						//TraceEvent("VST_Check0b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
@@ -267,7 +267,7 @@ struct VersionStampWorkload : TestWorkload {
 						ASSERT(value_pair_iter == last_element_iter);
 					}
 
-					Version commitVersion = value_pair_iter->first;
+					// Version commitVersion = value_pair_iter->first;
 					Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
 					//TraceEvent("VST_Check1b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
 					ASSERT(parsedVersion <= readVersion);

@@ -57,7 +57,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( KEY_SIZE_LIMIT,                          1e4 );
 	init( SYSTEM_KEY_SIZE_LIMIT,                   3e4 );
 	init( VALUE_SIZE_LIMIT,                        1e5 );
-	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 ); if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - serverKeysPrefixFor(UID()).size() - 1;
+	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 ); if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31;//serverKeysPrefixFor(UID()).size() - 1;
 	init( METADATA_VERSION_CACHE_SIZE,            1000 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
@@ -190,9 +190,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	}
 	init(CSI_STATUS_DELAY,						  10.0  );
 
-	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 );
+	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-	init( CONSISTENCY_CHECK_RATE_WINDOW,		  1.0  );
 
 	// TLS related
 	init( CHECK_CONNECTED_COORDINATOR_NUM_DELAY,  1.0 ); if( randomize && BUGGIFY ) CHECK_CONNECTED_COORDINATOR_NUM_DELAY =  g_random->random01() * 60.0; // In seconds

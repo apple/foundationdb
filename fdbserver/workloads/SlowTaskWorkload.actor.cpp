@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -56,7 +58,7 @@ struct SlowTaskWorkload : TestWorkload {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr, "Slow task complete: %lld exceptions; %lld calls to dl_iterate_phdr\n", exc, dl_iterate_phdr_calls - phc);
+		fprintf(stderr, "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr\n", exc, dl_iterate_phdr_calls - phc);
 		return Void();
 	}
 
@@ -65,7 +67,7 @@ struct SlowTaskWorkload : TestWorkload {
 		for(int j=0; j<1000; j++)
 			try {
 				throw success();
-			} catch (Error& e) {
+			} catch (Error& ) {
 				++*exc_count;
 			}
 	}

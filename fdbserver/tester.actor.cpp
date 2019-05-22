@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include <fstream>
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
@@ -65,7 +66,7 @@ Key doubleToTestKey( double p ) {
 
 double testKeyToDouble( const KeyRef& p ) {
 	uint64_t x = 0;
-	sscanf( p.toString().c_str(), "%llx", &x );
+	sscanf( p.toString().c_str(), "%" SCNx64, &x );
 	return *(double*)&x;
 }
 
@@ -151,7 +152,7 @@ int getOption( VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -163,11 +164,11 @@ uint64_t getOption( VectorRef<KeyValueRef> options, Key key, uint64_t defaultVal
 	for(int i = 0; i < options.size(); i++)
 		if( options[i].key == key ) {
 			uint64_t r;
-			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
+			if( sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -179,11 +180,11 @@ int64_t getOption( VectorRef<KeyValueRef> options, Key key, int64_t defaultValue
 	for(int i = 0; i < options.size(); i++)
 		if( options[i].key == key ) {
 			int64_t r;
-			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
+			if( sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
 			}
 		}
@@ -304,7 +305,7 @@ TestWorkload *getWorkloadIface( WorkloadRequest work, VectorRef<KeyValueRef> opt
 	auto unconsumedOptions = checkAllOptionsConsumed( workload ? workload->options : VectorRef<KeyValueRef>() );
 	if( !workload || unconsumedOptions.size() ) {
 		TraceEvent evt(SevError,"TestCreationError");
-		evt.detail("TestName", printable(testName));
+		evt.detail("TestName", testName);
 		if( !workload ) {
 			evt.detail("Reason", "Null workload");
 			fprintf(stderr, "ERROR: Workload could not be created, perhaps testName (%s) is not a valid workload\n", printable(testName).c_str());
@@ -346,7 +347,7 @@ TestWorkload *getWorkloadIface( WorkloadRequest work, Reference<AsyncVar<ServerD
 ACTOR Future<Void> databaseWarmer( Database cx ) {
 	loop {
 		state Transaction tr( cx );
-		Version v = wait( tr.getReadVersion() );
+		wait(success(tr.getReadVersion()));
 		wait( delay( 0.25 ) );
 	}
 }
@@ -509,7 +510,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		// add test for "done" ?
-		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", printable(work.title) );
+		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title );
 		TestWorkload *workload = getWorkloadIface( work, dbInfo );
 		if(!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
@@ -566,7 +567,7 @@ ACTOR Future<Void> clearData( Database cx ) {
 			// any other transactions
 			tr.clear( normalKeys );
 			tr.makeSelfConflicting();
-			Version v = wait( tr.getReadVersion() );  // required since we use addReadConflictRange but not get
+			wait(success(tr.getReadVersion())); // required since we use addReadConflictRange but not get
 			wait( tr.commit() );
 			TraceEvent("TesterClearingDatabase").detail("AtVersion", tr.getCommittedVersion());
 			break;
@@ -623,10 +624,19 @@ void logMetrics( vector<PerfMetric> metrics ) {
 				.detail( "Formatted", format(metrics[idx].format_code().c_str(), metrics[idx].value() ) );
 }
 
+template <class T>
+void throwIfError(const std::vector<Future<ErrorOr<T>>> &futures, std::string errorMsg) {
+	for(auto &future:futures) {
+		if(future.get().isError()) {
+			TraceEvent(SevError, errorMsg.c_str()).error(future.get().getError());
+			throw future.get().getError();
+		}
+	}
+}
+
 ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< TesterInterface > testers, 
 	TestSpec spec ) {
-	// FIXME: Fault tolerance for test workers (handle nonresponse or broken_promise from each getReply below)
-	TraceEvent("TestRunning").detail( "WorkloadTitle", printable(spec.title) )
+	TraceEvent("TestRunning").detail( "WorkloadTitle", spec.title )
 		.detail("TesterCount", testers.size()).detail("Phases", spec.phases)
 		.detail("TestTimeout", spec.timeout);
 
@@ -651,29 +661,31 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	}
 
 	state vector< WorkloadInterface > workloads = wait( getAll( workRequests ) );
-
+	state double waitForFailureTime = g_network->isSimulated() ? 24*60*60 : 60;
 	if( g_network->isSimulated() && spec.simCheckRelocationDuration )
 		debug_setCheckRelocationDuration( true );
 
 	if( spec.phases & TestWorkload::SETUP ) {
-		std::vector< Future<Void> > setups;
+		state std::vector< Future<ErrorOr<Void>> > setups;
 		printf("setting up test (%s)...\n", printable(spec.title).c_str());
-		TraceEvent("TestSetupStart").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
 		for(int i= 0; i < workloads.size(); i++)
-			setups.push_back( workloads[i].setup.template getReply<Void>() );
+			setups.push_back( workloads[i].setup.template getReplyUnlessFailedFor<Void>( waitForFailureTime, 0) );
 		wait( waitForAll( setups ) );
-		TraceEvent("TestSetupComplete").detail("WorkloadTitle", printable(spec.title));
+		throwIfError(setups, "SetupFailedForWorkload" + printable(spec.title));
+		TraceEvent("TestSetupComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if( spec.phases & TestWorkload::EXECUTION ) {
-		TraceEvent("TestStarting").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
 		printf("running test (%s)...\n", printable(spec.title).c_str());
-		std::vector< Future<Void> > starts;
+		state std::vector< Future<ErrorOr<Void>> > starts;
 		for(int i= 0; i < workloads.size(); i++)
-			starts.push_back( workloads[i].start.template getReply<Void>() );
+			starts.push_back( workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0) );
 		wait( waitForAll( starts ) );
+		throwIfError(starts, "StartFailedForWorkload" + printable(spec.title));
 		printf("%s complete\n", printable(spec.title).c_str());
-		TraceEvent("TestComplete").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if( spec.phases & TestWorkload::CHECK ) {
@@ -681,15 +693,16 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 			wait( delay(3.0) );
 		}
 
-		state std::vector< Future<bool> > checks;
+		state std::vector< Future<ErrorOr<bool>> > checks;
 		TraceEvent("CheckingResults");
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 		for(int i= 0; i < workloads.size(); i++)
-			checks.push_back( workloads[i].check.template getReply<bool>() );
+			checks.push_back( workloads[i].check.template getReplyUnlessFailedFor<bool>(waitForFailureTime, 0) );
 		wait( waitForAll( checks ) );
-		
+		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
+
 		for(int i = 0; i < checks.size(); i++) {
-			if(checks[i].get())
+			if(checks[i].get().get())
 				success++;
 			else
 				failure++;
@@ -697,21 +710,15 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	}
 
 	if( spec.phases & TestWorkload::METRICS ) {
-		state std::vector< Future<vector<PerfMetric>> > metricTasks;
+		state std::vector< Future<ErrorOr<vector<PerfMetric>>> > metricTasks;
 		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
-		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", printable(spec.title));
+		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", spec.title);
 		for(int i= 0; i < workloads.size(); i++)
-			metricTasks.push_back( workloads[i].metrics.template getReply<vector<PerfMetric>>() );
-		wait( waitForAllReady( metricTasks ) );
-		int failedMetrics = 0;
+			metricTasks.push_back( workloads[i].metrics.template getReplyUnlessFailedFor<vector<PerfMetric>>(waitForFailureTime, 0) );
+		wait( waitForAll( metricTasks ) );
+		throwIfError(metricTasks, "MetricFailedForWorkload" + printable(spec.title));
 		for(int i = 0; i < metricTasks.size(); i++) {
-			if(!metricTasks[i].isError())
-				metricsResults.push_back( metricTasks[i].get() );
-			else
-				TraceEvent(SevError, "TestFailure")
-					.error(metricTasks[i].getError())
-					.detail("Reason", "Metrics not retrieved")
-					.detail("From", workloads[i].metrics.getEndpoint().getPrimaryAddress());
+			metricsResults.push_back( metricTasks[i].get().get() );
 		}
 	}
 
@@ -750,12 +757,16 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 	}
 	
 	Standalone<VectorRef<KeyValueRef>> options;
+	StringRef performQuiescent = LiteralStringRef("false");
+	if (doQuiescentCheck) {
+		performQuiescent = LiteralStringRef("true");
+	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), ValueRef(format("%s", LiteralStringRef(doQuiescentCheck ? "true" : "false").toString().c_str()))));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("quiescentWaitTimeout"), ValueRef(format("%f", quiescentWaitTimeout))));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("quiescentWaitTimeout"), ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
@@ -828,7 +839,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	}
 
 	TraceEvent(ok ? SevInfo : SevWarnAlways, "TestResults")
-		.detail("Workload", printable(spec.title))
+		.detail("Workload", spec.title)
 		.detail("Passed", (int)ok);
 		//.detail("Metrics", metricSummary);
 
@@ -882,7 +893,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			}
 
 			spec.title = StringRef( value );
-			TraceEvent("TestParserTest").detail("ParsedTest", printable( spec.title ));
+			TraceEvent("TestParserTest").detail("ParsedTest",  spec.title );
 		} else if( attrib == "timeout" ) {
 			sscanf( value.c_str(), "%d", &(spec.timeout) );
 			ASSERT( spec.timeout > 0 );
@@ -1067,7 +1078,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
-		bool ok = wait( runTest( cx, testers, tests[idx], dbInfo ) );
+		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
 		// do we handle a failure here?
 	}
 

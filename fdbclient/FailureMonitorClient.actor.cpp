@@ -22,9 +22,10 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <unordered_set>
 
 struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
-	std::set<NetworkAddress> knownAddrs;
+	std::unordered_set<NetworkAddress> knownAddrs;
 	double serverFailedTimeout;
 
 	FailureMonitorClientState() {
@@ -77,7 +78,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 								changedAddresses.insert( reply.changes[c].addresses.secondaryAddress.get() );
 							}
 						}
-						for(auto it : fmState->knownAddrs)
+						for(auto& it : fmState->knownAddrs)
 							if (!changedAddresses.count( it ))
 								monitor->setStatus( it, FailureStatus() );
 						fmState->knownAddrs.clear();
@@ -168,7 +169,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
 	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
-
+	auto localAddr = g_network->getLocalAddresses();
+	monitor->setStatus(localAddr.address, FailureStatus(false));
+	if(localAddr.secondaryAddress.present()) {
+		monitor->setStatus(localAddr.secondaryAddress.get(), FailureStatus(false));
+	}
 	loop {
 		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();
 		wait( ci->onChange() );

@@ -69,10 +69,11 @@ public:
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), cleared(false) {}
+			: name(name), locality(locality), startingClass(startingClass),
+			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
+			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
+			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+			  fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -96,7 +97,7 @@ public:
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
-				case ProcessClass::RateKeeperClass: return false;
+				case ProcessClass::RatekeeperClass: return false;
 				default: return false;
 			}
 		}
@@ -154,6 +155,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
+	virtual bool useObjectSerializer() const = 0;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
@@ -309,8 +311,8 @@ public:
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
-protected:
 	static thread_local ProcessInfo* currentProcess;
+protected:
 	Mutex mutex;
 
 private:
@@ -325,7 +327,7 @@ private:
 extern ISimulator* g_pSimulator;
 #define g_simulator (*g_pSimulator)
 
-void startNewSimulator();
+void startNewSimulator(bool useObjectSerializer);
 
 //Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {

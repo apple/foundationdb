@@ -29,7 +29,7 @@ ifeq ($(PLATFORM),linux)
   fdbbackup_LDFLAGS += -static-libstdc++ -static-libgcc -ldl -lpthread -lrt
 
   # GPerfTools profiler (uncomment to use)
-  # fdbbackup_CFLAGS += -I/opt/gperftools/include -DUSE_GPERFTOOLS=1
+  # fdbbackup_CFLAGS += -I/opt/gperftools/include -DUSE_GPERFTOOLS=1 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free
   # fdbbackup_LDFLAGS += -L/opt/gperftools/lib
   # fdbbackup_STATIC_LIBS += -ltcmalloc -lunwind -lprofiler
 else ifeq ($(PLATFORM),osx)

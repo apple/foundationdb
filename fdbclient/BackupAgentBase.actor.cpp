@@ -37,6 +37,8 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	struct tm out;
+	out.tm_isdst = -1; // This field is not set by strptime. -1 tells mktime to determine whether DST is in effect
+
 	std::string timeOnly = timestamp.substr(0, 19);
 
 	// TODO:  Use std::get_time implementation for all platforms once supported
@@ -147,7 +149,7 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 
 	Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
-	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", baLogRangePrefix);
 
 	for (int64_t vblock = beginVersion / blockSize; vblock < (endVersion + blockSize - 1) / blockSize; ++vblock) {
 		int64_t tb = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -170,7 +172,7 @@ Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version 
 
 	Key baLogRangePrefix = backupUid.withPrefix(applyLogKeys.begin);
 
-	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", baLogRangePrefix);
 
 	for (int64_t vblock = beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE; vblock < (endVersion + CLIENT_KNOBS->APPLY_BLOCK_SIZE - 1) / CLIENT_KNOBS->APPLY_BLOCK_SIZE; ++vblock) {
 		int64_t tb = vblock * CLIENT_KNOBS->APPLY_BLOCK_SIZE / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -219,7 +221,7 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
 			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
-				.detail("ValueSize", value.size()).detail("Value", printable(value));
+				.detail("ValueSize", value.size()).detail("Value", value);
 			throw incompatible_protocol_version();
 		}
 
@@ -265,7 +267,7 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 		return result;
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", value);
 		throw;
 	}
 }
@@ -278,7 +280,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
 			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
-				.detail("ValueSize", value.size()).detail("Value", printable(value));
+				.detail("ValueSize", value.size()).detail("Value", value);
 			throw incompatible_protocol_version();
 		}
 
@@ -373,7 +375,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		}
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", value);
 		throw;
 	}
 }
@@ -382,7 +384,7 @@ void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std:
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if(now() - lastErrorTime > CLIENT_KNOBS->BACKUP_ERROR_DELAY) {
-		TraceEvent("BA_LogError").detail("Key", printable(keyErrors)).detail("Message", message);
+		TraceEvent("BA_LogError").detail("Key", keyErrors).detail("Message", message);
 		lastErrorTime = now();
 	}
 	tr->set(keyErrors, message);
@@ -446,9 +448,14 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 			}
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
-				throw;
-			tr = Transaction(cx);
+			if (e.code() == error_code_transaction_too_old) {
+				// We are using this transaction until it's too old and then resetting to a fresh one,
+				// so we don't need to delay.
+				tr.fullReset();
+			}
+			else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
@@ -491,10 +498,9 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
 			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 
-			int index(0);
 			for (auto & s : rangevalue){
 				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", printable(nextKey.key)).detail("End", printable(end.key)).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
+				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", nextKey.key).detail("End", end.key).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
 				if (groupKey != skipGroup){
 					if (rcGroup.version == -1){
 						rcGroup.version = tr.getReadVersion().get();
@@ -537,9 +543,14 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
-				throw;
-			wait(tr.onError(e));
+			if (e.code() == error_code_transaction_too_old) {
+				// We are using this transaction until it's too old and then resetting to a fresh one,
+				// so we don't need to delay.
+				tr.fullReset();
+			}
+			else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
@@ -566,7 +577,7 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 				for(int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
 				}
-				decodeBackupLogValue(req.arena, req.transaction.mutations, mutationSize, bw.toStringRef(), addPrefix, removePrefix, group.groupKey, keyVersion);
+				decodeBackupLogValue(req.arena, req.transaction.mutations, mutationSize, bw.toValue(), addPrefix, removePrefix, group.groupKey, keyVersion);
 				newBeginVersion = group.groupKey + 1;
 				if(mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;

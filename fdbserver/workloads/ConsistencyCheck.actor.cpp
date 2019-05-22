@@ -250,8 +250,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							throw;
 					}
 
-					bool hasStorage = wait( self->checkForStorage(cx, configuration, self) );
-					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
+					wait(::success(self->checkForStorage(cx, configuration, self)));
+					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					//Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
@@ -268,11 +268,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 
 				//Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
-				state Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServerPromise;
+				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise));
 				if(keyServerResult)
 				{
-					state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
+					state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
 
 					//Get the locations of all the shards in the database
 					state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
@@ -282,13 +282,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						//Check that each shard has the same data on all storage servers that it resides on
-						bool dataConsistencyResult = wait(self->checkDataConsistency(cx, keyLocations, configuration, self));
+						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, self)));
 					}
 				}
 			}
 			catch(Error &e)
 			{
-				if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
+				if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
+				    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_process_behind)
 					TraceEvent("ConsistencyCheck_Retry").error(e); // FIXME: consistency check does not retry in this case
 				else
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
@@ -322,9 +323,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Get a list of storage servers from the master and compares them with the TLogs.
 	//If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
 	//Returns false if there is a failure (in this case, keyServersPromise will never be set)
-	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
+	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
 	{
-		state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers;
+		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
 
 		//Try getting key server locations from the master proxies
 		state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
@@ -381,12 +382,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	//Retrieves the locations of all shards in the database
 	//Returns false if there is a failure (in this case, keyLocationPromise will never be set)
-	ACTOR Future<bool> getKeyLocations(Database cx, vector<pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
+	ACTOR Future<bool> getKeyLocations(Database cx, std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
 	{
 		state Standalone<VectorRef<KeyValueRef>> keyLocations;
 		state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
 		state Key endKey = allKeys.end.withPrefix(keyServersPrefix);
 		state int i = 0;
+		state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
 		for ( ; i < shards.size(); i++) {
@@ -466,11 +468,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 						keyLocations.push_back_deep(keyLocations.arena(), currentLocations.end()[-1]);
 				}
 				catch (Error& e) {
-					//If we failed because of a version problem, then retry
-					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
-					else
-						throw;
+					state Error err = e;
+					wait(onErrorTr.onError(err));
+					TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(err);
 				}
 			}
 		}
@@ -584,7 +584,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
-		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
@@ -706,6 +707,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int splitBytes = 0;
 				state int firstKeySampledBytes = 0;
 				state int sampledKeys = 0;
+				state int sampledKeysWithProb = 0;
 				state double shardVariance = 0;
 				state bool canSplit = false;
 				state Key lastSampleKey;
@@ -713,6 +715,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int64_t totalReadAmount = 0;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
+				state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 				//Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop
@@ -905,6 +908,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 										firstKeySampledBytes += sampleInfo.sampledSize;
 
 									sampledKeys++;
+									if(itemProbability < 1) {
+										sampledKeysWithProb++;
+									}
 								}
 							}
 
@@ -914,7 +920,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
 						if(rateLimitForThisRound > 0)
 						{
-								wait(rateLimiter->getAllowance(totalReadAmount));
+							wait(rateLimiter->getAllowance(totalReadAmount));
+							// Set ratelimit to max allowed if current round has been going on for a while
+							if(now() - rateLimiterStartTime > 1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME && rateLimitForThisRound != self->rateLimitMax) {
+								rateLimitForThisRound = self->rateLimitMax;
+								rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+								rateLimiterStartTime = now();
+								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound").detail("RateLimit", rateLimitForThisRound);
+							}
 						}
 						bytesReadInRange += totalReadAmount;
 						bytesReadInthisRound += totalReadAmount;
@@ -933,11 +946,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 					catch(Error &e)
 					{
-						//If we failed because of a version problem, then retry
-						if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(e);
-						else
-							throw;
+						state Error err = e;
+						wait(onErrorTr.onError(err));
+						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
 				}
 
@@ -982,12 +993,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				int estimateError = abs(shardBytes - sampledBytes);
 
 				//Only perform the check if there are sufficient keys to get a distribution that should resemble a normal distribution
-				if(sampledKeys > 30 && estimateError > failErrorNumStdDev * stdDev)
+				if(sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev)
 				{
 					double numStdDev = estimateError / sqrt(shardVariance);
 					TraceEvent("ConsistencyCheck_InaccurateShardEstimate").detail("Min", shardBounds.min.bytes).detail("Max", shardBounds.max.bytes).detail("Estimate", sampledBytes)
 						.detail("Actual", shardBytes).detail("NumStdDev", numStdDev).detail("Variance", shardVariance).detail("StdDev", stdDev)
-						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys);
+						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys)
+						.detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
 					self->testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev));
 				}
@@ -1377,11 +1389,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		// Check RateKeeper
-		ProcessClass::Fitness bestRateKeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::RateKeeper);
-		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::RateKeeper) != bestRateKeeperFitness)) {
-			TraceEvent("ConsistencyCheck_RateKeeperNotBest").detail("BestRateKeeperFitness", bestRateKeeperFitness)
-			.detail("ExistingRateKeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::RateKeeper) : -1);
+		// Check Ratekeeper
+		ProcessClass::Fitness bestRatekeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Ratekeeper);
+		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) != bestRatekeeperFitness)) {
+			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", bestRatekeeperFitness)
+			.detail("ExistingRatekeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) : -1);
 			return false;
 		}
 

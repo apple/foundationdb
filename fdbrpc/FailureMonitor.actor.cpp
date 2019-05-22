@@ -80,9 +80,9 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 		}
 	} else {
-		bool triggerEndpoint = status != it->value;
+		bool triggerEndpoint = status != it->second;
 		if (status != FailureStatus())
-			it->value = status;
+			it->second = status;
 		else
 			addressStatus.erase(it);
 		if(triggerEndpoint)
@@ -104,7 +104,7 @@ void SimpleFailureMonitor::notifyDisconnect( NetworkAddress const& address ) {
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure( Endpoint const& endpoint ) {
 	// If the endpoint or address is already failed, return right away
 	auto i = addressStatus.find(endpoint.getPrimaryAddress());
-	if (i == addressStatus.end() || i->value.isFailed() || endpointKnownFailed.get(endpoint)) {
+	if (i == addressStatus.end() || i->second.isFailed() || endpointKnownFailed.get(endpoint)) {
 		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
 	}
@@ -133,9 +133,15 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 	else {
 		auto a = addressStatus.find(endpoint.getPrimaryAddress());
 		if (a == addressStatus.end()) return FailureStatus();
-		else return a->value;
+		else return a->second;
 		//printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.address.toString(), a.failed ? "FAILED" : "OK", this);
 	}
+}
+
+FailureStatus SimpleFailureMonitor::getState( NetworkAddress const& address ) {
+	auto a = addressStatus.find(address);
+	if (a == addressStatus.end()) return FailureStatus();
+	else return a->second;
 }
 
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
@@ -143,7 +149,7 @@ bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
 		return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end()) return true;
-	else return !a->value.failed;
+	else return !a->second.failed;
 }
 
 bool SimpleFailureMonitor::permanentlyFailed( Endpoint const& endpoint ) {
@@ -151,6 +157,6 @@ bool SimpleFailureMonitor::permanentlyFailed( Endpoint const& endpoint ) {
 }
 
 void SimpleFailureMonitor::reset() {
-	addressStatus = Map< NetworkAddress, FailureStatus >();
+	addressStatus = std::unordered_map< NetworkAddress, FailureStatus >();
 	endpointKnownFailed.resetNoWaiting();
 }

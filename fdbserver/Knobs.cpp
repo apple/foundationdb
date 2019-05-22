@@ -71,18 +71,20 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
 	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 	init( TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES,            2e9 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES = 2e6;
+	init( TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK,           100 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK = 1;
+	init( TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH,           16<<10 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH = 500;
 	init( DISK_QUEUE_FILE_EXTENSION_BYTES,                    10<<20 ); // BUGGIFYd per file within the DiskQueue
 	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
+	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
-	init( TLOG_DEGRADED_RESET_INTERVAL,                     48*60*60 ); if ( randomize && BUGGIFY ) TLOG_DEGRADED_RESET_INTERVAL = 10;
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
 	init( BG_DD_POLLING_INTERVAL,                               10.0 );
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
-	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                4 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
+	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
 	init( DD_REBALANCE_PARALLELISM,                               50 );
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
@@ -196,6 +198,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	init( SQLITE_PAGE_SCAN_ERROR_LIMIT,                        10000 );
 	init( SQLITE_BTREE_PAGE_USABLE,                          4096 - 8);  // pageSize - reserveSize for page checksum
+	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
+	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
 	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
@@ -220,8 +224,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SQLITE_FRAGMENT_MIN_SAVINGS,                          0.20 );
 
 	// KeyValueStoreSqlite spring cleaning
-	init( CLEANING_INTERVAL,                                     1.0 );
-	init( SPRING_CLEANING_TIME_ESTIMATE,                        .010 );
+	init( SPRING_CLEANING_NO_ACTION_INTERVAL,                    1.0 ); if( randomize && BUGGIFY ) SPRING_CLEANING_NO_ACTION_INTERVAL = g_random->coinflip() ? 0.1 : g_random->random01() * 5;
+	init( SPRING_CLEANING_LAZY_DELETE_INTERVAL,                  0.1 ); if( randomize && BUGGIFY ) SPRING_CLEANING_LAZY_DELETE_INTERVAL = g_random->coinflip() ? 1.0 : g_random->random01() * 5;
+	init( SPRING_CLEANING_VACUUM_INTERVAL,                       1.0 ); if( randomize && BUGGIFY ) SPRING_CLEANING_VACUUM_INTERVAL = g_random->coinflip() ? 0.1 : g_random->random01() * 5;
+	init( SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE,            .010 ); if( randomize && BUGGIFY ) SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE = g_random->random01() * 5;
+	init( SPRING_CLEANING_VACUUM_TIME_ESTIMATE,                 .010 ); if( randomize && BUGGIFY ) SPRING_CLEANING_VACUUM_TIME_ESTIMATE = g_random->random01() * 5;
 	init( SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE,          0.0 ); if( randomize && BUGGIFY ) SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE = g_random->coinflip() ? 1e9 : g_random->random01() * 5;
 	init( SPRING_CLEANING_MIN_LAZY_DELETE_PAGES,                   0 ); if( randomize && BUGGIFY ) SPRING_CLEANING_MIN_LAZY_DELETE_PAGES = g_random->randomInt(1, 100);
 	init( SPRING_CLEANING_MAX_LAZY_DELETE_PAGES,                 1e9 ); if( randomize && BUGGIFY ) SPRING_CLEANING_MAX_LAZY_DELETE_PAGES = g_random->coinflip() ? 0 : g_random->randomInt(1, 1e4);
@@ -349,10 +356,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init(SERVER_MEM_LIMIT, 8LL << 30);
 
 	//Ratekeeper
-	bool slowRateKeeper = randomize && BUGGIFY;
-	init( SMOOTHING_AMOUNT,                                      1.0 ); if( slowRateKeeper ) SMOOTHING_AMOUNT = 5.0;
-	init( SLOW_SMOOTHING_AMOUNT,                                10.0 ); if( slowRateKeeper ) SLOW_SMOOTHING_AMOUNT = 50.0;
-	init( METRIC_UPDATE_RATE,                                     .1 ); if( slowRateKeeper ) METRIC_UPDATE_RATE = 0.5;
+	bool slowRatekeeper = randomize && BUGGIFY;
+	init( SMOOTHING_AMOUNT,                                      1.0 ); if( slowRatekeeper ) SMOOTHING_AMOUNT = 5.0;
+	init( SLOW_SMOOTHING_AMOUNT,                                10.0 ); if( slowRatekeeper ) SLOW_SMOOTHING_AMOUNT = 50.0;
+	init( METRIC_UPDATE_RATE,                                     .1 ); if( slowRatekeeper ) METRIC_UPDATE_RATE = 0.5;
 	init( DETAILED_METRIC_UPDATE_RATE,                           5.0 );
 
 	bool smallStorageTarget = randomize && BUGGIFY;
@@ -395,7 +402,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STORAGE_LIMIT_BYTES,                                500000 );
 	init( BUGGIFY_LIMIT_BYTES,                                  1000 );
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
-	init( FETCH_KEYS_PARALLELISM_BYTES,                          5e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 4e6;
+	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
@@ -410,13 +417,16 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( UPDATE_STORAGE_PROCESS_STATS_INTERVAL,                 5.0 );
 
 	//Wait Failure
-	init( BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS,               2 );
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
 	init( WAIT_FAILURE_DELAY_LIMIT,                              1.0 ); if( randomize && BUGGIFY ) WAIT_FAILURE_DELAY_LIMIT = 5.0;
 
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,                5.0 );
+	init( HEAP_PROFILER_INTERVAL,                               30.0 );
+	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
+	init( DEGRADED_WARNING_LIMIT,                                  1 );
+	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );

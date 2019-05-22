@@ -108,7 +108,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw future_version();
+		throw result.getError();
 	}
 
 	return false;

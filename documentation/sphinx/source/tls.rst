@@ -351,4 +351,4 @@ A verification string of::
 Would pass, and:
 
 * Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value ``prod.``.
-* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.com``.
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.org``.

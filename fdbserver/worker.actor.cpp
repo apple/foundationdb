@@ -42,8 +42,14 @@
 #include "flow/Profiler.h"
 
 #ifdef __linux__
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
+#include "gperftools/heap-profiler.h"
 #endif
 #include <unistd.h>
 #include <thread>
@@ -306,18 +312,18 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
 			// because they might be different if a new option was introduced in this version.
 			StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
-			TraceEvent("DiskStoreVersioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersioned").detail("Filename", filename);
 			ErrorOr<TLogOptions> tLogOptions = TLogOptions::FromStringRef(optionsString);
 			if (tLogOptions.isError()) {
-				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", printable(filename));
+				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", filename);
 				continue;
 			}
-			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", filename);
 			store.tLogOptions = tLogOptions.get();
 			prefix = filename.substr(0, fileVersionedLogDataPrefix.size() + optionsString.size() + 1);
 		}
 		else if( filename.startsWith( fileLogDataPrefix ) ) {
-			TraceEvent("DiskStoreUnversioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreUnversioned").detail("Filename", filename);
 			store.storedComponent = DiskStore::TLogData;
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
@@ -407,7 +413,6 @@ void updateCpuProfiler(ProfilerRequest req) {
 			options->filter_in_thread = &filter_in_thread;
 			options->filter_in_thread_arg = NULL;
 			ProfilerStartWithOptions(path, options);
-			free(workingDir);
 			break;
 		}
 		case ProfilerRequest::Action::DISABLE:
@@ -432,10 +437,13 @@ void updateCpuProfiler(ProfilerRequest req) {
 			break;
 		}
 		break;
+	default:
+		ASSERT(false);
+		break;
 	}
 }
 
-ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	if (req.action == ProfilerRequest::Action::RUN) {
 		req.action = ProfilerRequest::Action::ENABLE;
 		updateCpuProfiler(req);
@@ -447,6 +455,76 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 		updateCpuProfiler(req);
 		return Void();
 	}
+}
+
+void runHeapProfiler(const char* msg) {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	if (IsHeapProfilerRunning()) {
+		HeapProfilerDump(msg);
+	} else {
+		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
+	}
+#else
+	TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
+#endif
+}
+
+ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
+		runHeapProfiler("User triggered heap dump");
+	} else {
+		wait( runCpuProfiler(req) );
+	}
+
+	return Void();
+}
+
+bool checkHighMemory(int64_t threshold, bool* error) {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	*error = false;
+	uint64_t page_size = sysconf(_SC_PAGESIZE);
+	int fd = open("/proc/self/statm", O_RDONLY);
+	if (fd < 0) {
+		TraceEvent("OpenStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	const int buf_sz = 256;
+	char stat_buf[buf_sz];
+	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
+	if (stat_nread < 0) {
+		TraceEvent("ReadStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	uint64_t vmsize, rss;
+	sscanf(stat_buf, "%lu %lu", &vmsize, &rss);
+	rss *= page_size;
+	if (rss >= threshold) {
+		return true;
+	}
+#else
+	TraceEvent("CheckHighMemoryUnsupported");
+	*error = true;
+#endif
+	return false;
+}
+
+// Runs heap profiler when RSS memory usage is high.
+ACTOR Future<Void> monitorHighMemory(int64_t threshold) {
+	if (threshold <= 0) return Void();
+
+	loop {
+		bool err = false;
+		bool highmem = checkHighMemory(threshold, &err);
+		if (err) break;
+
+		if (highmem) runHeapProfiler("Highmem heap dump");
+		wait( delay(SERVER_KNOBS->HEAP_PROFILER_INTERVAL) );
+	}
+	return Void();
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit, IKeyValueStore* store ) {
@@ -611,8 +689,14 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
-ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData locality,
-	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
+ACTOR Future<Void> workerServer(
+		Reference<ClusterConnectionFile> connFile,
+		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+		LocalityData locality,
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
+		std::string metricsConnFile, std::string metricsPrefix,
+		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -625,7 +709,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
-	state Reference<AsyncVar<bool>> degraded( new AsyncVar<bool>(false) );
+	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
@@ -652,11 +736,12 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		}
 	}
 
-	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->TLOG_DEGRADED_RESET_INTERVAL, false));
+	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
+	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
 	filesClosed.add(stopping.getFuture());
 
@@ -858,13 +943,15 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					recruited = rkInterf->get().get();
 					TEST(true);  // Recruited while already a ratekeeper.
 				} else {
-					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
+					startRole(Role::RATEKEEPER, recruited.id(), interf.id());
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
 
-					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
-					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );
+					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
+					errorForwarders.add(
+					    forwardError(errors, Role::RATEKEEPER, recruited.id(),
+					                 setWhenDoneOrError(ratekeeperProcess, rkInterf, Optional<RatekeeperInterface>())));
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
@@ -1206,7 +1293,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 			int64_t fileSize = wait(lockFile.get()->size());
 			state Key fileData = makeString(fileSize);
-			int length = wait(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+			wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
 			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
 		}
 	}
@@ -1229,12 +1316,13 @@ ACTOR Future<Void> fdbd(
 	std::string coordFolder,
 	int64_t memoryLimit,
 	std::string metricsConnFile,
-	std::string metricsPrefix )
+	std::string metricsPrefix,
+	int64_t memoryProfileThreshold)
 {
 	try {
 
 		ServerCoordinators coordinators( connFile );
-		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		state vector<Future<Void>> v;
@@ -1256,7 +1344,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(v,1) );
@@ -1279,4 +1367,4 @@ const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
 const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
-const Role Role::RATE_KEEPER("RateKeeper", "RK");
+const Role Role::RATEKEEPER("Ratekeeper", "RK");

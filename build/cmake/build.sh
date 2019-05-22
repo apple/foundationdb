@@ -248,19 +248,19 @@ main() {
                     ;;
                 rpm )
                     rpm
+                    __res=$?
                     ;;
                 deb )
                     deb
-                    ;;
-                linux-pkgs)
-                    rpm
-                    deb
+                    __res=$?
                     ;;
                 test-fast)
                     test-fast
+                    __res=$?
                     ;;
                 test)
                     test
+                    __res=$?
                     ;;
                 * )
                     echo "ERROR: Command not found ($command)"

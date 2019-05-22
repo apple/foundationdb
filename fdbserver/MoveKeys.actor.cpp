@@ -73,9 +73,9 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		// Take the lock
 		if(isWrite) {
 			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
-			tr->set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
+			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
 			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toStringRef() );
+			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 		}
 
 		return Void();
@@ -83,7 +83,7 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		if(isWrite) {
 			// Touch the lock, preventing overlapping attempts to take it
 			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toStringRef() );
+			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
 			tr->makeSelfConflicting();
 		}
@@ -283,8 +283,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
 					/*TraceEvent("StartMoveKeysBatch", relocationIntervalId)
-						.detail("KeyBegin", printable(currentKeys.begin).c_str())
-						.detail("KeyEnd", printable(currentKeys.end).c_str());*/
+					  .detail("KeyBegin", currentKeys.begin.c_str())
+					  .detail("KeyEnd", currentKeys.end.c_str());*/
 
 					//printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
 					//for(int i=0; i<old.size(); i++)
@@ -301,8 +301,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						decodeKeyServersValue( old[i].value, src, dest );
 
 						/*TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-							.detail("KeyBegin", printable(rangeIntersectKeys.begin).c_str())
-							.detail("KeyEnd", printable(rangeIntersectKeys.end).c_str())
+							.detail("KeyBegin", rangeIntersectKeys.begin.c_str())
+							.detail("KeyEnd", rangeIntersectKeys.end.c_str())
 							.detail("OldSrc", describe(src))
 							.detail("OldDest", describe(dest))
 							.detail("ReadVersion", tr.getReadVersion().get());*/
@@ -366,8 +366,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					if(retries%10 == 0) {
 						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
 							.error(err)
-							.detail("Keys", printable(keys))
-							.detail("BeginKey", printable(begin))
+							.detail("Keys", keys)
+							.detail("BeginKey", begin)
 							.detail("NumTries", retries);
 					}
 				}
@@ -468,7 +468,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 	ASSERT (!destinationTeam.empty());
 
 	try {
-		TraceEvent(SevDebug, interval.begin(), relocationIntervalId).detail("KeyBegin", printable(keys.begin)).detail("KeyEnd", printable(keys.end));
+		TraceEvent(SevDebug, interval.begin(), relocationIntervalId).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 
 		//This process can be split up into multiple transactions if there are too many existing overlapping shards
 		//In that case, each iteration of this loop will have begin set to the end of the last processed shard
@@ -538,13 +538,13 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						alreadyMoved = destSet.empty() && srcSet == intendedTeam;
 						if(destSet != intendedTeam && !alreadyMoved) {
 							TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
-								.detail("KeyBegin", printable(keys.begin))
-								.detail("KeyEnd", printable(keys.end))
-								.detail("IterationBegin", printable(begin))
-								.detail("IterationEnd", printable(endKey))
+								.detail("KeyBegin", keys.begin)
+								.detail("KeyEnd", keys.end)
+								.detail("IterationBegin", begin)
+								.detail("IterationEnd", endKey)
 								.detail("DestSet", describe(destSet))
 								.detail("IntendedTeam", describe(intendedTeam))
-								.detail("KeyServers", printable(keyServers));
+								.detail("KeyServers", keyServers);
 							//ASSERT( false );
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
@@ -589,18 +589,18 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					if (!dest.size()) {
 						TEST(true); // A previous finishMoveKeys for this range committed just as it was cancelled to start this one?
 						TraceEvent("FinishMoveKeysNothingToDo", relocationIntervalId)
-							.detail("KeyBegin", printable(keys.begin))
-							.detail("KeyEnd", printable(keys.end))
-							.detail("IterationBegin", printable(begin))
-							.detail("IterationEnd", printable(endKey));
+							.detail("KeyBegin", keys.begin)
+							.detail("KeyEnd", keys.end)
+							.detail("IterationBegin", begin)
+							.detail("IterationEnd", endKey);
 						begin = keyServers.end()[-1].key;
 						break;
 					}
 
 					waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
 					TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
-						.detail("KeyBegin", printable(keys.begin))
-						.detail("KeyEnd", printable(keys.end));
+						.detail("KeyBegin", keys.begin)
+						.detail("KeyEnd", keys.end);
 
 					// Wait for a durable quorum of servers in destServers to have keys available (readWrite)
 					// They must also have at least the transaction read version so they can't "forget" the shard between
@@ -668,10 +668,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					if(retries%10 == 0) {
 						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId)
 							.error(err)
-							.detail("KeyBegin", printable(keys.begin))
-							.detail("KeyEnd", printable(keys.end))
-							.detail("IterationBegin", printable(begin))
-							.detail("IterationEnd", printable(endKey));
+							.detail("KeyBegin", keys.begin)
+							.detail("KeyEnd", keys.end)
+							.detail("IterationBegin", begin)
+							.detail("IterationEnd", endKey);
 					}
 				}
 			}
@@ -785,7 +785,7 @@ ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 	ASSERT(keys.size() >= 2);
 
 	if(keys[0].value == keys[1].value && keys[1].key != allKeys.end) {
-		TraceEvent("ServerKeysCoalescingError", serverID).detail("Key1", printable(keys[0].key)).detail("Key2", printable(keys[1].key)).detail("Value", printable(keys[0].value));
+		TraceEvent("ServerKeysCoalescingError", serverID).detail("Key1", keys[0].key).detail("Key2", keys[1].key).detail("Value", keys[0].value);
 		ASSERT(false);
 	}
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
@@ -107,7 +108,7 @@ struct DiskDurabilityTest : TestWorkload {
 
 		if (failed) throw operation_failed();
 
-		printf("Verified %d/%lld pages\n", verifyPages, size/4096);
+		printf("Verified %d/%" PRId64 " pages\n", verifyPages, size/4096);
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size/4096);
 
 		// Run

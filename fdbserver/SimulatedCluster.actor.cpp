@@ -46,7 +46,6 @@ extern bool buggifyActivated;
 extern "C" int g_expect_full_pointermap;
 extern const char* getHGVersion();
 
-const int PROCESS_START_TIME = 4;
 const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
@@ -207,19 +206,22 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		cycles ++;
 		TraceEvent("SimulatedFDBDPreWait").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("Address", NetworkAddress(ip, port, true, false))
-			.detailext("ZoneId", localities.zoneId())
+			.detail("ZoneId", localities.zoneId())
 			.detail("WaitTime", waitTime).detail("Port", port);
 
 		wait( delay( waitTime ) );
 
-		state ISimulator::ProcessInfo *process =  g_simulator.newProcess( "Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(), coordFolder->c_str() );
-		wait( g_simulator.onProcess(process, TaskDefaultYield) );	// Now switch execution to the process on which we will run
+		state ISimulator::ProcessInfo* process =
+		    g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
+		                           coordFolder->c_str());
+		wait(g_simulator.onProcess(process,
+		                           TaskDefaultYield)); // Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
 
 		try {
 			TraceEvent("SimulatedRebooterStarting").detail("Cycles", cycles).detail("RandomId", randomId)
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId())
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId())
 				.detail("Address", process->address.toString())
 				.detail("Excluded", process->excluded)
 				.detail("UsingSSL", sslEnabled);
@@ -248,7 +250,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind( n, n ));
 				}
-				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
+				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "", -1);
 				Future<Void> backup = runBackupAgents ? runBackup(connFile) : Future<Void>(Never());
 				Future<Void> dr = runBackupAgents ? runDr(connFile) : Future<Void>(Never());
 
@@ -266,19 +268,19 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				if(e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT( destructed || g_simulator.getCurrentProcess() == process ); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated").error(e, true).detailext("ZoneId", localities.zoneId());
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated").error(e, true).detail("ZoneId", localities.zoneId());
 			}
 
 			TraceEvent("SimulatedFDBDDone").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("Address", process->address)
 				.detail("Excluded", process->excluded)
-				.detailext("ZoneId", localities.zoneId())
+				.detail("ZoneId", localities.zoneId())
 				.detail("KillType", onShutdown.isReady() ? onShutdown.get() : ISimulator::None);
 
 			if (!onShutdown.isReady())
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
-			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError").error(e, true).detailext("ZoneId", localities.zoneId()).detail("RandomId", randomId);
+			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError").error(e, true).detail("ZoneId", localities.zoneId()).detail("RandomId", randomId);
 			onShutdown = e;
 		}
 
@@ -292,7 +294,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 			.detail("Address", process->address)
 			.detail("Excluded", process->excluded)
 			.detail("Rebooting", process->rebooting)
-			.detailext("ZoneId", localities.zoneId());
+			.detail("ZoneId", localities.zoneId());
 		wait( g_simulator.onProcess( simProcess ) );
 
 		wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));  // One last chance for the process to clean up?
@@ -303,14 +305,14 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		TraceEvent("SimulatedFDBDShutdown").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("Address", process->address)
 			.detail("Excluded", process->excluded)
-			.detailext("ZoneId", localities.zoneId())
+			.detail("ZoneId", localities.zoneId())
 			.detail("KillType", shutdownResult);
 
 		if( shutdownResult < ISimulator::RebootProcessAndDelete ) {
 			TraceEvent("SimulatedFDBDLowerReboot").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("Address", process->address)
 				.detail("Excluded", process->excluded)
-				.detailext("ZoneId", localities.zoneId())
+				.detail("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 			return onShutdown.get();
 		}
@@ -318,7 +320,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		if( onShutdown.get() == ISimulator::RebootProcessAndDelete ) {
 			TraceEvent("SimulatedFDBDRebootAndDelete").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("Address", process->address)
-				.detailext("ZoneId", localities.zoneId())
+				.detail("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 			*coordFolder = joinPath(baseFolder, g_random->randomUniqueID().toString());
 			*dataFolder = joinPath(baseFolder, g_random->randomUniqueID().toString());
@@ -335,7 +337,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		else {
 			TraceEvent("SimulatedFDBDJustRepeat").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("Address", process->address)
-				.detailext("ZoneId", localities.zoneId())
+				.detail("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 		}
 	}
@@ -400,7 +402,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				const int listenPort = i*listenPerProcess + 1;
 				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
-				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detailext("ZoneId", localities.zoneId()).detailext("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
+				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
 			TEST( bootCount >= 1 ); // Simulated machine rebooted
@@ -418,8 +420,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				.detail("ProcessClass", processClass.toString())
 				.detail("Restarting", restarting)
 				.detail("UseSeedFile", useSeedFile)
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId())
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId())
 				.detail("Locality", localities.toString());
 
 			wait( waitForAll( processes ) );
@@ -428,8 +430,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				.detail("Folder0", myFolders[0])
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId());
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId());
 
 			{
 				//Kill all open files, which may cause them to write invalid data.
@@ -468,8 +470,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
 				.detail("Closing", closingStr)
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId());
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId());
 
 			ISimulator::MachineInfo* machine = g_simulator.getMachineById(localities.machineId());
 			machine->closingFiles = filenames;
@@ -499,8 +501,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				if( shutdownDelayCount++ >= 50 ) {  // Worker doesn't shut down instantly on reboot
 					TraceEvent(SevError, "SimulatedFDBDFilesCheck", randomId)
 						.detail("PAddrs", toIPVectorString(ips))
-						.detailext("ZoneId", localities.zoneId())
-						.detailext("DataHall", localities.dataHallId());
+						.detail("ZoneId", localities.zoneId())
+						.detail("DataHall", localities.dataHallId());
 					ASSERT( false );
 				}
 
@@ -510,8 +512,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 
 			TraceEvent("SimulatedFDBDFilesClosed", randomId)
 				.detail("Address", toIPVectorString(ips))
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId());
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId());
 
 			g_simulator.destroyMachine(localities.machineId());
 
@@ -535,8 +537,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				.detail("Swap", swap)
 				.detail("KillType", killType)
 				.detail("RebootTime", rebootTime)
-				.detailext("ZoneId", localities.zoneId())
-				.detailext("DataHall", localities.dataHallId())
+				.detail("ZoneId", localities.zoneId())
+				.detail("DataHall", localities.dataHallId())
 				.detail("MachineIPs", toIPVectorString(ips));
 
 			wait( delay( rebootTime ) );
@@ -601,9 +603,10 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 
 #include "fdbclient/MonitorLeader.h"
 
-ACTOR Future<Void> restartSimulatedSystem(
-		vector<Future<Void>> *systemActors, std::string baseFolder, int* pTesterCount,
-		Optional<ClusterConnectionString> *pConnString, Standalone<StringRef> *pStartingConfiguration, Reference<TLSOptions> tlsOptions, int extraDB) {
+ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,
+                                          Optional<ClusterConnectionString>* pConnString,
+                                          Standalone<StringRef>* pStartingConfiguration,
+                                          Reference<TLSOptions> tlsOptions, int extraDB) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -698,9 +701,11 @@ ACTOR Future<Void> restartSimulatedSystem(
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
 			// SOMEDAY: parse backup agent from test file
-			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB, usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass) ),
-				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
+			systemActors->push_back(reportErrors(
+			    simulatedMachine(conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true,
+			                     i == useSeedForMachine, enableExtraDB,
+			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass)),
+			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
 		g_simulator.desiredCoordinators = desiredCoordinators;
@@ -1141,7 +1146,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
+	TraceEvent("SimulatorConfig").detail("ConfigString", StringRef(startingConfigString));
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -1235,7 +1240,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	*pConnString = conn;
 
-	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", printable(StringRef(startingConfigString)));
+	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", startingConfigString);
 
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
@@ -1277,7 +1282,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled, tlsOptions,
-				localities, processClass, baseFolder, false, machine == useSeedForMachine, true, sslOnly ), "SimulatedMachine"));
+				localities, processClass, baseFolder, false, machine == useSeedForMachine, true, sslOnly), "SimulatedMachine"));
 
 			if (extraDB && g_simulator.extraDB->toString() != conn.toString()) {
 				std::vector<IPAddress> extraIps;
@@ -1291,7 +1296,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				localities.set(LiteralStringRef("data_hall"), dcUID);
 				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled, tlsOptions,
 					localities,
-					processClass, baseFolder, false, machine == useSeedForMachine, false, sslOnly ), "SimulatedMachine"));
+					processClass, baseFolder, false, machine == useSeedForMachine, false, sslOnly), "SimulatedMachine"));
 			}
 
 			assignedMachines++;
@@ -1319,7 +1324,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		systemActors->push_back( reportErrors( simulatedMachine(
 			conn, ips, sslEnabled, tlsOptions,
 			localities, ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-			baseFolder, false, i == useSeedForMachine, false, sslEnabled ),
+			baseFolder, false, i == useSeedForMachine, false, sslEnabled),
 			"SimulatedTesterMachine") );
 	}
 	*pStartingConfiguration = startingConfigString;
@@ -1375,7 +1380,7 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication, i
 	ifs.close();
 }
 
-ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, Reference<TLSOptions> tlsOptions ) {
+ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, Reference<TLSOptions> tlsOptions) {
 	state vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
@@ -1405,9 +1410,10 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, tlsOptions, extraDB), 100.0 ) );
-		}
-		else {
+			wait(timeoutError(restartSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile,
+			                                         &startingConfiguration, tlsOptions, extraDB),
+			                  100.0));
+		} else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB,
 			                     minimumReplication, minimumRegions, tlsOptions);

@@ -763,7 +763,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", option.second).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();
@@ -1246,7 +1246,6 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if(platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
-					size_t index = 0;
 					for(auto value : parseOptionValues(valueStr)) {
 						Standalone<StringRef> currentValue = StringRef(value);
 						{ // lock scope

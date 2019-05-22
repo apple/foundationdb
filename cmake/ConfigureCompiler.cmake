@@ -1,10 +1,15 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
 set(PORTABLE_BINARY OFF CACHE BOOL "Create a binary that runs on older OS versions")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
-set(USE_GOLD_LINKER OFF CACHE BOOL "Use gold linker")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
+set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
+set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
+
+if(USE_GPERFTOOLS)
+  find_package(Gperftools REQUIRED)
+endif()
 
 add_compile_options(-DCMAKE_BUILD)
 add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
@@ -43,18 +48,13 @@ include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 
-
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
   # this sets the windows target version to Windows 7
   set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /std:c++14 /bigobj $<$<CONFIG:Release>:/Zi>)
+  add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
-  if(USE_GOLD_LINKER)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
-  endif()
 
   set(GCC NO)
   set(CLANG NO)
@@ -66,10 +66,29 @@ else()
     set(GCC YES)
   endif()
 
+  # check linker flags.
+  if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")))
+    message (FATAL_ERROR "USE_LD must be set to LD, GOLD, or LLD!")
+  endif()
+
+  # if USE_LD=LD, then we don't do anything, defaulting to whatever system
+  # linker is available (e.g. binutils doesn't normally exist on macOS, so this
+  # implies the default xcode linker, and other distros may choose others by
+  # default).
+
+  if(USE_LD STREQUAL "GOLD")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
+  endif()
+
+  if(USE_LD STREQUAL "LLD")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
+  endif()
+
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb)
-  set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
   if(USE_ASAN)
     add_compile_options(
       -fno-omit-frame-pointer -fsanitize=address
@@ -91,7 +110,7 @@ else()
     -mmmx
     -mavx
     -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++11>)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
@@ -117,11 +136,19 @@ else()
   endif()
   add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
   add_compile_options(-Wno-error=format
+    -Wunused-variable
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type
     -fdiagnostics-color=always
     -fPIC)
+  if (GPERFTOOLS_FOUND AND GCC)
+    add_compile_options(
+      -fno-builtin-malloc
+      -fno-builtin-calloc
+      -fno-builtin-realloc
+      -fno-builtin-free)
+  endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(USE_LTO OFF CACHE BOOL "Do link time optimization")

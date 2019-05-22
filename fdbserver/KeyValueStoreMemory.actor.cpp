@@ -485,8 +485,8 @@ private:
 					if (h.op == OpSnapshotItem) { // snapshot data item
 						/*if (p1 < uncommittedNextKey) {
 							TraceEvent(SevError, "RecSnapshotBack", self->id)
-								.detail("NextKey", printable(uncommittedNextKey))
-								.detail("P1", printable(p1))
+								.detail("NextKey", uncommittedNextKey)
+								.detail("P1", p1)
 								.detail("Nextlocation", self->log->getNextReadLocation());
 						}
 						ASSERT( p1 >= uncommittedNextKey );*/
@@ -497,7 +497,7 @@ private:
 						++dbgSnapshotItemCount;
 					} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
 						TraceEvent("RecSnapshotEnd", self->id)
-							.detail("NextKey", printable(uncommittedNextKey))
+							.detail("NextKey", uncommittedNextKey)
 							.detail("Nextlocation", self->log->getNextReadLocation())
 							.detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
 
@@ -526,7 +526,7 @@ private:
 					} else if (h.op == OpRollback) { // rollback previous transaction
 						recoveryQueue.rollback();
 						TraceEvent("KVSMemRecSnapshotRollback", self->id)
-							.detail("NextKey", printable(uncommittedNextKey));
+							.detail("NextKey", uncommittedNextKey);
 						uncommittedNextKey = self->recoveredSnapshotKey;
 						uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
 						uncommittedSnapshotEnd = self->currentSnapshotEnd;
@@ -620,7 +620,7 @@ private:
 		state int snapItems = 0;
 		state uint64_t snapshotBytes = 0;
 
-		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
+		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", nextKey);
 
 		loop {
 			wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
@@ -646,7 +646,7 @@ private:
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
 				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("LastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
+				//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
 				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
 				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
 				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)

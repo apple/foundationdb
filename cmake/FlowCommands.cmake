@@ -9,6 +9,7 @@ define_property(TARGET PROPERTY COVERAGE_FILTERS
 expression in this list will be ignored when the coverage.target.xml file is \
 generated. This property is set through the add_flow_target function.")
 
+
 function(generate_coverage_xml)
   if(NOT (${ARGC} EQUAL "1"))
     message(FATAL_ERROR "generate_coverage_xml expects one argument")
@@ -76,21 +77,79 @@ function(assert_no_version_h target)
 
   message(STATUS "Check versions.h on ${target}")
   set(target_name "${target}_versions_h_check")
-  add_custom_target("${target_name}"
-    COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+
+  if (DEFINED ENV{VERBOSE})
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
                                -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-    COMMAND echo
-    "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-                               -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-    COMMENT "Check old build system wasn't used in source dir")
+      COMMAND echo
+      "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+                                 -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+      COMMENT "Check old build system wasn't used in source dir")
+  else()
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+      COMMENT "Check old build system wasn't used in source dir")
+  endif()
+
   add_dependencies(${target} ${target_name})
+endfunction()
+
+add_custom_target(strip_targets)
+add_dependencies(packages strip_targets)
+
+function(strip_debug_symbols target)
+  if (WIN32)
+    return()
+  endif()
+  get_target_property(target_type ${target} TYPE)
+  if(target_type STREQUAL "EXECUTABLE")
+    set(path ${CMAKE_BINARY_DIR}/packages/bin)
+    set(is_exec ON)
+  else()
+    set(path ${CMAKE_BINARY_DIR}/packages/lib)
+  endif()
+  file(MAKE_DIRECTORY "${path}")
+  set(strip_command strip)
+  set(out_name ${target})
+  if(APPLE)
+    if(NOT is_exec)
+      set(out_name "lib${target}.dylib")
+      list(APPEND strip_command -S -x)
+    endif()
+  else()
+    if(is_exec)
+      list(APPEND strip_command --strip-debug --strip-unneeded)
+    else()
+      set(out_name "lib${target}.so")
+      list(APPEND strip_command --strip-all)
+    endif()
+  endif()
+  set(out_file "${path}/${out_name}")
+  list(APPEND strip_command -o "${out_file}")
+  add_custom_command(OUTPUT "${out_file}"
+    COMMAND ${strip_command} $<TARGET_FILE:${target}>
+    COMMENT "Stripping symbols from ${target}")
+  set(out_files "${out_file}")
+  if(is_exec AND NOT APPLE)
+    add_custom_command(OUTPUT "${out_file}.debug"
+      COMMAND objcopy --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug" &&
+              objcopy --add-gnu-debuglink="${out_file}.debug" ${out_file}
+      DEPENDS "${out_file}"
+      COMMENT "Copy debug symbols to ${out_name}.debug")
+    list(APPEND out_files "${out_file}.debug")
+  endif()
+  add_custom_target(strip_${target} DEPENDS ${out_files})
+  add_dependencies(strip_${target} ${target})
+  add_dependencies(strip_targets strip_${target})
 endfunction()
 
 function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY
     DYNAMIC_LIBRARY)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_WITHOUT_WAIT_WARNING ADDL_SRCS)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(NOT AFT_NAME)
     message(FATAL_ERROR "add_flow_target requires option NAME")
@@ -99,7 +158,7 @@ function(add_flow_target)
     message(FATAL_ERROR "No sources provided")
   endif()
   if(OPEN_FOR_IDE)
-    set(sources ${AFT_SRCS} ${AFT_DISABLE_ACTOR_WRITHOUT_WAIT_WARNING})
+    set(sources ${AFT_SRCS} ${AFT_DISABLE_ACTOR_WRITHOUT_WAIT_WARNING} ${AFT_ADDL_SRCS})
     add_library(${AFT_NAME} OBJECT ${sources})
   else()
     foreach(src IN LISTS AFT_SRCS AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
@@ -135,20 +194,22 @@ function(add_flow_target)
       endif()
     endforeach()
     if(AFT_EXECUTABLE)
+      set(strip_target ON)
       set(target_type exec)
-      add_executable(${AFT_NAME} ${sources})
+      add_executable(${AFT_NAME} ${sources} ${AFT_ADDL_SRCS})
     endif()
     if(AFT_STATIC_LIBRARY)
       if(target_type)
         message(FATAL_ERROR "add_flow_target can only be of one type")
       endif()
-      add_library(${AFT_NAME} STATIC ${sources})
+      add_library(${AFT_NAME} STATIC ${sources} ${AFT_ADDL_SRCS})
     endif()
     if(AFT_DYNAMIC_LIBRARY)
       if(target_type)
         message(FATAL_ERROR "add_flow_target can only be of one type")
       endif()
-      add_library(${AFT_NAME} DYNAMIC ${sources})
+      set(strip_target ON)
+      add_library(${AFT_NAME} DYNAMIC ${sources} ${AFT_ADDL_SRCS})
     endif()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
@@ -158,6 +219,9 @@ function(add_flow_target)
     add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
     assert_no_version_h(${AFT_NAME}_actors)
     generate_coverage_xml(${AFT_NAME})
+    if(strip_target)
+      strip_debug_symbols(${AFT_NAME})
+    endif()
   endif()
   target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()

@@ -26,6 +26,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
 
+#include <cinttypes>
 #include <ctime>
 #include <climits>
 #include "fdbrpc/IAsyncFile.h"
@@ -345,7 +346,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 	std::string errstr = "None";
 	if(lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
+		errstr = format("'%s' %" PRId64 "s ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
 
 	TraceEvent("FileRestoreProgress")
 		.detail("RestoreUID", uid)
@@ -386,7 +387,6 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	state Future<std::string> progress = restore.getProgress(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	state UID uid = restore.getUid();
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) && success(progress));
 
 	std::string returnStr;
@@ -741,7 +741,7 @@ namespace fileBackup {
 		if (taskVersion > version) {
 			state Error err = task_invalid_version();
 
-			TraceEvent(SevWarn, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevWarn, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", name).detail("Version", version);
 			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
 				std::string msg = format("%s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
 				wait(BackupConfig(task).logError(cx, err, msg));
@@ -806,7 +806,7 @@ namespace fileBackup {
 			TEST(true);  // Canceling old backup task
 
 			TraceEvent(SevInfo, "FileBackupCancelOldTask")
-					.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("Task", task->params[Task::reservedTaskParamKeyType])
 					.detail("TagName", tagName);
 			wait(abortFiveZeroBackup(&backupAgent, tr, tagName));
 
@@ -876,7 +876,7 @@ namespace fileBackup {
 			TEST(true);  // Canceling 5.1 backup task
 
 			TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
-					.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("Task", task->params[Task::reservedTaskParamKeyType])
 					.detail("TagName", tagName);
 			wait(abortFiveOneBackup(&backupAgent, tr, tagName));
 
@@ -1575,11 +1575,6 @@ namespace fileBackup {
 				countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
 			}
 
-			// countShardsThisDispatch is how many total shards are to be dispatched by this dispatch cycle.
-			// Since this dispatch cycle can span many incrementally progressing separate executions of the BackupSnapshotDispatchTask
-			// instance, this is calculated as the number of shards dispatched so far in the dispatch batch plus the number of shards
-			// the current execution is going to attempt to do.
-			int countShardsThisDispatch = countShardsToDispatch + snapshotBatchSize.get();
 			// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are being dispatched, if any.
 			int countShardsBehind = std::max<int64_t>(0, countShardsToDispatch + snapshotBatchSize.get() - countShardsExpectedPerNormalWindow); 
 			Params.shardsBehind().set(task, countShardsBehind);
@@ -1870,7 +1865,6 @@ namespace fileBackup {
 			state int blockSize = BUGGIFY ? g_random->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
 			state Reference<IBackupFile> outFile = wait(bc->writeLogFile(beginVersion, endVersion, blockSize));
 			state LogFileWriter logFile(outFile, blockSize);
-			state size_t idx;
 
 			state PromiseStream<RangeResultWithVersion> results;
 			state std::vector<Future<Void>> rc;
@@ -2688,13 +2682,13 @@ namespace fileBackup {
 							.detail("ReadOffset", readOffset)
 							.detail("ReadLen", readLen)
 							.detail("CommitVersion", tr->getCommittedVersion())
-							.detail("BeginRange", printable(trRange.begin))
-							.detail("EndRange", printable(trRange.end))
+							.detail("BeginRange", trRange.begin)
+							.detail("EndRange", trRange.end)
 							.detail("StartIndex", start)
 							.detail("EndIndex", i)
 							.detail("DataSize", data.size())
 							.detail("Bytes", txBytes)
-							.detail("OriginalFileRange", printable(originalFileRange))
+							.detail("OriginalFileRange", originalFileRange)
 							.detail("TaskInstance", THIS_ADDR);
 
 						// Commit succeeded, so advance starting point
@@ -3005,7 +2999,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -3019,7 +3013,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -3033,7 +3027,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", printable(Params.beginFile().get(task)))
+						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "restore_complete")
@@ -3141,7 +3135,7 @@ namespace fileBackup {
 				TraceEvent("FileRestoreDispatch")
 					.detail("RestoreUID", restore.getUid())
 					.detail("BeginVersion", beginVersion)
-					.detail("BeginFile", printable(Params.beginFile().get(task)))
+					.detail("BeginFile", Params.beginFile().get(task))
 					.detail("BeginBlock", Params.beginBlock().get(task))
 					.detail("EndVersion", endVersion)
 					.detail("ApplyLag", applyLag)
@@ -3187,7 +3181,7 @@ namespace fileBackup {
 			TraceEvent("FileRestoreDispatch")
 				.detail("RestoreUID", restore.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("BeginFile", printable(Params.beginFile().get(task)))
+				.detail("BeginFile", Params.beginFile().get(task))
 				.detail("BeginBlock", Params.beginBlock().get(task))
 				.detail("EndVersion", endVersion)
 				.detail("ApplyLag", applyLag)
@@ -3772,7 +3766,7 @@ public:
 					printf("%s\n", details.c_str());
 				}
 
-			ERestoreState status_ = wait(restore.stateEnum().getD(tr));
+				ERestoreState status_ = wait(restore.stateEnum().getD(tr));
 				status = status_;
 				state bool runnable = wait(restore.isRunnable(tr));
 
@@ -3825,7 +3819,7 @@ public:
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-			state Version endVersion = wait(tr->getReadVersion());
+			wait(success(tr->getReadVersion()));
 
 			wait(success(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
 
@@ -3928,6 +3922,8 @@ public:
 				doc.setKey("Tag", tag.tagName);
 
 				if(uidAndAbortedFlag.present()) {
+					doc.setKey("UID", uidAndAbortedFlag.get().first.toString());
+
 					state BackupConfig config(uidAndAbortedFlag.get().first);
 
 					state EBackupState backupState = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
@@ -4234,7 +4230,7 @@ public:
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
 				.detail("TargetVersion", targetVersion);
-			fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
+			fprintf(stderr, "ERROR: Restore version %" PRId64 " is not possible from %s\n", targetVersion, bc->getURL().c_str());
 			throw restore_invalid_version();
 		}
 
@@ -4251,9 +4247,10 @@ public:
 				wait(tr->commit());
 				break;
 			} catch(Error &e) {
-				if(e.code() != error_code_restore_duplicate_tag) {
-					wait(tr->onError(e));
+				if(e.code() == error_code_restore_duplicate_tag) {
+					throw;
 				}
+				wait(tr->onError(e));
 			}
 		}
 

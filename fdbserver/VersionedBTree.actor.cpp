@@ -34,6 +34,7 @@
 #include "fdbserver/DeltaTree.h"
 #include <string.h>
 #include "flow/actorcompiler.h"
+#include <cinttypes>
 
 #define STR(x) LiteralStringRef(x)
 struct RedwoodRecordRef {
@@ -237,7 +238,7 @@ struct RedwoodRecordRef {
 
 	std::string toString(int hexLimit = 15) const {
 		std::string r;
-		r += format("'%s' @%lld ", kvformat(key, hexLimit).c_str(), version);
+		r += format("'%s' @" PRId64 " ", kvformat(key, hexLimit).c_str(), version);
 		r += format("[%d/%d] ", chunk.start, chunk.total);
 		if(value.present()) {
 			r += format("-> '%s'", kvformat(value.get(), hexLimit).c_str());
@@ -288,7 +289,7 @@ struct BTreePage {
 
 	std::string toString(bool write, LogicalPageID id, Version ver, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) const {
 		std::string r;
-		r += format("BTreePage op=%s id=%d ver=%lld ptr=%p flags=0x%X count=%d kvBytes=%d extPages=%d\n  lowerBound: %s\n  upperBound: %s\n",
+		r += format("BTreePage op=%s id=%d ver=" PRId64 " ptr=%p flags=0x%X count=%d kvBytes=%d extPages=%d\n  lowerBound: %s\n  upperBound: %s\n",
 					write ? "write" : "read", id, ver, this, (int)flags, (int)count, (int)kvBytes, (int)extensionPageCount,
 					lowerBound->toString().c_str(), upperBound->toString().c_str());
 		try {
@@ -323,7 +324,7 @@ struct BTreePage {
 
 				} while(c.moveNext());
 			}
-		} catch(Error &e) {
+		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
 			debug_printf("BTreePage::toString partial result: %s\n", r.c_str());
 			throw;
@@ -570,7 +571,7 @@ public:
 		int64_t commitToPageStart;
 
 		std::string toString(bool clearAfter = false) {
-			std::string s = format("set=%lld clear=%lld get=%lld getRange=%lld commit=%lld pageRead=%lld extPageRead=%lld pageWrite=%lld extPageWrite=%lld commitPage=%lld commitPageStart=%lld", 
+			std::string s = format("set=" PRId64 " clear=" PRId64 " get=" PRId64 " getRange=" PRId64 " commit=" PRId64 " pageRead=" PRId64 " extPageRead=" PRId64 " pageWrite=" PRId64 " extPageWrite=" PRId64 " commitPage=" PRId64 " commitPageStart=" PRId64 "", 
 				sets, clears, gets, getRanges, commits, pageReads, extPageReads, pageWrites, extPageWrites, commitToPage, commitToPageStart);
 			if(clearAfter) {
 				clear();
@@ -792,7 +793,7 @@ private:
 	}
 
 	static std::string toString(const VersionedKeyToPageSetT &c) {
-		std::string r = format("Version %lld => [", c.first);
+		std::string r = format("Version " PRId64 " => [", c.first);
 		for(auto &o : c.second) {
 			r += toString(o) + " ";
 		}
@@ -858,12 +859,12 @@ private:
 			std::string result;
 			result.append("rangeClearVersion: ");
 			if(rangeClearVersion.present())
-				result.append(format("%lld", rangeClearVersion.get()));
+				result.append(format("" PRId64 "", rangeClearVersion.get()));
 			else
 				result.append("<not present>");
 			result.append("  startKeyMutations: ");
 			for(SingleKeyMutationsByVersion::value_type const &m : startKeyMutations)
-				result.append(format("[%lld => %s] ", m.first, m.second.toString().c_str()));
+				result.append(format("[" PRId64 " => %s] ", m.first, m.second.toString().c_str()));
 			return result;
 		}
 	};
@@ -992,14 +993,14 @@ private:
 			int oldPages = pages.size();
 			pages = buildPages(false, dbBegin, dbEnd, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_usablePageSizeOverride);
 
-			debug_printf("Writing a new root level at version %lld with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
+			debug_printf("Writing a new root level at version " PRId64 " with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
 
 			logicalPageIDs = writePages(pages, version, m_root, pPage, &dbEnd, nullptr);
 		}
 	}
 
 	std::vector<LogicalPageID> writePages(std::vector<BoundaryAndPage> pages, Version version, LogicalPageID originalID, const BTreePage *originalPage, const RedwoodRecordRef *upperBound, void *actor_debug) {
-		debug_printf("%p: writePages(): %u @%lld -> %lu replacement pages\n", actor_debug, originalID, version, pages.size());
+		debug_printf("%p: writePages(): %u @" PRId64 " -> %lu replacement pages\n", actor_debug, originalID, version, pages.size());
 
 		ASSERT(version != 0 || pages.size() == 1);
 
@@ -1014,7 +1015,7 @@ private:
 			primaryLogicalPageIDs.push_back(m_pager->allocateLogicalPage());
 		}
 
-		debug_printf("%p: writePages(): Writing %lu replacement pages for %d at version %lld\n", actor_debug, pages.size(), originalID, version);
+		debug_printf("%p: writePages(): Writing %lu replacement pages for %d at version " PRId64 "\n", actor_debug, pages.size(), originalID, version);
 		for(int i=0; i<pages.size(); i++) {
 			++counts.pageWrites;
 
@@ -1030,18 +1031,18 @@ private:
 
 				for(int e = 0, eEnd = extPages.size(); e < eEnd; ++e) {
 					LogicalPageID eid = m_pager->allocateLogicalPage();
-					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%lld (%d of %lu) referencePage=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
+					debug_printf("%p: writePages(): Writing extension page op=write id=%u @" PRId64 " (%d of %lu) referencePage=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
 					newPage->extensionPages[e] = eid;
 					// If replacing the primary page below (version == 0) then pass the primary page's ID as the reference page ID
 					m_pager->writePage(eid, extPages[e], version, (version == 0) ? id : invalidLogicalPageID);
 					++counts.extPageWrites;
 				}
 
-				debug_printf("%p: writePages(): Writing primary page op=write id=%u @%lld (+%lu extension pages)\n", actor_debug, id, version, extPages.size());
+				debug_printf("%p: writePages(): Writing primary page op=write id=%u @" PRId64 " (+%lu extension pages)\n", actor_debug, id, version, extPages.size());
 				m_pager->writePage(id, pages[i].firstPage, version);
 			}
 			else {
-				debug_printf("%p: writePages(): Writing normal page op=write id=%u @%lld\n", actor_debug, id, version);
+				debug_printf("%p: writePages(): Writing normal page op=write id=%u @" PRId64 "\n", actor_debug, id, version);
 				writePage(id, pages[i].firstPage, version, &pages[i].lowerBound, (i == pages.size() - 1) ? upperBound : &pages[i + 1].lowerBound);
 			}
 		}
@@ -1057,10 +1058,8 @@ private:
 
 	class SuperPage : public IPage, ReferenceCounted<SuperPage> {
 	public:
-		SuperPage(std::vector<Reference<const IPage>> pages, int usablePageSize) : m_size(0) {
-			for(auto &p : pages) {
-				m_size += usablePageSize;
-			}
+		SuperPage(std::vector<Reference<const IPage>> pages, int usablePageSize)
+		  : m_size(pages.size() * usablePageSize) {
 			m_data = new uint8_t[m_size];
 			uint8_t *wptr = m_data;
 			for(auto &p : pages) {
@@ -1095,11 +1094,11 @@ private:
 
 	private:
 		uint8_t *m_data;
-		int m_size;
+		const int m_size;
 	};
 
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
-		debug_printf("readPage() op=read id=%u @%lld lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
+		debug_printf("readPage() op=read id=%u @" PRId64 " lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
 		wait(delay(0, TaskDiskRead));
 
 		state Reference<const IPage> result = wait(snapshot->getPhysicalPage(id));
@@ -1107,14 +1106,14 @@ private:
 		state const BTreePage *pTreePage = (const BTreePage *)result->begin();
 
 		if(pTreePage->extensionPageCount == 0) {
-			debug_printf("readPage() Found normal page for op=read id=%u @%lld\n", id, snapshot->getVersion());
+			debug_printf("readPage() Found normal page for op=read id=%u @" PRId64 "\n", id, snapshot->getVersion());
 		}
 		else {
 			std::vector<Future<Reference<const IPage>>> pageGets;
 			pageGets.push_back(std::move(result));
 
 			for(int i = 0; i < pTreePage->extensionPageCount; ++i) {
-				debug_printf("readPage() Reading extension page op=read id=%u @%lld ext=%d/%d\n", pTreePage->extensionPages[i], snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
+				debug_printf("readPage() Reading extension page op=read id=%u @" PRId64 " ext=%d/%d\n", pTreePage->extensionPages[i], snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
 				pageGets.push_back(snapshot->getPhysicalPage(pTreePage->extensionPages[i]));
 			}
 
@@ -1125,7 +1124,7 @@ private:
 		}
 
 		if(result->userData == nullptr) {
-			debug_printf("readPage() Creating Reader for page id=%u @%lld lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
+			debug_printf("readPage() Creating Reader for page id=%u @" PRId64 " lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
 			result->userData = new BTreePage::BinaryTree::Reader(&pTreePage->tree(), lowerBound, upperBound);
 			result->userDataDestructor = [](void *ptr) { delete (BTreePage::BinaryTree::Reader *)ptr; };
 		}
@@ -1571,13 +1570,12 @@ private:
 				std::vector<RedwoodRecordRef> childEntries;
 
 				// For each Future<VersionedChildrenT>
-				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", THIS, root, version);
+				debug_printf("%p creating replacement pages for id=%d at Version " PRId64 "\n", THIS, root, version);
 
 				// In multi version mode if we're writing version 0 there is a chance that we don't have to write ourselves, if there are no changes in any child subtrees
 				bool modified = self->singleVersion || version != 0;
 
 				for(int i = 0; i < futureChildren.size(); ++i) {
-					LogicalPageID pageID = childPageIDs[i];
 					const VersionedChildrenT &children = futureChildren[i].get();
 					if(children.empty()) {
 						// Subtree was deleted, but due to prefix dependencies the boundary key might still need to exist
@@ -1596,7 +1594,7 @@ private:
 					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS, pageID, children.size());
 					if(REDWOOD_DEBUG) {
 						for(auto &versionedPageSet : children) {
-							debug_printf("%p    version %lld\n", THIS, versionedPageSet.first);
+							debug_printf("%p    version " PRId64 "\n", THIS, versionedPageSet.first);
 							for(auto &boundaryPage : versionedPageSet.second) {
 								debug_printf("%p       '%s' -> Page id=%u\n", THIS, boundaryPage.first.toString().c_str(), boundaryPage.second);
 							}
@@ -1616,23 +1614,23 @@ private:
 
 						// If there are no versions before the one we found, just update nextVersion and continue.
 						if(cv == children.begin()) {
-							debug_printf("%p First version (%lld) in set is greater than current, setting nextVersion and continuing\n", THIS, cv->first);
+							debug_printf("%p First version (" PRId64 ") in set is greater than current, setting nextVersion and continuing\n", THIS, cv->first);
 							nextVersion = std::min(nextVersion, cv->first);
-							debug_printf("%p   curr %lld next %lld\n", THIS, version, nextVersion);
+							debug_printf("%p   curr " PRId64 " next " PRId64 "\n", THIS, version, nextVersion);
 							continue;
 						}
 
 						// If a version greater than the current version being written was found, update nextVersion
 						if(cv != children.end()) {
 							nextVersion = std::min(nextVersion, cv->first);
-							debug_printf("%p   curr %lld next %lld\n", THIS, version, nextVersion);
+							debug_printf("%p   curr " PRId64 " next " PRId64 "\n", THIS, version, nextVersion);
 						}
 
 						// Go back one to the last version that was valid prior to or at the current version we are writing
 						--cv;
 					}
 
-					debug_printf("%p   Using children for version %lld from this set, building version %lld\n", THIS, cv->first, version);
+					debug_printf("%p   Using children for version " PRId64 " from this set, building version " PRId64 "\n", THIS, cv->first, version);
 
 					// If page count isn't 1 then the root is definitely modified
 					modified = modified || cv->second.size() != 1;
@@ -1648,18 +1646,18 @@ private:
 					}
 				}
 
-				debug_printf("%p Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", THIS, childEntries.size(), version, nextVersion);
+				debug_printf("%p Finished pass through futurechildren.  childEntries=%lu  version=" PRId64 "  nextVersion=" PRId64 "\n", THIS, childEntries.size(), version, nextVersion);
 
 				if(modified) {
 					// If all children were deleted then this page should be deleted as of the new version
 					// Note that if a single range clear covered the entire page then we should not get this far
 					if(childEntries.empty()) {
 						if(self->singleVersion) {
-							debug_printf("%p All internal page children were deleted #2 at version %lld\n", THIS, version);
+							debug_printf("%p All internal page children were deleted #2 at version " PRId64 "\n", THIS, version);
 						}
 						else {
 							VersionedKeyToPageSetT c({version, {} });
-							debug_printf("%p All internal page children were deleted #3 at version %lld, adding %s\n", THIS, version, toString(c).c_str());
+							debug_printf("%p All internal page children were deleted #3 at version " PRId64 ", adding %s\n", THIS, version, toString(c).c_str());
 							result.push_back(c);
 						}
 					}
@@ -1722,11 +1720,11 @@ private:
 
 		// Wait for the latest commit that started to be finished.
 		wait(previousCommit);
-		debug_printf("%s: Beginning commit of version %lld\n", self->m_name.c_str(), writeVersion);
+		debug_printf("%s: Beginning commit of version " PRId64 "\n", self->m_name.c_str(), writeVersion);
 
 		// Get the latest version from the pager, which is what we will read at
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
-		debug_printf("%s: pager latestVersion %lld\n", self->m_name.c_str(), latestVersion);
+		debug_printf("%s: pager latestVersion " PRId64 "\n", self->m_name.c_str(), latestVersion);
 
 		if(REDWOOD_DEBUG) {
 			self->printMutationBuffer(mutations);
@@ -1735,9 +1733,9 @@ private:
 		VersionedChildrenT newRoot = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, &dbBegin, &dbEnd, &dbBegin, &dbEnd));
 
 		self->m_pager->setLatestVersion(writeVersion);
-		debug_printf("%s: Committing pager %lld\n", self->m_name.c_str(), writeVersion);
+		debug_printf("%s: Committing pager " PRId64 "\n", self->m_name.c_str(), writeVersion);
 		wait(self->m_pager->commit());
-		debug_printf("%s: Committed version %lld\n", self->m_name.c_str(), writeVersion);
+		debug_printf("%s: Committed version " PRId64 "\n", self->m_name.c_str(), writeVersion);
 
 		// Now that everything is committed we must delete the mutation buffer.
 		// Our buffer's start version should be the oldest mutation buffer version in the map.
@@ -2087,7 +2085,7 @@ private:
 
 		std::string toString() const {
 			std::string r;
-			r += format("Cursor(%p) ver: %lld ", this, m_version);
+			r += format("Cursor(%p) ver: " PRId64 " ", this, m_version);
 			if(m_kv.present()) {
 				r += format("  KV: '%s' -> '%s'\n", m_kv.get().key.printable().c_str(), m_kv.get().value.printable().c_str());
 			}
@@ -2386,7 +2384,6 @@ public:
 
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
-		state Version readVersion = self->m_tree->getLastCommittedVersion();
 		if(rowLimit >= 0) {
 			wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
 			while(cur->isValid() && cur->getKey() < keys.end) {
@@ -2419,7 +2416,6 @@ public:
 	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, Key key, Optional< UID > debugID) {
 		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
-		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
 		wait(cur->findEqual(key));
 		if(cur->isValid()) {
@@ -2496,16 +2492,16 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
-	debug_printf("VerifyRange(@%lld, %s, %s): Start cur=%p\n", v, start.toString().c_str(), end.toString().c_str(), cur.getPtr());
+	debug_printf("VerifyRange(@" PRId64 ", %s, %s): Start cur=%p\n", v, start.toString().c_str(), end.toString().c_str(), cur.getPtr());
 
 	// Randomly use the cursor for something else first.
 	if(g_random->coinflip()) {
 		state Key randomKey = randomKV().key;
-		debug_printf("VerifyRange(@%lld, %s, %s): Dummy seek to '%s'\n", v, start.toString().c_str(), end.toString().c_str(), randomKey.toString().c_str());
+		debug_printf("VerifyRange(@" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.toString().c_str(), end.toString().c_str(), randomKey.toString().c_str());
 		wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
 
-	debug_printf("VerifyRange(@%lld, %s, %s): Actual seek\n", v, start.toString().c_str(), end.toString().c_str());
+	debug_printf("VerifyRange(@" PRId64 ", %s, %s): Actual seek\n", v, start.toString().c_str(), end.toString().c_str());
 	wait(cur->findFirstEqualOrGreater(start, true, 0));
 
 	state std::vector<KeyValue> results;
@@ -2526,7 +2522,7 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 					|| i->first.second > v
 				)
 			) {
-				debug_printf("VerifyRange(@%lld, %s, %s) Found key in written map: %s\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.first.c_str());
+				debug_printf("VerifyRange(@" PRId64 ", %s, %s) Found key in written map: %s\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.first.c_str());
 				break;
 			}
 		}
@@ -2534,20 +2530,20 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 		if(iLast == iEnd) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRange(@" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			printf("VerifyRange(@" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			printf("VerifyRange(@" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
 
@@ -2577,10 +2573,10 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	if(iLast != iEnd) {
 		++errors;
 		++*pErrorCount;
-		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		printf("VerifyRange(@" PRId64 ", %s, %s) ERROR: Tree range ended but written has @" PRId64 " '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
-	debug_printf("VerifyRangeReverse(@%lld, %s, %s): start\n", v, start.toString().c_str(), end.toString().c_str());
+	debug_printf("VerifyRangeReverse(@" PRId64 ", %s, %s): start\n", v, start.toString().c_str(), end.toString().c_str());
 
 	// Randomly use a new cursor for the reverse range read but only if version history is available
 	if(!btree->isSingleVersion() && g_random->coinflip()) {
@@ -2598,20 +2594,20 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 		if(r == results.rend()) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRangeReverse(@" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != r->key) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
+			printf("VerifyRangeReverse(@" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
 			break;
 		}
 		if(cur->getValue() != r->value) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
+			printf("VerifyRangeReverse(@" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
 
@@ -2622,7 +2618,7 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	if(r != results.rend()) {
 		++errors;
 		++*pErrorCount;
-		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
+		printf("VerifyRangeReverse(@" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
@@ -2642,7 +2638,7 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
-			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
+			debug_printf("Verifying @" PRId64 " '%s'\n", ver, key.c_str());
 			state Arena arena;
 			wait(cur->findEqual(KeyRef(arena, key)));
 
@@ -2651,17 +2647,17 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 					++errors;
 					++*pErrorCount;
 					if(!cur->isValid())
-						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(), val.get().c_str(), ver);
 					else if(cur->getKey() != key)
-						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), key.c_str(), ver);
 					else if(cur->getValue() != val.get())
-						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
 				}
 			} else {
 				if(cur->isValid() && cur->getKey() == key) {
 					++errors;
 					++*pErrorCount;
-					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @" PRId64 "\n", key.c_str(), cur->getValue().toString().c_str(), ver);
 				}
 			}
 		}
@@ -2680,7 +2676,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 
 			if(btree->isSingleVersion()) {
 				v = btree->getLastCommittedVersion();
-				debug_printf("Verifying at latest committed version %lld\n", v);
+				debug_printf("Verifying at latest committed version " PRId64 "\n", v);
 				vall = verifyRange(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pErrorCount);
 				if(serial) {
 					wait(success(vall));
@@ -2691,7 +2687,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 				}
 			}
 			else {
-				debug_printf("Verifying through version %lld\n", v);
+				debug_printf("Verifying through version " PRId64 "\n", v);
 				vall = verifyAll(btree, v, written, pErrorCount);
 				if(serial) {
 					wait(success(vall));
@@ -2705,7 +2701,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 
 			int errors = vall.get() + vrange.get();
 
-			debug_printf("Verified through version %lld, %d errors\n", v, errors);
+			debug_printf("Verified through version " PRId64 ", %d errors\n", v, errors);
 
 			if(*pErrorCount != 0)
 				break;
@@ -3008,7 +3004,7 @@ struct SimpleCounter {
 	double t;
 	double start;
 	int64_t xt;
-	std::string toString() { return format("%lld/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
+	std::string toString() { return format("" PRId64 "/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
 };
 
 TEST_CASE("!/redwood/correctness") {
@@ -3054,7 +3050,7 @@ TEST_CASE("!/redwood/correctness") {
 	state std::set<Key> keys;
 
 	state Version lastVer = wait(btree->getLatestVersion());
-	printf("Starting from version: %lld\n", lastVer);
+	printf("Starting from version: %" PRId64 "\n", lastVer);
 
 	state Version version = lastVer + 1;
 	btree->setWriteVersion(version);
@@ -3111,7 +3107,7 @@ TEST_CASE("!/redwood/correctness") {
 
 			++rangeClears;
 			KeyRangeRef range(start, end);
-			debug_printf("      Mutation:  Clear '%s' to '%s' @%lld\n", start.toString().c_str(), end.toString().c_str(), version);
+			debug_printf("      Mutation:  Clear '%s' to '%s' @" PRId64 "\n", start.toString().c_str(), end.toString().c_str(), version);
 			auto e = written.lower_bound(std::make_pair(start.toString(), 0));
 			if(e != written.end()) {
 				auto last = e;
@@ -3121,7 +3117,7 @@ TEST_CASE("!/redwood/correctness") {
 					++e;
 					// If e key is different from last and last was present then insert clear for last's key at version
 					if(last != eEnd && ((e == eEnd || e->first.first != last->first.first) && last->second.present())) {
-						debug_printf("      Mutation:    Clearing key '%s' @%lld\n", last->first.first.c_str(), version);
+						debug_printf("      Mutation:    Clearing key '%s' @" PRId64 "\n", last->first.first.c_str(), version);
 
 						keyBytesCleared += last->first.first.size();
 						mutationBytes += last->first.first.size();
@@ -3151,7 +3147,7 @@ TEST_CASE("!/redwood/correctness") {
 					kv.key = StringRef(kv.arena(), *i);
 			}
 
-			debug_printf("      Mutation:  Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+			debug_printf("      Mutation:  Set '%s' -> '%s' @" PRId64 "\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
 
 			++sets;
 			keyBytesInserted += kv.key.size();
@@ -3168,7 +3164,7 @@ TEST_CASE("!/redwood/correctness") {
 		if(mutationBytes.get() >= mutationBytesTarget || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
 			// Wait for previous commit to finish
 			wait(commit);
-			printf("Committed.  Next commit %d bytes, %lld/%d (%.2f%%)  Stats: Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
+			printf("Committed.  Next commit %d bytes, " PRId64 "/%d (%.2f%%)  Stats: Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
 				mutationBytesThisCommit,
 				mutationBytes.get(),
 				mutationBytesTarget,
@@ -3223,7 +3219,7 @@ TEST_CASE("!/redwood/correctness") {
 
 				Version v = wait(btree->getLatestVersion());
 				ASSERT(v == version);
-				printf("Recovered from disk.  Latest version %lld\n", v);
+				printf("Recovered from disk.  Latest version %" PRId64 "\n", v);
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
@@ -3328,6 +3324,7 @@ TEST_CASE("!/redwood/performance/set") {
 
 		if(kvBytes > 1e6 || kvBytesTotal >= kvBytesTarget) {
 			wait(commit);
+
 			// Avoid capturing this to freeze counter values
 			int recs = records;
 			int kvb = kvBytes;

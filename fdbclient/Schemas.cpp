@@ -82,7 +82,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "log",
                         "storage",
                         "resolver",
-                        "cluster_controller"
+                        "cluster_controller",
+                        "data_distributor",
+                        "ratekeeper",
+                        "router"
                      ]
                   },
                   "data_version":12341234,
@@ -165,6 +168,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                }
             ],
             "fault_domain":"0ccb4e0fdbdb5583010f6b77d9d10ece",
+            "under_maintenance":true,
             "excluded":false,
             "address":"1.2.3.4:1234",
             "disk":{
@@ -442,6 +446,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "protocol_version":"fdb00a400050001",
       "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
+      "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
+      "maintenance_seconds_remaining":1.0,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -453,7 +459,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
@@ -662,7 +669,8 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "triple",
         "three_datacenter",
         "three_datacenter_fallback",
-        "three_data_hall"
+        "three_data_hall",
+        "three_data_hall_fallback"
     ]},
     "regions":[{
         "datacenters":[{

@@ -266,6 +266,7 @@ extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
 extern const KeyRef metadataVersionKey;
+extern const KeyRef metadataVersionKeyEnd;
 extern const KeyRef metadataVersionRequiredValue;
 extern const KeyRef mustContainSystemMutationsKey;
 
@@ -276,5 +277,10 @@ extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
 
 const Key restoreWorkerKeyFor( UID const& agentID );
+
+extern const KeyRef healthyZoneKey;
+
+const Value healthyZoneValue( StringRef const& zoneId, Version version );
+std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 
 #endif

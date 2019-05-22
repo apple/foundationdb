@@ -87,7 +87,7 @@ struct KeyWithWriter {
 	void operator=( KeyWithWriter&& r ) { key = std::move(r.key); writer = std::move(r.writer); writerOffset = r.writerOffset; }
 
 	StringRef value() {
-		return StringRef(writer.toStringRef().substr(writerOffset));
+		return StringRef(writer.toValue().substr(writerOffset));
 	}
 };
 
@@ -540,7 +540,7 @@ struct FieldLevel {
 					// Otherwise, insert but first, patch the header if this block is old enough
 					if(data.rollTime <= lastTimeRequiringHeaderPatch) {
 						ASSERT(previousHeader.present());
-						FieldLevel<T>::updateSerializedHeader(data.writer.toStringRef(), previousHeader.get());
+						FieldLevel<T>::updateSerializedHeader(data.writer.toValue(), previousHeader.get());
 					}
 
 					batch.inserts.push_back(KeyWithWriter(mk.packDataKey(data.start), data.writer));
@@ -829,6 +829,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).log( std::tuple_element<Is, typename Descriptor<E>::fields>::type::get( static_cast<E&>(*this) ), t, l, overflow, bytes ), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -838,6 +839,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).init(), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -847,6 +849,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).nextKey(t, l),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -865,6 +868,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).flushField( mk, rollTime, batch ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -879,6 +883,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).rollMetric( t ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -893,6 +898,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).registerField( mk, fieldKeys ),Void())...
 		};
+		(void)_;
 #endif
 	}
 protected:
@@ -1243,7 +1249,7 @@ public:
 		// TOOD: If it is useful, this could be the current header value of the most recently logged level.
 		wr << FieldHeader<TimeAndValue<T>>();
 		enc.write(wr, tv);
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	void onEnable() {
@@ -1379,6 +1385,21 @@ struct MetricHandle {
 	typename T::ValueType getValue() const  { return ref->getValue(); }
 
 	Reference<T> ref;
+};
+
+template<class T>
+struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
+	static std::string toString(const MetricHandle<T>& value) {
+		return Traceable<typename T::ValueType>::toString(value.getValue());
+	}
+};
+
+template<class T>
+struct SpecialTraceMetricType<MetricHandle<T>> : SpecialTraceMetricType<typename T::ValueType> {
+	using parent = SpecialTraceMetricType<typename T::ValueType>;
+	static auto getValue(const MetricHandle<T>& value) -> decltype(parent::getValue(value.getValue())) {
+		return parent::getValue(value.getValue());
+	}
 };
 
 typedef MetricHandle<Int64Metric> Int64MetricHandle;

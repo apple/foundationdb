@@ -31,7 +31,7 @@ TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.$(DLEXT)
 	@echo "Archiving      tgz"
 	@mkdir -p packages
 	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz
-	@bash -c "tar -czf packages/FoundationDB-$(PLATFORM)-$(VERSION)-$(PKGRELEASE).tar.gz bin/{fdbmonitor{,.debug},fdbcli{,.debug},fdbserver{,.debug},fdbbackup{,.debug},fdbdr{,.debug},fdbrestore{,.debug},dr_agent{,.debug},coverage.{fdbclient,fdbserver,fdbrpc,flow}.xml} lib/libfdb_c.$(DLEXT){,-debug} lib/libfdb_java.$(DLEXT)* bindings/python/fdb/*.py bindings/c/*.h"
+	@bash -c "tar -czf packages/FoundationDB-$(PLATFORM)-$(VERSION)-$(PKGRELEASE).tar.gz bin/{backup_agent{,.debug},fdbmonitor{,.debug},fdbcli{,.debug},fdbserver{,.debug},fdbbackup{,.debug},fdbdr{,.debug},fdbrestore{,.debug},dr_agent{,.debug},coverage.{fdbclient,fdbserver,fdbrpc,flow}.xml} lib/libfdb_c.$(DLEXT){,-debug} lib/libfdb_java.$(DLEXT)* bindings/python/fdb/*.py bindings/c/*.h"
 
 BINS: packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz
 

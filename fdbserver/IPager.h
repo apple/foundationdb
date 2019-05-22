@@ -31,10 +31,13 @@
 
 #define debug_printf_always(...) { fprintf(stdout, "%s %f ", g_network->getLocalAddress().toString().c_str(), now()), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
 
+template <class... T>
+void debug_printf_noop(T&&...) {}
+
 #if REDWOOD_DEBUG
   #define debug_printf debug_printf_always
 #else
-  #define debug_printf(...)
+#define debug_printf debug_printf_noop
 #endif
 
 #define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)

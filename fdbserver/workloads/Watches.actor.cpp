@@ -180,7 +180,7 @@ struct WatchesWorkload : TestWorkload {
 			state bool firstAttempt = true;
 			loop {
 				try {
-					state Version readVer = wait( tr.getReadVersion() );
+					wait(success(tr.getReadVersion()));
 					Optional<Value> _startValue = wait( tr.get( startKey ) );
 					if( firstAttempt ) {
 						startValue = _startValue;
@@ -199,7 +199,6 @@ struct WatchesWorkload : TestWorkload {
 						tr.clear( startKey );
 
 					wait( tr.commit() );
-					//TraceEvent("WatcherInitialSet").detail("Start", printable(startKey)).detail("End", printable(endKey)).detail("Value", printable( expectedValue ) ).detail("Ver", tr.getCommittedVersion()).detail("ReadVer", readVer);
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );

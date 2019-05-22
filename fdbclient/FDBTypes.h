@@ -21,11 +21,14 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
-using std::vector;
-using std::pair;
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
@@ -33,7 +36,15 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
+enum {
+	tagLocalitySpecial = -1,
+	tagLocalityLogRouter = -2,
+	tagLocalityRemoteLog = -3,
+	tagLocalityUpgraded = -4,
+	tagLocalitySatellite = -5,
+	tagLocalityLogRouterMapped = -6,
+	tagLocalityInvalid = -99
+}; //The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
@@ -46,6 +57,10 @@ struct Tag {
 	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
 	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
 	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	int toTagDataIndex() {
+		return locality >= 0 ? 2 * locality : 1 - (2 * locality);
+	}
 
 	std::string toString() const {
 		return format("%d:%d", locality, id);
@@ -60,6 +75,32 @@ struct Tag {
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
+
+template <>
+struct struct_like_traits<Tag> : std::true_type {
+	using Member = Tag;
+	using types = pack<uint16_t, int8_t>;
+
+	template <int i>
+	static const index_t<i, types>& get(const Member& m) {
+		if constexpr (i == 0) {
+			return m.id;
+		} else {
+			static_assert(i == 1);
+			return m.locality;
+		}
+	}
+
+	template <int i, class Type>
+	static const void assign(Member& m, const Type& t) {
+		if constexpr (i == 0) {
+			m.id = t;
+		} else {
+			static_assert(i == 1);
+			m.locality = t;
+		}
+	}
+};
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
@@ -213,6 +254,23 @@ struct KeyRangeRef {
 	};
 };
 
+template<>
+struct Traceable<KeyRangeRef> : std::true_type {
+	static std::string toString(const KeyRangeRef& value) {
+		auto begin = Traceable<StringRef>::toString(value.begin);
+		auto end = Traceable<StringRef>::toString(value.end);
+		std::string result;
+		result.reserve(begin.size() + end.size() + 3);
+		std::copy(begin.begin(), begin.end(), std::back_inserter(result));
+		result.push_back(' ');
+		result.push_back('-');
+		result.push_back(' ');
+		std::copy(end.begin(), end.end(), std::back_inserter(result));
+		return result;
+	}
+};
+
+
 inline KeyRangeRef operator & (const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
 	if (e < b)
@@ -261,6 +319,13 @@ struct KeyValueRef {
 			return a.key > b;
 		}
 	};
+};
+
+template<>
+struct Traceable<KeyValueRef> : std::true_type {
+	static std::string toString(const KeyValueRef& value) {
+		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
+	}
 };
 
 typedef Standalone<KeyRef> Key;
@@ -479,7 +544,15 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	}
 };
 
+template<>
+struct Traceable<RangeResultRef> : std::true_type {
+	static std::string toString(const RangeResultRef& value) {
+		return Traceable<VectorRef<KeyValueRef>>::toString(value);
+	}
+};
+
 struct KeyValueStoreType {
+	constexpr static FileIdentifier file_identifier = 6560359;
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum StoreType {
 		SSD_BTREE_V1,
@@ -511,6 +584,13 @@ struct KeyValueStoreType {
 
 private:
 	uint32_t type;
+};
+
+template<>
+struct Traceable<KeyValueStoreType> : std::true_type {
+	static std::string toString(KeyValueStoreType const& value) {
+		return value.toString();
+	}
 };
 
 struct TLogVersion {
@@ -545,6 +625,13 @@ struct TLogVersion {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
 		return default_error_or();
+	}
+};
+
+template<>
+struct Traceable<TLogVersion> : std::true_type {
+	static std::string toString(TLogVersion const& value) {
+		return Traceable<Version>::toString(value.version);
 	}
 };
 
@@ -677,7 +764,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {

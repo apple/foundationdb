@@ -23,6 +23,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -139,7 +140,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				else
 					kt = ISimulator::RebootAndDelete;
 			}
-			TraceEvent("Assassination").detailext("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
+			TraceEvent("Assassination").detail("TargetDatacenter", target).detail("Reboot", self->reboot).detail("KillType", kt);
 
 			g_simulator.killDataCenter( target, kt );
 		} else {
@@ -167,10 +168,15 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 
 				// decide on a machine to kill
-				LocalityData targetMachine = self->machines.back();
+				state LocalityData targetMachine = self->machines.back();
+
+				if(BUGGIFY_WITH_PROB(0.01)) {
+					TEST(true); //Marked a zone for maintenance before killing it
+					wait( setHealthyZone(cx, targetMachine.zoneId().get(), g_random->random01()*20 ) );
+				}
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detailext("ZoneId", targetMachine.zoneId())
+					.detail("ZoneId", targetMachine.zoneId())
 					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
 					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
 					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);

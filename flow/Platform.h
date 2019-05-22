@@ -247,7 +247,7 @@ struct SystemStatisticsState;
 
 struct IPAddress;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState);
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState, bool logDetails);
 
 double getProcessorTimeThread();
 
@@ -272,7 +272,7 @@ void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& o
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors);
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime);
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails);
 
 double timer();  // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
 double timer_monotonic();  // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer() at startup, but might not be a globally accurate time.
@@ -386,7 +386,7 @@ size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
-}; // namespace platform
+} // namespace platform
 
 #ifdef __linux__
 typedef struct {

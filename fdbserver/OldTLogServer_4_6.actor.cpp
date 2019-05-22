@@ -135,7 +135,7 @@ namespace oldTLog_4_6 {
 			wr << qe;
 			wr << uint8_t(1);
 			*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
-			auto loc = queue->push( wr.toStringRef() );
+			auto loc = queue->push( wr.toValue() );
 			//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 			version_location[qe.version] = loc;
 		}
@@ -230,7 +230,7 @@ namespace oldTLog_4_6 {
 		wr << id;
 		wr << tag;
 		wr << bigEndian64( version );
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	static Key persistTagPoppedKey( UID id, OldTag tag ) {
@@ -238,7 +238,7 @@ namespace oldTLog_4_6 {
 		wr.serializeBytes( persistTagPoppedKeys.begin );
 		wr << id;
 		wr << tag;
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	static Value persistTagPoppedValue( Version popped ) {
@@ -524,7 +524,7 @@ namespace oldTLog_4_6 {
 				for(; msg != tag->value.version_messages.end() && msg->first == currentVersion; ++msg)
 					wr << msg->second.toStringRef();
 
-				self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tag->key, currentVersion ), wr.toStringRef() ) );
+				self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tag->key, currentVersion ), wr.toValue() ) );
 
 				Future<Void> f = yield(TaskUpdateStorage);
 				if(!f.isReady()) {
@@ -897,7 +897,7 @@ namespace oldTLog_4_6 {
 			return Void();
 		}
 
-		//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
+		//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
 		// Wait until we have something to return that the caller doesn't already have
 		if( logData->version.get() < req.begin ) {
 			wait( logData->version.whenAtLeast( req.begin ) );
@@ -907,7 +907,7 @@ namespace oldTLog_4_6 {
 		state Version endVersion = logData->version.get() + 1;
 
 		//grab messages from disk
-		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
+		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
 		if( req.begin <= logData->persistentDataDurableVersion ) {
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from memory.  We may or may not actually send it depending on
 			// whether we get enough data from disk.
@@ -921,7 +921,7 @@ namespace oldTLog_4_6 {
 					persistTagMessagesKey(logData->logId, oldTag, req.begin),
 					persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 
-			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? printable(kv1[0].key) : "").detail("Tag2ResultsLast", kv2.size() ? printable(kv2[0].key) : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
 			for (auto &kv : kvs) {
 				auto ver = decodeTagMessagesKey(kv.key);
@@ -942,7 +942,7 @@ namespace oldTLog_4_6 {
 			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
 				endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 			else
-				messages.serializeBytes( messages2.toStringRef() );
+				messages.serializeBytes( messages2.toValue() );
 		} else {
 			peekMessagesFromMemory( logData, req, messages, endVersion );
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
@@ -957,7 +957,7 @@ namespace oldTLog_4_6 {
 			reply.popped = poppedVer;
 			reply.end = poppedVer;
 		} else {
-			reply.messages = messages.toStringRef();
+			reply.messages = messages.toValue();
 			reply.end = endVersion;
 		}
 		//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
@@ -1244,7 +1244,7 @@ namespace oldTLog_4_6 {
 		wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fRecoverCounts) ) );
 
 		if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
-			TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", printable(fFormat.get().get())).detail("Expected", persistFormat.value.toString());
+			TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", fFormat.get().get()).detail("Expected", persistFormat.value.toString());
 			throw worker_recovery_failed();
 		}
 
@@ -1255,7 +1255,7 @@ namespace oldTLog_4_6 {
 				throw worker_removed();
 			} else {
 				// This should never happen
-				TraceEvent(SevError, "NoDBFormatKey", self->dbgid).detail("FirstKey", printable(v[0].key));
+				TraceEvent(SevError, "NoDBFormatKey", self->dbgid).detail("FirstKey", v[0].key);
 				ASSERT( false );
 				throw worker_recovery_failed();
 			}

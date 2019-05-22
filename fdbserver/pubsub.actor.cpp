@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/pubsub.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -27,7 +28,7 @@ Value uInt64ToValue( uint64_t v ) {
 }
 uint64_t valueToUInt64( const StringRef& v ) {
 	uint64_t x = 0;
-	sscanf( v.toString().c_str(), "%llx", &x );
+	sscanf( v.toString().c_str(), "%" SCNx64, &x );
 	return x;
 }
 
@@ -428,12 +429,12 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 				//printf(" -> cached message %016llx from feed %016llx\n", messageId, feed);
 				if(messageId >= cursor) {
 					//printf(" -> entering message %016llx from feed %016llx\n", messageId, feed);
-					feedLatest.insert(pair<MessageId, Feed>(messageId, feed));
+					feedLatest.emplace(messageId, feed);
 				} else {
 					// replace this with the first message older than the cursor
 					MessageId mId = wait(getFeedLatestAtOrAfter(&tr, feed, cursor));
 					if(mId) {
-						feedLatest.insert(pair<MessageId, Feed>(mId, feed));
+						feedLatest.emplace(mId, feed);
 					}
 				}
 			}
@@ -464,7 +465,7 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 
 				MessageId nextMessage = wait(getFeedLatestAtOrAfter(&tr, f, id + 1));
 				if(nextMessage) {
-					feedLatest.insert(pair<MessageId, Feed>(nextMessage, f));
+					feedLatest.emplace(nextMessage, f);
 				}
 			}
 

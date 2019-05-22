@@ -429,7 +429,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: void fdb_transaction_set_read_version(FDBTransaction* transaction, int64_t version)
 
-   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_past_version; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of :func:`fdb_transaction_get_*()` have been called on this transaction already, the result is undefined.
+   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_transaction_too_old; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of :func:`fdb_transaction_get_*()` have been called on this transaction already, the result is undefined.
 
 .. function:: FDBFuture* fdb_transaction_get_read_version(FDBTransaction* transaction)
 

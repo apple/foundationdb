@@ -104,10 +104,15 @@ public class FDB {
 	 * Called only once to create the FDB singleton.
 	 */
 	private FDB(int apiVersion) {
-		this.apiVersion = apiVersion;
+		this(apiVersion, true);
+	}
 
+	private FDB(int apiVersion, boolean controlRuntime) {
+		this.apiVersion = apiVersion;
 		options = new NetworkOptions(this::Network_setOption);
-		Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
+		if (controlRuntime) {
+			Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
+		}
 	}
 
 	/**
@@ -171,7 +176,14 @@ public class FDB {
 	 *
 	 * @return the FoundationDB API object
 	 */
-	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
+	public static FDB selectAPIVersion(final int version) throws FDBException {
+		return selectAPIVersion(version, true);
+	}
+
+	/**
+	   This function is called from C++ if the VM is controlled directly from FDB
+	 */
+	private static synchronized FDB selectAPIVersion(final int version, boolean controlRuntime) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.getAPIVersion()) {
 				throw new IllegalArgumentException(
@@ -185,7 +197,7 @@ public class FDB {
 			throw new IllegalArgumentException("API version not supported (maximum 610)");
 
 		Select_API_version(version);
-		FDB fdb = new FDB(version);
+		FDB fdb = new FDB(version, controlRuntime);
 
 		return singleton = fdb;
 	}

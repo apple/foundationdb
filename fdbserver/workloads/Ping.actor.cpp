@@ -103,7 +103,7 @@ struct PingWorkload : TestWorkload {
 	ACTOR Future<Void> persistInterface( PingWorkload *self, Database cx ) {
 		state Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion()); wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toStringRef();
+		state Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
 			try {
 				Optional<Value> val = wait( tr.get( StringRef( format("Ping/Client/%d", self->clientId) ) ) );
@@ -239,7 +239,6 @@ struct PingWorkload : TestWorkload {
 
 	ACTOR Future<Void> payloadPinger(PingWorkload* self, Database cx, vector<RequestStream<LoadedPingRequest>> peers) {
 		// state vector<PingWorkloadInterface> peers = wait( self->fetchInterfaces( self, cx ) );
-		state double lastTime = now();
 
 		// loop {
 			state double start = now();
