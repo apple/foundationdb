@@ -31,8 +31,8 @@ struct RequestStats {
 	RequestStats() : nextReadId(0) {}
 
 	struct ReadStats {
-		ReadStats(int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted) :
-			readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted) {}
+		ReadStats(int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted, double latency) :
+			readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted), latency(latency) {}
 
 		int readId;
 		int bytesFetched;
@@ -40,6 +40,7 @@ struct RequestStats {
 		Key beginKey;
 		Key endKey;
 		NetworkAddress storageContacted;
+		double latency;
 	};
 
 	std::vector<ReadStats> reads;
@@ -61,6 +62,7 @@ struct RequestStats {
 			readStats.push_back(json_spirit::Pair("storageContacted", json_spirit::Value(r.storageContacted.toString())));
 			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(static_cast<uint64_t>(r.keysFetched))));
 			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(static_cast<uint64_t>(r.bytesFetched))));
+			readStats.push_back(json_spirit::Pair("latency", json_spirit::Value(r.latency)));
 			readStatsList.push_back(readStats);
 		}
 		json_spirit::Object result;
@@ -156,7 +158,8 @@ namespace FdbClientLogEvents {
 					(valueSize == 0) ? 0 : 1,
 					key,
 					key,
-					storageContacted
+					storageContacted,
+					latency
 				}
 			);
 		}
@@ -197,7 +200,8 @@ namespace FdbClientLogEvents {
 					1,
 					key,
 					key,
-					storageContacted
+					storageContacted,
+					latency
 				}
 			);
 		}
@@ -269,7 +273,8 @@ namespace FdbClientLogEvents {
 					keysFetched,
 					beginKey,
 					endKey,
-					storageContacted
+					storageContacted,
+					latency
 				}
 			);
 		}
