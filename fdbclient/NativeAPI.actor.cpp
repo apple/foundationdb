@@ -2891,6 +2891,17 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			break;
 
+		case FDBTransactionOptions::TRACK_REQUEST_STATS:
+			validateOptionValue(value, false);
+			if (trLogInfo) {
+				trLogInfo->logTo(TransactionLogInfo::REQ_STATS);
+			}
+			else {
+				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before tracking request stats");
+				throw client_invalid_operation;
+			}
+			break;
+
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
