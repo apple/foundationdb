@@ -1675,9 +1675,16 @@ int main(int argc, char* argv[]) {
 				ini.SetUnicode();
 				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
-				isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
-				bool snapFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
-				if (isRestoring && !snapFailed) {
+				int backupFailed = true;
+				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
+				if (isRestoringStr) {
+					isRestoring = atoi(isRestoringStr);
+					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", NULL);
+					if (isRestoring && backupFailedStr) {
+						backupFailed = atoi(backupFailedStr);
+					}
+				}
+				if (isRestoring && !backupFailed) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
 					returnList = platform::listDirectories(absDataFolder);
