@@ -39,6 +39,12 @@ struct BackupData {
 		myId(id), startVersion(0), version(invalidVersion) {}
 };
 
+ACTOR Future<Void> uploadData(BackupData* self) {
+	// TODO: upload self->messages to cloud
+	wait(Never());
+	return Void();
+}
+
 // Pulls data from TLog servers using LogRouter tag.
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
@@ -58,6 +64,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 					// peekLogRouter() assumes "myId" is one of the log router and returns the ServerPeekCursor
 					// from primary location's server for the tag.
 					// Otherwise, returns the SetPeekCursor from old log sets that has the log router.
+					// TODO: set tag for this worker
 					Tag tag(-2, 0);
 					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, tag);
 				} else {
@@ -68,7 +75,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
-		state Version ver = 0;
 		while (r->hasMessage()) {
 			lastVersion = r->version().version;
 			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
@@ -76,6 +82,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		tagAt = std::max(r->version().version, lastVersion);
+		TraceEvent("BackupWorkerGot", self->myId).detail("V", tagAt);
 	}
 }
 
@@ -120,6 +127,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	TraceEvent("BackupWorkerStart", interf.id());
 	try {
 		addActor.send(pullAsyncData(&self));
+		addActor.send(uploadData(&self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
 		loop choose {

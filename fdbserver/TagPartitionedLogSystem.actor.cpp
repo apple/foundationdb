@@ -859,13 +859,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) {
 		bool found = false;
-		for( auto& log : tLogs ) {
-			found = log->hasLogRouter(dbgid);
-			if(found) {
+		for (const auto& log : tLogs) {
+			found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
+			if (found) {
 				break;
 			}
 		}
-		if( found ) {
+		if (found) {
 			if(stopped) {
 				std::vector<Reference<LogSet>> localSets;
 				int bestPrimarySet = 0;
@@ -917,11 +917,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		bool firstOld = true;
-		for(auto& old : oldLogData) {
+		for (const auto& old : oldLogData) {
 			found = false;
-			for( auto& log : old.tLogs ) {
-				found = log->hasLogRouter(dbgid);
-				if(found) {
+			for (const auto& log : old.tLogs) {
+				found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
+				if (found) {
 					break;
 				}
 			}

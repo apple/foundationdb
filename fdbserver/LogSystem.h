@@ -71,9 +71,18 @@ public:
 		return result;
 	}
 
-	bool hasLogRouter(UID id) {
+	bool hasLogRouter(UID id) const {
 		for (const auto& router : logRouters) {
 			if (router->get().id() == id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool hasBackupWorker(UID id) const {
+		for (const auto& worker : backupWorkers) {
+			if (worker->get().id() == id) {
 				return true;
 			}
 		}
