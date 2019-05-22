@@ -3020,6 +3020,7 @@ TEST_CASE("!/redwood/correctness") {
 	state bool serialTest = g_random->coinflip();
 	state bool shortTest = g_random->coinflip();
 	state bool singleVersion = true; // Multi-version mode is broken / not finished
+	state double startTime = now();
 
 	printf("serialTest: %d  shortTest: %d  singleVersion: %d\n", serialTest, shortTest, singleVersion);
 
@@ -3075,6 +3076,10 @@ TEST_CASE("!/redwood/correctness") {
 	state Future<Void> commit = Void();
 
 	while(mutationBytes.get() < mutationBytesTarget) {
+		if(now() - startTime > 600) {
+			mutationBytesTarget = mutationBytes.get();
+		}
+
 		// Sometimes advance the version
 		if(g_random->random01() < 0.10) {
 			++version;
