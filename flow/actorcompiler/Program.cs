@@ -44,7 +44,7 @@ namespace actorcompiler
             {
                 errorMessagePolicy.DisableActorWithoutWaitWarning = true;
             }
-            if (args.Contains("--generateProbes")) {
+            if (args.Contains("--generate-probes")) {
                 generateProbes = true;
             }
             try
