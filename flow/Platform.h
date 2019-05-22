@@ -628,46 +628,18 @@ EXTERNC void setProfilingEnabled(int enabled);
 // DTrace probing
 #if defined(DTRACE_PROBES)
 #include <sys/sdt.h>
-#define FDB_TRACE_PROBE(probe)		\
-  DTRACE_PROBE(foundationdb,probe)
-#define FDB_TRACE_PROBE1(probe,parm1)	\
-  DTRACE_PROBE1(foundationdb,probe,parm1)
-#define FDB_TRACE_PROBE2(probe,parm1,parm2)	\
-  DTRACE_PROBE2(foundationdb,probe,parm1,parm2)
-#define FDB_TRACE_PROBE3(probe,parm1,parm2,parm3) \
-  DTRACE_PROBE3(foundationdb,probe,parm1,parm2,parm3)
-#define FDB_TRACE_PROBE4(probe,parm1,parm2,parm3,parm4)	\
-  DTRACE_PROBE4(foundationdb,probe,parm1,parm2,parm3,parm4)
-#define FDB_TRACE_PROBE5(probe,parm1,parm2,parm3,parm4,parm5)	\
-  DTRACE_PROBE5(foundationdb,probe,parm1,parm2,parm3,parm4,parm5)
-#define FDB_TRACE_PROBE6(probe,parm1,parm2,parm3,parm4,parm5,parm6) \
-  DTRACE_PROBE6(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6)
-#define FDB_TRACE_PROBE7(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7) \
-  DTRACE_PROBE7(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7)
-#define FDB_TRACE_PROBE8(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8) \
-  DTRACE_PROBE8(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8)
-#define FDB_TRACE_PROBE9(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9) \
-  DTRACE_PROBE9(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9)
-#define FDB_TRACE_PROBE10(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10) \
-  DTRACE_PROBE10(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10)
-#define FDB_TRACE_PROBE11(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11) \
-  DTRACE_PROBE11(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11)
-#define FDB_TRACE_PROBE12(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12) \
-  DTRACE_PROBE12(foundationdb,probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12)
+#define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9,   \
+									 _10, _11, _12, NAME, ...)                 \
+	NAME
+#define FDB_TRACE_PROBE(...)                                                   \
+	FDB_TRACE_PROBE_EXPAND_MACRO(__VA_ARGS__, DTRACE_PROBE12, DTRACE_PROBE11,  \
+								 DTRACE_PROBE10, DTRACE_PROBE9, DTRACE_PROBE8, \
+								 DTRACE_PROBE7, DTRACE_PROBE6, DTRACE_PROBE5,  \
+								 DTRACE_PROBE4, DTRACE_PROBE3, DTRACE_PROBE2,  \
+								 DTRACE_PROBE1, DTRACE_PROBE)                  \
+	(foundationdb, __VA_ARGS__)
 #else
-#define FDB_TRACE_PROBE(probe)
-#define FDB_TRACE_PROBE1(probe,parm1)
-#define FDB_TRACE_PROBE2(probe,parm1,parm2)
-#define FDB_TRACE_PROBE3(probe,parm1,parm2,parm3)
-#define FDB_TRACE_PROBE4(probe,parm1,parm2,parm3,parm4)
-#define FDB_TRACE_PROBE5(probe,parm1,parm2,parm3,parm4,parm5)
-#define FDB_TRACE_PROBE6(probe,parm1,parm2,parm3,parm4,parm5,parm6)
-#define FDB_TRACE_PROBE7(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7)
-#define FDB_TRACE_PROBE8(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8)
-#define FDB_TRACE_PROBE9(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9)
-#define FDB_TRACE_PROBE10(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10)
-#define FDB_TRACE_PROBE11(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11)
-#define FDB_TRACE_PROBE12(probe,parm1,parm2,parm3,parm4,parm5,parm6,parm7,parm8,parm9,parm10,parm11,parm12)
+#define FDB_TRACE_PROBE(...)
 #endif
 
 #endif /* FLOW_PLATFORM_H */
