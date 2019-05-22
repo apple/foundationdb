@@ -285,13 +285,15 @@ namespace actorcompiler
         bool LineNumbersEnabled;
         int chooseGroups = 0, whenCount = 0;
         string This;
+        bool generateProbes;
 
-        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled)
+        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled, bool generateProbes)
         {
             this.actor = actor;
             this.sourceFile = sourceFile;
             this.isTopLevel = isTopLevel;
             this.LineNumbersEnabled = lineNumbersEnabled;
+            this.generateProbes = generateProbes;
 
             if (actor.returnType == null)
                 actor.isUncancellable = true;
@@ -783,12 +785,16 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
-                cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+                if (generateProbes) {
+                    cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+                }
                 cbFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(cbFunc), cx.catchFErr, cx.tryLoopDepth, () => {
                     cbFunc.WriteLine("{0};", ch.Body.call("value", "0"));
                 }, false);
-                cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+                if (generateProbes) {
+                    cbFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+                }
 
                 var errFunc = new Function
                 {
@@ -802,13 +808,17 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", errFunc.name, ch.Index), errFunc);
                 errFunc.Indent(codeIndent);
-                errFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+                if (generateProbes) {
+                    errFunc.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+                }
                 errFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(errFunc), cx.catchFErr, cx.tryLoopDepth, () =>
                 {
                     errFunc.WriteLine("{0};", cx.catchFErr.call("err", "0"));
                 }, false);
-                errFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+                if (generateProbes) {
+                    errFunc.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+                }
             }
 
             bool firstChoice = true;
@@ -1164,9 +1174,13 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
-            constructor.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+            if (generateProbes) {
+                constructor.WriteLine("FDB_TRACE_PROBE1(actor_enter, \"{0}\");", actor.name);
+            }
             constructor.WriteLine("this->{0};", body.call());
-            constructor.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+            if (generateProbes) {
+                constructor.WriteLine("FDB_TRACE_PROBE1(actor_exit, \"{0}\");", actor.name);
+            }
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1207,7 +1221,9 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
-            constructor.WriteLine("FDB_TRACE_PROBE1(actor_create, \"{0}\");", actor.name);
+            if (generateProbes) {
+                constructor.WriteLine("FDB_TRACE_PROBE1(actor_create, \"{0}\");", actor.name);
+            }
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1224,7 +1240,9 @@ namespace actorcompiler
             destructor.Indent(-1);
             destructor.WriteLine("{");
             destructor.Indent(+1);
-            destructor.WriteLine(String.Format("FDB_TRACE_PROBE1(actor_destroy, \"{0}\");", actor.name));
+            if (generateProbes) {
+                destructor.WriteLine(String.Format("FDB_TRACE_PROBE1(actor_destroy, \"{0}\");", actor.name));
+            }
             WriteFunction(writer, destructor, destructor.BodyText);
         }
 
