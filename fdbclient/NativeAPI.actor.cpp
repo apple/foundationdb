@@ -3194,14 +3194,24 @@ ACTOR Future< Standalone<RangeResultRef> > waitStorageMetricsList(
 	KeyRange keys,
 	int shardLimit )
 {
-	ErrorOr<GetDDMetricsReply> rep = wait(errorOr(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics, GetDDMetricsRequest(keys, shardLimit))));
-	if (rep.isError()) {
-		throw rep.getError();
+	state Future<Void> clientTimeout = delay(5.0);
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(ErrorOr<GetDDMetricsReply> rep =
+			         wait(errorOr(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+			                                  GetDDMetricsRequest(keys, shardLimit))))) {
+				if (rep.isError()) {
+					throw rep.getError();
+				}
+				return rep.get().storageMetricsList;
+			}
+			when(wait(clientTimeout)) { throw timed_out(); }
+		}
 	}
-	return rep.get().storageMetricsList;
 }
 
-Future< Standalone<RangeResultRef> > Transaction::getStorageMetricsList(KeyRange const& keys, int shardLimit) {
+Future<Standalone<RangeResultRef>> Transaction::getDataDistributionMetricsList(KeyRange const& keys, int shardLimit) {
 	return ::waitStorageMetricsList(cx, keys, shardLimit);
 }
 

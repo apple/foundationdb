@@ -1280,7 +1280,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
 			auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
 			try {
-				return tr.getStorageMetricsList(keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT);
+				return tr.getDataDistributionMetricsList(keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT);
 			} catch( Error &e ) {
 				return e;
 			}

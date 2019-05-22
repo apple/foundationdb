@@ -42,16 +42,19 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	ACTOR static Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
 		state int tNum;
 		for (tNum = 0; tNum < self->numTransactions; ++tNum) {
-			state ReadYourWritesTransaction tr(cx);
-			try {
-				state int i;
-				for (i = 0; i < self->writesPerTransaction; ++i) {
-					tr.set(StringRef(format("Key/%08d", tNum * self->writesPerTransaction + i)), getRandomValue());
+			loop {
+				state ReadYourWritesTransaction tr(cx);
+				try {
+					state int i;
+					for (i = 0; i < self->writesPerTransaction; ++i) {
+						tr.set(StringRef(format("Key/%08d", tNum * self->writesPerTransaction + i)), getRandomValue());
+					}
+					wait(tr.commit());
+					++self->transactionsCommitted;
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
 				}
-				wait(tr.commit());
-				++self->transactionsCommitted;
-			} catch (Error& e) {
-				// ignore failing transactions
 			}
 		}
 		return Void();
@@ -70,6 +73,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			self->numShards = result.size();
 			if (self->numShards < 1) return false;
 		} catch (Error& e) {
+			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 			return false;
 		}
 		return true;
@@ -80,7 +84,10 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) { m.push_back(PerfMetric("NumShards", numShards, false)); }
+	virtual void getMetrics(vector<PerfMetric>& m) {
+		m.push_back(PerfMetric("NumShards", numShards, true));
+		// add extra metrics
+	}
 };
 
 WorkloadFactory<DataDistributionMetricsWorkload> DataDistributionMetricsWorkloadFactory("DataDistributionMetrics");
