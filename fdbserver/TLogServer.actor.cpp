@@ -648,7 +648,7 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 	if (!data->requiresPoppedLocationUpdate) return Void();
 	data->requiresPoppedLocationUpdate = false;
 
-	if (data->popped < logData->persistentDataVersion) {
+	if (data->popped <= logData->persistentDataVersion) {
 		// Recover the next needed location in the Disk Queue from the index.
 		Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
 				self->persistentData->readRange(KeyRangeRef(
