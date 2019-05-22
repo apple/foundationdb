@@ -30,6 +30,7 @@ namespace actorcompiler
     {
         public static int Main(string[] args)
         {
+            bool generateProbes = false;
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
@@ -43,11 +44,14 @@ namespace actorcompiler
             {
                 errorMessagePolicy.DisableActorWithoutWaitWarning = true;
             }
+            if (args.Contains("--generateProbes")) {
+                generateProbes = true;
+            }
             try
             {
                 var inputData = File.ReadAllText(input);
                 using (var outputStream = new StreamWriter(outputtmp))
-                    new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy).Write(outputStream, output.Replace('\\', '/'));
+                    new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy, generateProbes).Write(outputStream, output.Replace('\\', '/'));
                 if (File.Exists(output))
                 {
                     File.SetAttributes(output, FileAttributes.Normal);
