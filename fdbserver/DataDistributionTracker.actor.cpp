@@ -655,6 +655,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 	try {
 		loop {
 			// no shard identifier as of yet, use simple numbering system
+			// also used to control shard limit
 			int shardNum = 1;
 			// list of metrics, regenerate on loop when full range unsuccessful
 			Standalone<RangeResultRef> result;
@@ -665,13 +666,10 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					onChange = stats->onChange();
 					break;
 				}
+				std::string keyRanges = "Begin: " + t.begin().toString() + ", End: " + t.end().toString();
 				result.push_back_deep(
-					result.arena(),
-					KeyValueRef(
-						StringRef(std::to_string(shardNum)),
-						StringRef(t.value().stats->get().get().toString())
-					)
-				);
+				    result.arena(), KeyValueRef(KeyRef(std::to_string(shardNum)),
+				                                ValueRef(keyRanges + ", " + t.value().stats->get().get().toString())));
 				++shardNum;
 				if ( shardNum > req.shardLimit ) {
 					break;
