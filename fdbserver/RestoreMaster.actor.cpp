@@ -820,79 +820,40 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 	//wait for the restoreRequestTriggerKey to be set by the client/test workload
 	state ReadYourWritesTransaction tr(cx);
 
-	loop {
+	loop{
 		try {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			// Assumption: restoreRequestTriggerKey has not been set
-			// Question: What if  restoreRequestTriggerKey has been set? we will stuck here?
-			// Question: Can the following code handle the situation?
-			// Note: restoreRequestTriggerKey may be set before the watch is set or may have a conflict when the client sets the same key
-			// when it happens, will we  stuck at wait on the watch?
+			state Optional<Value> numRequests = wait(tr.get(restoreRequestTriggerKey));
+			if ( !numRequests.present() ) {
+				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
+				wait(tr.commit());
+				wait( watch4RestoreRequest );
+			} else {
+				int num = decodeRestoreRequestTriggerValue(numRequests.get());
+				//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
+				printf("[INFO] RestoreRequestNum:%d\n", num);
 
-			watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
-			wait(tr.commit());
-			printf("[INFO][Master] Finish setting up watch for restoreRequestTriggerKey\n");
-			break;
+				state Standalone<RangeResultRef> restoreRequestValues = wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+				printf("Restore worker get restoreRequest: %s\n", restoreRequestValues.toString().c_str());
+
+				ASSERT(!restoreRequestValues.more);
+
+				if(restoreRequestValues.size()) {
+					for ( auto &it : restoreRequestValues ) {
+						printf("Now decode restore request value...\n");
+						restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+					}
+				}
+				break;
+			}
 		} catch(Error &e) {
 			printf("[WARNING] Transaction for restore request in watch restoreRequestTriggerKey. Error:%s\n", e.name());
 			wait(tr.onError(e));
 		}
-	};
-
-
-	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			// Assumption: restoreRequestTriggerKey has not been set
-			// Before we wait on the watch, we must make sure the key is not there yet!
-			//printf("[INFO][Master] Make sure restoreRequestTriggerKey does not exist before we wait on the key\n");
-			Optional<Value> triggerKey = wait( tr.get(restoreRequestTriggerKey) );
-			if ( triggerKey.present() ) {
-				printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
-				break;
-			}
-			wait(watch4RestoreRequest);
-			printf("[INFO][Master] restoreRequestTriggerKey watch is triggered\n");
-			break;
-		} catch(Error &e) {
-			printf("[WARNING] Transaction for restore request at wait on watch restoreRequestTriggerKey. Error:%s\n", e.name());
-			wait(tr.onError(e));
-		}
-	};
-
-	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			state Optional<Value> numRequests = wait(tr.get(restoreRequestTriggerKey));
-			int num = decodeRestoreRequestTriggerValue(numRequests.get());
-			//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
-			printf("[INFO] RestoreRequestNum:%d\n", num);
-
-			state Standalone<RangeResultRef> restoreRequestValues = wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
-			printf("Restore worker get restoreRequest: %s\n", restoreRequestValues.toString().c_str());
-
-			ASSERT(!restoreRequestValues.more);
-
-			if(restoreRequestValues.size()) {
-				for ( auto &it : restoreRequestValues ) {
-					printf("Now decode restore request value...\n");
-					restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
-				}
-			}
-			break;
-		} catch(Error &e) {
-			printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
-			wait(tr.onError(e));
-		}
-	};
-
+	}
+	
 	return restoreRequests;
 }
 
@@ -1294,12 +1255,14 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 	state ReadYourWritesTransaction tr3(cx);
 	loop {
 		try {
+			//Standalone<StringRef> versionStamp = wait( tr3.getVersionstamp() );
 			tr3.reset();
 			tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr3.clear(restoreRequestTriggerKey);
 			tr3.clear(restoreRequestKeys);
-			tr3.set(restoreRequestDoneKey, restoreRequestDoneValue(restoreRequests.size()));
+			Version readVersion = wait(tr3.getReadVersion());
+			tr3.set(restoreRequestDoneKey, restoreRequestDoneVersionValue(readVersion));
 			wait(tr3.commit());
 			TraceEvent("LeaderFinishRestoreRequest");
 			printf("[INFO] RestoreLeader write restoreRequestDoneKey\n");

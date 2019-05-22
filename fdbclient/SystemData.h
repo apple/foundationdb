@@ -304,6 +304,8 @@ const Value restoreRequestTriggerValue (int const numRequests);
 const int decodeRestoreRequestTriggerValue( ValueRef const& value );
 const Value restoreRequestDoneValue (int const numRequests);
 const int decodeRestoreRequestDoneValue( ValueRef const& value );
+const Value restoreRequestDoneVersionValue (Version readVersion);
+Version decodeRestoreRequestDoneVersionValue( ValueRef const& value );
 const Key restoreRequestKeyFor( int const& index );
 const Value restoreRequestValue( RestoreRequest const& server );
 RestoreRequest decodeRestoreRequestValue( ValueRef const& value );

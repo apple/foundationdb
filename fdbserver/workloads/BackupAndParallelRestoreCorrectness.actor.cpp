@@ -632,8 +632,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-//				wait(waitForAll(restores)); //MX: Can be removed because we no longer reply on the Future event to mark the finish of restore
-
 				// MX: We should wait on all restore before proceeds
 				printf("Wait for restore to finish\n");
 				state int waitNum = 0;
@@ -645,16 +643,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						//TraceEvent("CheckRestoreRequestDoneMX");
-//						state Optional<Value> restoreRequestDoneValue = wait(tr2.get(restoreRequestDoneKey));
-//						if ( restoreRequestDoneValue.present()) {
-//							printf("[ERROR] restoreRequest was unexpectedly set somewhere\n");
-//							tr2.clear(restoreRequestDoneKey);
-//							wait( tr2.commit() );
-//							tr2.reset();
-//							tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-//							tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-//						}
-
 						watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
 						wait( tr2.commit() );
 						printf("[INFO] Finish setting up watch for restoreRequestDoneKey\n");
@@ -672,42 +660,21 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						Optional<Value> restoreRequestDoneKeyValue = wait( tr2.get(restoreRequestDoneKey) );
+						// Restore may finish before restoreAgent waits on the restore finish event.
 						if ( restoreRequestDoneKeyValue.present() ) {
-							//printf("!!! restoreRequestTriggerKey has been set before we wait on the key: Restore has been done before restore agent waits for the done key\n");
+							printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction");
+							tr2.clear(restoreRequestDoneKey);
+							wait( tr2.commit() );
 							break;
 						}
 						wait(watch4RestoreRequestDone);
 						printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
-						break;
+						//break;
 					} catch( Error &e ) {
 						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
 						//printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
 						wait( tr2.onError(e) );
 					}
-				}
-
-				loop {
-					try {
-						tr2.reset();
-						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
-						if (numFinished.present()) {
-							int num = decodeRestoreRequestDoneValue(numFinished.get());
-							TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
-							printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
-						}
-						printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction");
-						tr2.clear(restoreRequestDoneKey);
-						// NOTE: The clear transaction may fail in uncertain state. We need to retry to clear the key
-						wait( tr2.commit() );
-						break;
-					} catch( Error &e ) {
-						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						printf("[WARNING] Clearing the restoreRequestDoneKey has error in transaction: %s. We will retry to clear the key\n", e.what());
-						wait( tr2.onError(e) );
-					}
-
 				}
 
 				printf("MX: Restore is finished\n");

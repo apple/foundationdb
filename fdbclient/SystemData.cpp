@@ -710,6 +710,19 @@ const int decodeRestoreRequestDoneValue( ValueRef const& value ) {
 	return s;
 }
 
+const Value restoreRequestDoneVersionValue (Version readVersion) {
+	BinaryWriter wr(IncludeVersion());
+	wr << readVersion;
+	return wr.toValue();
+}
+Version decodeRestoreRequestDoneVersionValue( ValueRef const& value ) {
+	Version v;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> v;
+	return v;
+}
+
+
 const Key restoreRequestKeyFor( int const& index ) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreRequestKeys.begin );
