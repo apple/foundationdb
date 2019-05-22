@@ -1591,7 +1591,7 @@ private:
 						continue;
 					}
 
-					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS, pageID, children.size());
+					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS, childPageIDs[i], children.size());
 					if(REDWOOD_DEBUG) {
 						for(auto &versionedPageSet : children) {
 							debug_printf("%p    version " PRId64 "\n", THIS, versionedPageSet.first);
