@@ -50,7 +50,15 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		{
 			FdbClientLogEvents::EventGetValue g;
 			reader >> g;
-			ASSERT(g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			ASSERT(g.readId >= 0 && g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT &&
+			       g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && g.storageContacted.isValid());
+			break;
+		}
+		case FdbClientLogEvents::GET_KEY: {
+			FdbClientLogEvents::EventGetKey g;
+			reader >> g;
+			ASSERT(g.readId >= 0 && g.latency < 1e4 && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT &&
+			       g.storageContacted.isValid());
 			break;
 		}
 		case FdbClientLogEvents::GET_RANGE:
@@ -60,11 +68,25 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 			ASSERT(gr.latency < 10000 && gr.rangeSize < 1000000000 && gr.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
+		case FdbClientLogEvents::GET_SUBRANGE: {
+			FdbClientLogEvents::EventGetSubRange gsr;
+			reader >> gsr;
+			ASSERT(gsr.readId >= 0 && gsr.latency < 1e4 && gsr.bytesFetched < 1e9 && gsr.keysFetched < 1e8 &&
+			       gsr.beginKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT &&
+			       gsr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gsr.storageContacted.isValid());
+			break;
+		}
 		case FdbClientLogEvents::COMMIT_LATENCY:
 		{
 			FdbClientLogEvents::EventCommit c;
 			reader >> c;
 			ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
+			break;
+		}
+		case FdbClientLogEvents::CONTACTED_PROXY: {
+			FdbClientLogEvents::EventContactedProxy cp;
+			reader >> cp;
+			ASSERT(cp.proxyContacted.isValid());
 			break;
 		}
 		case FdbClientLogEvents::ERROR_GET:

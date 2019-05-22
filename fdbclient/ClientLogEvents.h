@@ -165,6 +165,7 @@ namespace FdbClientLogEvents {
 	struct EventGetKey : public Event {
 		EventGetKey(double ts, int readId, double latency, Key key, NetworkAddress storageContacted) :
 			Event(GET_KEY, ts), readId(readId), latency(latency), key(key), storageContacted(storageContacted) {}
+	    EventGetKey() {}
 
 		template <typename Ar> Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -381,6 +382,7 @@ namespace FdbClientLogEvents {
 		EventContactedProxy(double ts, NetworkAddress proxyContacted) :
 			Event(CONTACTED_PROXY, ts),
 			proxyContacted(proxyContacted) {}
+	    EventContactedProxy() {}
 
 		NetworkAddress proxyContacted;
 
