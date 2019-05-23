@@ -1092,6 +1092,7 @@ std::string TraceEventFields::getValue(std::string key) const {
 	}
 	else {
 		TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
+		ev.suppressFor(1.0);
 		if(tryGetValue("Type", value)) {
 			ev.detail("Event", value);
 		}
