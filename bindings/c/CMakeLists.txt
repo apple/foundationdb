@@ -93,6 +93,11 @@ fdb_install(
   DESTINATION lib
   DESTINATION_SUFFIX "/cmake/${targets_export_name}"
   COMPONENT clients)
+fdb_configure_and_install(
+  FILE "${PROJECT_SOURCE_DIR}/cmake/foundationdb-client.pc.in"
+  DESTINATION lib
+  DESTINATION_SUFFIX "/pkgconfig"
+  COMPONENT clients)
 fdb_install(
   EXPORT ${targets_export_name}
   DESTINATION lib

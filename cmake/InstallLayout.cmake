@@ -122,6 +122,27 @@ set(install_destination_for_data_el6 "var/lib/foundationdb")
 set(install_destination_for_data_el7 "var/lib/foundationdb")
 set(install_destination_for_data_pm "")
 
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+function(fdb_configure_and_install)
+  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
+    set(one_value_options COMPONENT DESTINATION FILE DESTINATION_SUFFIX)
+    cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+    foreach(package tgz deb el6 el7 pm)
+      set(INCLUDE_DIR "${install_destination_for_include_${package}}")
+      set(LIB_DIR "${install_destination_for_lib_${package}}")
+      set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
+      string(REGEX REPLACE "\.in$" "" name "${IN_FILE}")
+      get_filename_component(name "${name}" NAME)
+      set(generated_file_name "${generated_dir}/${package}/${name}")
+      configure_file("${IN_FILE}" "${generated_file_name}" @ONLY)
+      install(
+        FILES "${generated_file_name}"
+        DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+        COMPONENT "${IN_COMPONENT}-${package}")
+    endforeach()
+  endif()
+endfunction()
+
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
     set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)

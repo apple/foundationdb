@@ -1,0 +1,6 @@
+Name: foundationdb-client
+Description: FoundationDB c client
+Version: @PROJECT_VERSION@
+
+Libs: -L/@LIB_DIR@ -lfdb_c
+Cflags: -I/@INCLUDE_DIR@
