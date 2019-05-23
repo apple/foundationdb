@@ -41,6 +41,7 @@ package directory
 
 import (
 	"errors"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 )
@@ -52,6 +53,12 @@ const (
 	_MAJORVERSION int32 = 1
 	_MINORVERSION int32 = 0
 	_MICROVERSION int32 = 0
+)
+
+var (
+	ErrDirAlreadyExists      = errors.New("the directory already exists")
+	ErrDirNotExists          = errors.New("the directory does not exist")
+	ErrParentDirDoesNotExist = errors.New("the parent directory does not exist")
 )
 
 // Directory represents a subspace of keys in a FoundationDB database,
