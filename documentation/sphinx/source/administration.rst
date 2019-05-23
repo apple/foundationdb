@@ -232,7 +232,7 @@ The procedures for adding and removing machines can be combined into a recipe fo
 Converting an existing cluster to use TLS
 =========================================
 
-A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster>`.
+A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster-after-6.1>`.
 
 .. _administration-monitoring-cluster-status:
 
