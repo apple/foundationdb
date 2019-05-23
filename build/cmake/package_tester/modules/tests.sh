@@ -67,6 +67,17 @@ then
        popd
        python -c 'import fdb; fdb.api_version(610)'
        successOr "Loading python bindings failed"
+
+       # Test cmake and pkg-config integration: https://github.com/apple/foundationdb/issues/1483
+       cd /foundationdb/build/cmake/package_tester/fdb_c_app
+       rm -rf build
+       mkdir build
+       cd build
+       cmake .. && make
+       successOr "FoundationDB-Client cmake integration failed"
+
+       cc ../app.c `pkg-config --libs --cflags foundationdb-client`
+       successOr "FoundationDB-Client pkg-config integration failed"
    }
 
    keep_config() {
