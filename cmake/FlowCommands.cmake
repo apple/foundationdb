@@ -234,11 +234,9 @@ function(add_flow_target)
 
     foreach(src IN LISTS sources AFT_ADDL_SRCS)
       get_filename_component(dname ${CMAKE_CURRENT_SOURCE_DIR} NAME_WLE)
-      message(STATUS "dname: ${dname}")
       string(REGEX REPLACE "\\..*" "" fname ${src})
-      message(STATUS "src: ${src}")
-      message(STATUS "fname: ${fname}")
-      set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}/${fname})
+      string(REPLACE / _ fname ${fname})
+      set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}_${fname})
     endforeach()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
