@@ -37,7 +37,7 @@ else()
   strip_debug_symbols(fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
-target_link_libraries(fdb_c PUBLIC fdbclient)
+target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -77,4 +77,8 @@ fdb_install(
   DESTINATION include
   DESTINATION_SUFFIX /foundationdb
   COMPONENT clients)
-#install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
+fdb_install(
+  EXPORT FoundationDB-Client
+  DESTINATION lib
+  DESTINATION_SUFFIX /cmake
+  COMPONENT clients)

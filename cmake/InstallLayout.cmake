@@ -128,27 +128,38 @@ function(fdb_install)
     set(multi_value_options TARGETS FILES DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
+    set(install_export 0)
     if(IN_TARGETS)
       set(args TARGETS ${IN_TARGETS})
     elseif(IN_FILES)
       set(args FILES ${IN_FILES})
     elseif(IN_DIRECTORY)
       set(args DIRECTORY ${IN_DIRECTORY})
+    elseif(IN_EXPORT)
+      set(install_export 1)
     else()
       message(FATAL_ERROR "Expected FILES or TARGETS")
     endif()
     foreach(package tgz deb el6 el7 pm)
       set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
-      set(export_args "")
-      if (IN_EXPORT)
-        set(export_args EXPORT "${IN_EXPORT}")
-      endif()
-      if(NOT ${install_path} STREQUAL "")
+      if(install_export)
         install(
-          ${args}
-          ${export_args}
+          EXPORT "${IN_EXPORT}-${package}"
           DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+          FILE "${IN_EXPORT}.cmake"
           COMPONENT "${IN_COMPONENT}-${package}")
+      else()
+        set(export_args "")
+        if (IN_EXPORT)
+          set(export_args EXPORT "${IN_EXPORT}-${package}")
+        endif()
+        if(NOT ${install_path} STREQUAL "")
+          install(
+            ${args}
+            ${export_args}
+            DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+            COMPONENT "${IN_COMPONENT}-${package}")
+        endif()
       endif()
     endforeach()
   endif()
