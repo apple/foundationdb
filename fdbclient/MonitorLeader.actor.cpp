@@ -237,12 +237,12 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	{
 		LeaderInfo in;
 		LeaderInfo out;
-		in.forward = g_random->coinflip();
-		in.changeID = g_random->randomUniqueID();
+		in.forward = deterministicRandom()->coinflip();
+		in.changeID = deterministicRandom()->randomUniqueID();
 		{
-			std::string rndString(g_random->randomInt(10, 400), 'x');
+			std::string rndString(deterministicRandom()->randomInt(10, 400), 'x');
 			for (auto& c : rndString) {
-				c = g_random->randomAlphaNumeric();
+				c = deterministicRandom()->randomAlphaNumeric();
 			}
 			in.serializedInfo = rndString;
 		}
@@ -256,12 +256,12 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 		ASSERT(in.serializedInfo == out.serializedInfo);
 	}
 	LeaderInfo leaderInfo;
-	leaderInfo.forward = g_random->coinflip();
-	leaderInfo.changeID = g_random->randomUniqueID();
+	leaderInfo.forward = deterministicRandom()->coinflip();
+	leaderInfo.changeID = deterministicRandom()->randomUniqueID();
 	{
-		std::string rndString(g_random->randomInt(10, 400), 'x');
+		std::string rndString(deterministicRandom()->randomInt(10, 400), 'x');
 		for (auto& c : rndString) {
-			c = g_random->randomAlphaNumeric();
+			c = deterministicRandom()->randomAlphaNumeric();
 		}
 		leaderInfo.serializedInfo = rndString;
 	}

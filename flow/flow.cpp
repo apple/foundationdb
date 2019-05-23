@@ -257,7 +257,7 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 		ASSERT(out.getError().code() == in.getError().code());
 	}
 	{
-		ErrorOr<uint32_t> in(g_random->randomUInt32());
+		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
 		ErrorOr<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);
@@ -282,7 +282,7 @@ TEST_CASE("/flow/FlatBuffers/Optional") {
 		ASSERT(!out.present());
 	}
 	{
-		Optional<uint32_t> in(g_random->randomUInt32());
+		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
 		Optional<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);

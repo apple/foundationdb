@@ -342,7 +342,7 @@ public:
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
 					int64_t maxShrink = pageFloor( std::max( self->files[1].size - desiredMaxFileSize, self->fileShrinkBytes ) );
 					if ((maxShrink > SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_BYTES) ||
-					    (frivolouslyTruncate && g_random->random01() < 0.3)) {
+					    (frivolouslyTruncate && deterministicRandom()->random01() < 0.3)) {
 						TEST(true);  // Replacing DiskQueue file
 						TraceEvent("DiskQueueReplaceFile", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", self->files[1].size).detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait( replaceFile(self->files[1].f) );
