@@ -152,7 +152,7 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 		}
 		ret = append(ret, ri.kvs...)
 		ri.index = len(ri.kvs)
-		ri.fetchNextBatch()
+		ri.FetchNextBatch()
 	}
 
 	return ret, nil
@@ -232,7 +232,7 @@ func (ri *RangeIterator) Advance() bool {
 	return false
 }
 
-func (ri *RangeIterator) fetchNextBatch() {
+func (ri *RangeIterator) FetchNextBatch() {
 	if !ri.more || ri.index == ri.options.Limit {
 		ri.done = true
 		return
@@ -255,6 +255,16 @@ func (ri *RangeIterator) fetchNextBatch() {
 	ri.f = &f
 }
 
+func (ri *RangeIterator) GetBatch() ([]KeyValue, error) {
+	if ri.err != nil {
+		return nil, ri.err
+	}
+
+	ri.index += len(ri.kvs)
+
+	return ri.kvs, nil
+}
+
 // Get returns the next KeyValue in a range read, or an error if one of the
 // asynchronous operations associated with this range did not successfully
 // complete. The Advance method of this RangeIterator must have returned true
@@ -270,7 +280,7 @@ func (ri *RangeIterator) Get() (kv KeyValue, e error) {
 	ri.index++
 
 	if ri.index == len(ri.kvs) {
-		ri.fetchNextBatch()
+		ri.FetchNextBatch()
 	}
 
 	return
