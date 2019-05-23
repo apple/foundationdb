@@ -19,30 +19,74 @@
  */
 
 #include "fdbclient/Notified.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupData {
-	UID myId;
-	std::vector<Tag> backupTags;
+	const UID myId;
+	const Tag tag;
+	const Version startVersion;
 	Version minKnownCommittedVersion;
-	Version startVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
+	Database cx;
 	std::vector<TagsAndMessage> messages;
+	std::vector<Version> versions;  // one for each of the "messages"
 	NotifiedVersion version;
 
-	explicit BackupData(UID id, const InitializeBackupRequest& req) :
-		myId(id), startVersion(0), version(invalidVersion) {}
+	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
+	  : myId(id), tag(req.routerTag), startVersion(req.startVersion), minKnownCommittedVersion(invalidVersion),
+	    version(invalidVersion) {
+		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
+	}
 };
 
+ACTOR Future<Void> setProgress(BackupData* self, int64_t recoveryCount, Version backupVersion) {
+	state Transaction tr(self->cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(recoveryCount, backupVersion));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Uploads self->messages to cloud storage.
 ACTOR Future<Void> uploadData(BackupData* self) {
-	// TODO: upload self->messages to cloud
-	wait(Never());
-	return Void();
+	state Version popVersion = invalidVersion;
+	state Version lastPopVersion = 0;
+
+	loop {
+		ASSERT(self->messages.size() == self->versions.size());
+		// TODO: upload messages
+		while (!self->messages.empty()) {
+			popVersion = std::max(popVersion, self->versions[0]);
+			self->messages.erase(self->messages.begin());
+			self->versions.erase(self->versions.begin());
+		}
+		Future<Void> saveProgress = Void();
+		if (self->logSystem.get() && popVersion > lastPopVersion) {
+			const Tag popTag = self->logSystem.get()->getPseudoPopTag(self->tag, ProcessClass::BackupClass);
+			self->logSystem.get()->pop(popVersion, popTag);
+			lastPopVersion = popVersion;
+			TraceEvent("BackupWorkerPop", self->myId).detail("V", popVersion).detail("Tag", self->tag.toString());
+			saveProgress = setProgress(self, 0, popVersion);
+		}
+		wait(delay(30) && saveProgress);
+	}
 }
 
 // Pulls data from TLog servers using LogRouter tag.
@@ -61,12 +105,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			when (wait(logSystemChange)) {
 				if (r) tagPopped = std::max(tagPopped, r->popped());
 				if (self->logSystem.get()) {
-					// peekLogRouter() assumes "myId" is one of the log router and returns the ServerPeekCursor
-					// from primary location's server for the tag.
-					// Otherwise, returns the SetPeekCursor from old log sets that has the log router.
-					// TODO: set tag for this worker
-					Tag tag(-2, 0);
-					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, tag);
+					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
 				} else {
 					r = Reference<ILogSystem::IPeekCursor>();
 				}
@@ -75,9 +114,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
+		// TODO: avoid peeking uncommitted messages
 		while (r->hasMessage()) {
 			lastVersion = r->version().version;
 			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
+			self->versions.push_back(lastVersion);
 			r->nextMessage();
 		}
 
@@ -119,7 +160,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 
 ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo>> db) {
-	state BackupData self(interf.id(), req);
+	state BackupData self(interf.id(), db, req);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();

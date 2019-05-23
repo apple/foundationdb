@@ -152,6 +152,7 @@ struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
 	uint64_t recoveryCount;
+	Tag routerTag;
 	Version startVersion;
 	ReplyPromise<struct BackupInterface> reply;
 
@@ -160,7 +161,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recoveryCount, startVersion, reply);
+		serializer(ar, reqId, recoveryCount, routerTag, startVersion, reply);
 	}
 };
 

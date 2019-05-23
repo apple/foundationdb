@@ -238,6 +238,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			break;
 
+		case ProcessClass::BackupClass:
+			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tag.locality) > 0) {
+				tag.locality = tagLocalityBackup;
+			}
+			break;
+
 		default:
 			break;
 		}
@@ -1827,10 +1833,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	static Version getMaxLocalStartVersion(std::vector<Reference<LogSet>>& tLogs) {
+	static Version getMaxLocalStartVersion(const std::vector<Reference<LogSet>>& tLogs) {
 		Version maxStart = 0;
 		for (const auto& logSet : tLogs) {
-			if(logSet->isLocal) {
+			if (logSet->isLocal) {
 				maxStart = std::max(maxStart, logSet->startVersion);
 			}
 		}
@@ -1847,13 +1853,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return localTags;
 	}
 
-	ACTOR static Future<Void> newBackupWorkers(Reference<LogSet> logSet, RecruitFromConfigurationReply recruits,
-	                                           LogEpoch recoveryCount) {
+	ACTOR static Future<Void> recruitBackupWorkers(Reference<TagPartitionedLogSystem> logSystem,
+	                                               RecruitFromConfigurationReply recruits, LogEpoch recoveryCount) {
+		if (recruits.backupWorkers.size() == 0) return Void();
+
 		std::vector<Future<BackupInterface>> initializationReplies;
-		for (const auto& worker : recruits.backupWorkers) {
+		for (int i = 0; i < logSystem->logRouterTags; i++) {
+			const auto& worker = recruits.backupWorkers[i % recruits.backupWorkers.size()];
 			InitializeBackupRequest req(g_random->randomUniqueID());
 			req.recoveryCount = recoveryCount;
-			req.startVersion = logSet->startVersion;
+			req.routerTag = Tag(tagLocalityLogRouter, i);
+			req.startVersion = logSystem->tLogs[0]->startVersion;
 			TraceEvent("BackupRecruitment").detail("WorkerID", worker.id()).detail("RecoveryCount", recoveryCount)
 			.detail("StartVersion", req.startVersion);
 			initializationReplies.push_back(transformErrors(
@@ -1864,7 +1874,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
 		for (const auto& interf : newRecruits) {
-			logSet->backupWorkers.emplace_back(
+			logSystem->tLogs[0]->backupWorkers.emplace_back(
 			    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
 		}
 
@@ -2035,6 +2045,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,recr.tLogs.size()));
 			logSystem->expectedLogSets++;
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
+			logSystem->addPseudoLocality(tagLocalityBackup);
 		}
 
 		logSystem->tLogs.emplace_back(new LogSet());
@@ -2200,7 +2211,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < recr.tLogs.size(); i++ )
 			initializationReplies.push_back( transformErrors( throwErrorOr( recr.tLogs[i].tLog.getReplyUnlessFailedFor( reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
-		state Future<Void> recruitBackup = newBackupWorkers(logSystem->tLogs[0], recr, recoveryCount);
+		state Future<Void> recruitBackup = recruitBackupWorkers(logSystem, recr, recoveryCount);
 		state std::vector<Future<Void>> recoveryComplete;
 
 		if(region.satelliteTLogReplicationFactor > 0) {

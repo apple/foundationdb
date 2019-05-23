@@ -781,8 +781,9 @@ public:
 		}
 
 		// TODO: revisit the number of workers. Consider the number of log routers?
+		const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 		auto backupWorkers =
-		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, tlogs.size(), req.configuration, id_used);
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
 		std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
 		               [](const WorkerDetails& w) { return w.interf; });
 
