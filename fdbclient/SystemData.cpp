@@ -625,3 +625,8 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& value) {
 	reader >> version;
 	return std::make_pair(zoneId, version);
 }
+
+const KeyRangeRef testOnlyTxnStateStorePrefixRange(
+    LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
+    LiteralStringRef("\xff/TESTONLYtxnStateStore0")
+);
