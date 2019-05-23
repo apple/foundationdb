@@ -1,6 +1,9 @@
+libdir=/@LIB_DIR@
+includedir=/@INCLUDE_DIR@
+
 Name: foundationdb-client
 Description: FoundationDB c client
 Version: @PROJECT_VERSION@
 
-Libs: -L/@LIB_DIR@ -lfdb_c
-Cflags: -I/@INCLUDE_DIR@
+Libs: -L${libdir} -lfdb_c
+Cflags: -I${includedir}
