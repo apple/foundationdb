@@ -628,6 +628,9 @@ EXTERNC void setProfilingEnabled(int enabled);
 // DTrace probing
 #if defined(DTRACE_PROBES)
 #include <sys/sdt.h>
+#define FDB_TRACE_PROBE_STRING_EXPAND(x) x
+#define FDB_TRACE_PROBE_STRING_CONCAT2(h, t) h ## t
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) FDB_TRACE_PROBE_STRING_CONCAT2(h, t)
 #define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9,   \
 									 _10, _11, _12, NAME, ...)                 \
 	NAME
@@ -639,6 +642,7 @@ EXTERNC void setProfilingEnabled(int enabled);
 								 DTRACE_PROBE1, DTRACE_PROBE)                  \
 	(foundationdb, __VA_ARGS__)
 #else
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
 #define FDB_TRACE_PROBE(...)
 #endif
 

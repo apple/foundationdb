@@ -232,6 +232,15 @@ function(add_flow_target)
       add_library(${AFT_NAME} DYNAMIC ${sources} ${AFT_ADDL_SRCS})
     endif()
 
+    foreach(src IN LISTS sources AFT_ADDL_SRCS)
+      get_filename_component(dname ${CMAKE_CURRENT_SOURCE_DIR} NAME_WLE)
+      message(STATUS "dname: ${dname}")
+      string(REGEX REPLACE "\\..*" "" fname ${src})
+      message(STATUS "src: ${src}")
+      message(STATUS "fname: ${fname}")
+      set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}/${fname})
+    endforeach()
+
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
 

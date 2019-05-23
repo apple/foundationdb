@@ -628,7 +628,7 @@ void Net2::run() {
 		TaskPriority minTaskID = TaskPriority::Max;
 		int queueSize = ready.size();
 
-		FDB_TRACE_PROBE1(process_actor_queue_start, queueSize);
+		FDB_TRACE_PROBE(process_actor_queue_start, queueSize);
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
@@ -651,7 +651,7 @@ void Net2::run() {
 			}
 		}
 		queueSize = ready.size();
-		FDB_TRACE_PROBE1(process_actor_queue_done, queueSize);
+		FDB_TRACE_PROBE(process_actor_queue_done, queueSize);
 
 		trackMinPriority(minTaskID, now);
 
