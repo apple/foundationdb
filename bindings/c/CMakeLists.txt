@@ -72,5 +72,7 @@ fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-  DESTINATION include COMPONENT clients)
+  DESTINATION include
+  DESTINATION_SUFFIX /foundationdb
+  COMPONENT clients)
 #install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
