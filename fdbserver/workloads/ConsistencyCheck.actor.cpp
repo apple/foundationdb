@@ -268,11 +268,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 
 				//Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
-				state Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServerPromise;
+				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise));
 				if(keyServerResult)
 				{
-					state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
+					state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
 
 					//Get the locations of all the shards in the database
 					state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
@@ -323,9 +323,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Get a list of storage servers from the master and compares them with the TLogs.
 	//If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
 	//Returns false if there is a failure (in this case, keyServersPromise will never be set)
-	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
+	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
 	{
-		state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers;
+		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
 
 		//Try getting key server locations from the master proxies
 		state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
@@ -382,7 +382,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	//Retrieves the locations of all shards in the database
 	//Returns false if there is a failure (in this case, keyLocationPromise will never be set)
-	ACTOR Future<bool> getKeyLocations(Database cx, vector<pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
+	ACTOR Future<bool> getKeyLocations(Database cx, std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
 	{
 		state Standalone<VectorRef<KeyValueRef>> keyLocations;
 		state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);

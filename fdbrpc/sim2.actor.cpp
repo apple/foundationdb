@@ -174,7 +174,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn( ISimulator::ProcessInfo* process )
-		: process(process), dbgid( deterministicRandom()->randomUniqueID() ), opened(false), closedByCaller(false)
+		: process(process), dbgid( deterministicRandom()->randomUniqueID() ), opened(false), closedByCaller(false), stopReceive(Never())
 	{
 		pipes = sender(this) && receiver(this);
 	}
@@ -209,6 +209,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
+		stopReceive = delay(1.0);
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
@@ -285,6 +286,7 @@ private:
 	Future<Void> leakedConnectionTracker;
 
 	Future<Void> pipes;
+	Future<Void> stopReceive;
 
 	int availableSendBufferForPeer() const { return sendBufSize - (writtenBytes.get() - receivedBytes.get()); }  // SOMEDAY: acknowledgedBytes instead of receivedBytes
 
@@ -317,6 +319,9 @@ private:
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
 			wait( delay( g_clogging.getRecvDelay( self->process->address, self->peerProcess->address ) ) );
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
+			if(self->stopReceive.isReady()) {
+				wait(Future<Void>(Never()));
+			}
 			self->receivedBytes.set( pos );
 			wait( Future<Void>(Void()) );  // Prior notification can delete self and cancel this actor
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
@@ -603,11 +608,16 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT1 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
+		if (size == 0) {
+			// KAIO will return EINVAL, as len==0 is an error.
+			throw io_error();
+		}
+
 		if(self->delayOnWrite)
 			wait( waitUntilDiskReady( self->diskParameters, 0 ) );
 
 		if( _chsize( self->h, (long) size ) == -1 ) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6);
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6).detail("Filename", self->filename).detail("Size", size).detail("Fd", self->h).GetLastError();
 			throw io_error();
 		}
 
@@ -1071,6 +1081,10 @@ public:
 		}
 
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
+	}
+
+	virtual bool useObjectSerializer() const {
+		return net2->useObjectSerializer();
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
@@ -1565,10 +1579,10 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
+	Sim2(bool objSerializer) : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
-		currentProcess = new ProcessInfo( "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "" );
-		g_network = net2 = newNet2(false, true);
+		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
+		g_network = net2 = newNet2(false, true, objSerializer);
 		Net2FileSystem::newFileSystem();
 		check_yield(0);
 	}
@@ -1673,9 +1687,9 @@ public:
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
 
-void startNewSimulator() {
+void startNewSimulator(bool objSerializer) {
 	ASSERT( !g_network );
-	g_network = g_pSimulator = new Sim2();
+	g_network = g_pSimulator = new Sim2(objSerializer);
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 

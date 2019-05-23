@@ -265,7 +265,7 @@ public:
 			result = fallocate( fd, 0, 0, size);
 			if (result != 0) {
 				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
+				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).detail("Size", size).GetLastError();
 				if ( fallocateErrCode == EOPNOTSUPP ) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;

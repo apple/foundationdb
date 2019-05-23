@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <numeric>
 #include <string>
+#include <vector>
 
 /*
 #ifdef __GNUG__
@@ -43,9 +44,8 @@
 
 using std::min;
 using std::max;
-using std::make_pair;
 
-static vector<PerfDoubleCounter*> skc;
+static std::vector<PerfDoubleCounter*> skc;
 
 static thread_local uint32_t g_seed = 0;
 
@@ -199,7 +199,7 @@ bool operator == (const KeyInfo& lhs, const KeyInfo& rhs ) {
 	return !(lhs<rhs || rhs<lhs);
 }
 
-void swapSort(vector<KeyInfo>& points, int a, int b){
+void swapSort(std::vector<KeyInfo>& points, int a, int b){
 	if (points[b] < points[a]){
 		KeyInfo temp;
 		temp = points[a];
@@ -208,7 +208,7 @@ void swapSort(vector<KeyInfo>& points, int a, int b){
 	}
 }
 
-void smallSort(vector<KeyInfo>& points, int start, int N){
+void smallSort(std::vector<KeyInfo>& points, int start, int N){
 	for (int i=1;i<N;i++)
 		for (int j=i;j>0;j-=2)
 			swapSort(points, start+j-1, start+j);
@@ -224,12 +224,12 @@ struct SortTask {
 	SortTask(int begin, int size, int character) : begin(begin), size(size), character(character) {}
 };
 
-void sortPoints(vector<KeyInfo>& points){
-	vector<SortTask> tasks;
-	vector<KeyInfo> newPoints;
-	vector<int> counts;
+void sortPoints(std::vector<KeyInfo>& points){
+	std::vector<SortTask> tasks;
+	std::vector<KeyInfo> newPoints;
+	std::vector<int> counts;
 
-	tasks.push_back( SortTask(0, points.size(), 0) );
+	tasks.emplace_back(0, points.size(), 0);
 
 	while (tasks.size()){
 		SortTask st = tasks.back();
@@ -259,7 +259,7 @@ void sortPoints(vector<KeyInfo>& points){
 		for(int i=0;i<counts.size();i++){
 			int temp = counts[i];
 			if (temp > 1)
-				tasks.push_back(SortTask(st.begin+total, temp, st.character+1));
+				tasks.emplace_back(st.begin+total, temp, st.character+1);
 			counts[i] = total;
 			total += temp;
 		}
@@ -569,7 +569,7 @@ public:
 	}
 
 	void concatenate( SkipList* input, int count ) {
-		vector<Finger> ends( count-1 );
+		std::vector<Finger> ends( count-1 );
 		for(int i=0; i<ends.size(); i++)
 			input[i].getEnd( ends[i] );
 
@@ -948,9 +948,9 @@ struct ConflictSet {
 	SkipList versionHistory;
 	Key removalKey;
 	Version oldestVersion;
-	vector<PAction> worker_nextAction;
-	vector<Event*> worker_ready;
-	vector<Event*> worker_finished;
+	std::vector<PAction> worker_nextAction;
+	std::vector<Event*> worker_ready;
+	std::vector<Event*> worker_finished;
 };
 
 ConflictSet* newConflictSet() { return new ConflictSet; }
@@ -989,18 +989,18 @@ void ConflictBatch::addTransaction( const CommitTransactionRef& tr ) {
 		info->readRanges.resize( arena, tr.read_conflict_ranges.size() );
 		info->writeRanges.resize( arena, tr.write_conflict_ranges.size() );
 
-		vector<KeyInfo> &points = this->points;
+		std::vector<KeyInfo>& points = this->points;
 		for(int r=0; r<tr.read_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
-			points.push_back( KeyInfo( range.begin, false, true, false, t, &info->readRanges[r].first ) );
+			points.emplace_back(range.begin, false, true, false, t, &info->readRanges[r].first);
 			//points.back().keyEnd = StringRef(buf,range.second);
-			points.push_back( KeyInfo( range.end, false, false, false, t, &info->readRanges[r].second ) );
-			combinedReadConflictRanges.push_back( ReadConflictRange( range.begin, range.end, tr.read_snapshot, t ) );
+			points.emplace_back(range.end, false, false, false, t, &info->readRanges[r].second);
+			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
 		}
 		for(int r=0; r<tr.write_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
-			points.push_back( KeyInfo( range.begin, false, true, true, t, &info->writeRanges[r].first ) );
-			points.push_back( KeyInfo( range.end, false, false, true, t, &info->writeRanges[r].second ) );
+			points.emplace_back(range.begin, false, true, true, t, &info->writeRanges[r].first);
+			points.emplace_back(range.end, false, false, true, t, &info->writeRanges[r].second);
 		}
 	}
 
@@ -1008,7 +1008,7 @@ void ConflictBatch::addTransaction( const CommitTransactionRef& tr ) {
 }
 
 class MiniConflictSet2 : NonCopyable {
-	vector<bool> values;
+	std::vector<bool> values;
 public:
 	explicit MiniConflictSet2( int size ) {
 		values.assign( size, false );
@@ -1028,21 +1028,21 @@ public:
 class MiniConflictSet : NonCopyable {
 	typedef uint64_t wordType;
 	enum { bucketShift = 6, bucketMask=sizeof(wordType)*8-1 };
-	vector<wordType> values; // undefined when andValues is true for a range of values
-	vector<wordType> orValues;
-	vector<wordType> andValues;
+	std::vector<wordType> values; // undefined when andValues is true for a range of values
+	std::vector<wordType> orValues;
+	std::vector<wordType> andValues;
 	MiniConflictSet2 debug;		// SOMEDAY: Test on big ranges, eliminate this
 
 	uint64_t bitMask(unsigned int bit){ // computes results for bit%word
 		return (((wordType)1) << ( bit & bucketMask )); // '&' unnecesary?
 	}
-	void setNthBit(vector<wordType> &v, const unsigned int bit){
+	void setNthBit(std::vector<wordType>& v, const unsigned int bit){
 		v[bit>>bucketShift] |= bitMask(bit);
 	}
-	void clearNthBit(vector<wordType> &v, const unsigned int bit){
+	void clearNthBit(std::vector<wordType>& v, const unsigned int bit){
 		v[bit>>bucketShift] &= ~(bitMask(bit));
 	}
-	bool getNthBit(const vector<wordType> &v, const unsigned int bit){
+	bool getNthBit(const std::vector<wordType>& v, const unsigned int bit){
 		return (v[bit>>bucketShift] & bitMask(bit)) != 0;
 	}
 	int wordsForNBits(unsigned int bits){
@@ -1060,7 +1060,7 @@ class MiniConflictSet : NonCopyable {
 		return (b&bucketMask) ? lowBits(b) : -1;
 	}
 
-	void setBits(vector<wordType> &v, int bitBegin, int bitEnd, bool fillMiddle){
+	void setBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool fillMiddle){
 		if (bitBegin >= bitEnd)	return;
 		int beginWord = bitBegin>>bucketShift;
 		int lastWord = ((bitEnd+bucketMask) >> bucketShift) - 1;
@@ -1075,7 +1075,7 @@ class MiniConflictSet : NonCopyable {
 		}
 	}
 
-	bool orBits(vector<wordType> &v, int bitBegin, int bitEnd, bool getMiddle) {
+	bool orBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool getMiddle) {
 		if (bitBegin >= bitEnd) return false;
 		int beginWord = bitBegin >> bucketShift;
 		int lastWord = ((bitEnd+bucketMask) >> bucketShift) - 1;
@@ -1152,7 +1152,7 @@ void ConflictBatch::checkIntraBatchConflicts() {
 	}
 }
 
-void ConflictBatch::GetTooOldTransactions(vector<int>& tooOldTransactions) {
+void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) {
 	for (int i = 0; i<transactionInfo.size(); i++) {
 		if (transactionInfo[i]->tooOld) {
 			tooOldTransactions.push_back(i);
@@ -1160,7 +1160,7 @@ void ConflictBatch::GetTooOldTransactions(vector<int>& tooOldTransactions) {
 	}
 }
 
-void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, vector<int>& nonConflicting, vector<int>* tooOldTransactions) {
+void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting, std::vector<int>* tooOldTransactions) {
 	double t = timer();
 	sortPoints( points );
 	//std::sort( combinedReadConflictRanges.begin(), combinedReadConflictRanges.end() );
@@ -1232,7 +1232,7 @@ DISABLE_ZERO_DIVISION_FLAG
 	}
 }
 
-void ConflictBatch::addConflictRanges(Version now, vector< pair<StringRef,StringRef> >::iterator begin, vector< pair<StringRef,StringRef> >::iterator end,SkipList* part) {
+void ConflictBatch::addConflictRanges(Version now, std::vector< std::pair<StringRef,StringRef> >::iterator begin, std::vector< std::pair<StringRef,StringRef> >::iterator end,SkipList* part) {
 	int count = end-begin;
 #if 0
 	//for(auto w = begin; w != end; ++w)
@@ -1262,16 +1262,16 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 		return;
 
 	if (PARALLEL_THREAD_COUNT) {
-		vector<SkipList> parts;
+		std::vector<SkipList> parts;
 		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++)
-			parts.push_back(SkipList());
+			parts.emplace_back();
 
-		vector<StringRef> splits( parts.size()-1 );
+		std::vector<StringRef> splits( parts.size()-1 );
 		for(int s=0; s<splits.size(); s++)
 			splits[s] = combinedWriteConflictRanges[ (s+1)*combinedWriteConflictRanges.size()/parts.size() ].first;
 
 		cs->versionHistory.partition( splits.size() ? &splits[0] : NULL, splits.size(), &parts[0] );
-		vector<double> tstart(PARALLEL_THREAD_COUNT), tend(PARALLEL_THREAD_COUNT);
+		std::vector<double> tstart(PARALLEL_THREAD_COUNT), tend(PARALLEL_THREAD_COUNT);
 		Event done[PARALLEL_THREAD_COUNT ? PARALLEL_THREAD_COUNT : 1];
 		double before = timer();
 		for(int t=0; t<parts.size(); t++) {
@@ -1325,8 +1325,8 @@ void ConflictBatch::combineWriteConflictRanges()
 		if (point.write && !transactionConflictStatus[ point.transaction ]) {
 			if (point.begin) {
  				activeWriteCount++;
-  				if (activeWriteCount == 1)
-  					combinedWriteConflictRanges.push_back( make_pair( point.key, KeyRef() ) );
+				if (activeWriteCount == 1)
+					combinedWriteConflictRanges.emplace_back(point.key, KeyRef());
 			} else /*if (point.end)*/ {
 				activeWriteCount--;
 				if (activeWriteCount == 0)
@@ -1431,8 +1431,8 @@ void skipListTest() {
 	Arena testDataArena;
 	VectorRef< VectorRef<KeyRangeRef> > testData;
 	testData.resize(testDataArena, 500);
-	vector<vector<uint8_t>> success( testData.size() );
-	vector<vector<uint8_t>> success2( testData.size() );
+	std::vector<std::vector<uint8_t>> success( testData.size() );
+	std::vector<std::vector<uint8_t>> success2( testData.size() );
 	for(int i=0; i<testData.size(); i++) {
 		testData[i].resize(testDataArena, 5000);
 		success[i].assign( testData[i].size(), false );
@@ -1454,10 +1454,10 @@ void skipListTest() {
 	int cranges = 0, tcount = 0;
 
 	start = timer();
-	vector<vector<int>> nonConflict( testData.size() );
+	std::vector<std::vector<int>> nonConflict( testData.size() );
 	for(int i=0; i<testData.size(); i++) {
 		Arena buf;
-		vector<CommitTransactionRef> trs;
+		std::vector<CommitTransactionRef> trs;
 		double t = timer();
 		for(int j=0; j+readCount+writeCount<=testData[i].size(); j+=readCount+writeCount) {
 			CommitTransactionRef tr;

@@ -29,6 +29,7 @@
 using std::vector;
 
 struct PerfMetric {
+	constexpr static FileIdentifier file_identifier = 5980618;
 	PerfMetric() : m_name(""), m_value(0), m_averaged(false), m_format_code( "%.3g" ) {}
 	PerfMetric( std::string name, double value, bool averaged ) : m_name(name), m_value(value), m_averaged(averaged), m_format_code( "%.3g" ) {}
 	PerfMetric( std::string name, double value, bool averaged, std::string format_code ) : m_name(name), m_value(value), m_averaged(averaged), m_format_code(format_code) {}

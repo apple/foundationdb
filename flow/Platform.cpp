@@ -2477,6 +2477,7 @@ void outOfMemory() {
 	TRACEALLOCATOR(16);
 	TRACEALLOCATOR(32);
 	TRACEALLOCATOR(64);
+	TRACEALLOCATOR(96);
 	TRACEALLOCATOR(128);
 	TRACEALLOCATOR(256);
 	TRACEALLOCATOR(512);
@@ -2742,7 +2743,7 @@ extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
-extern volatile double net2liveness;
+extern std::atomic<int64_t> net2liveness;
 extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
@@ -2789,12 +2790,13 @@ void* checkThread(void *arg) {
 	pthread_t mainThread = *(pthread_t*)arg;
 	free(arg);
 
-	double lastValue = net2liveness;
+	int64_t lastValue = net2liveness.load();
 	double lastSignal = 0;
 	double logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
 	while(true) {
 		threadSleep(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
-		if(lastValue == net2liveness) {
+		int64_t currentLiveness = net2liveness.load();
+		if(lastValue == currentLiveness) {
 			double t = timer();
 			if(lastSignal == 0 || t - lastSignal >= logInterval) {
 				if(lastSignal > 0) {
@@ -2806,10 +2808,10 @@ void* checkThread(void *arg) {
 			}
 		}
 		else {
+			lastValue = currentLiveness;
 			lastSignal = 0;
 			logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
 		}
-		lastValue = net2liveness;
 	}
 	return NULL;
 #else

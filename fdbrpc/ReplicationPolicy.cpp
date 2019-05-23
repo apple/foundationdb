@@ -142,6 +142,8 @@ PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IR
 	return;
 }
 
+PolicyAcross::PolicyAcross() : _policy(new PolicyOne()) {}
+
 PolicyAcross::~PolicyAcross()
 {
 	return;

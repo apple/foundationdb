@@ -25,6 +25,7 @@
 #include "fdbclient/CoordinationInterface.h"
 
 struct GenerationRegInterface {
+	constexpr static FileIdentifier file_identifier = 16726744;
 	RequestStream< struct GenerationRegReadRequest > read;
 	RequestStream< struct GenerationRegWriteRequest > write;
 
@@ -52,6 +53,7 @@ struct GenerationRegInterface {
 };
 
 struct UniqueGeneration {
+	constexpr static FileIdentifier file_identifier = 16684234;
 	uint64_t generation;
 	UID uid;
 	UniqueGeneration() : generation(0) {}
@@ -70,7 +72,20 @@ struct UniqueGeneration {
 	}
 };
 
+struct GenerationRegReadReply {
+	constexpr static FileIdentifier file_identifier = 12623609;
+	Optional<Value> value;
+	UniqueGeneration gen, rgen;
+	GenerationRegReadReply() {}
+	GenerationRegReadReply( Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen ) : value(value), gen(gen), rgen(rgen) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value, gen, rgen);
+	}
+};
+
 struct GenerationRegReadRequest {
+	constexpr static FileIdentifier file_identifier = 8975311;
 	Key key;
 	UniqueGeneration gen;
 	ReplyPromise<struct GenerationRegReadReply> reply;
@@ -82,18 +97,8 @@ struct GenerationRegReadRequest {
 	}
 };
 
-struct GenerationRegReadReply {
-	Optional<Value> value;
-	UniqueGeneration gen, rgen;
-	GenerationRegReadReply() {}
-	GenerationRegReadReply( Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen ) : value(value), gen(gen), rgen(rgen) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, value, gen, rgen);
-	}
-};
-
 struct GenerationRegWriteRequest {
+	constexpr static FileIdentifier file_identifier = 3521510;
 	KeyValue kv;
 	UniqueGeneration gen;
 	ReplyPromise< UniqueGeneration > reply;
@@ -116,6 +121,7 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 };
 
 struct CandidacyRequest {
+	constexpr static FileIdentifier file_identifier = 14473958;
 	Key key;
 	LeaderInfo myInfo;
 	UID knownLeader, prevChangeID;
@@ -131,6 +137,7 @@ struct CandidacyRequest {
 };
 
 struct LeaderHeartbeatRequest {
+	constexpr static FileIdentifier file_identifier = 9495992;
 	Key key;
 	LeaderInfo myInfo;
 	UID prevChangeID;
@@ -146,6 +153,7 @@ struct LeaderHeartbeatRequest {
 };
 
 struct ForwardRequest {
+	constexpr static FileIdentifier file_identifier = 13570359;
 	Key key;
 	Value conn;  // a cluster connection string
 	ReplyPromise<Void> reply;

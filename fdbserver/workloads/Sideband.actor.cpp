@@ -24,6 +24,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SidebandMessage {
+	constexpr static FileIdentifier file_identifier = 11862046;
 	uint64_t key;
 	Version commitVersion;
 
@@ -37,6 +38,7 @@ struct SidebandMessage {
 };
 
 struct SidebandInterface {
+	constexpr static FileIdentifier file_identifier = 15950544;
 	RequestStream<SidebandMessage> updates;
 
 	UID id() const { return updates.getEndpoint().token; }

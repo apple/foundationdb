@@ -58,6 +58,18 @@ using namespace boost::asio::ip;
 const uint64_t currentProtocolVersion        = 0x0FDB00B061070001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+const uint64_t objectSerializerFlag          = 0x1000000000000000LL;
+const uint64_t versionFlagMask               = 0x0FFFFFFFFFFFFFFFLL;
+
+uint64_t removeFlags(uint64_t version) {
+	return version & versionFlagMask;
+}
+uint64_t addObjectSerializerFlag(uint64_t version) {
+	return version | objectSerializerFlag;
+}
+bool hasObjectSerializerFlag(uint64_t version) {
+	return (version & objectSerializerFlag) > 0;
+}
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
 static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
@@ -65,7 +77,7 @@ static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protoco
 #if defined(__linux__)
 #include <execinfo.h>
 
-volatile double net2liveness = 0;
+std::atomic<int64_t> net2liveness(0);
 
 volatile size_t net2backtraces_max = 10000;
 volatile void** volatile net2backtraces = NULL;
@@ -123,7 +135,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics);
+	Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer);
 	void run();
 	void initMetrics();
 
@@ -157,9 +169,11 @@ public:
 
 	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
+	virtual bool useObjectSerializer() const { return _useObjectSerializer; }
 	std::vector<flowGlobalType>		globals;
 
 	bool useThreadPool;
+	bool _useObjectSerializer = false;
 //private:
 
 	ASIOReactor reactor;
@@ -489,8 +503,9 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(bool useThreadPool, bool useMetrics)
+Net2::Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer)
 	: useThreadPool(useThreadPool),
+	  _useObjectSerializer(useObjectSerializer),
 	  network(this),
 	  reactor(this),
 	  stopped(false),
@@ -689,7 +704,7 @@ void Net2::run() {
 			}
 
 			// to keep the thread liveness check happy
-			net2liveness = nondeterministicRandom()->random01();
+			net2liveness.fetch_add(1);
 		}
 #endif
 
@@ -1009,9 +1024,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics, bool useObjectSerializer) {
 	try {
-		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, useObjectSerializer);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

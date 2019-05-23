@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
@@ -92,16 +93,27 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 			SAV<T>::sendErrorAndDelPromiseRef(error);
 		}
 	}
+	virtual void receive(ArenaObjectReader& reader) {
+		if (!SAV<T>::canBeSet()) return;
+		this->addPromiseRef();
+		ErrorOr<EnsureTable<T>> message;
+		reader.deserialize(message);
+		if (message.isError()) {
+			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
+		} else {
+			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
+		}
+	}
 };
 
 
 
 template <class T>
-class ReplyPromise sealed
+class ReplyPromise sealed : public ComposedIdentifier<T, 0x2>
 {
 public:
 	template <class U>
-	void send(U && value) const {
+	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
 	template <class E>
@@ -163,6 +175,22 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	networkSender(value.getFuture(), endpoint);
 }
 
+template <class T>
+struct serializable_traits<ReplyPromise<T>> : std::true_type {
+	template<class Archiver>
+	static void serialize(Archiver& ar, ReplyPromise<T>& p) {
+		if constexpr (Archiver::isDeserializing) {
+			UID token;
+			serializer(ar, token);
+			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
+			p = ReplyPromise<T>(endpoint);
+			networkSender(p.getFuture(), endpoint);
+		} else {
+			const auto& ep = p.getEndpoint().token;
+			serializer(ar, ep);
+		}
+	}
+};
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) { return p; }
@@ -207,6 +235,13 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 		this->addPromiseRef();
 		T message;
 		reader >> message;
+		this->send(std::move(message));
+		this->delPromiseRef();
+	}
+	virtual void receive(ArenaObjectReader& reader) {
+		this->addPromiseRef();
+		T message;
+		reader.deserialize(message);
 		this->send(std::move(message));
 		this->delPromiseRef();
 	}
@@ -378,6 +413,22 @@ void load(Ar& ar, RequestStream<T>& value) {
 	ar >> endpoint;
 	value = RequestStream<T>(endpoint);
 }
+
+template <class T>
+struct serializable_traits<RequestStream<T>> : std::true_type {
+	template <class Archiver>
+	static void serialize(Archiver& ar, RequestStream<T>& stream) {
+		if constexpr (Archiver::isDeserializing) {
+			Endpoint endpoint;
+			serializer(ar, endpoint);
+			stream = RequestStream<T>(endpoint);
+		} else {
+			const auto& ep = stream.getEndpoint();
+			serializer(ar, ep);
+			UNSTOPPABLE_ASSERT(ep.getPrimaryAddress().isValid());  // No serializing PromiseStreams on a client with no public address
+		}
+	}
+};
 
 #endif
 #include "fdbrpc/genericactors.actor.h"

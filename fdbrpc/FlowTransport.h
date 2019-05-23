@@ -24,12 +24,14 @@
 
 #include <algorithm>
 #include "flow/network.h"
+#include "flow/FileIdentifier.h"
 
 #pragma pack(push, 4)
 class Endpoint {
 public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
+	constexpr static FileIdentifier file_identifier = 10618805;
 	typedef UID Token;
 	NetworkAddressList addresses;
 	Token token;
@@ -72,22 +74,31 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-			addresses.secondaryAddress = Optional<NetworkAddress>();
-			serializer(ar, addresses.address, token);
-		} else {
+		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, addresses, token);
-			if (ar.isDeserializing) {
+			if constexpr (Ar::isDeserializing) {
 				choosePrimaryAddress();
+			}
+		} else {
+			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+				addresses.secondaryAddress = Optional<NetworkAddress>();
+				serializer(ar, addresses.address, token);
+			} else {
+				serializer(ar, addresses, token);
+				if (ar.isDeserializing) {
+					choosePrimaryAddress();
+				}
 			}
 		}
 	}
 };
 #pragma pack(pop)
 
+class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
 	virtual void receive( ArenaReader& ) = 0;
+	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
 };
 

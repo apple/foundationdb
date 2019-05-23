@@ -233,6 +233,56 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
+	{
+		LeaderInfo in;
+		LeaderInfo out;
+		in.forward = g_random->coinflip();
+		in.changeID = g_random->randomUniqueID();
+		{
+			std::string rndString(g_random->randomInt(10, 400), 'x');
+			for (auto& c : rndString) {
+				c = g_random->randomAlphaNumeric();
+			}
+			in.serializedInfo = rndString;
+		}
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in.forward == out.forward);
+		ASSERT(in.changeID == out.changeID);
+		ASSERT(in.serializedInfo == out.serializedInfo);
+	}
+	LeaderInfo leaderInfo;
+	leaderInfo.forward = g_random->coinflip();
+	leaderInfo.changeID = g_random->randomUniqueID();
+	{
+		std::string rndString(g_random->randomInt(10, 400), 'x');
+		for (auto& c : rndString) {
+			c = g_random->randomAlphaNumeric();
+		}
+		leaderInfo.serializedInfo = rndString;
+	}
+	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objIn(leaderInfo);
+	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objOut;
+	Standalone<StringRef> copy;
+	ObjectWriter writer;
+	writer.serialize(objIn);
+	copy = writer.toStringRef();
+	ArenaObjectReader reader(copy.arena(), copy);
+	reader.deserialize(objOut);
+
+	ASSERT(!objOut.isError());
+	ASSERT(objOut.get().asUnderlyingType().present());
+	LeaderInfo outLeader = objOut.get().asUnderlyingType().get();
+	ASSERT(outLeader.changeID == leaderInfo.changeID);
+	ASSERT(outLeader.forward == leaderInfo.forward);
+	ASSERT(outLeader.serializedInfo == leaderInfo.serializedInfo);
+	return Void();
+}
+
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	// For a static connection string, add in fuzzed comments and whitespace
 	// SOMEDAY: create a series of random connection strings, rather than the one we started with
@@ -461,5 +511,24 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 		info = _info;
 		info.generation++;
 
+	}
+}
+
+ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
+													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
+	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
+		new AsyncVar<Optional<ClusterControllerClientInterface>>{});
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, g_network->useObjectSerializer());
+	loop {
+		choose {
+			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(knownLeader->onChange())) {
+				if (knownLeader->get().present()) {
+					outKnownLeader->set(knownLeader->get().get().clientInterface);
+				} else {
+					outKnownLeader->set(Optional<ClusterInterface>{});
+				}
+			}
+		}
 	}
 }

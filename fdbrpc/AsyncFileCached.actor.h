@@ -27,6 +27,8 @@
 #elif !defined(FLOW_ASYNCFILECACHED_ACTOR_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
+#include <boost/intrusive/list.hpp>
+
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Knobs.h"
@@ -34,10 +36,12 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+namespace bi = boost::intrusive;
 struct EvictablePage {
 	void* data;
 	int index;
 	class Reference<struct EvictablePageCache> pageCache;
+	bi::list_member_hook<> member_hook;
 
 	virtual bool evict() = 0; // true if page was evicted, false if it isn't immediately evictable (but will be evicted regardless if possible)
 
@@ -46,30 +50,86 @@ struct EvictablePage {
 };
 
 struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
-	EvictablePageCache() : pageSize(0), maxPages(0) {}
-	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize) {}
+	using List = bi::list< EvictablePage, bi::member_hook< EvictablePage, bi::list_member_hook<>, &EvictablePage::member_hook>>;
+	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
+
+	static CacheEvictionType evictionPolicyStringToEnum(const std::string &policy) {
+		std::string cep = policy;
+		std::transform(cep.begin(), cep.end(), cep.begin(), ::tolower);
+		if (cep != "random" && cep != "lru")
+			throw invalid_cache_eviction_policy();
+
+		if (cep == "random")
+			return RANDOM;
+		return LRU;
+	}
+
+	EvictablePageCache() : pageSize(0), maxPages(0), cacheEvictionType(RANDOM) {}
+
+	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize), cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
+		cacheHits.init(LiteralStringRef("EvictablePageCache.CacheHits"));
+		cacheMisses.init(LiteralStringRef("EvictablePageCache.CacheMisses"));
+		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEvictions"));
+	}
 
 	void allocate(EvictablePage* page) {
 		try_evict();
 		try_evict();
 		page->data = pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096,pageSize);
-		page->index = pages.size();
-		pages.push_back(page);
+		if (RANDOM == cacheEvictionType) {
+			page->index = pages.size();
+			pages.push_back(page);
+		} else {
+			lruPages.push_back(*page); // new page is considered the most recently used (placed at LRU tail)
+		}
+		++cacheMisses;
+	}
+
+	void updateHit(EvictablePage* page) {
+		if (RANDOM != cacheEvictionType) {
+			// on a hit, update page's location in the LRU so that it's most recent (tail)
+			lruPages.erase(List::s_iterator_to(*page));
+			lruPages.push_back(*page);
+		}
+		++cacheHits;
 	}
 
 	void try_evict() {
-		if (pages.size() >= (uint64_t)maxPages && !pages.empty()) {
-			for (int i = 0; i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS; i++) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
-				int toEvict = deterministicRandom()->randomInt(0, pages.size());
-				if (pages[toEvict]->evict())
-					break;
+		if (RANDOM == cacheEvictionType) {
+			if (pages.size() >= (uint64_t)maxPages && !pages.empty()) {
+				for (int i = 0; i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS; i++) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
+					int toEvict = deterministicRandom()->randomInt(0, pages.size());
+					if (pages[toEvict]->evict()) {
+						++cacheEvictions;
+						break;
+					}
+				}
+			}
+		} else {
+			// For now, LRU is the only other CACHE_EVICTION option
+			if (lruPages.size() >= (uint64_t)maxPages) {
+				int i = 0;
+				// try the least recently used pages first (starting at head of the LRU list)
+				for (List::iterator it = lruPages.begin();
+				     it != lruPages.end() && i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS;
+				     ++it, ++i) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
+					if (it->evict()) {
+						++cacheEvictions;
+						break;
+					}
+				}
 			}
 		}
 	}
 
 	std::vector<EvictablePage*> pages;
+	List lruPages;
 	int pageSize;
 	int64_t maxPages;
+	Int64MetricHandle cacheHits;
+	Int64MetricHandle cacheMisses;
+	Int64MetricHandle cacheEvictions;
+	const CacheEvictionType cacheEvictionType;
 };
 
 struct OpenFileInfo : NonCopyable {
