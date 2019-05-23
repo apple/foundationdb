@@ -124,7 +124,7 @@ set(install_destination_for_data_pm "")
 
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(one_value_options COMPONENT DESTINATION DESTINATION_SUFFIX)
+    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)
     set(multi_value_options TARGETS FILES DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
@@ -139,8 +139,16 @@ function(fdb_install)
     endif()
     foreach(package tgz deb el6 el7 pm)
       set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
+      set(export_args "")
+      if (IN_EXPORT)
+        set(export_args EXPORT "${IN_EXPORT}")
+      endif()
       if(NOT ${install_path} STREQUAL "")
-        install(${args} DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}" COMPONENT "${IN_COMPONENT}-${package}")
+        install(
+          ${args}
+          ${export_args}
+          DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+          COMPONENT "${IN_COMPONENT}-${package}")
       endif()
     endforeach()
   endif()

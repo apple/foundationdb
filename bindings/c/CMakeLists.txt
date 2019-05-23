@@ -39,9 +39,9 @@ endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC fdbclient)
 target_include_directories(fdb_c PUBLIC
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
@@ -65,7 +65,9 @@ endif()
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
-fdb_install(TARGETS fdb_c
+fdb_install(
+  TARGETS fdb_c
+  EXPORT FoundationDB-Client
   DESTINATION lib
   COMPONENT clients)
 fdb_install(
