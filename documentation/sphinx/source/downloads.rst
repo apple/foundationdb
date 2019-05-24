@@ -72,6 +72,6 @@ Java 8+
 * `fdb-java-6.1.8-javadoc.jar <https://www.foundationdb.org/downloads/6.1.8/bindings/java/fdb-java-6.1.8-javadoc.jar>`_
 
 Go 1.11+
--------
+--------
 
 The FoundationDB Go package is available on `GitHub <https://github.com/apple/foundationdb/tree/master/bindings/go>`_.
