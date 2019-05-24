@@ -125,6 +125,7 @@ struct RestoreCommonReply {
 	CMDUID cmdID; // The restore command for the reply
 	
 	RestoreCommonReply() : id(UID()), cmdID(CMDUID()) {}
+	explicit RestoreCommonReply(UID id) : id(id) {}
 	explicit RestoreCommonReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
 	
 	std::string toString() const {

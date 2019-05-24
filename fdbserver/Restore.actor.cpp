@@ -73,12 +73,13 @@ void initRestoreWorkerConfig();
 
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx);
 ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self);
-ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self, Database cx);
+// ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self, Database cx);
 ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self, ActorCollection *actors, Database cx);
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers = 2);
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self);
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx, RestoreWorkerInterface myWorkerInterf);
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx);
+ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreWorkerData> self);
 
 bool debug_verbose = true;
 void printGlobalNodeStatus(Reference<RestoreWorkerData>);
@@ -250,50 +251,21 @@ void initRestoreWorkerConfig() {
 			MIN_NUM_WORKERS, ratio_loader_to_applier, loadBatchSizeMB, loadBatchSizeThresholdB, transactionBatchSizeThreshold);
 }
 
-
-// Restore Worker
-ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self, Database cx) {
-	state ReadYourWritesTransaction tr(cx);
-	// For now, we assume only one role per restore worker
-	ASSERT( !(self->loaderInterf.present() && self->applierInterf.present()) );
-
-	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			ASSERT( !(self->loaderInterf.present() && self->applierInterf.present()) ); 
-			if ( self->loaderInterf.present() ) {
-				tr.set( restoreLoaderKeyFor(self->loaderInterf.get().id()), restoreLoaderInterfaceValue(self->loaderInterf.get()) );
-			}
-			if ( self->applierInterf.present() ) {
-				tr.set( restoreApplierKeyFor(self->applierInterf.get().id()), restoreApplierInterfaceValue(self->applierInterf.get()) );
-			}
-			wait (tr.commit() );
-			break;
-		} catch( Error &e ) {
-			printf("[WARNING]%s: commitRestoreRoleInterfaces transaction error:%s\n", self->describeNode().c_str(), e.what());
-			wait( tr.onError(e) );
-		}
-	}
-
-	return Void();
-} 
-
-// Restore Worker
+// Assume only 1 role on a restore worker.
+// Future: Multiple roles in a restore worker
 ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self, ActorCollection *actors, Database cx) {
 	printf("[INFO][Worker] Node:%s get role %s\n", self->describeNode().c_str(),
 			getRoleStr(req.role).c_str());
 
-	while (self->isInProgress(RestoreCommandEnum::Recruit_Role_On_Worker)) {
-		printf("[DEBUG] NODE:%s handleRecruitRoleRequest wait for 1s\n",  self->describeNode().c_str());
-		wait(delay(1.0));
-	}
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	// Already recruited a role
+	if (self->loaderInterf.present()) {
+		ASSERT( req.role == RestoreRole::Loader );
+		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Loader, self->loaderInterf.get()));
+		return Void();
+	} else if (self->applierInterf.present()) {
+		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Applier, self->applierInterf.get()));
 		return Void();
 	}
-	self->setInProgressFlag(RestoreCommandEnum::Recruit_Role_On_Worker);
 
 	if (req.role == RestoreRole::Loader) {
 		ASSERT( !self->loaderInterf.present() );
@@ -310,6 +282,7 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		DUMPTOKEN(recruited.finishRestore);
 		self->loaderData = Reference<RestoreLoaderData>( new RestoreLoaderData(self->loaderInterf.get().id(),  req.nodeIndex) );
 		actors->add( restoreLoaderCore(self->loaderData, self->loaderInterf.get(), cx) );
+		req.reply.send(RestoreRecruitRoleReply(self->id(),  RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT( !self->applierInterf.present() );
 		self->applierInterf = RestoreApplierInterface();
@@ -326,15 +299,25 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		DUMPTOKEN(recruited.finishRestore);
 		self->applierData = Reference<RestoreApplierData>( new RestoreApplierData(self->applierInterf.get().id(), req.nodeIndex) );
 		actors->add( restoreApplierCore(self->applierData, self->applierInterf.get(), cx) );
+		req.reply.send(RestoreRecruitRoleReply(self->id(),  RestoreRole::Applier, self->applierInterf.get()));
 	} else {
 		TraceEvent(SevError, "FastRestore").detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
 	}
 
-	wait( commitRestoreRoleInterfaces(self, cx) ); // Commit the interface after the interface is ready to accept requests
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-	self->processedCmd[req.cmdID] = 1;
-	self->clearInProgressFlag(RestoreCommandEnum::Recruit_Role_On_Worker);
+	return Void();
+}
 
+// Assume: Only update the local data if it (applierInterf) has not been set
+ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreWorkerData> self) {
+	ASSERT( self->loaderData.isValid() ); // Restore loader receives this request
+	if ( !self->loaderData->appliersInterf.empty() ) {
+		req.reply.send(RestoreCommonReply());
+		return Void();
+	}
+
+	self->loaderData->appliersInterf = req.sysInfo.appliers;
+	
+	req.reply.send(RestoreCommonReply() );
 	return Void();
 }
 
@@ -465,30 +448,59 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	// Assign a role to each worker
 	state int nodeIndex = 0;
 	state RestoreRole role;
-	state UID nodeID;
 	printf("Node:%s Start configuring roles for workers\n", self->describeNode().c_str());
 
 	self->cmdID.initPhase(RestoreCommandEnum::Recruit_Role_On_Worker);
 	printf("numLoader:%d, numApplier:%d, self->workerInterfaces.size:%d\n", numLoader, numApplier, self->workerInterfaces.size());
-	ASSERT( numLoader + numApplier == self->workerInterfaces.size() ); // We assign 1 role per worker for now
+	ASSERT( numLoader + numApplier <= self->workerInterfaces.size() ); // We assign 1 role per worker for now
 	std::map<UID, RestoreRecruitRoleRequest> requests;
 	for (auto &workerInterf : self->workerInterfaces)  {
-		if ( nodeIndex < numLoader ) {
-			role = RestoreRole::Loader;
-		} else {
+		if ( nodeIndex >= 0 && nodeIndex < numApplier ) { 
+			// [0, numApplier) are appliers
 			role = RestoreRole::Applier;
+		} else if ( nodeIndex >= numApplier && nodeIndex < numLoader + numApplier ) {
+			// [numApplier, numApplier + numLoader) are loaders
+			role = RestoreRole::Loader;
 		}
-		nodeID = workerInterf.first;
 		self->cmdID.nextCmd();
 		printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
-				getRoleStr(role).c_str(), nodeIndex, nodeID.toString().c_str());
+				getRoleStr(role).c_str(), nodeIndex,  workerInterf.first.toString().c_str());
 		requests[workerInterf.first] = RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex);
 		//cmdReplies.push_back( workerInterf.second.recruitRole.getReply(RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex)) );
 		nodeIndex++;
 	}
-	wait( getBatchReplies(&RestoreWorkerInterface::recruitRole, self->workerInterfaces, requests) );
+	state std::vector<RestoreRecruitRoleReply> replies;
+	wait( getBatchReplies(&RestoreWorkerInterface::recruitRole, self->workerInterfaces, requests, &replies) );
+	printf("TEST: RestoreRecruitRoleReply replies.size:%d\n", replies.size());
+	for (auto& reply : replies) {
+		printf("TEST: RestoreRecruitRoleReply reply:%s\n", reply.toString().c_str());
+		if ( reply.role == RestoreRole::Applier ) {
+			ASSERT_WE_THINK(reply.applier.present());
+			self->masterData->appliersInterf[reply.applier.get().id()] = reply.applier.get();
+		} else if ( reply.role == RestoreRole::Loader ) {
+			ASSERT_WE_THINK(reply.loader.present());
+			self->masterData->loadersInterf[reply.loader.get().id()] = reply.loader.get();
+		} else {
+			TraceEvent(SevError, "FastRestore").detail("RecruitRestoreRoles_InvalidRole", reply.role);
+		}
+	}
 	printf("[RecruitRestoreRoles] Finished\n");
 
+	return Void();
+}
+
+ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> self)  {
+	ASSERT( self->masterData.isValid() );
+	ASSERT( !self->masterData->loadersInterf.empty() );
+	RestoreSysInfo sysInfo(self->masterData->appliersInterf);
+	std::map<UID, RestoreSysInfoRequest> requests;
+	for (auto &loader : self->masterData->loadersInterf) {
+		requests[loader.first] =  RestoreSysInfoRequest(sysInfo);
+	}
+
+	wait( sendBatchRequests(&RestoreWorkerInterface::updateRestoreSysInfo, self->workerInterfaces, requests) );
+
+	TraceEvent("FastRestore").detail("DistributeRestoreSysInfo", "Finish");
 	return Void();
 }
 
@@ -510,6 +522,8 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 
 	// recruitRestoreRoles must be after collectWorkerInterface
 	wait( recruitRestoreRoles(self) );
+
+	wait( distributeRestoreSysInfo(self) );
 
 	wait( startRestoreMaster(self->masterData, cx) );
 
@@ -539,6 +553,10 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 				when ( RestoreRecruitRoleRequest req = waitNext(interf.recruitRole.getFuture()) ) {
 					requestTypeStr = "recruitRole";
 					actors.add( handleRecruitRoleRequest(req, self, &actors, cx) );
+				}
+				when ( RestoreSysInfoRequest req = waitNext(interf.updateRestoreSysInfo.getFuture()) ) {
+					requestTypeStr = "updateRestoreSysInfo";
+					actors.add( handleRestoreSysInfoRequest(req, self) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(interf.terminateWorker.getFuture()) ) {
 					// Destroy the worker at the end of the restore

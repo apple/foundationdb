@@ -101,13 +101,6 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 					requestTypeStr = "finishRestore";
 					exitRole = handlerFinishRestoreRequest(req, self, cx);
 				}
-                // TODO: To modify the following when conditions
-				when ( RestoreSimpleRequest req = waitNext(loaderInterf.collectRestoreRoleInterfaces.getFuture()) ) {
-					// Step: Find other worker's workerInterfaces
-					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their workerInterfaces into DB before we can read the workerInterface.
-					// TODO: Wait until all workers have registered their workerInterface.
-					actors.add( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
-				}
 				when ( wait(exitRole) ) {
 					break;
 				}
@@ -755,7 +748,7 @@ ACTOR Future<Void> registerMutationsToApplierV2(Reference<RestoreLoaderData> sel
 					//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
 					//cmdReplies.clear();
 				}
-				wait( getBatchReplies(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requestsToAppliers) );
+				wait( sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requestsToAppliers) );
 				requestsToAppliers.clear();
 				ASSERT( prevVersion < commitVersion );
 				prevVersion = commitVersion;

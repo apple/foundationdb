@@ -63,10 +63,6 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
 	try {
-		// wait( delay(1.0) );
-		wait( _collectRestoreRoleInterfaces(self, cx) );
-
-		// wait( delay(1.0) );
 		wait( askLoadersToCollectRestoreAppliersInterfaces(self) );
 
 		state int restoreId = 0;
@@ -990,38 +986,14 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
 		self->cmdID.nextCmd();
 		applierRequests[applier.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
 	}
-	wait( getBatchReplies(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, applierRequests) );
+	wait( sendBatchRequests(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, applierRequests) );
 
 	std::map<UID, RestoreVersionBatchRequest> loaderRequests;
 	for (auto &loader : self->loadersInterf) {
 		self->cmdID.nextCmd();
 		loaderRequests[loader.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
 	}
-	wait( getBatchReplies(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, loaderRequests) );
-
-	// loop {
-	// 	try {
-	// 		// wait(delay(1.0));
-	// 		std::vector<Future<RestoreCommonReply>> cmdReplies;
-	// 		self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
-
-			
-	// 		for (auto &loader : self->loadersInterf) {
-	// 			cmdReplies.push_back( loader.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
-	// 		}
-			
-	// 		// for (auto &applier : self->appliersInterf) {
-	// 		// 	cmdReplies.push_back( applier.second.initVersionBatch.getReply(RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
-	// 		// }
-
-	// 		std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-	// 		printf("Initilaize Version Batch done\n");
-	// 		break;
-	// 	} catch (Error &e) {
-	// 		fprintf(stdout, "[ERROR] Node:%s, Current phase: initializeVersionBatch, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-	// 				self->cmdID.toString().c_str(), e.code(), e.what());
-	// 	}
-	// }
+	wait( sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, loaderRequests) );
 
 	return Void();
 }
@@ -1038,33 +1010,7 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 				self->cmdID.nextCmd();
 				requests[applier.first] = RestoreSimpleRequest(self->cmdID);
 			}
-			wait( getBatchReplies(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
-
-			// state std::map<UID, RestoreApplierInterface>::iterator applier;
-			// for (applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++) {
-			// 	RestoreApplierInterface &applierInterf = applier->second;
-	
-			// 	printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", self->describeNode().c_str(), applier->first.toString().c_str());
-			// 	cmdReplies.push_back( applier->second.applyToDB.getReply(RestoreSimpleRequest(self->cmdID)) );
-
-			// 	// Ask applier to apply to DB one by one
-			// 	printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
-			// 	std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			// 	//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-			// 	printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
-
-			// 	cmdReplies.clear();
-
-			// }
-			// Ask all appliers to apply to DB at once
-			// printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", self->appliersInterf.size());
-			// std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			// //std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-			// printf("[INFO] %ld appliers finished applying mutations to DB\n", self->appliersInterf.size());
-
-			// cmdReplies.clear();
-
-			// wait(delay(5.0)); //TODO: Delete this wait and see if it can pass correctness
+			wait( sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
 
 			break;
 		} catch (Error &e) {
@@ -1228,7 +1174,6 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 			self->loadersInterf.clear();
 			self->appliersInterf.clear();
 			cmdReplies.clear();
-			wait( _collectRestoreRoleInterfaces(self, cx) );
 		}
 	}
 

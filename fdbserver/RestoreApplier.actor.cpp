@@ -98,11 +98,6 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					requestTypeStr = "finishRestore";
 					exitRole =  handlerFinishRestoreRequest(req, self, cx);
 				}
-				when ( RestoreSimpleRequest req = waitNext(applierInterf.collectRestoreRoleInterfaces.getFuture()) ) {
-					// NOTE: This must be after wait(configureRolesHandler()) because we must ensure all workers have registered their workerInterfaces into DB before we can read the workerInterface.
-					// TODO: Wait until all workers have registered their workerInterface.
-					actors.add( handleCollectRestoreRoleInterfaceRequest(req, self, cx) );
-				}
 				when ( wait(exitRole) ) {
 					break;
 				}

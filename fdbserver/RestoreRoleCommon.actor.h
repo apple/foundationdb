@@ -53,11 +53,9 @@ struct RestoreMasterData;
 struct RestoreSimpleRequest;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
-ACTOR Future<Void> handleCollectRestoreRoleInterfaceRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx);
 
-ACTOR Future<Void> _collectRestoreRoleInterfaces(Reference<RestoreRoleData> self, Database cx);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -104,6 +102,7 @@ struct StringRefReaderMX {
 	const int str_size;
 	Error failure_error;
 };
+
 
 struct RestoreRoleData :  NonCopyable, public ReferenceCounted<RestoreRoleData> {
 public:	
