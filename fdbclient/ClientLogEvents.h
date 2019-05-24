@@ -101,7 +101,7 @@ namespace FdbClientLogEvents {
 		double startTs{ 0 };
 
 		void logEvent(std::string id) const {}
-		void addToRequestStats(RequestStats &reqStats) const {}
+		void addToReqStats(RequestStats &reqStats) const {}
 	};
 
 	struct EventGetVersion : public Event {

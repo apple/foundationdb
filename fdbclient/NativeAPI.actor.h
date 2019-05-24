@@ -192,7 +192,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 
 		if(logLocation & REQ_STATS) {
 			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
-			event.addToRequestStats(requestStats);
+			event.addToReqStats(requestStats);
 		}
 	}
 
