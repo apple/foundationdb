@@ -803,7 +803,6 @@ ACTOR static Future<Void> changeConnectionFileImpl(Reference<ClusterConnectionFi
 			    .detail("ReadVersion", v)
 			    .detail("MinAcceptableReadVersion", self->minAcceptableReadVersion);
 			ASSERT(self->minAcceptableReadVersion != std::numeric_limits<Version>::max());
-			TraceEvent("ChangeClusterFileRecreateWatchesTrigger");
 			self->recreateWatchesTrigger.trigger();
 			return Void();
 		} catch (Error& e) {
