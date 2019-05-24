@@ -19,6 +19,8 @@
  */
 
 #include "FDBLibTLS/FDBLibTLSSession.h"
+
+#include "flow/flow.h"
 #include "flow/Trace.h"
 
 #include <openssl/bio.h>
@@ -60,7 +62,7 @@ static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, v
 
 FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uidptr) :
 	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
-	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false) {
+	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), lastVerifyFailureLogged(0.0) {
 	if (uidptr)
 		uid = * (UID*) uidptr;
 
@@ -342,8 +344,11 @@ bool FDBLibTLSSession::verify_peer() {
 
 	if (!rc) {
 		// log the various failure reasons
-		for (std::string reason : verify_failure_reasons) {
-			TraceEvent("FDBLibTLSVerifyFailure", uid).detail("Reason", reason).suppressFor(1.0);
+		if(now() - lastVerifyFailureLogged > 1.0) {
+			for (std::string reason : verify_failure_reasons) {
+				lastVerifyFailureLogged = now();
+				TraceEvent("FDBLibTLSVerifyFailure", uid).detail("Reason", reason);
+			}
 		}
 	}
 

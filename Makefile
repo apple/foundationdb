@@ -1,13 +1,12 @@
 export
 PLATFORM := $(shell uname)
 ARCH := $(shell uname -m)
-ifeq ("$(wildcard /etc/centos-release)", "")
-	LIBSTDCPP_HACK = 1
-else
-	LIBSTDCPP_HACK = 0
-endif
-
 TOPDIR := $(shell pwd)
+
+# Allow custom libc++ hack for Ubuntu
+ifeq ("$(wildcard /etc/centos-release)", "")
+  LIBSTDCPP_HACK ?= 1
+endif
 
 ifeq ($(ARCH),x86_64)
   ARCH := x64
@@ -15,14 +14,14 @@ else
   $(error Not prepared to compile on $(ARCH))
 endif
 
-MONO := $(shell which mono)
+MONO := $(shell which mono 2>/dev/null)
 ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-MCS := $(shell which mcs)
+MCS := $(shell which mcs 2>/dev/null)
 ifeq ($(MCS),)
-  MCS := $(shell which dmcs) 
+  MCS := $(shell which dmcs 2>/dev/null)
 endif
 ifeq ($(MCS),)
   MCS := /usr/bin/mcs
@@ -56,8 +55,8 @@ else ifeq ($(PLATFORM),Darwin)
   CC := /usr/bin/clang
   CXX := /usr/bin/clang
 
-  CFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
-  CXXFLAGS += -mmacosx-version-min=10.7 -std=c++11 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
+  CFLAGS += -mmacosx-version-min=10.14 -stdlib=libc++
+  CXXFLAGS += -mmacosx-version-min=10.14 -std=c++17 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
@@ -70,7 +69,7 @@ else
 endif
 BOOSTDIR ?= ${BOOST_BASEDIR}/${BOOST_BASENAME}
 
-CCACHE := $(shell which ccache)
+CCACHE := $(shell which ccache 2>/dev/null)
 ifneq ($(CCACHE),)
   CCACHE_CC := $(CCACHE) $(CC)
   CCACHE_CXX := $(CCACHE) $(CXX)

@@ -23,6 +23,9 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -168,7 +171,7 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -213,7 +216,7 @@ struct GetStorageServerRejoinInfoReply {
 	Tag tag;
 	Optional<Tag> newTag;
 	bool newLocality;
-	vector<pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -22,10 +22,8 @@
 
 package fdb
 
-/*
- #define FDB_API_VERSION 610
- #include <foundationdb/fdb_c.h>
-*/
+// #define FDB_API_VERSION 610
+// #include <foundationdb/fdb_c.h>
 import "C"
 
 // A ReadTransaction can asynchronously read from a FoundationDB

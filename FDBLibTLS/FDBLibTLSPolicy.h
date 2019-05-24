@@ -24,7 +24,7 @@
 #pragma once
 
 #include "fdbrpc/ITLSPlugin.h"
-#include "ReferenceCounted.h"
+#include "flow/FastRef.h"
 
 #include "FDBLibTLS/FDBLibTLSPlugin.h"
 #include "FDBLibTLS/FDBLibTLSVerify.h"

@@ -1344,7 +1344,7 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 	}
 	
 	if (tr.apiVersionAtLeast(300)) {
-		if (keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) {
+		if ((keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) && (keys.begin != metadataVersionKey || keys.end != metadataVersionKeyEnd)) {
 			throw key_outside_legal_range();
 		}
 	}
