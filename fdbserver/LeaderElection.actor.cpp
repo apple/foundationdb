@@ -75,8 +75,10 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
-	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
+ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Value proposedSerializedInterface,
+                                           Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected,
+                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees(new AsyncVar<vector<Optional<LeaderInfo>>>());
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;

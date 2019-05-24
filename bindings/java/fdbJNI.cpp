@@ -28,14 +28,8 @@
 #define JNI_NULL nullptr 
 
 #if defined(__GNUG__)
-#define thread_local __thread
-// TODO: figure out why the default definition suppresses visibility
 #undef JNIEXPORT
 #define JNIEXPORT __attribute__ ((visibility ("default")))
-#elif defined(_MSC_VER)
-#define thread_local __declspec(thread)
-#else
-#error Missing thread local storage
 #endif
 
 static JavaVM* g_jvm = nullptr; 

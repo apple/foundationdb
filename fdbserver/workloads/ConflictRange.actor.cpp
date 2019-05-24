@@ -74,8 +74,6 @@ struct ConflictRangeWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload *self) {
-		state int i;
-		state int j;
 		state std::string clientID;
 		state std::string myKeyA;
 		state std::string myKeyB;
@@ -182,7 +180,9 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				//Do random operations in one of the transactions and commit.
 				//Either do all sets in locations without existing data or all clears in locations with data.
-				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
+				for (int i = 0;
+				     i < g_random->randomInt(self->minOperationsPerTransaction, self->maxOperationsPerTransaction + 1);
+				     i++) {
 					if( randomSets ) {
 						for( int j = 0; j < 5; j++) {
 							int proposedKey = g_random->randomInt( 0, self->maxKeySpace );

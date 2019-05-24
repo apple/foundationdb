@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -27,6 +26,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/actorcompiler.h" // This must be the last include.
 
 struct KillRegionWorkload : TestWorkload {
 	bool enabled;

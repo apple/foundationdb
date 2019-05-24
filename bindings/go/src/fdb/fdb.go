@@ -22,11 +22,9 @@
 
 package fdb
 
-/*
- #define FDB_API_VERSION 610
- #include <foundationdb/fdb_c.h>
- #include <stdlib.h>
-*/
+// #define FDB_API_VERSION 610
+// #include <foundationdb/fdb_c.h>
+// #include <stdlib.h>
 import "C"
 
 import (
@@ -139,7 +137,10 @@ func APIVersion(version int) error {
 			if e == 2203 {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
-					return fmt.Errorf("This version of the FoundationDB Go binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d.", headerVersion, maxSupportedVersion)
+					return fmt.Errorf("This version of the FoundationDB Go binding is "+
+						"not supported by the installed FoundationDB C library. "+
+						"The binding requires a library that supports API version %d, "+
+						"but the installed library supports a maximum version of %d.", headerVersion, maxSupportedVersion)
 				}
 				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}

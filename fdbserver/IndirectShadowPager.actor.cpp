@@ -444,7 +444,6 @@ ACTOR Future<Void> waitAndFreePhysicalPageID(IndirectShadowPager *pager, Physica
 // have been committed and so the physical page should still contain its previous data but it's been overwritten.
 void IndirectShadowPager::freePhysicalPageID(PhysicalPageID pageID) {
 	debug_printf("%s: Freeing physical %u\n", pageFileName.c_str(), pageID);
-	auto itr = busyPages.find(pageID);
 	pagerFile.freePage(pageID);
 }
 

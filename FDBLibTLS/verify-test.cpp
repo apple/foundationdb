@@ -28,7 +28,6 @@
 #include <openssl/objects.h>
 
 #include "fdbrpc/ITLSPlugin.h"
-#include "ReferenceCounted.h"
 
 #include "FDBLibTLS/FDBLibTLSPlugin.h"
 #include "FDBLibTLS/FDBLibTLSPolicy.h"

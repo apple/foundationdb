@@ -33,6 +33,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct WorkloadInterface {
+	constexpr static FileIdentifier file_identifier = 4454551;
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
 	RequestStream<ReplyPromise<bool>> check;
@@ -48,6 +49,7 @@ struct WorkloadInterface {
 };
 
 struct WorkloadRequest {
+	constexpr static FileIdentifier file_identifier = 8121024;
 	Arena arena;
 	StringRef title;
 	int timeout;
@@ -79,6 +81,7 @@ struct WorkloadRequest {
 };
 
 struct TesterInterface {
+	constexpr static FileIdentifier file_identifier = 4465210;
 	RequestStream<WorkloadRequest> recruitments;
 
 	UID id() const { return recruitments.getEndpoint().token; }

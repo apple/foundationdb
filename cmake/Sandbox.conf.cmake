@@ -33,6 +33,6 @@ logdir = ${CMAKE_BINARY_DIR}/sandbox/logs
 # metrics_cluster =
 # metrics_prefix =
 
-## An individual fdbserver process with id 4500
+## An individual fdbserver process with id 4000
 ## Parameters set here override defaults from the [fdbserver] section
 [fdbserver.4000]

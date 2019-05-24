@@ -27,63 +27,92 @@ THIS SOFTWARE IS PROVIDED BY DMITRY VYUKOV "AS IS" AND ANY EXPRESS OR IMPLIED WA
 
 The views and conclusions contained in the software and documentation are those of the authors and should not be interpreted as representing official policies, either expressed or implied, of Dmitry Vyukov.*/
 
+#include <atomic>
+
+#if VALGRIND
+#include <drd.h>
+#endif
+  
 template <class T>
 class ThreadSafeQueue : NonCopyable {
 	struct BaseNode {
-		BaseNode* volatile  next;
+		std::atomic<BaseNode*> next;
+		BaseNode() : next(nullptr) {}
 	};
 
-	struct Node : BaseNode, FastAllocated<Node>
-	{
+	struct Node : BaseNode, FastAllocated<Node> {
 		T data;
 		Node( T const& data ) : data(data) {}
 	};
-	BaseNode* volatile  head;
-	BaseNode*           tail;
+	std::atomic<BaseNode*> head;
+	BaseNode* tail;
 	BaseNode stub, sleeping;
 	bool sleepy;
 
 	BaseNode* popNode() {
 		BaseNode* tail = this->tail;
-		BaseNode* next = tail->next;
+		BaseNode* next = tail->next.load();
+#if VALGRIND
+		ANNOTATE_HAPPENS_BEFORE(&tail->next);
+#endif
 		if (tail == &this->stub) {
-			if (0 == next)
-				return 0;
+			if (!next) {
+				return nullptr;
+			}
 			this->tail = next;
 			tail = next;
-			next = next->next;
+			next = next->next.load();
+#if VALGRIND
+			ANNOTATE_HAPPENS_BEFORE(&next->next);
+#endif
 		}
-		if (next)
-		{
+		if (next) {
 			this->tail = next;
 			return tail;
 		}
-		BaseNode* head = this->head;
-		if (tail != head)
-			return 0;
-		pushNode( &this->stub );
-		next = tail->next;
-		if (next)
-		{
+		BaseNode* head = this->head.load();
+#if VALGRIND
+		ANNOTATE_HAPPENS_BEFORE(&this->head);
+#endif
+		if (tail != head) {
+			return nullptr;
+		}
+#if VALGRIND
+		ANNOTATE_HAPPENS_AFTER(&this->stub.next);
+#endif
+		this->stub.next.store(nullptr);
+		pushNode(&this->stub);
+		next = tail->next.load();
+#if VALGRIND
+		ANNOTATE_HAPPENS_BEFORE(&tail->next);
+#endif
+		if (next) {
 			this->tail = next;
 			return tail;
 		}
-		return 0;
+		return nullptr;
 	}
 
 	// Pushes n at the end of the queue and returns the node immediately before it
 	BaseNode* pushNode( BaseNode* n ) {
-		n->next = 0;
-		BaseNode* prev = interlockedExchangePtr( &head, n );
-		prev->next = n;
+#if VALGRIND
+		ANNOTATE_HAPPENS_AFTER(&head);
+#endif
+		BaseNode* prev = head.exchange(n);
+#if VALGRIND
+		ANNOTATE_HAPPENS_BEFORE(&head);
+		ANNOTATE_HAPPENS_AFTER(&prev->next);
+#endif
+		prev->next.store(n);
 		return prev;
 	}
 public:
 	ThreadSafeQueue() {
-		this->head = &this->stub;
+#if VALGRIND
+		ANNOTATE_HAPPENS_AFTER(&this->head);
+#endif
+		this->head.store(&this->stub);
 		this->tail = &this->stub;
-		this->stub.next = 0;
-		this->sleeping.next = 0;
 		this->sleepy = false;
 	}
 	~ThreadSafeQueue() {
@@ -101,10 +130,21 @@ public:
 
 	// If canSleep returns true, then the queue is empty and the next push() will return true
 	bool canSleep() {
-		if (sleepy) return false;  // We already have sleeping in the queue from a previous call to canSleep.  Pop it and then maybe you can sleep!
-		if (this->tail != &stub || this->tail->next != 0) return false;  // There is definitely something in the queue.  This is a rejection test not needed for correctness, but avoids calls to pushNode
+		if (sleepy) {
+			return false;  // We already have sleeping in the queue from a previous call to canSleep.  Pop it and then maybe you can sleep!
+		}
+		if (this->tail != &stub || this->tail->next.load()) {
+#if VALGRIND
+			ANNOTATE_HAPPENS_BEFORE(&this->tail->next);
+#endif
+			return false;  // There is definitely something in the queue.  This is a rejection test not needed for correctness, but avoids calls to pushNode
+		}
+#if VALGRIND
+		ANNOTATE_HAPPENS_BEFORE(&this->tail->next);
+#endif
 		// sleeping is definitely not in the queue, so we can safely try...
-		bool ok = pushNode( &sleeping ) == &stub;
+		sleeping.next.store(nullptr);
+		bool ok = pushNode(&sleeping) == &stub;
 		sleepy = true; // sleeping is in the queue, regardless of whether it's the first thing; we need to pop it before sleeping again
 		return ok;
 	}
@@ -112,8 +152,8 @@ public:
 	Optional<T> pop() {
 		BaseNode* b = popNode();
 		if (b == &sleeping) { sleepy = false; b = popNode(); }
-		if ( b == &sleeping ) ASSERT(false);
-		if ( b == &stub ) ASSERT(false);
+		if (b == &sleeping) ASSERT(false);
+		if (b == &stub) ASSERT(false);
 		if (!b) return Optional<T>();
 
 		Node* n = (Node*)b;

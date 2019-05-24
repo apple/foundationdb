@@ -255,4 +255,5 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self);
 ACTOR Future<Void> teamRemoverPeriodic(DDTeamCollection* self);
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
 
+#include "flow/unactorcompiler.h"
 #endif

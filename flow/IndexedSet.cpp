@@ -24,6 +24,7 @@
 #include "flow/IndexedSet.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadPrimitives.h"
+#include <cinttypes>
 #include <algorithm>
 #include <set>
 #include <string>
@@ -129,7 +130,7 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	is.testonly_assertBalanced();
 
 	int count = 0;
-	for (auto i : is) ++count;
+	for (auto iter = is.begin(); iter != is.end(); ++iter) ++count;
 
 	ASSERT(count*3 == is.sumTo(is.end()));
 
@@ -230,9 +231,7 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 
 		//printf("\n#%d Erasing %d of %d items\n", t, original_incount, original_count);
 
-		auto before = timer();
 		is.erase(ib, ie);
-		auto erase_time = timer() - before;
 		is.testonly_assertBalanced();
 
 		int count = 0, incount = 0;
@@ -246,7 +245,6 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 
 		//printf("%d items remain, totalling %d\n", count, is.sumTo(is.end()));
 		//printf("%d items remain in erased range\n", incount);
-		//printf("Erase time: %f sec\n", erase_time);
 
 		ASSERT(incount == 0);
 		ASSERT(count == original_count - original_incount);
@@ -399,13 +397,12 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	for (int i = 0; i<100000; i++) {
 		int b = g_random->randomInt(1, (int)allNumbers.size());
 		int64_t ntotal = int64_t(b)*(b - 1) / 2;
-		int64_t nmax = int64_t(b + 1)*(b) / 2;
-		int64_t n = ntotal;// + g_random->randomInt( 0, int(std::max<int64_t>(1<<30,nmax-ntotal)) );
+		int64_t n = ntotal;
 		auto ii = is.index(n);
 		int ib = ii != is.end() ? *ii : 1000000;
 		ASSERT(ib == b);
 		if (ib != b)
-			printf("%s %lld %d %d %lld\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
+			printf("%s %" PRId64 " %d %d %" PRId64 "\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
 	}
 
 	for (int i = 0; i<100000; i++) {
@@ -418,7 +415,7 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 		int64_t ntotal = int64_t(b - a)*(a + b - 1) / 2;
 		ASSERT(itotal == ntotal);
 		if (itotal != ntotal)
-			printf("%s %lld %lld\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
+			printf("%s %" PRId64 " %" PRId64 "\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
 	}
 
 	//double a = timer();

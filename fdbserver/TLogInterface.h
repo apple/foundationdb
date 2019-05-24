@@ -29,6 +29,7 @@
 #include <iterator>
 
 struct TLogInterface {
+	constexpr static FileIdentifier file_identifier = 16308510;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -64,13 +65,16 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ASSERT(ar.isDeserializing || uniqueID != UID());
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.isDeserializing || uniqueID != UID());
+		}
 		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
 		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
 	}
 };
 
 struct TLogRecoveryFinishedRequest {
+	constexpr static FileIdentifier file_identifier = 8818668;
 	ReplyPromise<Void> reply;
 
 	TLogRecoveryFinishedRequest() {}
@@ -82,6 +86,7 @@ struct TLogRecoveryFinishedRequest {
 };
 
 struct TLogLockResult {
+	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
 
@@ -92,6 +97,7 @@ struct TLogLockResult {
 };
 
 struct TLogConfirmRunningRequest {
+	constexpr static FileIdentifier file_identifier = 10929130;
 	Optional<UID> debugID;
 	ReplyPromise<Void> reply;
 
@@ -136,6 +142,7 @@ struct VerUpdateRef {
 };
 
 struct TLogPeekReply {
+	constexpr static FileIdentifier file_identifier = 11365689;
 	Arena arena;
 	StringRef messages;
 	Version end;
@@ -151,6 +158,7 @@ struct TLogPeekReply {
 };
 
 struct TLogPeekRequest {
+	constexpr static FileIdentifier file_identifier = 11001131;
 	Arena arena;
 	Version begin;
 	Tag tag;
@@ -168,6 +176,7 @@ struct TLogPeekRequest {
 };
 
 struct TLogPopRequest {
+	constexpr static FileIdentifier file_identifier = 5556423;
 	Arena arena;
 	Version to;
 	Version durableKnownCommittedVersion;
@@ -201,6 +210,7 @@ struct TagMessagesRef {
 };
 
 struct TLogCommitRequest {
+	constexpr static FileIdentifier file_identifier = 4022206;
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
@@ -218,16 +228,8 @@ struct TLogCommitRequest {
 	}
 };
 
-struct TLogQueuingMetricsRequest {
-	ReplyPromise<struct TLogQueuingMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
 struct TLogQueuingMetricsReply {
+	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
@@ -237,6 +239,16 @@ struct TLogQueuingMetricsReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
+	}
+};
+
+struct TLogQueuingMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 7798476;
+	ReplyPromise<struct TLogQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

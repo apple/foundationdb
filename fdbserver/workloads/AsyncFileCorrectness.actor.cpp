@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -89,7 +91,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		if(maxOperationSize * numSimultaneousOperations > targetFileSize * 0.25)
 		{
 			targetFileSize *= (int)ceil((maxOperationSize * numSimultaneousOperations * 4.0) / targetFileSize);
-			printf("Target file size is insufficient to support %d simultaneous operations of size %d; changing to %lld\n", numSimultaneousOperations, maxOperationSize, targetFileSize);
+			printf("Target file size is insufficient to support %d simultaneous operations of size %d; changing to %" PRId64 "\n", numSimultaneousOperations, maxOperationSize, targetFileSize);
 		}
 	}
 
@@ -206,7 +208,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 						//If we know what data should be in a particular range, then compare the result with what we know
 						if(isValid && memcmp(&self->fileValidityMask[info.offset + start], &info.data->buffer[start], i - start))
 						{
-							printf("Read returned incorrect results at %llu of length %llu\n", info.offset, info.length);
+							printf("Read returned incorrect results at %" PRIu64 " of length %" PRIu64 "\n", info.offset, info.length);
 
 							self->success = false;
 							return Void();
@@ -415,7 +417,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 			if(numRead != std::min(info.length, self->fileSize - info.offset))
 			{
-				printf("Read reported incorrect number of bytes at %llu of length %llu\n", info.offset, info.length);
+				printf("Read reported incorrect number of bytes at %" PRIu64 " of length %" PRIu64 "\n", info.offset, info.length);
 				self->success = false;
 			}
 		}
@@ -456,12 +458,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if(fileSizeChange >= _PAGE_SIZE)
 			{
-				printf("Reopened file increased in size by %lld bytes (at most %d allowed)\n", fileSizeChange, _PAGE_SIZE - 1);
+				printf("Reopened file increased in size by %" PRId64 " bytes (at most %d allowed)\n", fileSizeChange, _PAGE_SIZE - 1);
 				self->success = false;
 			}
 			else if(fileSizeChange < 0)
 			{
-				printf("Reopened file decreased in size by %lld bytes\n", -fileSizeChange);
+				printf("Reopened file decreased in size by %" PRId64 " bytes\n", -fileSizeChange);
 				self->success = false;
 			}
 

@@ -42,6 +42,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <cinttypes>
 #include <algorithm>	// std::transform
 #include <string>
 #include <iostream>
@@ -1260,7 +1261,6 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
 		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey());
-		state int i = 0;
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1387,7 +1387,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::s
 				readMore = true;
 		} catch(Error &e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", printable(docs[i].key));
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if(limit == 1)
@@ -1983,7 +1983,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
+		printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
 		targetVersion = v;
 	}
 
@@ -2008,7 +2008,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
-				printf("Using target restore version %lld\n", targetVersion);
+				printf("Using target restore version %" PRId64 "\n", targetVersion);
 		}
 
 		if (performRestore) {
@@ -2016,18 +2016,18 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
-				printf("Restored to version %lld\n", restoredVersion);
+				printf("Restored to version %" PRId64 "\n", restoredVersion);
 			}
 		}
 		else {
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
 
 			if(!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld.  Describe backup for more information.\n", targetVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 ".  Describe backup for more information.\n", targetVersion);
 				throw restore_invalid_version();
 			}
 
-			printf("Backup can be used to restore to version %lld\n", targetVersion);
+			printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
 		}
 
 	}
@@ -2061,7 +2061,7 @@ ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationConta
 		}
 	}
 
-	printf("Scanning version range %lld to %lld\n", beginVersion, endVersion);
+	printf("Scanning version range %" PRId64 " to %" PRId64 "\n", beginVersion, endVersion);
 	BackupFileList files = wait(c->dumpFileList(beginVersion, endVersion));
 	files.toStream(stdout);
 
@@ -2113,9 +2113,9 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : "") );
 
 		if(endVersion < 0)
-			printf("All data before %lld versions (%lld days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			printf("All data before %" PRId64 " versions (%" PRId64 " days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
-			printf("All data before version %lld has been deleted.\n", endVersion);
+			printf("All data before version %" PRId64 " has been deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2453,7 +2453,7 @@ Version parseVersion(const char *str) {
 	}
 
 	Version ver;
-	if(sscanf(str, "%lld", &ver) != 1) {
+	if(sscanf(str, "%" SCNd64, &ver) != 1) {
 		fprintf(stderr, "Could not parse version: %s\n", str);
 		flushAndExit(FDB_EXIT_ERROR);
 	}

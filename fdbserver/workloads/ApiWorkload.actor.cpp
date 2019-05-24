@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -114,7 +115,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<Key
 		for(int j = 0; j < storeResults.size(); j++)
 			printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-		printf("Read Version: %lld\n", readVersion);
+		printf("Read Version: %" PRId64 "\n", readVersion);
 
 		TraceEvent(SevError, format("%s_CompareSizeMismatch", description().c_str()).c_str()).detail("ReadVer", readVersion).detail("ResultSize", dbResults.size()).detail("StoreResultSize", storeResults.size());
 
@@ -134,7 +135,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<Key
 			for(int j = 0; j < storeResults.size(); j++)
 				printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-			printf("Read Version: %lld\n", readVersion);
+			printf("Read Version: %" PRId64 "\n", readVersion);
 
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str()).detail("ReadVer", readVersion).detail("ResultSize", dbResults.size()).detail("DifferAt", i);
 

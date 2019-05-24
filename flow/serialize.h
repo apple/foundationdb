@@ -27,6 +27,8 @@
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -99,6 +101,11 @@ inline void load( Ar& ar, T& value ) {
 	Serializer<Ar,T>::serialize(ar, value);
 }
 
+template <class CharT, class Traits, class Allocator>
+struct FileIdentifierFor<std::basic_string<CharT, Traits, Allocator>> {
+	constexpr static FileIdentifier value = 15694229;
+};
+
 template <class Archive>
 inline void load( Archive& ar, std::string& value ) {
 	int32_t length;
@@ -123,6 +130,20 @@ public:
 	}
 };
 
+template <class F, class S, bool = HasFileIdentifier<F>::value&& HasFileIdentifier<S>::value>
+struct PairFileIdentifier;
+
+template <class F, class S>
+struct PairFileIdentifier<F, S, false> {};
+
+template <class F, class S>
+struct PairFileIdentifier<F, S, true> {
+	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
+};
+
+template <class F, class S>
+struct FileIdentifierFor<std::pair<F, S>> : PairFileIdentifier<F, S> {};
+
 template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
@@ -130,6 +151,9 @@ public:
 		serializer(ar, p.first, p.second);
 	}
 };
+
+template <class T, class Allocator>
+struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 0x10> {};
 
 template <class Archive, class T>
 inline void save( Archive& ar, const std::vector<T>& value ) {
@@ -229,6 +253,11 @@ static inline bool valgrindCheck( const void* data, int bytes, const char* conte
 extern const uint64_t currentProtocolVersion;
 extern const uint64_t minValidProtocolVersion;
 extern const uint64_t compatibleProtocolVersionMask;
+extern const uint64_t objectSerializerFlag;
+
+extern uint64_t removeFlags(uint64_t version);
+extern uint64_t addObjectSerializerFlag(uint64_t version);
+extern bool hasObjectSerializerFlag(uint64_t version);
 
 struct _IncludeVersion {
 	uint64_t v;
@@ -261,9 +290,7 @@ struct _IncludeVersion {
 };
 struct _AssumeVersion {
 	uint64_t v;
-	explicit _AssumeVersion( uint64_t version ) : v(version) {
-		ASSERT( version >= minValidProtocolVersion );
-	}
+	explicit _AssumeVersion( uint64_t version );
 	template <class Ar> void write( Ar& ar ) { ar.setProtocolVersion(v); }
 	template <class Ar> void read( Ar& ar ) { ar.setProtocolVersion(v); }
 };
@@ -277,7 +304,7 @@ inline _IncludeVersion IncludeVersion( uint64_t defaultVersion = currentProtocol
 inline _AssumeVersion AssumeVersion( uint64_t version ) { return _AssumeVersion(version); }
 inline _Unversioned Unversioned() { return _Unversioned(); }
 
-static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL, 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
+//static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL, 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
 
 class BinaryWriter : NonCopyable {
 public:
@@ -506,6 +533,10 @@ public:
 		return (const uint8_t*)readBytes(bytes);
 	}
 
+	StringRef arenaReadAll() const {
+		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
+	}
+
 	template <class T>
 	void serializeBinaryItem( T& t ) {
 		t = *(T*)readBytes(sizeof(T));
@@ -546,13 +577,7 @@ public:
 	static const int isDeserializing = 1;
 	typedef BinaryReader READER;
 
-	const void* readBytes( int bytes ) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT( e <= end );
-		begin = e;
-		return b;
-	}
+	const void* readBytes( int bytes );
 
 	const void* peekBytes( int bytes ) {
 		ASSERT( begin + bytes <= end );
@@ -694,35 +719,56 @@ private:
 };
 
 struct ISerializeSource {
-	virtual void serializePacketWriter( PacketWriter& ) const = 0;
-	virtual void serializeBinaryWriter( BinaryWriter& ) const = 0;
+	virtual void serializePacketWriter(PacketWriter&, bool useObjectSerializer) const = 0;
+	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
+	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
 
-template <class T>
+template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
-	virtual void serializePacketWriter( PacketWriter& w ) const { ((T const*)this)->serialize(w); }
-	virtual void serializeBinaryWriter( BinaryWriter& w ) const { ((T const*)this)->serialize(w); }
+	using value_type = V;
+	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
+		if (useObjectSerializer) {
+			ObjectWriter writer;
+			writer.serialize(get());
+			w.serializeBytes(writer.toStringRef()); // TODO(atn34) Eliminate unnecessary memcpy
+		} else {
+			static_cast<T const*>(this)->serialize(w);
+		}
+	}
+	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
+	virtual value_type const& get() const = 0;
 };
 
 template <class T>
-struct SerializeSource : MakeSerializeSource<SerializeSource<T>> {
+struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
+	using value_type = T;
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
-	template <class Ar> void serialize(Ar& ar) const { ar << value; }
+	virtual void serializeObjectWriter(ObjectWriter& w) const {
+		w.serialize(value);
+	}
+	template <class Ar> void serialize(Ar& ar) const {
+		ar << value;
+	}
+	virtual T const& get() const { return value; }
 };
 
 template <class T>
-struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>> {
+struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
+	using value_type = T;
 	bool b;
 	T const& value;
 	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
 	template <class Ar> void serialize(Ar& ar) const { ar << b << value; }
-};
-
-struct SerializeSourceRaw : MakeSerializeSource<SerializeSourceRaw> {
-	StringRef data;
-	SerializeSourceRaw(StringRef data) : data(data) {}
-	template <class Ar> void serialize(Ar& ar) const { ar.serializeBytes(data); }
+	virtual void serializeObjectWriter(ObjectWriter& w) const {
+		ASSERT(false);
+	}
+	virtual T const& get() const {
+		// This is only used for the streaming serializer
+		ASSERT(false);
+		return value;
+	}
 };
 
 #endif

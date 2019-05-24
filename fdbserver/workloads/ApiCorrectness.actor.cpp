@@ -187,19 +187,17 @@ public:
 			return Void();
 
 		//Test the get function
-		bool getResult = wait(self->runGet(data, self->numGets, self));
+		wait(::success(self->runGet(data, self->numGets, self)));
 
 		//Test the getRange function
 		state int i;
-		for(i = 0; i < self->numGetRanges; i++)
-			bool getRangeResult = wait(self->runGetRange(data, self));
+		for (i = 0; i < self->numGetRanges; i++) wait(::success(self->runGetRange(data, self)));
 
 		//Test the getRange function using key selectors
-		for(i = 0; i < self->numGetRangeSelectors; i++)
-			bool getRangeSelectorResult = wait(self->runGetRangeSelector(data, self));
+		for (i = 0; i < self->numGetRangeSelectors; i++) wait(::success(self->runGetRangeSelector(data, self)));
 
 		//Test the getKey function
-		bool getKeyResult = wait(self->runGetKey(data, self->numGetKeys, self));
+		wait(::success(self->runGetKey(data, self->numGetKeys, self)));
 
 		//Test the clear function
 		bool clearResult = wait(self->runClear(data, self->numClears, self));

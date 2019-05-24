@@ -483,7 +483,7 @@ Key logRangesEncodeKey(KeyRef keyBegin, UID logUid) {
 // Returns the start key and optionally the logRange Uid
 KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 	if (key.size() < logRangesRange.begin.size() + sizeof(UID)) {
-		TraceEvent(SevError, "InvalidDecodeKey").detail("Key", printable(key));
+		TraceEvent(SevError, "InvalidDecodeKey").detail("Key", key);
 		ASSERT(false);
 	}
 
@@ -587,6 +587,7 @@ const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
 const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
+const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00");
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
 
@@ -607,3 +608,25 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 	wr << agentID;
 	return wr.toValue();
 }
+
+const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
+
+const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << zoneId;
+	wr << version;
+	return wr.toValue();
+}
+std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& value) {
+	Key zoneId;
+	Version version;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> zoneId;
+	reader >> version;
+	return std::make_pair(zoneId, version);
+}
+
+const KeyRangeRef testOnlyTxnStateStorePrefixRange(
+    LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
+    LiteralStringRef("\xff/TESTONLYtxnStateStore0")
+);

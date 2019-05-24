@@ -54,6 +54,7 @@
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -79,81 +80,84 @@
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT };
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER };
 
 CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
-	{ OPT_CONNFILE,             "--cluster_file",              SO_REQ_SEP },
-	{ OPT_SEEDCONNFILE,         "--seed_cluster_file",         SO_REQ_SEP },
-	{ OPT_SEEDCONNSTRING,       "--seed_connection_string",    SO_REQ_SEP },
-	{ OPT_ROLE,                 "-r",                          SO_REQ_SEP },
-	{ OPT_ROLE,                 "--role",                      SO_REQ_SEP },
-	{ OPT_PUBLICADDR,           "-p",                          SO_REQ_SEP },
-	{ OPT_PUBLICADDR,           "--public_address",            SO_REQ_SEP },
-	{ OPT_LISTEN,               "-l",                          SO_REQ_SEP },
-	{ OPT_LISTEN,               "--listen_address",            SO_REQ_SEP },
+	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
+	{ OPT_CONNFILE,              "--cluster_file",              SO_REQ_SEP },
+	{ OPT_SEEDCONNFILE,          "--seed_cluster_file",         SO_REQ_SEP },
+	{ OPT_SEEDCONNSTRING,        "--seed_connection_string",    SO_REQ_SEP },
+	{ OPT_ROLE,                  "-r",                          SO_REQ_SEP },
+	{ OPT_ROLE,                  "--role",                      SO_REQ_SEP },
+	{ OPT_PUBLICADDR,            "-p",                          SO_REQ_SEP },
+	{ OPT_PUBLICADDR,            "--public_address",            SO_REQ_SEP },
+	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
+	{ OPT_LISTEN,                "--listen_address",            SO_REQ_SEP },
 #ifdef __linux__
 	{ OPT_FILESYSTEM,           "--data_filesystem",           SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
 #endif
-	{ OPT_DATAFOLDER,           "-d",                          SO_REQ_SEP },
-	{ OPT_DATAFOLDER,           "--datadir",                   SO_REQ_SEP },
-	{ OPT_LOGFOLDER,            "-L",                          SO_REQ_SEP },
-	{ OPT_LOGFOLDER,            "--logdir",                    SO_REQ_SEP },
-	{ OPT_ROLLSIZE,             "-Rs",                         SO_REQ_SEP },
-	{ OPT_ROLLSIZE,             "--logsize",                   SO_REQ_SEP },
-	{ OPT_MAXLOGS,              "--maxlogs",                   SO_REQ_SEP },
-	{ OPT_MAXLOGSSIZE,          "--maxlogssize",               SO_REQ_SEP },
-	{ OPT_LOGGROUP,             "--loggroup",                  SO_REQ_SEP },
+	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
+	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
+	{ OPT_LOGFOLDER,             "-L",                          SO_REQ_SEP },
+	{ OPT_LOGFOLDER,             "--logdir",                    SO_REQ_SEP },
+	{ OPT_ROLLSIZE,              "-Rs",                         SO_REQ_SEP },
+	{ OPT_ROLLSIZE,              "--logsize",                   SO_REQ_SEP },
+	{ OPT_MAXLOGS,               "--maxlogs",                   SO_REQ_SEP },
+	{ OPT_MAXLOGSSIZE,           "--maxlogssize",               SO_REQ_SEP },
+	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
+	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
 #ifdef _WIN32
-	{ OPT_PARENTPID,            "--parentpid",                 SO_REQ_SEP },
-	{ OPT_NEWCONSOLE,           "-n",                          SO_NONE },
-	{ OPT_NEWCONSOLE,           "--newconsole",                SO_NONE },
-	{ OPT_NOBOX,                "-q",                          SO_NONE },
-	{ OPT_NOBOX,                "--no_dialog",                 SO_NONE },
+	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
+	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
+	{ OPT_NOBOX,                 "-q",                          SO_NONE },
+	{ OPT_NOBOX,                 "--no_dialog",                 SO_NONE },
 #endif
-	{ OPT_KVFILE,               "--kvfile",                    SO_REQ_SEP },
-	{ OPT_TESTFILE,             "-f",                          SO_REQ_SEP },
-	{ OPT_TESTFILE,             "--testfile",                  SO_REQ_SEP },
-	{ OPT_RESTARTING,           "-R",                          SO_NONE },
-	{ OPT_RESTARTING,           "--restarting",                SO_NONE },
-	{ OPT_RANDOMSEED,           "-s",                          SO_REQ_SEP },
-	{ OPT_RANDOMSEED,           "--seed",                      SO_REQ_SEP },
-	{ OPT_KEY,                  "-k",                          SO_REQ_SEP },
-	{ OPT_KEY,                  "--key",                       SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "-m",                          SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "--memory",                    SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "-M",                          SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "--storage_memory",            SO_REQ_SEP },
-	{ OPT_MACHINEID,            "-i",                          SO_REQ_SEP },
-	{ OPT_MACHINEID,            "--machine_id",                SO_REQ_SEP },
-	{ OPT_DCID,                 "-a",                          SO_REQ_SEP },
-	{ OPT_DCID,                 "--datacenter_id",             SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "-c",                          SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "--class",                     SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "-b",                          SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "--buggify",                   SO_REQ_SEP },
-	{ OPT_VERSION,              "-v",                          SO_NONE },
-	{ OPT_VERSION,              "--version",                   SO_NONE },
-	{ OPT_CRASHONERROR,         "--crash",                     SO_NONE },
-	{ OPT_NETWORKIMPL,          "-N",                          SO_REQ_SEP },
-	{ OPT_NETWORKIMPL,          "--network",                   SO_REQ_SEP },
-	{ OPT_NOBUFSTDOUT,          "--unbufferedout",             SO_NONE },
-	{ OPT_BUFSTDOUTERR,         "--bufferedout",               SO_NONE },
-	{ OPT_TRACECLOCK,           "--traceclock",                SO_REQ_SEP },
-	{ OPT_NUMTESTERS,           "--num_testers",               SO_REQ_SEP },
-	{ OPT_HELP,                 "-?",                          SO_NONE },
-	{ OPT_HELP,                 "-h",                          SO_NONE },
-	{ OPT_HELP,                 "--help",                      SO_NONE },
-	{ OPT_DEVHELP,              "--dev-help",                  SO_NONE },
-	{ OPT_KNOB,                 "--knob_",                     SO_REQ_SEP },
-	{ OPT_LOCALITY,             "--locality_",                 SO_REQ_SEP },
-	{ OPT_TESTSERVERS,          "--testservers",               SO_REQ_SEP },
-	{ OPT_TEST_ON_SERVERS,      "--testonservers",             SO_NONE },
-	{ OPT_METRICSCONNFILE,      "--metrics_cluster",           SO_REQ_SEP },
-	{ OPT_METRICSPREFIX,        "--metrics_prefix",            SO_REQ_SEP },
-	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
-	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,   "--trace_format",              SO_REQ_SEP },
+	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
+	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
+	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
+	{ OPT_RESTARTING,            "-R",                          SO_NONE },
+	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
+	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
+	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
+	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
+	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
+	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
+	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
+	{ OPT_DCID,                  "--datacenter_id",             SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "-c",                          SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
+	{ OPT_VERSION,               "-v",                          SO_NONE },
+	{ OPT_VERSION,               "--version",                   SO_NONE },
+	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
+	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
+	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
+	{ OPT_NOBUFSTDOUT,           "--unbufferedout",             SO_NONE },
+	{ OPT_BUFSTDOUTERR,          "--bufferedout",               SO_NONE },
+	{ OPT_TRACECLOCK,            "--traceclock",                SO_REQ_SEP },
+	{ OPT_NUMTESTERS,            "--num_testers",               SO_REQ_SEP },
+	{ OPT_HELP,                  "-?",                          SO_NONE },
+	{ OPT_HELP,                  "-h",                          SO_NONE },
+	{ OPT_HELP,                  "--help",                      SO_NONE },
+	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_KNOB,                  "--knob_",                     SO_REQ_SEP },
+	{ OPT_LOCALITY,              "--locality_",                 SO_REQ_SEP },
+	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
+	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
+	{ OPT_METRICSCONNFILE,       "--metrics_cluster",           SO_REQ_SEP },
+	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
+	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
+	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
+	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -203,9 +207,9 @@ StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", printable(mutation.param1)).detail("Value", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
 	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", printable(mutation.param1)).detail("KeyEnd", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 	else
 		return false;
 	const char* type =
@@ -223,7 +227,7 @@ bool debugMutation( const char* context, Version version, MutationRef const& mut
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
 	if (keys.contains(debugKey) || keys.contains(debugKey2)) {
 		debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end) );
-		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", printable(keys.begin)).detail("KeyEnd", printable(keys.end));
+		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return true;
 	} else
 		return false;
@@ -453,7 +457,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				state Arena arena;
 				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
 				Version ver = wait( tr.getReadVersion() );
-				fprintf(output, "<h3>Database version: %lld</h3>", ver);
+				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
 					Standalone<RangeResultRef> results = wait(
@@ -501,12 +505,21 @@ void parentWatcher(void *parentHandle) {
 		criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
 }
+#else
+void* parentWatcher(void *arg) {
+	int *parent_pid = (int*) arg;
+	while(1) {
+		sleep(1);
+		if(getppid() != *parent_pid)
+			criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
+	}
+}
 #endif
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -566,6 +579,10 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+		   "                 Use object serializer for sending messages. The object serializer\n"
+		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
+		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -615,6 +632,12 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  --num_testers NUM\n");
 		printf("                 A multitester will wait for NUM testers before starting\n");
 		printf("                 (defaults to 1).\n");
+#ifdef __linux__
+		printf("  --rsssize SIZE\n"
+			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
+			   "                 the given threshold. fdbserver needs to be compiled with\n"
+			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
+#endif
 		printf("  --testservers ADDRESSES\n");
 		printf("                 The addresses of networktestservers\n");
 		printf("                 specified as ADDRESS:PORT,ADDRESS:PORT...\n");
@@ -895,7 +918,7 @@ int main(int argc, char* argv[]) {
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
-		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
+		bool buggifyEnabled = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
 		Optional<Standalone<StringRef>> dcId;
 		ProcessClass processClass = ProcessClass( ProcessClass::UnsetClass, ProcessClass::CommandLineSource );
@@ -916,6 +939,8 @@ int main(int argc, char* argv[]) {
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
+		uint64_t rsssize = -1;
+		bool useObjectSerializer = false;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -1044,6 +1069,17 @@ int main(int argc, char* argv[]) {
 					fileSystemPath = args.OptionArg();
 					break;
 				}
+				case OPT_PROFILER_RSS_SIZE:{
+					const char *a = args.OptionArg();
+					char *end;
+					rsssize = strtoull(a, &end, 10);
+					if(*end) {
+						fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					break;
+				}
 	#endif
 				case OPT_DATAFOLDER:
 					dataFolder = args.OptionArg();
@@ -1140,6 +1176,14 @@ int main(int argc, char* argv[]) {
 				case OPT_NOBOX:
 					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 					break;
+	#else
+				case OPT_PARENTPID: {
+					auto pid_str = args.OptionArg();
+					int *parent_pid = new(int);
+					*parent_pid = atoi(pid_str);
+					startThread(&parentWatcher, parent_pid);
+					break;
+				}
 	#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
@@ -1241,6 +1285,21 @@ int main(int argc, char* argv[]) {
 						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 					}
 					break;
+				case OPT_USE_OBJECT_SERIALIZER:
+				{
+					std::string s = args.OptionArg();
+					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+					if (s == "on" || s == "true" || s == "1") {
+						useObjectSerializer = true;
+					} else if (s == "off" || s == "false" || s == "0") {
+						useObjectSerializer = false;
+					}  else {
+						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					break;
+				}
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
 					args.OptionArg();
@@ -1394,18 +1453,22 @@ int main(int argc, char* argv[]) {
 					!clientKnobs->setKnob( k->first, k->second ) &&
 					!serverKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					flushAndExit(FDB_EXIT_ERROR);
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					flushAndExit(FDB_EXIT_ERROR);
+					fprintf(stderr, "WARNING: Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+				} else {
+					throw;
 				}
-				throw;
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+
+		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
+		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1462,10 +1525,10 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator();
+			startNewSimulator(useObjectSerializer);
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true);
+			g_network = newNet2(useThreadPool, true, useObjectSerializer);
 			FlowTransport::createInstance(1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1624,7 +1687,7 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
+			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );

@@ -51,6 +51,8 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/subspace/Subspace.java
   src/main/com/apple/foundationdb/Transaction.java
   src/main/com/apple/foundationdb/TransactionContext.java
+  src/main/com/apple/foundationdb/testing/AbstractWorkload.java
+  src/main/com/apple/foundationdb/testing/WorkloadContext.java
   src/main/com/apple/foundationdb/tuple/ByteArrayUtil.java
   src/main/com/apple/foundationdb/tuple/IterableComparator.java
   src/main/com/apple/foundationdb/tuple/package-info.java
@@ -127,6 +129,9 @@ target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
 target_link_libraries(fdb_java PRIVATE fdb_c)
 set_target_properties(fdb_java PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/${SYSTEM_NAME}/amd64/)
+if(APPLE)
+  set_target_properties(fdb_java PROPERTIES SUFFIX ".jnilib")
+endif()
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
 set(CMAKE_JNI_TARGET TRUE)
@@ -185,15 +190,17 @@ if(NOT OPEN_FOR_IDE)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
-    COMMENT "Copy library")
+    COMMENT "Copy jni library for fat jar")
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
   set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
     WORKING_DIRECTORY ${unpack_dir}
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
-  add_custom_target(fat-jar DEPENDS ${target_jar})
+  add_custom_target(fat-jar ALL DEPENDS ${target_jar})
+  add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 endif()

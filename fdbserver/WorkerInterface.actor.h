@@ -41,6 +41,7 @@
 #define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 struct WorkerInterface {
+	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
@@ -75,6 +76,7 @@ struct WorkerInterface {
 };
 
 struct WorkerDetails {
+	constexpr static FileIdentifier file_identifier = 9973980;
 	WorkerInterface interf;
 	ProcessClass processClass;
 	bool degraded;
@@ -89,6 +91,7 @@ struct WorkerDetails {
 };
 
 struct InitializeTLogRequest {
+	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
@@ -116,6 +119,7 @@ struct InitializeTLogRequest {
 };
 
 struct InitializeLogRouterRequest {
+	constexpr static FileIdentifier file_identifier = 2976228;
 	uint64_t recoveryCount;
 	Tag routerTag;
 	Version startVersion;
@@ -132,6 +136,7 @@ struct InitializeLogRouterRequest {
 
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
+	constexpr static FileIdentifier file_identifier = 12684574;
 	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
@@ -139,12 +144,15 @@ struct RecruitMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
 		serializer(ar, lifetime, forceRecovery, reply, arena);
 	}
 };
 
 struct InitializeMasterProxyRequest {
+	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
@@ -158,6 +166,7 @@ struct InitializeMasterProxyRequest {
 };
 
 struct InitializeDataDistributorRequest {
+	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
@@ -170,6 +179,7 @@ struct InitializeDataDistributorRequest {
 };
 
 struct InitializeRatekeeperRequest {
+	constexpr static FileIdentifier file_identifier = 6416816;
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 
@@ -182,6 +192,7 @@ struct InitializeRatekeeperRequest {
 };
 
 struct InitializeResolverRequest {
+	constexpr static FileIdentifier file_identifier = 7413317;
 	uint64_t recoveryCount;
 	int proxyCount;
 	int resolverCount;
@@ -194,6 +205,7 @@ struct InitializeResolverRequest {
 };
 
 struct InitializeStorageReply {
+	constexpr static FileIdentifier file_identifier = 10390645;
 	StorageServerInterface interf;
 	Version addedVersion;
 
@@ -204,6 +216,7 @@ struct InitializeStorageReply {
 };
 
 struct InitializeStorageRequest {
+	constexpr static FileIdentifier file_identifier = 16665642;
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
@@ -217,6 +230,7 @@ struct InitializeStorageRequest {
 };
 
 struct TraceBatchDumpRequest {
+	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
@@ -226,6 +240,7 @@ struct TraceBatchDumpRequest {
 };
 
 struct LoadedReply {
+	constexpr static FileIdentifier file_identifier = 9956350;
 	Standalone<StringRef> payload;
 	UID id;
 
@@ -236,6 +251,7 @@ struct LoadedReply {
 };
 
 struct LoadedPingRequest {
+	constexpr static FileIdentifier file_identifier = 4590979;
 	UID id;
 	bool loadReply;
 	Standalone<StringRef> payload;
@@ -248,6 +264,7 @@ struct LoadedPingRequest {
 };
 
 struct CoordinationPingMessage {
+	constexpr static FileIdentifier file_identifier = 9982747;
 	UID clusterControllerId;
 	int64_t timeStep;
 
@@ -261,6 +278,7 @@ struct CoordinationPingMessage {
 };
 
 struct SetMetricsLogRateRequest {
+	constexpr static FileIdentifier file_identifier = 4245995;
 	uint32_t metricsLogsPerSecond;
 
 	SetMetricsLogRateRequest() : metricsLogsPerSecond( 1 ) {}
@@ -273,6 +291,7 @@ struct SetMetricsLogRateRequest {
 };
 
 struct EventLogRequest {
+	constexpr static FileIdentifier file_identifier = 122319;
 	bool getLastError;
 	Standalone<StringRef> eventName;
 	ReplyPromise< TraceEventFields > reply;
@@ -307,6 +326,7 @@ struct DebugEntryRef {
 };
 
 struct DiskStoreRequest {
+	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
 	ReplyPromise<Standalone<VectorRef<UID>>> reply;
 
@@ -360,7 +380,7 @@ ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct Cl
 
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
                         std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
-                        std::string metricsConnFile, std::string metricsPrefix);
+                        std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold);
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,

@@ -21,6 +21,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 #include <cmath>
+#include <cinttypes>
 
 FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
@@ -64,6 +65,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
+	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
@@ -75,6 +78,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( BUGGIFY_SIM_PAGE_CACHE_4K,                           1e6 );
 	init( BUGGIFY_SIM_PAGE_CACHE_64K,                          1e6 );
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
+	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
 
 	//AsyncFileKAIO
@@ -88,7 +92,6 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	//GenericActors
-	init( MAX_DELIVER_DUPLICATE_DELAY,                         1.0 ); if( randomize && BUGGIFY ) MAX_DELIVER_DUPLICATE_DELAY = 10.0;
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 
 	//IAsyncFile
@@ -170,10 +173,10 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		int64_t v;
 		int n=0;
 		if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-			if (sscanf(value.c_str(), "0x%llx%n", &v, &n) != 1 || n != value.size())
+			if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
 		} else {
-			if (sscanf(value.c_str(), "%lld%n", &v, &n) != 1 || n != value.size())
+			if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
 				throw invalid_option_value();
 		}
 		if (int64_knobs.count(knob))

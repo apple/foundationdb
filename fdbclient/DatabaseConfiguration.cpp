@@ -239,6 +239,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 				result["redundancy_mode"] = "triple";
 			} else if( tLogReplicationFactor == 4 && storageTeamSize == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" ) {
 				result["redundancy_mode"] = "three_data_hall";
+			} else if( tLogReplicationFactor == 4 && storageTeamSize == 2 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^2 x 1" ) {
+				result["redundancy_mode"] = "three_data_hall_fallback";
 			} else {
 				customRedundancy = true;
 			}

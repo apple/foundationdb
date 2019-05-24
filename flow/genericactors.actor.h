@@ -175,7 +175,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 	loop {
 		if (i == results.size()) return Void();
 		try {
-			T r = wait( results[i] );
+			wait(success(results[i]));
 		} catch (...) {
 		}
 		i++;
@@ -736,11 +736,18 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output ) {
+ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
 	loop {
-		if (input->get().size())
-			output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-		else
+		if (input->get().size()) {
+			if (useObjSerializer) {
+				ObjectReader reader(input->get().begin());
+				T res;
+				reader.deserialize(res);
+				output->set(res);
+			} else {
+				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
+			}
+		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
 	}
@@ -776,13 +783,23 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
+	state int resetCount = 0;
+	state double lastReset = now();
 	loop {
 		choose {
 			when( wait( resetDelay ) ) {
 				var->set( val );
+				if(now() - lastReset > warningResetDelay) {
+					resetCount = 0;
+				}
+				resetCount++;
+				if(context && warningLimit >= 0 && resetCount > warningLimit) {
+					TraceEvent(SevWarnAlways, context).detail("ResetCount", resetCount).detail("LastReset", now() - lastReset);
+				}
+				lastReset = now();
 				isEqual = true;
 				resetDelay = Never();
 			}
@@ -1014,13 +1031,14 @@ ACTOR template <class T> Future<Void> onEqual( Future<T> in, T equalTo ) {
 ACTOR template <class T>
 Future<Void> success( Future<T> of ) {
 	T t = wait( of );
+	(void)t;
 	return Void();
 }
 
 ACTOR template <class T>
 Future<Void> ready( Future<T> f ) {
 	try {
-		T _ = wait( f );
+		wait(success(f));
 	} catch (...) {
 	}
 	return Void();

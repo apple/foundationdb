@@ -102,7 +102,6 @@ struct FileSystemWorkload : TestWorkload {
 		uint64_t userID = g_random->randomInt(0, self->userIDCount);
 		int serverID = g_random->randomInt(0, self->serverCount);
 		bool deleted = g_random->random01() < self->deletedFilesRatio;
-		UID uid = g_random->randomUniqueID();
 		double time = now();
 
 		tr->set( key, path );
