@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":6,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6};
+var methods = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":6,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6,"i16":6,"i17":6,"i18":6,"i19":6,"i20":6};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],4:["t3","Abstract Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -110,11 +110,11 @@ var activeTableTab = "activeTableTab";
 <pre>public interface <span class="typeNameLabel">ReadTransaction</span>
 extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" title="interface in com.apple.foundationdb">ReadTransactionContext</a></pre>
 <div class="block">A read-only subset of a FoundationDB <a href="../../../com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>. This is the interface that
-  <code>Transaction</code>'s <a href="../../../com/apple/foundationdb/Transaction.html#snapshot--"><code>snapshot</code></a> presents.<br>
+  <code>Transaction</code>'s <a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--"><code>snapshot</code></a> presents.<br>
  <br>
  <b>Note:</b> Client must call <a href="../../../com/apple/foundationdb/Transaction.html#commit--"><code>Transaction.commit()</code></a> and wait on the result on all transactions,
   even ones that only read. This is done automatically when using the retry loops from
-  <a href="../../../com/apple/foundationdb/Database.html#run-java.util.function.Function-"><code>Database.run(Function)</code></a>. This is explained more in the intro to <a href="../../../com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>.</div>
+  <a href="../../../com/apple/foundationdb/Database.html#run-java.util.function.Function-"><code>Database.run(java.util.function.Function)</code></a>. This is explained more in the intro to <a href="../../../com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>.</div>
 <dl>
 <dt><span class="seeLabel">See Also:</span></dt>
 <dd><a href="../../../com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a></dd>
@@ -160,25 +160,40 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <th class="colLast" scope="col">Method and Description</th>
 </tr>
 <tr id="i0" class="altColor">
+<td class="colFirst"><code>boolean</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#addReadConflictKeyIfNotSnapshot-byte:A-">addReadConflictKeyIfNotSnapshot</a></span>(byte[]&nbsp;key)</code>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key.</div>
+</td>
+</tr>
+<tr id="i1" class="rowColor">
+<td class="colFirst"><code>boolean</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#addReadConflictRangeIfNotSnapshot-byte:A-byte:A-">addReadConflictRangeIfNotSnapshot</a></span>(byte[]&nbsp;keyBegin,
+                                 byte[]&nbsp;keyEnd)</code>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key range.</div>
+</td>
+</tr>
+<tr id="i2" class="altColor">
 <td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;byte[]&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#get-byte:A-">get</a></span>(byte[]&nbsp;key)</code>
 <div class="block">Gets a value from the database.</div>
 </td>
 </tr>
-<tr id="i1" class="rowColor">
+<tr id="i3" class="rowColor">
 <td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;byte[]&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getKey-com.apple.foundationdb.KeySelector-">getKey</a></span>(<a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;selector)</code>
 <div class="block">Returns the key referenced by the specified <code>KeySelector</code>.</div>
 </td>
 </tr>
-<tr id="i2" class="altColor">
+<tr id="i4" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-">getRange</a></span>(byte[]&nbsp;begin,
         byte[]&nbsp;end)</code>
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i3" class="rowColor">
+<tr id="i5" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-">getRange</a></span>(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -186,7 +201,7 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i4" class="altColor">
+<tr id="i6" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-">getRange</a></span>(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -195,7 +210,7 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i5" class="rowColor">
+<tr id="i7" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a></span>(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -205,14 +220,14 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i6" class="altColor">
+<tr id="i8" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-">getRange</a></span>(<a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end)</code>
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i7" class="rowColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-">getRange</a></span>(<a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -220,7 +235,7 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i8" class="altColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-">getRange</a></span>(<a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -229,7 +244,7 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i9" class="rowColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a></span>(<a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="../../../com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -239,20 +254,20 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i10" class="altColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-">getRange</a></span>(<a href="../../../com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range)</code>
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i11" class="rowColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-">getRange</a></span>(<a href="../../../com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit)</code>
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i12" class="altColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-">getRange</a></span>(<a href="../../../com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit,
@@ -260,7 +275,7 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i13" class="rowColor">
+<tr id="i15" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="../../../com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a></span>(<a href="../../../com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit,
@@ -269,16 +284,34 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i14" class="altColor">
+<tr id="i16" class="altColor">
 <td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;java.lang.Long&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#getReadVersion--">getReadVersion</a></span>()</code>
 <div class="block">Gets the version at which the reads for this <code>Transaction</code> will access the database.</div>
 </td>
 </tr>
-<tr id="i15" class="rowColor">
+<tr id="i17" class="rowColor">
+<td class="colFirst"><code>boolean</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#isSnapshot--">isSnapshot</a></span>()</code>
+<div class="block">Gets whether this transaction is a snapshot view of the database.</div>
+</td>
+</tr>
+<tr id="i18" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#options--">options</a></span>()</code>
 <div class="block">Returns a set of options that can be set on a <code>Transaction</code></div>
+</td>
+</tr>
+<tr id="i19" class="rowColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#setReadVersion-long-">setReadVersion</a></span>(long&nbsp;version)</code>
+<div class="block">Directly sets the version of the database at which to execute reads.</div>
+</td>
+</tr>
+<tr id="i20" class="altColor">
+<td class="colFirst"><code><a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--">snapshot</a></span>()</code>
+<div class="block">Return a special-purpose, read-only view of the database.</div>
 </td>
 </tr>
 </table>
@@ -326,6 +359,46 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <!--   -->
 </a>
 <h3>Method Detail</h3>
+<a name="isSnapshot--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>isSnapshot</h4>
+<pre>boolean&nbsp;isSnapshot()</pre>
+<div class="block">Gets whether this transaction is a snapshot view of the database. In other words, this returns
+  whether read conflict ranges are omitted for any reads done through this <code>ReadTransaction</code>.
+ <br>
+ For more information about how to use snapshot reads correctly, see
+ <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
+<dl>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>whether this is a snapshot view of the database with relaxed isolation properties</dd>
+<dt><span class="seeLabel">See Also:</span></dt>
+<dd><a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--"><code>snapshot()</code></a></dd>
+</dl>
+</li>
+</ul>
+<a name="snapshot--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>snapshot</h4>
+<pre><a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>&nbsp;snapshot()</pre>
+<div class="block">Return a special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
+  Snapshot reads selectively relax FoundationDB's isolation property, reducing
+  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+  but making reasoning about concurrency harder.<br>
+ <br>
+ For more information about how to use snapshot reads correctly, see
+ <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
+<dl>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>a read-only view of this <code>ReadTransaction</code> with relaxed isolation properties</dd>
+</dl>
+</li>
+</ul>
 <a name="getReadVersion--">
 <!--   -->
 </a>
@@ -337,6 +410,68 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>the version for database reads</dd>
+</dl>
+</li>
+</ul>
+<a name="setReadVersion-long-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setReadVersion</h4>
+<pre>void&nbsp;setReadVersion(long&nbsp;version)</pre>
+<div class="block">Directly sets the version of the database at which to execute reads.  The
+  normal operation of a transaction is to determine an appropriately recent
+  version; this call overrides that behavior.  If the version is set too
+  far in the past, <code>past_version</code> errors will be thrown from read operations.
+  <i>Infrequently used.</i></div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>version</code> - the version at which to read from the database</dd>
+</dl>
+</li>
+</ul>
+<a name="addReadConflictRangeIfNotSnapshot-byte:A-byte:A-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>addReadConflictRangeIfNotSnapshot</h4>
+<pre>boolean&nbsp;addReadConflictRangeIfNotSnapshot(byte[]&nbsp;keyBegin,
+                                          byte[]&nbsp;keyEnd)</pre>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key range. If this is a <a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--">snapshot</a> view of the database, this will
+  not add the conflict range. This mirrors how reading a range through a snapshot view
+  of the database does not add a conflict range for the read keys.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>keyBegin</code> - the first key in the range (inclusive)</dd>
+<dd><code>keyEnd</code> - the last key in the range (exclusive)</dd>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd><code>true</code> if the read conflict range was added and <code>false</code> otherwise</dd>
+<dt><span class="seeLabel">See Also:</span></dt>
+<dd><a href="../../../com/apple/foundationdb/Transaction.html#addReadConflictRange-byte:A-byte:A-"><code>Transaction.addReadConflictRange(byte[], byte[])</code></a></dd>
+</dl>
+</li>
+</ul>
+<a name="addReadConflictKeyIfNotSnapshot-byte:A-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>addReadConflictKeyIfNotSnapshot</h4>
+<pre>boolean&nbsp;addReadConflictKeyIfNotSnapshot(byte[]&nbsp;key)</pre>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key. If this is a <a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--">snapshot</a> view of the database, this will
+  not add the conflict range. This mirrors how reading a key through a snapshot view
+  of the database does not add a conflict range for the read key.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>key</code> - the key to add to the read conflict range set (it this is not a snapshot view of the database)</dd>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd><code>true</code> if the read conflict key was added and <code>false</code> otherwise</dd>
+<dt><span class="seeLabel">See Also:</span></dt>
+<dd><a href="../../../com/apple/foundationdb/Transaction.html#addReadConflictKey-byte:A-"><code>Transaction.addReadConflictKey(byte[])</code></a></dd>
 </dl>
 </li>
 </ul>

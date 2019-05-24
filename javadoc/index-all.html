@@ -114,9 +114,9 @@
 <div class="block">Creates a copy of this <code>Tuple</code> with a <a href="com/apple/foundationdb/tuple/Versionstamp.html" title="class in com.apple.foundationdb.tuple"><code>Versionstamp</code></a> object appended as the last
   element.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#add-java.util.List-">add(List&lt;? extends Object&gt;)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#add-java.util.List-">add(List&lt;?&gt;)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
-<div class="block">Creates a copy of this <code>Tuple</code> with an <code>List</code> appended as the last element.</div>
+<div class="block">Creates a copy of this <code>Tuple</code> with a <code>List</code> appended as the last element.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#add-com.apple.foundationdb.tuple.Tuple-">add(Tuple)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
@@ -126,7 +126,7 @@
 <dd>
 <div class="block">Creates a copy of this <code>Tuple</code> with a <code>byte</code> array appended as the last element.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#addAll-java.util.List-">addAll(List&lt;? extends Object&gt;)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#addAll-java.util.List-">addAll(List&lt;?&gt;)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Create a copy of this <code>Tuple</code> with a list of items appended.</div>
 </dd>
@@ -143,10 +143,20 @@
 <div class="block">Adds a key to the transaction's read conflict ranges as if you had read
  the key.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#addReadConflictKeyIfNotSnapshot-byte:A-">addReadConflictKeyIfNotSnapshot(byte[])</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#addReadConflictRange-byte:A-byte:A-">addReadConflictRange(byte[], byte[])</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
 <dd>
 <div class="block">Adds a range of keys to the transaction's read conflict ranges as if you
  had read the range.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#addReadConflictRangeIfNotSnapshot-byte:A-byte:A-">addReadConflictRangeIfNotSnapshot(byte[], byte[])</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">Adds the read conflict range that this <code>ReadTransaction</code> would have added as if it had read
+  the given key range.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#addWriteConflictKey-byte:A-">addWriteConflictKey(byte[])</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
 <dd>
@@ -259,15 +269,18 @@
 </dd>
 <dt><a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb"><span class="typeNameLink">Cluster</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
 <dd>
-<div class="block">The <code>Cluster</code> represents a connection to a physical set of cooperating machines
-  running FoundationDB.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 </dd>
 <dt><a href="com/apple/foundationdb/ClusterOptions.html" title="class in com.apple.foundationdb"><span class="typeNameLink">ClusterOptions</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
 <dd>
-<div class="block">A set of options that can be set on a <a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb"><code>Cluster</code></a>.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>
+<div class="block"><span class="deprecationComment">There are no cluster options.</span></div>
+</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/ClusterOptions.html#ClusterOptions-com.apple.foundationdb.OptionConsumer-">ClusterOptions(OptionConsumer)</a></span> - Constructor for class com.apple.foundationdb.<a href="com/apple/foundationdb/ClusterOptions.html" title="class in com.apple.foundationdb">ClusterOptions</a></dt>
-<dd>&nbsp;</dd>
+<dd>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
+&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/MutationType.html#code--">code()</a></span> - Method in enum com.apple.foundationdb.<a href="com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a></dt>
 <dd>
 <div class="block">Gets the FoundationDB native-level constant code for a <code>MutationType</code>.</div>
@@ -391,16 +404,21 @@
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#createCluster--">createCluster()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Connects to the cluster specified by the
-  <a href="./com/apple/foundationdb//foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>
+<div class="block"><span class="deprecationComment">Use <a href="com/apple/foundationdb/FDB.html#open--"><code>FDB.open()</code></a> instead.</span></div>
+</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#createCluster-java.lang.String-">createCluster(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Connects to the cluster specified by <code>clusterFilePath</code>.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>
+<div class="block"><span class="deprecationComment">Use <a href="com/apple/foundationdb/FDB.html#open-java.lang.String-"><code>FDB.open(String)</code></a> instead.</span></div>
+</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#createCluster-java.lang.String-java.util.concurrent.Executor-">createCluster(String, Executor)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Connects to the cluster specified by <code>clusterFilePath</code>.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>
+<div class="block"><span class="deprecationComment">Use <a href="com/apple/foundationdb/FDB.html#open-java.lang.String-java.util.concurrent.Executor-"><code>FDB.open(String, Executor)</code></a> instead.</span></div>
+</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/Directory.html#createOrOpen-com.apple.foundationdb.TransactionContext-java.util.List-">createOrOpen(TransactionContext, List&lt;String&gt;)</a></span> - Method in interface com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/Directory.html" title="interface in com.apple.foundationdb.directory">Directory</a></dt>
 <dd>
@@ -657,15 +675,15 @@
 <div class="block">Creates a <code>Versionstamp</code> instance based on the given byte array
   representation.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromItems-java.lang.Iterable-">fromItems(Iterable&lt;? extends Object&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromItems-java.lang.Iterable-">fromItems(Iterable&lt;?&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Creates a new <code>Tuple</code> from a variable number of elements.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromList-java.util.List-">fromList(List&lt;? extends Object&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromList-java.util.List-">fromList(List&lt;?&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Efficiently creates a new <code>Tuple</code> from a list of objects.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromStream-java.util.stream.Stream-">fromStream(Stream&lt;? extends Object&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromStream-java.util.stream.Stream-">fromStream(Stream&lt;?&gt;)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Efficiently creates a new <code>Tuple</code> from a <code>Stream</code> of objects.</div>
 </dd>
@@ -827,6 +845,10 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeySelector.html#getOffset--">getOffset()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a></dt>
 <dd>
 <div class="block">Returns the key offset parameter for this <code>KeySelector</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#getPackedSize--">getPackedSize()</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dd>
+<div class="block">Get the number of bytes in the packed representation of this <code>Tuple</code>.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/Directory.html#getPath--">getPath()</a></span> - Method in interface com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/Directory.html" title="interface in com.apple.foundationdb.directory">Directory</a></dt>
 <dd>
@@ -1008,6 +1030,10 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDBException.html#isRetryableNotCommitted--">isRetryableNotCommitted()</a></span> - Method in exception com.apple.foundationdb.<a href="com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></dt>
 <dd>
 <div class="block">Returns <code>true</code> if the error indicates the transaction has not committed, though in a way that can be retried.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#isSnapshot--">isSnapshot()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">Gets whether this transaction is a snapshot view of the database.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDBException.html#isSuccess--">isSuccess()</a></span> - Method in exception com.apple.foundationdb.<a href="com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></dt>
 <dd>
@@ -1229,11 +1255,13 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Cluster.html#openDatabase--">openDatabase()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb">Cluster</a></dt>
 <dd>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Cluster.html#openDatabase-java.util.concurrent.Executor-">openDatabase(Executor)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb">Cluster</a></dt>
 <dd>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/MismatchedLayerException.html#opened">opened</a></span> - Variable in exception com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/MismatchedLayerException.html" title="class in com.apple.foundationdb.directory">MismatchedLayerException</a></dt>
 <dd>
@@ -1245,6 +1273,7 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Cluster.html#options--">options()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb">Cluster</a></dt>
 <dd>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 <div class="block">Returns a set of options that can be set on a <code>Cluster</code>.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#options--">options()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
@@ -1284,6 +1313,10 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#pack-byte:A-">pack(byte[])</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Get an encoded representation of this <code>Tuple</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#packInto-java.nio.ByteBuffer-">packInto(ByteBuffer)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dd>
+<div class="block">Pack an encoded representation of this <code>Tuple</code> onto the end of the given <code>ByteBuffer</code>.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/subspace/Subspace.html#packWithVersionstamp-com.apple.foundationdb.tuple.Tuple-">packWithVersionstamp(Tuple)</a></span> - Method in class com.apple.foundationdb.subspace.<a href="com/apple/foundationdb/subspace/Subspace.html" title="class in com.apple.foundationdb.subspace">Subspace</a></dt>
 <dd>
@@ -1362,6 +1395,11 @@
 <dd>
 <div class="block">Returns a range representing all keys that encode <code>Tuple</code>s strictly starting
   with this <code>Tuple</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#range-byte:A-">range(byte[])</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
+<dd>
+<div class="block">Returns a range representing all keys that encode <code>Tuple</code>s strictly starting
+  with the given prefix followed by this <code>Tuple</code>.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#read-java.util.function.Function-">read(Function&lt;? super ReadTransaction, T&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
@@ -1541,6 +1579,10 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDebugRetryLogging-java.lang.String-">setDebugRetryLogging(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDebugTransactionIdentifier-java.lang.String-">setDebugTransactionIdentifier(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setDisableClientStatisticsLogging--">setDisableClientStatisticsLogging()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block">Disables logging of client statistics, such as sampled transaction activity.</div>
@@ -1593,13 +1635,17 @@
 <dd>
 <div class="block">The transaction can read and write to locked databases, and is resposible for checking that it took the lock.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setLogTransaction--">setLogTransaction()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Enables tracing for this transaction and logs results to the client trace logs.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setMachineId-java.lang.String-">setMachineId(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>
 <div class="block">Specify the machine ID that was passed to fdbserver processes running on the same machine as this client, for better location-aware load balancing.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setMaxRetryDelay-long-">setMaxRetryDelay(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">Set the maximum amount of backoff delay incurred in the call to onError if the error is retryable.</div>
+<div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setMaxWatches-long-">setMaxWatches(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>
@@ -1615,7 +1661,7 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setPriorityBatch--">setPriorityBatch()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">Specifies that this transaction should be treated as low priority and that default priority transactions should be processed first.</div>
+<div class="block">Specifies that this transaction should be treated as low priority and that default priority transactions will be processed first.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setPrioritySystemImmediate--">setPrioritySystemImmediate()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -1633,7 +1679,7 @@
 <dd>
 <div class="block">Allows this transaction to read system keys (those that start with the byte 0xFF).</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#setReadVersion-long-">setReadVersion(long)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#setReadVersion-long-">setReadVersion(long)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
 <dd>
 <div class="block">Directly sets the version of the database at which to execute reads.</div>
 </dd>
@@ -1643,11 +1689,19 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setRetryLimit-long-">setRetryLimit(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">Set a maximum number of retries after which additional calls to onError will throw the most recently seen error code.</div>
+<div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setSnapshotRywDisable--">setSnapshotRywDisable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Snapshot read operations will not see the results of writes done in the same transaction.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setSnapshotRywDisable--">setSnapshotRywDisable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
 <div class="block">Snapshot read operations will not see the results of writes done in the same transaction.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setSnapshotRywEnable--">setSnapshotRywEnable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Snapshot read operations will see the results of writes done in the same transaction.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setSnapshotRywEnable--">setSnapshotRywEnable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -1697,6 +1751,10 @@
 <dd>
 <div class="block">Enables trace output to a file in a directory of the clients choosing.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTraceFormat-java.lang.String-">setTraceFormat(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Select the format of the log files.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTraceLogGroup-java.lang.String-">setTraceLogGroup(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block">Sets the 'LogGroup' attribute with the specified value for all events in the trace output files.</div>
@@ -1711,7 +1769,19 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setTransactionLoggingEnable-java.lang.String-">setTransactionLoggingEnable(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">Enables tracing for this transaction and logs results to the client trace logs.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionMaxRetryDelay-long-">setTransactionMaxRetryDelay(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionRetryLimit-long-">setTransactionRetryLimit(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionTimeout-long-">setTransactionTimeout(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#setUnclosedWarning-boolean-">setUnclosedWarning(boolean)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
@@ -1722,13 +1792,17 @@
 <dd>
 <div class="block">By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setUseProvisionalProxies--">setUseProvisionalProxies()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">This option should only be used by tools which change the database configuration.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#size--">size()</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Gets the number of elements in this <code>Tuple</code>.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#snapshot--">snapshot()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#snapshot--">snapshot()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
 <dd>
-<div class="block">Return special-purpose, read-only view of the database.</div>
+<div class="block">Return a special-purpose, read-only view of the database.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectoryMoveException.html#sourcePath">sourcePath</a></span> - Variable in exception com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectoryMoveException.html" title="class in com.apple.foundationdb.directory">DirectoryMoveException</a></dt>
 <dd>

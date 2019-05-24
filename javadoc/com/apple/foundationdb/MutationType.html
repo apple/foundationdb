@@ -177,31 +177,36 @@ extends java.lang.Enum&lt;<a href="../../../com/apple/foundationdb/MutationType.
 </td>
 </tr>
 <tr class="altColor">
+<td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#COMPARE_AND_CLEAR">COMPARE_AND_CLEAR</a></span></code>
+<div class="block">Performs an atomic <code>compare and clear</code> operation.</div>
+</td>
+</tr>
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#MAX">MAX</a></span></code>
 <div class="block">Performs a little-endian comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#MIN">MIN</a></span></code>
 <div class="block">Performs a little-endian comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#OR">OR</a></span></code>
 <div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#SET_VERSIONSTAMPED_KEY">SET_VERSIONSTAMPED_KEY</a></span></code>
 <div class="block">Transforms <code>key</code> using a versionstamp for the transaction.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#SET_VERSIONSTAMPED_VALUE">SET_VERSIONSTAMPED_VALUE</a></span></code>
 <div class="block">Transforms <code>param</code> using a versionstamp for the transaction.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#XOR">XOR</a></span></code>
 <div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
@@ -382,7 +387,7 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <li class="blockList">
 <h4>SET_VERSIONSTAMPED_KEY</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> SET_VERSIONSTAMPED_KEY</pre>
-<div class="block">Transforms <code>key</code> using a versionstamp for the transaction. Sets the transformed key in the database to <code>param</code>. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the key from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.</div>
+<div class="block">Transforms <code>key</code> using a versionstamp for the transaction. Sets the transformed key in the database to <code>param</code>. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the key from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.</div>
 </li>
 </ul>
 <a name="SET_VERSIONSTAMPED_VALUE">
@@ -392,7 +397,7 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <li class="blockList">
 <h4>SET_VERSIONSTAMPED_VALUE</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> SET_VERSIONSTAMPED_VALUE</pre>
-<div class="block">Transforms <code>param</code> using a versionstamp for the transaction. Sets the <code>key</code> given to the transformed <code>param</code>. The parameter is transformed by removing the final four bytes from <code>param</code> and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the parameter from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.</div>
+<div class="block">Transforms <code>param</code> using a versionstamp for the transaction. Sets the <code>key</code> given to the transformed <code>param</code>. The parameter is transformed by removing the final four bytes from <code>param</code> and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the parameter from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.</div>
 </li>
 </ul>
 <a name="BYTE_MIN">
@@ -408,11 +413,21 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <a name="BYTE_MAX">
 <!--   -->
 </a>
-<ul class="blockListLast">
+<ul class="blockList">
 <li class="blockList">
 <h4>BYTE_MAX</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> BYTE_MAX</pre>
 <div class="block">Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code>param</code> is stored. Otherwise the larger of the two values is then stored in the database.</div>
+</li>
+</ul>
+<a name="COMPARE_AND_CLEAR">
+<!--   -->
+</a>
+<ul class="blockListLast">
+<li class="blockList">
+<h4>COMPARE_AND_CLEAR</h4>
+<pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> COMPARE_AND_CLEAR</pre>
+<div class="block">Performs an atomic <code>compare and clear</code> operation. If the existing value in the database is equal to the given value, then given key is cleared.</div>
 </li>
 </ul>
 </li>

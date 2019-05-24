@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Administration &#8212; FoundationDB 6.0</title>
+    <title>Administration &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,7 +31,7 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
+    <link rel="next" title="Configuration" href="configuration.html" />
     <link rel="prev" title="Time-Series Data" href="time-series.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -95,6 +95,7 @@
 <li><a class="reference internal" href="#accessing-cluster-file-information-from-a-client">Accessing cluster file information from a client</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#ipv6-support">IPv6 Support</a></li>
 <li><a class="reference internal" href="#adding-machines-to-a-cluster">Adding machines to a cluster</a></li>
 <li><a class="reference internal" href="#removing-machines-from-a-cluster">Removing machines from a cluster</a></li>
 <li><a class="reference internal" href="#moving-a-cluster">Moving a cluster</a></li>
@@ -124,6 +125,7 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#version-specific-notes-on-upgrading">Version-specific notes on upgrading</a><ul>
+<li><a class="reference internal" href="#upgrading-from-6-1-x">Upgrading from 6.1.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-6-0-x">Upgrading from 6.0.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-5-0-x-5-1-x">Upgrading from 5.0.x - 5.1.x</a></li>
@@ -145,7 +147,7 @@
     </a>
   </li>
   <li>
-    <a href="moving-a-cluster.html" title="Next Chapter: Moving a Cluster to New Machines"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Moving a Clus... &raquo;</span>
+    <a href="configuration.html" title="Next Chapter: Configuration"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Configuration &raquo;</span>
     </a>
   </li>
               
@@ -187,6 +189,7 @@
 <li><a class="reference internal" href="#accessing-cluster-file-information-from-a-client">Accessing cluster file information from a client</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#ipv6-support">IPv6 Support</a></li>
 <li><a class="reference internal" href="#adding-machines-to-a-cluster">Adding machines to a cluster</a></li>
 <li><a class="reference internal" href="#removing-machines-from-a-cluster">Removing machines from a cluster</a></li>
 <li><a class="reference internal" href="#moving-a-cluster">Moving a cluster</a></li>
@@ -216,6 +219,7 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#version-specific-notes-on-upgrading">Version-specific notes on upgrading</a><ul>
+<li><a class="reference internal" href="#upgrading-from-6-1-x">Upgrading from 6.1.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-6-0-x">Upgrading from 6.0.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-5-0-x-5-1-x">Upgrading from 5.0.x - 5.1.x</a></li>
@@ -240,6 +244,7 @@
 <p class="last">In FoundationDB, a &#8220;cluster&#8221; refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.</p>
 </div>
 <p>To administer an externally accessible cluster, you need to understand basic system tasks. You should begin with how to <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">start and stop the database</span></a>. Next, you should review management of a cluster, including <a class="reference internal" href="#adding-machines-to-a-cluster"><span class="std std-ref">adding</span></a> and <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">removing</span></a> machines, and monitoring <a class="reference internal" href="#administration-monitoring-cluster-status"><span class="std std-ref">cluster status</span></a> and the basic <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">server processes</span></a>. You should be familiar with <a class="reference internal" href="#administration-managing-trace-files"><span class="std std-ref">managing trace files</span></a> and <a class="reference internal" href="#administration-other-administrative-concerns"><span class="std std-ref">other administrative concerns</span></a>. Finally, you should know how to <a class="reference internal" href="#administration-removing"><span class="std std-ref">uninstall</span></a> or <a class="reference internal" href="#upgrading-foundationdb"><span class="std std-ref">upgrade</span></a> the database.</p>
+<p>FoundationDB also provides a number of different <a class="reference internal" href="configuration.html"><span class="doc">configuration</span></a> options which you should know about when setting up a FoundationDB database.</p>
 <div class="section" id="starting-and-stopping">
 <span id="administration-running-foundationdb"></span><h2>Starting and stopping</h2>
 <p>After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.</p>
@@ -293,7 +298,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 <p>All FoundationDB components can be configured to use a specified cluster file:</p>
 <ul class="simple">
 <li>The <code class="docutils literal"><span class="pre">fdbcli</span></code> tool allows a cluster file to be passed on the command line using the <code class="docutils literal"><span class="pre">-C</span></code> option.</li>
-<li>The <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to be passed when connecting to a cluster, usually via <code class="docutils literal"><span class="pre">open()</span></code> or <code class="docutils literal"><span class="pre">create_cluster()</span></code>.</li>
+<li>The <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to be passed when connecting to a cluster, usually via <code class="docutils literal"><span class="pre">open()</span></code>.</li>
 <li>A FoundationDB server or <code class="docutils literal"><span class="pre">backup-agent</span></code> allow a cluster file to be specified in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</li>
 </ul>
 <p>In addition, FoundationDB allows you to use the environment variable <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> to specify a cluster file. This approach is helpful if you operate or access more than one cluster.</p>
@@ -343,8 +348,24 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 </ul>
 </div>
 </div>
+<div class="section" id="ipv6-support">
+<span id="id3"></span><h2>IPv6 Support</h2>
+<p>FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as <code class="docutils literal"><span class="pre">[IP]:PORT</span></code>, e.g. &#8220;[::1]:4800&#8221;, &#8220;[abcd::dead:beef]:4500&#8221;.</p>
+<ol class="arabic">
+<li><p class="first">The cluster file can contain mix of IPv6 and IPv6 addresses. For example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="nd">@127</span><span class="o">.</span><span class="mf">0.0</span><span class="o">.</span><span class="mi">1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
+</pre></div>
+</div>
+</li>
+<li><p class="first">Starting <code class="docutils literal"><span class="pre">fdbserver</span></code> with IPv6:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>$ /path/to/fdbserver -C fdb.cluster -p \[::1\]:4500
+</pre></div>
+</div>
+</li>
+</ol>
+</div>
 <div class="section" id="adding-machines-to-a-cluster">
-<span id="id3"></span><h2>Adding machines to a cluster</h2>
+<span id="id4"></span><h2>Adding machines to a cluster</h2>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
@@ -373,7 +394,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 </ol>
 </div>
 <div class="section" id="removing-machines-from-a-cluster">
-<span id="id4"></span><h2>Removing machines from a cluster</h2>
+<span id="id5"></span><h2>Removing machines from a cluster</h2>
 <p>To temporarily or permanently remove one or more machines from a FoundationDB cluster without compromising fault tolerance or availability, perform the following steps:</p>
 <ol class="arabic">
 <li><p class="first">Make sure that your current redundancy mode will still make sense after removing the machines you want to remove. For example, if you are currently using <code class="docutils literal"><span class="pre">triple</span></code> redundancy and are reducing the number of servers to fewer than five, you should probably switch to a lower redundancy mode first. See <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>.</p>
@@ -422,7 +443,7 @@ user@host3$ sudo update-rc.d foundationdb disable
 </div>
 <div class="section" id="converting-an-existing-cluster-to-use-tls">
 <h2>Converting an existing cluster to use TLS</h2>
-<p>A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a>. To enable TLS on an existing, non-TLS cluster, see <a class="reference internal" href="tls.html#converting-existing-cluster"><span class="std std-ref">Converting a running cluster</span></a>.</p>
+<p>A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a>. To enable TLS on an existing, non-TLS cluster, see <a class="reference internal" href="tls.html#converting-existing-cluster-after-6-1"><span class="std std-ref">Converting a running cluster</span></a>.</p>
 </div>
 <div class="section" id="monitoring-cluster-status">
 <span id="administration-monitoring-cluster-status"></span><h2>Monitoring cluster status</h2>
@@ -782,7 +803,7 @@ Client time: 03/19/18 08:59:37
 <div class="section" id="other-administrative-concerns">
 <span id="administration-other-administrative-concerns"></span><h2>Other administrative concerns</h2>
 <div class="section" id="storage-space-requirements">
-<span id="id5"></span><h3>Storage space requirements</h3>
+<span id="id6"></span><h3>Storage space requirements</h3>
 <p>FoundationDB&#8217;s storage space requirements depend on which storage engine is used.</p>
 <p>Using the <code class="docutils literal"><span class="pre">ssd</span></code> storage engine, data is stored in B-trees that add some overhead.</p>
 <ul class="simple">
@@ -874,13 +895,13 @@ Client time: 03/19/18 08:59:37
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.0.15-1_amd64.deb \
-foundationdb-server_6.0.15-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.1.8-1_amd64.deb \
+foundationdb-server_6.1.8-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.0.15-1.el7.x86_64.rpm \
-foundationdb-server-6.0.15-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.1.8-1.el7.x86_64.rpm \
+foundationdb-server-6.1.8-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -895,6 +916,10 @@ foundationdb-server-6.0.15-1.el7.x86_64.rpm
 </div>
 <div class="section" id="version-specific-notes-on-upgrading">
 <span id="version-specific-upgrading"></span><h2>Version-specific notes on upgrading</h2>
+<div class="section" id="upgrading-from-6-1-x">
+<h3>Upgrading from 6.1.x</h3>
+<p>Upgrades from 6.1.x will keep all your old data and configuration settings.</p>
+</div>
 <div class="section" id="upgrading-from-6-0-x">
 <h3>Upgrading from 6.0.x</h3>
 <p>Upgrades from 6.0.x will keep all your old data and configuration settings.</p>
@@ -908,7 +933,7 @@ foundationdb-server-6.0.15-1.el7.x86_64.rpm
 <p>Upgrades from versions between 5.0.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted.</p>
 </div>
 <div class="section" id="upgrading-from-older-versions">
-<span id="id6"></span><h3>Upgrading from Older Versions</h3>
+<span id="id7"></span><h3>Upgrading from Older Versions</h3>
 <p>Upgrades from versions older than 5.0.0 are no longer supported.</p>
 </div>
 </div>
@@ -934,7 +959,7 @@ foundationdb-server-6.0.15-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

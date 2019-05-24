@@ -14,7 +14,6 @@
 .. |reset-func-name| replace:: :func:`reset <Transaction.reset>`
 .. |reset-func| replace:: :func:`Transaction.reset`
 .. |cancel-func| replace:: :func:`Transaction.cancel`
-.. |init-func| replace:: :func:`fdb.init`
 .. |open-func| replace:: :func:`fdb.open`
 .. |on-error-func| replace:: :meth:`Transaction.on_error`
 .. |null-type| replace:: ``None``
@@ -22,8 +21,18 @@
 .. |error-raise-type| replace:: raise
 .. |future-cancel| replace:: :func:`Future.cancel`
 .. |max-watches-database-option| replace:: :func:`Database.options.set_max_watches`
+.. |retry-limit-database-option| replace:: :func:`Database.options.set_transaction_retry_limit`
+.. |timeout-database-option| replace:: :func:`Database.options.set_transaction_timeout`
+.. |max-retry-delay-database-option| replace:: :func:`Database.options.set_transaction_max_retry_delay`
+.. |snapshot-ryw-enable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :ref:`future <api-python-future>`
 .. |read-your-writes-disable-option| replace:: :func:`Transaction.options.set_read_your_writes_disable`
+.. |retry-limit-transaction-option| replace:: :func:`Transaction.options.set_retry_limit`
+.. |timeout-transaction-option| replace:: :func:`Transaction.options.set_timeout`
+.. |max-retry-delay-transaction-option| replace:: :func:`Transaction.options.set_max_retry_delay`
+.. |snapshot-ryw-enable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_disable`
 .. |lazy-iterator-object| replace:: generator
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :ref:`DirectorySubspace <api-python-directory-subspace>`
@@ -54,7 +63,7 @@ Python API
 Installation
 ============
 
-The FoundationDB Python API is compatible with Python 2.7 - 3.6. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.
+The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
 On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
 
@@ -86,32 +95,17 @@ For API changes between version 13 and |api-version| (for the purpose of porting
 Opening a database
 ==================
 
-After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
+After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(600)
+    fdb.api_version(610)
     db = fdb.open()
 
-.. function:: open( cluster_file=None, db_name="DB", event_model=None )
+.. function:: open( cluster_file=None, event_model=None )
 
     |fdb-open-blurb|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
-
-    .. note:: In this release, db_name must be "DB".
-
-    .. note:: ``fdb.open()`` combines the effect of :func:`init`, :func:`create_cluster`, and :meth:`Cluster.open_database`.
-
-.. function:: init()
-
-    Initializes the FoundationDB API, creating a thread for the FoundationDB client and initializing the client's networking engine. :func:`init()` can only be called once. If called subsequently or after :func:`open`, it will raise an ``client_invalid_operation`` error.
-
-.. function:: create_cluster( cluster_file=None )
-
-    Connects to the cluster specified by :ref:`cluster_file <foundationdb-cluster-file>`, or by a :ref:`default cluster file <default-cluster-file>` if
-    ``cluster_file`` is None. :func:`init` must be called first.
-
-    Returns a |future-type| :class:`Cluster` object.
 
 .. data:: options
 
@@ -132,6 +126,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_trace_roll_size(bytes)
 
        |option-trace-roll-size-blurb|
+
+    .. method :: fdb.options.set_trace_format(format)
+
+       |option-trace-format-blurb|
 
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
@@ -174,19 +172,6 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_key_bytes(bytes)
 
        |option-tls-key-bytes|
-
-Cluster objects
-===============
-
-.. class:: Cluster
-
-.. method:: Cluster.open_database(name="DB")
-
-    Opens a database with the given name.
-
-    Returns a |future-type| :class:`Database` object.
-
-    .. note:: In this release, name **must** be "DB".
 
 .. _api-python-keys:
 
@@ -380,6 +365,26 @@ Database options
 .. method:: Database.options.set_datacenter_id(id)
 
     |option-datacenter-id-blurb|
+
+.. method:: Database.options.set_transaction_timeout(timeout)
+
+    |option-db-tr-timeout-blurb|
+
+.. method:: Database.options.set_transaction_retry_limit(retry_limit)
+
+    |option-db-tr-retry-limit-blurb|
+
+.. method:: Database.options.set_transaction_max_retry_delay(delay_limit)
+
+    |option-db-tr-max-retry-delay-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_enable()
+
+    |option-db-snapshot-ryw-enable-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_disable()
+
+    |option-db-snapshot-ryw-disable-blurb|
 
 .. _api-python-transactional-decorator:
 
@@ -966,7 +971,7 @@ The following streaming modes are available:
 Event models
 ============
 
-By default, the FoundationDB Python API assumes that the calling program uses threads (as provided by the ``threading`` module) for concurrency.  This means that blocking operations will block the current Python thread.  This behavior can be changed by specifying the optional ``event_model`` parameter to the :func:`open` or :func:`init` functions.
+By default, the FoundationDB Python API assumes that the calling program uses threads (as provided by the ``threading`` module) for concurrency.  This means that blocking operations will block the current Python thread.  This behavior can be changed by specifying the optional ``event_model`` parameter to the :func:`open` function.
 
 The following event models are available:
 

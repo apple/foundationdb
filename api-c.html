@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>C API &#8212; FoundationDB 6.0</title>
+    <title>C API &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -91,7 +91,6 @@
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
-<li><a class="reference internal" href="#cluster">Cluster</a></li>
 <li><a class="reference internal" href="#database">Database</a></li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
@@ -152,7 +151,6 @@
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
-<li><a class="reference internal" href="#cluster">Cluster</a></li>
 <li><a class="reference internal" href="#database">Database</a></li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
@@ -194,7 +192,7 @@
 <p>The FoundationDB C bindings are provided as a shared object which may be linked against at build time, or dynamically loaded at runtime. Any program that uses this API must be able to find a platform-appropriate shared library at runtime. Generally, this condition is best met by installing the FoundationDB client binaries (see <a class="reference internal" href="api-general.html#installing-client-binaries"><span class="std std-ref">Installing FoundationDB client binaries</span></a>) on any machine where the program will be run.</p>
 <div class="section" id="linux">
 <h3>Linux</h3>
-<p>When linking against <code class="docutils literal"><span class="pre">libfdb_c.so</span></code>, you must also link against <code class="docutils literal"><span class="pre">libm</span></code>, <code class="docutils literal"><span class="pre">libpthread</span></code> and <code class="docutils literal"><span class="pre">librt</span></code>. These dependencies will be resolved by the dynamic linker when using this API via <code class="xref c c-func docutils literal"><span class="pre">dlopen()</span></code> or an FFI.</p>
+<p>When linking against <code class="docutils literal"><span class="pre">libfdb_c.so</span></code>, you must also link against <code class="docutils literal"><span class="pre">libm</span></code>, <code class="docutils literal"><span class="pre">libpthread</span></code> and <code class="docutils literal"><span class="pre">librt</span></code>. These dependencies will be resolved by the dynamic linker when using this API via <code class="docutils literal"><span class="pre">dlopen()</span></code> or an FFI.</p>
 </div>
 <div class="section" id="macos">
 <h3>macOS</h3>
@@ -203,21 +201,21 @@
 </div>
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 600.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 600</span>
+<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 610.</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 610</span>
 <span class="cp">#include</span> <span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
 </pre></div>
 </div>
 <dl class="function">
 <dt id="c.fdb_select_api_version">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_select_api_version</code><span class="sig-paren">(</span>int<em>&nbsp;version</em><span class="sig-paren">)</span></dt>
-<dd><p>Must be called before any other API functions. <code class="xref c c-data docutils literal"><span class="pre">version</span></code> must be less than or equal to <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code> (and should almost always be equal).</p>
-<p>Language bindings implemented in C which themselves expose API versioning will usually pass the version requested by the application, instead of always passing <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code>.</p>
-<p>Passing a version less than <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code> will cause the API to behave as it did in the older version.</p>
+<dd><p>Must be called before any other API functions. <code class="docutils literal"><span class="pre">version</span></code> must be less than or equal to <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> (and should almost always be equal).</p>
+<p>Language bindings implemented in C which themselves expose API versioning will usually pass the version requested by the application, instead of always passing <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code>.</p>
+<p>Passing a version less than <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> will cause the API to behave as it did in the older version.</p>
 <p>It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">This is actually implemented as a macro. If you are accessing this API via <code class="xref c c-func docutils literal"><span class="pre">dlopen()</span></code> or an FFI, you will need to use <a class="reference internal" href="#c.fdb_select_api_version_impl" title="fdb_select_api_version_impl"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version_impl()</span></code></a>.</p>
+<p class="last">This is actually implemented as a macro. If you are accessing this API via <code class="docutils literal"><span class="pre">dlopen()</span></code> or an FFI, you will need to use <a class="reference internal" href="#c.fdb_select_api_version_impl" title="fdb_select_api_version_impl"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version_impl()</span></code></a>.</p>
 </div>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -228,15 +226,15 @@
 <dl class="function">
 <dt id="c.fdb_select_api_version_impl">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_select_api_version_impl</code><span class="sig-paren">(</span>int<em>&nbsp;runtime_version</em>, int<em>&nbsp;header_version</em><span class="sig-paren">)</span></dt>
-<dd><p>This is the actual entry point called by the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> macro. It should never be called directly from C, but if you are accessing this API via <code class="xref c c-func docutils literal"><span class="pre">dlopen()</span></code> or an FFI, you will need to use it. <code class="docutils literal"><span class="pre">fdb_select_api_version(v)</span></code> is equivalent to <code class="docutils literal"><span class="pre">fdb_select_api_version_impl(v,</span> <span class="pre">FDB_API_VERSION)</span></code>.</p>
+<dd><p>This is the actual entry point called by the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> macro. It should never be called directly from C, but if you are accessing this API via <code class="docutils literal"><span class="pre">dlopen()</span></code> or an FFI, you will need to use it. <code class="docutils literal"><span class="pre">fdb_select_api_version(v)</span></code> is equivalent to <code class="docutils literal"><span class="pre">fdb_select_api_version_impl(v,</span> <span class="pre">FDB_API_VERSION)</span></code>.</p>
 <p>It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">runtime_version</span></code></dt>
-<dd><p class="first">The version of run-time behavior the API is requested to provide. Must be less than or equal to <code class="xref c c-data docutils literal"><span class="pre">header_version</span></code>, and should almost always be equal.</p>
+<dt><code class="docutils literal"><span class="pre">runtime_version</span></code></dt>
+<dd><p class="first">The version of run-time behavior the API is requested to provide. Must be less than or equal to <code class="docutils literal"><span class="pre">header_version</span></code>, and should almost always be equal.</p>
 <p class="last">Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">header_version</span></code></dt>
-<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 600). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
+<dt><code class="docutils literal"><span class="pre">header_version</span></code></dt>
+<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 610). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
 </dl>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -383,7 +381,7 @@ void <code class="descname">fdb_future_destroy</code><span class="sig-paren">(</
 <dl class="type">
 <dt id="c.FDBCallback">
 <code class="descname">FDBCallback</code></dt>
-<dd><p>A pointer to a function which takes <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture*</span></code></a> and <code class="xref c c-type docutils literal"><span class="pre">void*</span></code> and returns <code class="xref c c-type docutils literal"><span class="pre">void</span></code>.</p>
+<dd><p>A pointer to a function which takes <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture*</span></code></a> and <code class="docutils literal"><span class="pre">void*</span></code> and returns <code class="docutils literal"><span class="pre">void</span></code>.</p>
 </dd></dl>
 
 <dl class="function">
@@ -400,51 +398,35 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 <dl class="function">
 <dt id="c.fdb_future_get_error">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_error</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em><span class="sig-paren">)</span></dt>
-<dd><p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise.</p>
+<dd><p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_future_get_version">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_version</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, int64_t*<em>&nbsp;out_version</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a value of type version from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="xref c c-type docutils literal"><span class="pre">int64_t</span></code>. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+<dd><p>Extracts a version from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="docutils literal"><span class="pre">int64_t</span></code>. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_future_get_key">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_key</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, uint8_t const**<em>&nbsp;out_key</em>, int*<em>&nbsp;out_key_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a value of type key from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables of type <code class="xref c c-type docutils literal"><span class="pre">uint8_t*</span></code> (a pointer to the beginning of the key) and <code class="xref c c-type docutils literal"><span class="pre">int</span></code> (the length of the key). <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+<dd><p>Extracts a key from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables of type <code class="docutils literal"><span class="pre">uint8_t*</span></code> (a pointer to the beginning of the key) and <code class="docutils literal"><span class="pre">int</span></code> (the length of the key). <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 <p>The memory referenced by the result is owned by the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object and will be valid until either <code class="docutils literal"><span class="pre">fdb_future_destroy(future)</span></code> or <code class="docutils literal"><span class="pre">fdb_future_release_memory(future)</span></code> is called.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_future_get_cluster">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_cluster</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, <a class="reference internal" href="#c.FDBCluster" title="FDBCluster">FDBCluster</a>**<em>&nbsp;out_cluster</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a value of type <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster*</span></code></a> from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
-<p>This function may only be called once on a given <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object, as it transfers ownership of the <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster</span></code></a> to the caller. The caller is responsible for calling <a class="reference internal" href="#c.fdb_cluster_destroy" title="fdb_cluster_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_cluster_destroy()</span></code></a> when finished with the result.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_future_get_database">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_database</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>**<em>&nbsp;out_database</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a value of type <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase*</span></code></a> from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
-<p>This function may only be called once on a given <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object, as it transfers ownership of the <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> to the caller. The caller is responsible for calling <code class="docutils literal"><span class="pre">fdb_database_destroy(*out_database)</span></code> when finished with the result.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_future_get_value">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_value</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a>*<em>&nbsp;out_present</em>, uint8_t const**<em>&nbsp;out_value</em>, int*<em>&nbsp;out_value_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a database value from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+<dd><p>Extracts a database value from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_present</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_present</span></code></dt>
 <dd>Set to non-zero if (and only if) the requested value was present in the database. (If zero, the other outputs are meaningless.)</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_value</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_value</span></code></dt>
 <dd>Set to point to the first byte of the value.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_value_length</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_value_length</span></code></dt>
 <dd>Set to the length of the value (in bytes).</dd>
 </dl>
 <p>The memory referenced by the result is owned by the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object and will be valid until either <code class="docutils literal"><span class="pre">fdb_future_destroy(future)</span></code> or <code class="docutils literal"><span class="pre">fdb_future_release_memory(future)</span></code> is called.</p>
@@ -453,12 +435,12 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 <dl class="function">
 <dt id="c.fdb_future_get_string_array">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_string_array</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, const char***<em>&nbsp;out_strings</em>, int*<em>&nbsp;out_count</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts an array of null-terminated C strings from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+<dd><p>Extracts an array of null-terminated C strings from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_strings</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_strings</span></code></dt>
 <dd>Set to point to the first string in the array.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_count</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_count</span></code></dt>
 <dd>Set to the number of strings in the array.</dd>
 </dl>
 <p>The memory referenced by the result is owned by the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object and will be valid until either <code class="docutils literal"><span class="pre">fdb_future_destroy(future)</span></code> or <code class="docutils literal"><span class="pre">fdb_future_release_memory(future)</span></code> is called.</p>
@@ -467,14 +449,14 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 <dl class="function">
 <dt id="c.fdb_future_get_keyvalue_array">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_keyvalue_array</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue">FDBKeyValue</a> const**<em>&nbsp;out_kv</em>, int*<em>&nbsp;out_count</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a>*<em>&nbsp;out_more</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts an array of <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue"><code class="xref c c-type docutils literal"><span class="pre">FDBKeyValue</span></code></a> objects from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="xref c c-data docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
-<p>Returns zero if <code class="xref c c-data docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+<dd><p>Extracts an array of <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue"><code class="xref c c-type docutils literal"><span class="pre">FDBKeyValue</span></code></a> objects from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_kv</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_kv</span></code></dt>
 <dd>Set to point to the first <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue"><code class="xref c c-type docutils literal"><span class="pre">FDBKeyValue</span></code></a> object in the array.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_count</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_count</span></code></dt>
 <dd>Set to the number of <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue"><code class="xref c c-type docutils literal"><span class="pre">FDBKeyValue</span></code></a> objects in the array.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_more</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_more</span></code></dt>
 <dd>Set to true if (but not necessarily only if) values remain in the <em>key</em> range requested (possibly beyond the limits requested).</dd>
 </dl>
 <p>The memory referenced by the result is owned by the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> object and will be valid until either <code class="docutils literal"><span class="pre">fdb_future_destroy(future)</span></code> or <code class="docutils literal"><span class="pre">fdb_future_release_memory(future)</span></code> is called.</p>
@@ -493,63 +475,14 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 </pre></div>
 </div>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key</span></code></dt>
 <dd>A pointer to a key.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_length</span></code></dt>
-<dd>The length of the key pointed to by <code class="xref c c-data docutils literal"><span class="pre">key</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">value</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_length</span></code></dt>
+<dd>The length of the key pointed to by <code class="docutils literal"><span class="pre">key</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">value</span></code></dt>
 <dd>A pointer to a value.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">value_length</span></code></dt>
-<dd>The length of the value pointed to by <code class="xref c c-data docutils literal"><span class="pre">value</span></code>.</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="cluster">
-<h2>Cluster</h2>
-<dl class="type">
-<dt id="c.FDBCluster">
-<code class="descname">FDBCluster</code></dt>
-<dd><p>An opaque type that represents a Cluster in the FoundationDB C API.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_create_cluster">
-<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_create_cluster</code><span class="sig-paren">(</span>const char*<em>&nbsp;cluster_file_path</em><span class="sig-paren">)</span></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to an <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster</span></code></a> object. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_cluster" title="fdb_future_get_cluster"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_cluster()</span></code></a> to extract the <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster</span></code></a> object, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
-<dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">cluster_file_path</span></code></dt>
-<dd>A NULL-terminated string giving a local path of a <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> (often called &#8216;fdb.cluster&#8217;) which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</dd>
-</dl>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_cluster_destroy">
-void <code class="descname">fdb_cluster_destroy</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCluster" title="FDBCluster">FDBCluster</a>*<em>&nbsp;cluster</em><span class="sig-paren">)</span></dt>
-<dd><p>Destroys an <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster</span></code></a> object. It must be called exactly once for each successful call to <a class="reference internal" href="#c.fdb_future_get_cluster" title="fdb_future_get_cluster"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_cluster()</span></code></a>. This function only destroys a handle to the cluster &#8211; your cluster will be fine!</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_cluster_set_option">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_cluster_set_option</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCluster" title="FDBCluster">FDBCluster</a>*<em>&nbsp;cluster</em>, <a class="reference internal" href="#c.FDBClusterOption" title="FDBClusterOption">FDBClusterOption</a><em>&nbsp;option</em>, uint8_t const*<em>&nbsp;value</em>, int<em>&nbsp;value_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Called to set an option on an <a class="reference internal" href="#c.FDBCluster" title="FDBCluster"><code class="xref c c-type docutils literal"><span class="pre">FDBCluster</span></code></a>. If the given option is documented as taking a parameter, you must also pass a pointer to the parameter value and the parameter value&#8217;s length. If the option is documented as taking an <code class="docutils literal"><span class="pre">Int</span></code> parameter, <code class="docutils literal"><span class="pre">value</span></code> must point to a signed 64-bit integer (little-endian), and <code class="docutils literal"><span class="pre">value_length</span></code> must be 8. This memory only needs to be valid until <a class="reference internal" href="#c.fdb_cluster_set_option" title="fdb_cluster_set_option"><code class="xref c c-func docutils literal"><span class="pre">fdb_cluster_set_option()</span></code></a> returns.</p>
-</dd></dl>
-
-<dl class="type">
-<dt id="c.FDBClusterOption">
-<code class="descname">FDBClusterOption</code></dt>
-<dd><p>Please see <code class="docutils literal"><span class="pre">fdb_c_options.g.h</span></code> for a definition of this type, along with documentation of its allowed values.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="c.fdb_cluster_create_database">
-<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_cluster_create_database</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCluster" title="FDBCluster">FDBCluster</a><em>&nbsp;*cluster</em>, uint8_t const*<em>&nbsp;db_name</em>, int<em>&nbsp;db_name_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to an <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_database" title="fdb_future_get_database"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_database()</span></code></a> to extract the <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
-<dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">db_name</span></code></dt>
-<dd>A pointer to the name of the database to be opened. The value does not need to be NULL-terminated. In the current FoundationDB API, the database name <em>must</em> be &#8220;DB&#8221;.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">db_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">db_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">value_length</span></code></dt>
+<dd>The length of the value pointed to by <code class="docutils literal"><span class="pre">value</span></code>.</dd>
 </dl>
 </dd></dl>
 
@@ -564,9 +497,21 @@ void <code class="descname">fdb_cluster_destroy</code><span class="sig-paren">(<
 </dd></dl>
 
 <dl class="function">
+<dt id="c.fdb_create_database">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_create_database</code><span class="sig-paren">(</span>const char*<em>&nbsp;cluster_file_path</em>, <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>**<em>&nbsp;out_database</em><span class="sig-paren">)</span></dt>
+<dd><p>Creates a new database connected the specified cluster. The caller assumes ownership of the <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_database_destroy" title="fdb_database_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_database_destroy()</span></code></a>.</p>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">cluster_file_path</span></code></dt>
+<dd>A NULL-terminated string giving a local path of a <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> (often called &#8216;fdb.cluster&#8217;) which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</dd>
+<dt><code class="docutils literal"><span class="pre">*out_database</span></code></dt>
+<dd>Set to point to the newly created <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a>.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
 <dt id="c.fdb_database_destroy">
 void <code class="descname">fdb_database_destroy</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em><span class="sig-paren">)</span></dt>
-<dd><p>Destroys an <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object. It must be called exactly once for each successful call to <a class="reference internal" href="#c.fdb_future_get_database" title="fdb_future_get_database"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_database()</span></code></a>. This function only destroys a handle to the database &#8211; your database will be fine!</p>
+<dd><p>Destroys an <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object. It must be called exactly once for each successful call to <a class="reference internal" href="#c.fdb_create_database" title="fdb_create_database"><code class="xref c c-func docutils literal"><span class="pre">fdb_create_database()</span></code></a>. This function only destroys a handle to the database &#8211; your database will be fine!</p>
 </dd></dl>
 
 <dl class="function">
@@ -586,7 +531,7 @@ void <code class="descname">fdb_database_destroy</code><span class="sig-paren">(
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_database_create_transaction</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>**<em>&nbsp;out_transaction</em><span class="sig-paren">)</span></dt>
 <dd><p>Creates a new transaction on the given database. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">*out_transaction</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">*out_transaction</span></code></dt>
 <dd>Set to point to the newly created <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a>.</dd>
 </dl>
 </dd></dl>
@@ -638,15 +583,15 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dl class="function">
 <dt id="c.fdb_transaction_get">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;snapshot</em><span class="sig-paren">)</span></dt>
-<dd><p>Reads a value from the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code>.</p>
-<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the value of <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code> in the database. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_value()</span></code></a> to extract the value, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
-<p>See <a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_value()</span></code></a> to see exactly how results are unpacked. If <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code> is not present in the database, the result is not an error, but a zero for <code class="xref c c-data docutils literal"><span class="pre">*out_present</span></code> returned from that function.</p>
+<dd><p>Reads a value from the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code>.</p>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the value of <code class="docutils literal"><span class="pre">key_name</span></code> in the database. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_value()</span></code></a> to extract the value, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<p>See <a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_value()</span></code></a> to see exactly how results are unpacked. If <code class="docutils literal"><span class="pre">key_name</span></code> is not present in the database, the result is not an error, but a zero for <code class="docutils literal"><span class="pre">*out_present</span></code> returned from that function.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key to be looked up in the database. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">snapshot</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">snapshot</span></code></dt>
 <dd>Non-zero if this is a <a class="reference internal" href="#snapshots"><span class="std std-ref">snapshot read</span></a>.</dd>
 </dl>
 </dd></dl>
@@ -654,12 +599,12 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dl class="function">
 <dt id="c.fdb_transaction_get_key">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_key</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;or_equal</em>, int<em>&nbsp;offset</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;snapshot</em><span class="sig-paren">)</span></dt>
-<dd><p>Resolves a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> against the keys in the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code>.</p>
+<dd><p>Resolves a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> against the keys in the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code>.</p>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the key in the database matching the <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a>. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_key" title="fdb_future_get_key"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_key()</span></code></a> to extract the key, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>, <code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code>, <code class="xref c c-data docutils literal"><span class="pre">or_equal</span></code>, <code class="xref c c-data docutils literal"><span class="pre">offset</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code>, <code class="docutils literal"><span class="pre">key_name_length</span></code>, <code class="docutils literal"><span class="pre">or_equal</span></code>, <code class="docutils literal"><span class="pre">offset</span></code></dt>
 <dd>The four components of a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">snapshot</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">snapshot</span></code></dt>
 <dd>Non-zero if this is a <a class="reference internal" href="#snapshots"><span class="std std-ref">snapshot read</span></a>.</dd>
 </dl>
 </dd></dl>
@@ -667,38 +612,38 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dl class="function">
 <dt id="c.fdb_transaction_get_addresses_for_key">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_addresses_for_key</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code> and its associated value.</p>
+<dd><p>Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing <code class="docutils literal"><span class="pre">key_name</span></code> and its associated value.</p>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to an array of strings. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_string_array" title="fdb_future_get_string_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_string_array()</span></code></a> to extract the string array, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key whose location is to be queried.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
 </dl>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_get_range">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_range</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;begin_or_equal</em>, int<em>&nbsp;begin_offset</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;end_or_equal</em>, int<em>&nbsp;end_offset</em>, int<em>&nbsp;limit</em>, int<em>&nbsp;target_bytes</em>, <a class="reference internal" href="#c.FDBStreamingMode" title="FDBStreamingMode">FDBStreamingMode</a><em>&nbsp;mode</em>, int<em>&nbsp;iteration</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;snapshot</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;reverse</em><span class="sig-paren">)</span></dt>
-<dd><p>Reads all key-value pairs in the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> (potentially limited by <code class="xref c c-data docutils literal"><span class="pre">limit</span></code>, <code class="xref c c-data docutils literal"><span class="pre">target_bytes</span></code>, or <code class="xref c c-data docutils literal"><span class="pre">mode</span></code>) which have a key lexicographically greater than or equal to the key resolved by the begin <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> and lexicographically less than the key resolved by the end <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a>.</p>
+<dd><p>Reads all key-value pairs in the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> (potentially limited by <code class="xref c c-data docutils literal"><span class="pre">limit</span></code>, <code class="xref c c-data docutils literal"><span class="pre">target_bytes</span></code>, or <code class="xref c c-data docutils literal"><span class="pre">mode</span></code>) which have a key lexicographically greater than or equal to the key resolved by the begin <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> and lexicographically less than the key resolved by the end <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a>.</p>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to an <a class="reference internal" href="#c.FDBKeyValue" title="FDBKeyValue"><code class="xref c c-type docutils literal"><span class="pre">FDBKeyValue</span></code></a> array. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> to extract the key-value array, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">begin_key_name</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_key_name_length</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_or_equal</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_offset</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">begin_key_name</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_key_name_length</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_or_equal</span></code>, <code class="xref c c-data docutils literal"><span class="pre">begin_offset</span></code></dt>
 <dd>The four components of a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> describing the beginning of the range.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">end_key_name</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_or_equal</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_offset</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">end_key_name</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_or_equal</span></code>, <code class="xref c c-data docutils literal"><span class="pre">end_offset</span></code></dt>
 <dd>The four components of a <a class="reference internal" href="#key-selectors"><span class="std std-ref">key selector</span></a> describing the end of the range.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">limit</span></code></dt>
-<dd>If non-zero, indicates the maximum number of key-value pairs to return. If this limit was reached before the end of the specified range, then the <code class="xref c c-data docutils literal"><span class="pre">*more</span></code> return of <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> will be set to a non-zero value.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">target_bytes</span></code></dt>
-<dd>If non-zero, indicates a (soft) cap on the combined number of bytes of keys and values to return. If this limit was reached before the end of the specified range, then the <code class="xref c c-data docutils literal"><span class="pre">*more</span></code> return of <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> will be set to a non-zero value.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">mode</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">limit</span></code></dt>
+<dd>If non-zero, indicates the maximum number of key-value pairs to return. If this limit was reached before the end of the specified range, then the <code class="docutils literal"><span class="pre">*more</span></code> return of <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> will be set to a non-zero value.</dd>
+<dt><code class="docutils literal"><span class="pre">target_bytes</span></code></dt>
+<dd>If non-zero, indicates a (soft) cap on the combined number of bytes of keys and values to return. If this limit was reached before the end of the specified range, then the <code class="docutils literal"><span class="pre">*more</span></code> return of <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> will be set to a non-zero value.</dd>
+<dt><code class="docutils literal"><span class="pre">mode</span></code></dt>
 <dd>One of the <a class="reference internal" href="#c.FDBStreamingMode" title="FDBStreamingMode"><code class="xref c c-type docutils literal"><span class="pre">FDBStreamingMode</span></code></a> values indicating how the caller would like the data in the range returned.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">iteration</span></code></dt>
-<dd>If <code class="xref c c-data docutils literal"><span class="pre">mode</span></code> is <code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code>, this parameter should start at 1 and be incremented by 1 for each successive call while reading this range. In all other cases it is ignored.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">snapshot</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">iteration</span></code></dt>
+<dd>If <code class="docutils literal"><span class="pre">mode</span></code> is <code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code>, this parameter should start at 1 and be incremented by 1 for each successive call while reading this range. In all other cases it is ignored.</dd>
+<dt><code class="docutils literal"><span class="pre">snapshot</span></code></dt>
 <dd>Non-zero if this is a <a class="reference internal" href="#snapshots"><span class="std std-ref">snapshot read</span></a>.</dd>
 </dl>
-<p><code class="xref c c-data docutils literal"><span class="pre">reverse</span></code></p>
+<p><code class="docutils literal"><span class="pre">reverse</span></code></p>
 <blockquote>
 <div>If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.</div></blockquote>
 </dd></dl>
@@ -707,25 +652,25 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dt id="c.FDBStreamingMode">
 <code class="descname">FDBStreamingMode</code></dt>
 <dd><p>An enumeration of available streaming modes to be passed to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code></p>
 <blockquote>
-<div>The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the <code class="xref c c-data docutils literal"><span class="pre">iteration</span></code> parameter to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_SMALL</span></code></p>
+<div>The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the <code class="docutils literal"><span class="pre">iteration</span></code> parameter to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</div></blockquote>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_SMALL</span></code></p>
 <blockquote>
 <div>Data is returned in small batches (not much more expensive than reading individual key-value pairs).</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_MEDIUM</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_MEDIUM</span></code></p>
 <blockquote>
 <div>Data is returned in batches between _SMALL and _LARGE.</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_LARGE</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_LARGE</span></code></p>
 <blockquote>
 <div>Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_SERIAL</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_SERIAL</span></code></p>
 <blockquote>
 <div>Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_WANT_ALL</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_WANT_ALL</span></code></p>
 <blockquote>
 <div>The caller intends to consume the entire range and would like it all transferred as early as possible.</div></blockquote>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_EXACT</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_EXACT</span></code></p>
 <blockquote>
 <div>The caller has passed a specific row limit and wants that many rows delivered in a single batch.</div></blockquote>
 </dd></dl>
@@ -733,54 +678,54 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dl class="function">
 <dt id="c.fdb_transaction_set">
 void <code class="descname">fdb_transaction_set</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em>, uint8_t const*<em>&nbsp;value</em>, int<em>&nbsp;value_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Modify the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to change the given key to have the given value. If the given key was not previously present in the database it is inserted.</p>
-<p>The modification affects the actual database only if <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
+<dd><p>Modify the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to change the given key to have the given value. If the given key was not previously present in the database it is inserted.</p>
+<p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key to be inserted into the database. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">value</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">value</span></code></dt>
 <dd>A pointer to the value to be inserted into the database. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">value_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">value</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">value_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">value</span></code>.</dd>
 </dl>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_clear">
 void <code class="descname">fdb_transaction_clear</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Modify the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to remove the given key from the database. If the key was not previously present in the database, there is no effect.</p>
-<p>The modification affects the actual database only if <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
+<dd><p>Modify the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to remove the given key from the database. If the key was not previously present in the database, there is no effect.</p>
+<p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key to be removed from the database. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
 </dl>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_clear_range">
 void <code class="descname">fdb_transaction_clear_range</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em><span class="sig-paren">)</span></dt>
-<dd><p>Modify the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to remove all keys (if any) which are lexicographically greater than or equal to the given begin key and lexicographically less than the given end_key.</p>
-<p>The modification affects the actual database only if <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
+<dd><p>Modify the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to remove all keys (if any) which are lexicographically greater than or equal to the given begin key and lexicographically less than the given end_key.</p>
+<p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">begin_key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">begin_key_name</span></code></dt>
 <dd>A pointer to the name of the key specifying the beginning of the range to clear. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">begin_key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">begin_key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">end_key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">begin_key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">begin_key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">end_key_name</span></code></dt>
 <dd>A pointer to the name of the key specifying the end of the range to clear. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">end_key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">end_key_name_length</span></code>.</dd>
 </dl>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_atomic_op">
 void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;key_name</em>, int<em>&nbsp;key_name_length</em>, uint8_t const*<em>&nbsp;param</em>, int<em>&nbsp;param_length</em>, <a class="reference internal" href="#c.FDBMutationType" title="FDBMutationType">FDBMutationType</a><em>&nbsp;operationType</em><span class="sig-paren">)</span></dt>
-<dd><p>Modify the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to perform the operation indicated by <code class="docutils literal"><span class="pre">operationType</span></code> with operand <code class="docutils literal"><span class="pre">param</span></code> to the value stored by the given key.</p>
+<dd><p>Modify the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to perform the operation indicated by <code class="docutils literal"><span class="pre">operationType</span></code> with operand <code class="docutils literal"><span class="pre">param</span></code> to the value stored by the given key.</p>
 <p>An atomic operation is a single database command that carries out several logical steps: reading the value of a key, performing a transformation on that value, and writing the result. Different atomic operations perform different transformations. Like other database operations, an atomic operation is used within a transaction; however, its use within a transaction will not cause the transaction to conflict.</p>
 <p>Atomic operations do not expose the current value of the key to the client but simply send the database the transformation to apply. In regard to conflict checking, an atomic operation is equivalent to a write without a read. It can only cause <em>other</em> transactions performing reads of the key to conflict.</p>
 <p>By combining these logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction will not conflict due to the operation. This makes atomic operations ideal for operating on keys that are frequently modified. A common example is the use of a key-value pair as a counter.</p>
@@ -788,17 +733,17 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <p class="first admonition-title">Warning</p>
 <p class="last">If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
 </div>
-<p>The modification affects the actual database only if <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
+<p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key whose value is to be mutated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">param</span></code></dt>
-<dd>A pointer to the parameter with which the atomic operation will mutate the value associated with <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">param_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">param</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">operation_type</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">param</span></code></dt>
+<dd>A pointer to the parameter with which the atomic operation will mutate the value associated with <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">param_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">param</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">operation_type</span></code></dt>
 <dd>One of the <a class="reference internal" href="#c.FDBMutationType" title="FDBMutationType"><code class="xref c c-type docutils literal"><span class="pre">FDBMutationType</span></code></a> values indicating which operation should be performed.</dd>
 </dl>
 </dd></dl>
@@ -807,48 +752,48 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <dt id="c.FDBMutationType">
 <code class="descname">FDBMutationType</code></dt>
 <dd><p>An enumeration of available opcodes to be passed to <a class="reference internal" href="#c.fdb_transaction_atomic_op" title="fdb_transaction_atomic_op"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_atomic_op()</span></code></a></p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_ADD</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_ADD</span></code></p>
 <p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>The integers to be added must be stored in a little-endian representation. They can be signed in two&#8217;s complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to <code class="docutils literal"><span class="pre">param</span></code> and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_AND</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_AND</span></code></p>
 <p>Performs a bitwise &#8220;and&#8221; operation. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored in the database. If the existing value in the database is  shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_OR</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_OR</span></code></p>
 <p>Performs a bitwise &#8220;or&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_XOR</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_XOR</span></code></p>
 <p>Performs a bitwise &#8220;xor&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_MAX</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_MAX</span></code></p>
 <p>Sets the value in the database to the larger of the existing value and <code class="docutils literal"><span class="pre">param</span></code>. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>Both the existing value and <code class="docutils literal"><span class="pre">param</span></code> are treated as unsigned integers. (This differs from the behavior of atomic addition.)</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_BYTE_MAX</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_BYTE_MAX</span></code></p>
 <p>Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored. Otherwise the larger of the two values is then stored in the database.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_MIN</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_MIN</span></code></p>
 <p>Sets the value in the database to the smaller of the existing value and <code class="docutils literal"><span class="pre">param</span></code>. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored in the database. If the existing value in the database is shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>Both the existing value and <code class="docutils literal"><span class="pre">param</span></code> are treated as unsigned integers. (This differs from the behavior of atomic addition.)</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_BYTE_MIN</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_BYTE_MIN</span></code></p>
 <p>Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored. Otherwise the smaller of the two values is then stored in the database.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY</span></code></p>
-<p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 12 bytes long. The final 2 bytes will be interpreted as a 16-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY</span></code></p>
+<p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
 <p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
 <p>This operation is not compatible with the READ_YOUR_WRITES_DISABLE <a class="reference internal" href="#c.fdb_transaction_set_option" title="fdb_transaction_set_option"><code class="xref c c-func docutils literal"><span class="pre">transaction</span> <span class="pre">option</span></code></a> and will generate an error if used with it.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
+<p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
 </div>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE</span></code></p>
-<p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 10 bytes long, and the first 10 bytes will be overwritten with the versionstamp. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE</span></code></p>
+<p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
 <p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
 <p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">At this time, versionstamped values are not compatible with the Tuple layer.</p>
+<p class="last">At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.</p>
 </div>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_commit">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_commit</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em><span class="sig-paren">)</span></dt>
-<dd><p>Attempts to commit the sets and clears previously applied to the database snapshot represented by <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to the actual database. The commit may or may not succeed &#8211; in particular, if a conflicting transaction previously committed, then the commit must fail in order to preserve transactional isolation. If the commit does succeed, the transaction is durably committed to the database and all subsequently started transactions will observe its effects.</p>
+<dd><p>Attempts to commit the sets and clears previously applied to the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to the actual database. The commit may or may not succeed &#8211; in particular, if a conflicting transaction previously committed, then the commit must fail in order to preserve transactional isolation. If the commit does succeed, the transaction is durably committed to the database and all subsequently started transactions will observe its effects.</p>
 <p>It is not necessary to commit a read-only transaction &#8211; you can simply call <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> representing an empty value. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <p>Callers will usually want to retry a transaction if the commit or a prior <code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_*()</span></code> returns a retryable error (see <a class="reference internal" href="#c.fdb_transaction_on_error" title="fdb_transaction_on_error"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_on_error()</span></code></a>).</p>
@@ -859,7 +804,7 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <dl class="function">
 <dt id="c.fdb_transaction_get_committed_version">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_transaction_get_committed_version</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, int64_t*<em>&nbsp;out_version</em><span class="sig-paren">)</span></dt>
-<dd><p>Retrieves the database version number at which a given transaction was committed. <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a> must have been called on <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> and the resulting future must be ready and not an error before this function is called, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.</p>
+<dd><p>Retrieves the database version number at which a given transaction was committed. <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a> must have been called on <code class="docutils literal"><span class="pre">transaction</span></code> and the resulting future must be ready and not an error before this function is called, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.</p>
 <p>Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling <a class="reference internal" href="#c.fdb_transaction_set_read_version" title="fdb_transaction_set_read_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_set_read_version()</span></code></a> on another subsequent transaction.</p>
 <p>Most applications will not call this function.</p>
 </dd></dl>
@@ -881,10 +826,10 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> representing an empty value that will be set once the watch has detected a change to the value at the specified key. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <p>By default, each database connection can have no more than 10,000 watches that have not yet reported a change. When this number is exceeded, an attempt to create a watch will return a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">too_many_watches</span></a> error. This limit can be changed using the MAX_WATCHES <a class="reference internal" href="#c.fdb_database_set_option" title="fdb_database_set_option"><code class="xref c c-func docutils literal"><span class="pre">database</span> <span class="pre">option</span></code></a>. Because a watch outlives the transaction that creates it, any watch that is no longer needed should be cancelled by calling <a class="reference internal" href="#c.fdb_future_cancel" title="fdb_future_cancel"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_cancel()</span></code></a> on its returned future.</p>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">key_name</span></code></dt>
 <dd>A pointer to the name of the key to watch. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">key_name</span></code>.</dd>
 </dl>
 </dd></dl>
 
@@ -905,7 +850,7 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <dl class="function">
 <dt id="c.fdb_transaction_reset">
 void <code class="descname">fdb_transaction_reset</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em><span class="sig-paren">)</span></dt>
-<dd><p>Reset <code class="xref c c-data docutils literal"><span class="pre">transaction</span></code> to its initial state. This is similar to calling <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a> followed by <a class="reference internal" href="#c.fdb_database_create_transaction" title="fdb_database_create_transaction"><code class="xref c c-func docutils literal"><span class="pre">fdb_database_create_transaction()</span></code></a>. It is not necessary to call <a class="reference internal" href="#c.fdb_transaction_reset" title="fdb_transaction_reset"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_reset()</span></code></a> when handling an error with <a class="reference internal" href="#c.fdb_transaction_on_error" title="fdb_transaction_on_error"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_on_error()</span></code></a> since the transaction has already been reset.</p>
+<dd><p>Reset <code class="docutils literal"><span class="pre">transaction</span></code> to its initial state. This is similar to calling <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a> followed by <a class="reference internal" href="#c.fdb_database_create_transaction" title="fdb_database_create_transaction"><code class="xref c c-func docutils literal"><span class="pre">fdb_database_create_transaction()</span></code></a>. It is not necessary to call <a class="reference internal" href="#c.fdb_transaction_reset" title="fdb_transaction_reset"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_reset()</span></code></a> when handling an error with <a class="reference internal" href="#c.fdb_transaction_on_error" title="fdb_transaction_on_error"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_on_error()</span></code></a> since the transaction has already been reset.</p>
 </dd></dl>
 
 <dl class="function">
@@ -931,15 +876,15 @@ void <code class="descname">fdb_transaction_cancel</code><span class="sig-paren"
 <p class="last">Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
 </div>
 <dl class="docutils">
-<dt><code class="xref c c-data docutils literal"><span class="pre">begin_key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">begin_key_name</span></code></dt>
 <dd>A pointer to the name of the key specifying the beginning of the conflict range. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">begin_key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">begin_key_name</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">end_key_name</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">begin_key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">begin_key_name</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">end_key_name</span></code></dt>
 <dd>A pointer to the name of the key specifying the end of the conflict range. The value does not need to be NULL-terminated.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code></dt>
-<dd>The length of the parameter specified by <code class="xref c c-data docutils literal"><span class="pre">end_key_name_length</span></code>.</dd>
-<dt><code class="xref c c-data docutils literal"><span class="pre">type</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">end_key_name_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">end_key_name_length</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">type</span></code></dt>
 <dd>One of the <a class="reference internal" href="#c.FDBConflictRangeType" title="FDBConflictRangeType"><code class="xref c c-type docutils literal"><span class="pre">FDBConflictRangeType</span></code></a> values indicating what type of conflict range is being set.</dd>
 </dl>
 </dd></dl>
@@ -948,9 +893,9 @@ void <code class="descname">fdb_transaction_cancel</code><span class="sig-paren"
 <dt id="c.FDBConflictRangeType">
 <code class="descname">FDBConflictRangeType</code></dt>
 <dd><p>An enumeration of available conflict range types to be passed to <a class="reference internal" href="#c.fdb_transaction_add_conflict_range" title="fdb_transaction_add_conflict_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_add_conflict_range()</span></code></a>.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_CONFLICT_RANGE_TYPE_READ</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_CONFLICT_RANGE_TYPE_READ</span></code></p>
 <p>Adds a range of keys to the transaction&#8217;s read conflict ranges as if you had read the range. As a result, other transactions that write a key in this range could cause the transaction to fail with a conflict.</p>
-<p><code class="xref c c-data docutils literal"><span class="pre">FDB_CONFLICT_RANGE_TYPE_WRITE</span></code></p>
+<p><code class="docutils literal"><span class="pre">FDB_CONFLICT_RANGE_TYPE_WRITE</span></code></p>
 <p>Adds a range of keys to the transaction&#8217;s write conflict ranges as if you had cleared the range. As a result, other transactions that concurrently read a key in this range could fail with a conflict.</p>
 </dd></dl>
 
@@ -1045,7 +990,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

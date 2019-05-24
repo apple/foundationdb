@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":38,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6,"i16":6,"i17":6,"i18":6,"i19":6,"i20":6,"i21":6};
+var methods = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":38,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6,"i16":6,"i17":6,"i18":6,"i19":6};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],4:["t3","Abstract Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -314,18 +314,6 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
 </td>
 </tr>
 <tr id="i19" class="rowColor">
-<td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Transaction.html#setReadVersion-long-">setReadVersion</a></span>(long&nbsp;version)</code>
-<div class="block">Directly sets the version of the database at which to execute reads.</div>
-</td>
-</tr>
-<tr id="i20" class="altColor">
-<td class="colFirst"><code><a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Transaction.html#snapshot--">snapshot</a></span>()</code>
-<div class="block">Return special-purpose, read-only view of the database.</div>
-</td>
-</tr>
-<tr id="i21" class="rowColor">
 <td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;java.lang.Void&gt;</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Transaction.html#watch-byte:A-">watch</a></span>(byte[]&nbsp;key)</code>
 <div class="block">Creates a watch that will become ready when it reports a change to
@@ -340,7 +328,7 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
 <!--   -->
 </a>
 <h3>Methods inherited from interface&nbsp;com.apple.foundationdb.<a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></h3>
-<code><a href="../../../com/apple/foundationdb/ReadTransaction.html#get-byte:A-">get</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getKey-com.apple.foundationdb.KeySelector-">getKey</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getReadVersion--">getReadVersion</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#options--">options</a></code></li>
+<code><a href="../../../com/apple/foundationdb/ReadTransaction.html#addReadConflictKeyIfNotSnapshot-byte:A-">addReadConflictKeyIfNotSnapshot</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#addReadConflictRangeIfNotSnapshot-byte:A-byte:A-">addReadConflictRangeIfNotSnapshot</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#get-byte:A-">get</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getKey-com.apple.foundationdb.KeySelector-">getKey</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-byte:A-byte:A-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.KeySelector-com.apple.foundationdb.KeySelector-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getRange-com.apple.foundationdb.Range-int-boolean-com.apple.foundationdb.StreamingMode-">getRange</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#getReadVersion--">getReadVersion</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#isSnapshot--">isSnapshot</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#options--">options</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#setReadVersion-long-">setReadVersion</a>, <a href="../../../com/apple/foundationdb/ReadTransaction.html#snapshot--">snapshot</a></code></li>
 </ul>
 <ul class="blockList">
 <li class="blockList"><a name="methods.inherited.from.class.com.apple.foundationdb.ReadTransactionContext">
@@ -363,44 +351,6 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
 <!--   -->
 </a>
 <h3>Method Detail</h3>
-<a name="snapshot--">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>snapshot</h4>
-<pre><a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>&nbsp;snapshot()</pre>
-<div class="block">Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
- Snapshot reads selectively relax FoundationDB's isolation property, reducing
- <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
- but making reasoning about concurrency harder.<br>
- <br>
- For more information about how to use snapshot reads correctly, see
- <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
-<dl>
-<dt><span class="returnLabel">Returns:</span></dt>
-<dd>a read-only view of this <code>Transaction</code> with relaxed isolation properties</dd>
-</dl>
-</li>
-</ul>
-<a name="setReadVersion-long-">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>setReadVersion</h4>
-<pre>void&nbsp;setReadVersion(long&nbsp;version)</pre>
-<div class="block">Directly sets the version of the database at which to execute reads.  The
-  normal operation of a transaction is to determine an appropriately recent
-  version; this call overrides that behavior.  If the version is set too
-  far in the past, <code>past_version</code> errors will be thrown from read operations.
-  <i>Infrequently used.</i></div>
-<dl>
-<dt><span class="paramLabel">Parameters:</span></dt>
-<dd><code>version</code> - the version at which to read from the database</dd>
-</dl>
-</li>
-</ul>
 <a name="addReadConflictRange-byte:A-byte:A-">
 <!--   -->
 </a>
@@ -431,7 +381,7 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
  could cause the transaction to fail with a conflict.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
-<dd><code>key</code> - the key to be added to the range</dd>
+<dd><code>key</code> - the key to be added to the read conflict range set</dd>
 </dl>
 </li>
 </ul>

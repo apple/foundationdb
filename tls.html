@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Transport Layer Security &#8212; FoundationDB 6.0</title>
+    <title>Transport Layer Security &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -87,7 +87,8 @@
 <li><a class="reference internal" href="#enabling-tls-in-a-new-cluster">Enabling TLS in a new cluster</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls-since-v6-1">Converting an existing cluster to use TLS (since v6.1)</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls-v6-1">Converting an existing cluster to use TLS (&lt; v6.1)</a></li>
 <li><a class="reference internal" href="#configuring-tls">Configuring TLS</a><ul>
 <li><a class="reference internal" href="#default-values">Default Values</a><ul>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
@@ -96,6 +97,7 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
@@ -166,7 +168,8 @@
 <li><a class="reference internal" href="#enabling-tls-in-a-new-cluster">Enabling TLS in a new cluster</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls-since-v6-1">Converting an existing cluster to use TLS (since v6.1)</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls-v6-1">Converting an existing cluster to use TLS (&lt; v6.1)</a></li>
 <li><a class="reference internal" href="#configuring-tls">Configuring TLS</a><ul>
 <li><a class="reference internal" href="#default-values">Default Values</a><ul>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
@@ -175,6 +178,7 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
@@ -227,8 +231,50 @@
 </div>
 </div>
 </div>
-<div class="section" id="converting-an-existing-cluster-to-use-tls">
-<span id="converting-existing-cluster"></span><h2>Converting an existing cluster to use TLS</h2>
+<div class="section" id="converting-an-existing-cluster-to-use-tls-since-v6-1">
+<span id="converting-existing-cluster-after-6-1"></span><h2>Converting an existing cluster to use TLS (since v6.1)</h2>
+<p>Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:</p>
+<ol class="arabic">
+<li><p class="first">Restart each FoundationDB server individually, but with an additional listen address for TLS traffic:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">C</span> <span class="n">fdb</span><span class="o">.</span><span class="n">cluster</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4600</span><span class="p">:</span><span class="n">tls</span>
+</pre></div>
+</div>
+<p>Since, the server still listens to unencrypted traffic and the cluster file still contains the old address, rest of the processes will be able to talk to this new process.</p>
+</li>
+<li><p class="first">Once all processes are listening to both TLS and unencrypted traffic, switch one or more coordinator to use TLS. Therefore, if the old coordinator list was <code class="docutils literal"><span class="pre">127.0.0.1:4500,127.0.0.1:4501,127.0.0.1:4502</span></code>, the new one would be something like <code class="docutils literal"><span class="pre">127.0.0.1:4600:tls,127.0.0.1:4501,127.0.0.1:4502</span></code>. Switching few coordinators to TLS at a time allows a smoother migration and a window to find out clients who do not yet have TLS configured. The number of coordinators each client can connect to can be seen via  <code class="docutils literal"><span class="pre">fdbstatus</span></code> (look for <code class="docutils literal"><span class="pre">connected_coordinators</span></code> field in <code class="docutils literal"><span class="pre">clients</span></code>):</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;clients&quot;</span> <span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;count&quot;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+    <span class="s2">&quot;supported_versions&quot;</span> <span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;client_version&quot;</span> <span class="p">:</span> <span class="s2">&quot;6.1.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;connected_clients&quot;</span> <span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;address&quot;</span> <span class="p">:</span> <span class="s2">&quot;127.0.0.1:42916&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;connected_coordinators&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+                    <span class="s2">&quot;log_group&quot;</span> <span class="p">:</span> <span class="s2">&quot;default&quot;</span>
+                <span class="p">},</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;address&quot;</span> <span class="p">:</span> <span class="s2">&quot;127.0.0.1:42918&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;connected_coordinators&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                    <span class="s2">&quot;log_group&quot;</span> <span class="p">:</span> <span class="s2">&quot;default&quot;</span>
+                <span class="p">}</span>
+            <span class="p">]</span>
+        <span class="p">},</span> <span class="o">...</span>
+    <span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+<li><p class="first">If there exist a client (e.g., the client 127.0.0.1:42918 in the above example) that cannot connect to all coordinators after a coordinator is switched to TLS, it mean the client does not set up its TLS correctly. System operator should notify the client to correct the client&#8217;s TLS configuration. Otherwise, when all coordinators are switched to TLS ports, the client will loose connection.</p>
+</li>
+<li><p class="first">Repeat (2) and (3) until all the addresses in coordinator list are TLS.</p>
+</li>
+<li><p class="first">Restart each FoundationDB server, but only with one public address that listens to TLS traffic only.</p>
+</li>
+</ol>
+</div>
+<div class="section" id="converting-an-existing-cluster-to-use-tls-v6-1">
+<span id="converting-existing-cluster-before-6-1"></span><h2>Converting an existing cluster to use TLS (&lt; v6.1)</h2>
 <p>Enabling TLS on an existing (non-TLS) cluster cannot be accomplished without downtime because all processes must have TLS enabled to communicate. At startup, each server process enables TLS if the addresses in its cluster file are TLS-enabled. As a result, server processes must be stopped and restarted to convert them to use TLS. To convert the cluster to TLS in the most conservative way:</p>
 <ol class="arabic simple">
 <li>Stop all FoundationDB clients and <a class="reference internal" href="administration.html#administration-running-foundationdb"><span class="std std-ref">server processes</span></a> in the cluster.</li>
@@ -292,6 +338,7 @@ to trust</td>
 <li>The value of the environment variable, if one has been set;</li>
 <li>The default value</li>
 </ol>
+<p>For the password, rather than using the command-line option, it is recommended to use the environment variable <code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code>, as command-line options are more visible to other processes running on the same host.</p>
 <p>As with all other command-line options to <code class="docutils literal"><span class="pre">fdbserver</span></code>, the TLS settings can be specified in the <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section of the configuration file</span></a>.</p>
 <p>The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.</p>
 <div class="section" id="default-values">
@@ -318,6 +365,18 @@ to trust</td>
 </div>
 <div class="section" id="parameters-and-client-bindings">
 <h3>Parameters and client bindings</h3>
+</div>
+<div class="section" id="automatic-tls-certificate-refresh">
+<h3>Automatic TLS certificate refresh</h3>
+<p>The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:</p>
+<blockquote>
+<div><ul class="simple">
+<li>They are changed, judging by the last modified time.</li>
+<li>They are valid certificates.</li>
+<li>The key file matches the certificate file.</li>
+</ul>
+</div></blockquote>
+<p>The refresh rate is controlled by <code class="docutils literal"><span class="pre">--knob_tls_cert_refresh_delay_seconds</span></code>. Setting it to 0 will disable the refresh.</p>
 </div>
 </div>
 <div class="section" id="the-default-libressl-based-implementation">
@@ -420,7 +479,7 @@ to proceed.</td>
 <td>Common Name</td>
 </tr>
 <tr class="row-odd"><td><code class="docutils literal"><span class="pre">C</span></code></td>
-<td>County</td>
+<td>Country</td>
 </tr>
 <tr class="row-even"><td><code class="docutils literal"><span class="pre">L</span></code></td>
 <td>Locality</td>
@@ -606,7 +665,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

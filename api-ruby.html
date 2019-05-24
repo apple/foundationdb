@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Ruby API &#8212; FoundationDB 6.0</title>
+    <title>Ruby API &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -85,7 +85,6 @@
 <li><a class="reference internal" href="#installation">Installation</a></li>
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#opening-a-database">Opening a database</a></li>
-<li><a class="reference internal" href="#cluster-objects">Cluster objects</a></li>
 <li><a class="reference internal" href="#keys-and-values">Keys and values</a><ul>
 <li><a class="reference internal" href="#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
 </ul>
@@ -167,7 +166,6 @@
 <li><a class="reference internal" href="#installation">Installation</a></li>
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#opening-a-database">Opening a database</a></li>
-<li><a class="reference internal" href="#cluster-objects">Cluster objects</a></li>
 <li><a class="reference internal" href="#keys-and-values">Keys and values</a><ul>
 <li><a class="reference internal" href="#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
 </ul>
@@ -231,7 +229,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="function">
 <dt id="FDB.api_version">
 <code class="descclassname">FDB.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 600.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 610.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -246,40 +244,20 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 14 and 600 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+<p>For API changes between version 14 and 610 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
-<p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a>. The simplest way of doing this is using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
+<p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">600</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">610</span>
 <span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
 <dl class="function">
 <dt id="FDB.open">
-<code class="descclassname">FDB.</code><code class="descname">open</code><span class="sig-paren">(</span><em>cluster_file=nil</em>, <em>db_name=&quot;DB&quot;</em><span class="sig-paren">)</span> &#x2192; Database</dt>
-<dd><p>Initializes the FoundationDB API, connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>, and opens the database with the specified name. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
-<div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">In this release, db_name must be &#8220;DB&#8221;.</p>
-</div>
-<div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last"><code class="docutils literal"><span class="pre">fdb.open</span></code> combines the effect of <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">init</span></code></a>, <a class="reference internal" href="#FDB.create_cluster" title="FDB.create_cluster"><code class="xref rb rb-func docutils literal"><span class="pre">create_cluster</span></code></a>, and <a class="reference internal" href="#FDB::Cluster.open_database" title="FDB::Cluster.open_database"><code class="xref rb rb-meth docutils literal"><span class="pre">Cluster.open_database</span></code></a>.</p>
-</div>
-</dd></dl>
-
-<dl class="function">
-<dt id="FDB.init">
-<code class="descclassname">FDB.</code><code class="descname">init</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Initializes the FoundationDB API, creating a thread for the FoundationDB client and initializing the client&#8217;s networking engine. <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">init</span></code></a> can only be called once. If called subsequently or after <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>, it will raise a <code class="docutils literal"><span class="pre">client_invalid_operation</span></code> error.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="FDB.create_cluster">
-<code class="descclassname">FDB.</code><code class="descname">create_cluster</code><span class="sig-paren">(</span><em>cluster_file=nil</em><span class="sig-paren">)</span> &#x2192; Cluster</dt>
-<dd><p>Connects to the cluster specified by <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster_file</span></a>, or by a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> if <code class="docutils literal"><span class="pre">cluster_file</span></code> is <code class="docutils literal"><span class="pre">nil</span></code>.</p>
+<code class="descclassname">FDB.</code><code class="descname">open</code><span class="sig-paren">(</span><em>cluster_file=nil</em><span class="sig-paren">)</span> &#x2192; Database</dt>
+<dd><p>Initializes the FoundationDB API and connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
 </dd></dl>
 
 <dl class="global">
@@ -288,7 +266,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dd><p>A singleton providing options which affect the entire FoundationDB client. Note that network options can also be <a class="reference internal" href="api-general.html#network-options-using-environment-variables"><span class="std std-ref">set using environment variables</span></a>.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">It is an error to set these options after the first call to <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">FDB.open</span></code></a> or <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">FDB.init</span></code></a> anywhere in your application.</p>
+<p class="last">It is an error to set these options after the first call to <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">FDB.open</span></code></a> anywhere in your application.</p>
 </div>
 <dl class="method">
 <dt id="FDB::FDB.options.set_trace_enable">
@@ -309,9 +287,19 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="method">
 <dt id="FDB::FDB.options.set_trace_roll_size">
 <code class="descclassname">FDB.options.</code><code class="descname">set_trace_roll_size</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><blockquote>
-<div>Sets the maximum size in bytes of a single trace output file for this FoundationDB client.</div></blockquote>
-<p>Disables the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> and instead uses the local client directly. Must be set before setting up the network.</p>
+<dd><p>Sets the maximum size in bytes of a single trace output file for this FoundationDB client.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_trace_format">
+<code class="descclassname">FDB.options.</code><code class="descname">set_trace_format</code><span class="sig-paren">(</span><em>format</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_disable_multi_version_client_api">
+<code class="descclassname">FDB.options.</code><code class="descname">set_disable_multi_version_client_api</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Disables the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> and instead uses the local client directly. Must be set before setting up the network.</p>
 </dd></dl>
 
 <dl class="method">
@@ -373,28 +361,10 @@ must be installed. If you upgrade a language binding to a new version, you may n
 </dd></dl>
 
 <dl class="method">
-<dt id="FDB::FDB.options.set_disable_multi_version_client_api">
+<dt>
 <code class="descclassname">FDB.options.</code><code class="descname">set_disable_multi_version_client_api</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd></dd></dl>
 
-</dd></dl>
-
-</div>
-<div class="section" id="cluster-objects">
-<h2>Cluster objects</h2>
-<dl class="class">
-<dt id="FDB::Cluster">
-<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Cluster</code></dt>
-<dd></dd></dl>
-
-<dl class="method">
-<dt id="FDB::Cluster.open_database">
-<code class="descclassname">Cluster.</code><code class="descname">open_database</code><span class="sig-paren">(</span><em>name=&quot;DB&quot;</em><span class="sig-paren">)</span> &#x2192; Database</dt>
-<dd><p>Opens a database with the given name.</p>
-<div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">In this release, name <strong>must</strong> be &#8220;DB&#8221;.</p>
-</div>
 </dd></dl>
 
 </div>
@@ -669,6 +639,36 @@ value of the key is also retrieved, using network bandwidth.</p>
 <dd><p>Specify the datacenter ID to be preferentially used for database operations. ID must be a string of up to 16 hexadecimal digits that was used to configure <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">fdbserver processes</span></a>. Load balancing uses this option for location-awareness, attempting to send database operations first to servers on a specified machine, then a specified datacenter, then returning to its default algorithm.</p>
 </dd></dl>
 
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_timeout">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_timeout</code><span class="sig-paren">(</span><em>timeout</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_timeout" title="FDB::Transaction.options.set_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_timeout</span></code></a> on each transaction created by this database. This option can only be called if the API version is at least 610.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_retry_limit">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_retry_limit</code><span class="sig-paren">(</span><em>retry_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the default maximum number of retries for each transaction after which additional calls to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> will throw the most recently seen error code. This is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_retry_limit" title="FDB::Transaction.options.set_retry_limit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_retry_limit</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_max_retry_delay">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_max_retry_delay</code><span class="sig-paren">(</span><em>delay_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the default maximum backoff delay incurred by each transaction in the call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> if the error is retryable. This is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_max_retry_delay" title="FDB::Transaction.options.set_max_retry_delay"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_max_retry_delay</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_snapshot_ryw_enable">
+<code class="descclassname">Database.options.</code><code class="descname">set_snapshot_ryw_enable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>If this option has been set an equal or more times with this database than the disable option, snapshot reads <em>will</em> see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_snapshot_ryw_enable" title="FDB::Transaction.options.set_snapshot_ryw_enable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_snapshot_ryw_enable</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_snapshot_ryw_disable">
+<code class="descclassname">Database.options.</code><code class="descname">set_snapshot_ryw_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>If this option has been set more times with this database than the disable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction. Disabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_snapshot_ryw_disable" title="FDB::Transaction.options.set_snapshot_ryw_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_snapshot_ryw_disable</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="transaction-objects">
@@ -924,25 +924,25 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="FDB::Transaction.set_versionstamped_key">
 <code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_key</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 12 bytes long. The final 2 bytes will be interpreted as a 16-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<dd><p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
 <p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
 <p>This operation is not compatible with <a class="reference internal" href="#FDB::Transaction.options.set_read_your_writes_disable" title="FDB::Transaction.options.set_read_your_writes_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_read_your_writes_disable</span></code></a> and will generate an error if used with it.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
+<p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
 </div>
 </dd></dl>
 
 <dl class="method">
 <dt id="FDB::Transaction.set_versionstamped_value">
 <code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_value</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 10 bytes long, and the first 10 bytes will be overwritten with the versionstamp. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
+<dd><p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
 <p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
 <p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">At this time, versionstamped values are not compatible with the Tuple layer.</p>
+<p class="last">At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.</p>
 </div>
 </dd></dl>
 
@@ -1082,19 +1082,19 @@ both the caching and the increased network bandwidth.</p>
 <span class="target" id="api-ruby-snapshot-ryw"></span><dl class="method">
 <dt id="FDB::Transaction.options.set_snapshot_ryw_disable">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_snapshot_ryw_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>If this option is set more times in this transaction than the enable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction.</p>
+<dd><p>If this option is set more times in this transaction than the enable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction. Note that prior to API version 300, this was the default behavior. This option can be disabled one or more times at the database level by calling <a class="reference internal" href="#FDB::Database.options.set_snapshot_ryw_disable" title="FDB::Database.options.set_snapshot_ryw_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_snapshot_ryw_disable</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
 <dt id="FDB::Transaction.options.set_snapshot_ryw_enable">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_snapshot_ryw_enable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>If this option is set an equal or more times in this transaction than the disable option, snapshot reads <em>will</em> see the effects of prior writes in the same transaction.</p>
+<dd><p>If this option is set an equal or more times in this transaction than the disable option, snapshot reads <em>will</em> see the effects of prior writes in the same transaction. This option can be enabled one or more times at the database-level by calling <a class="reference internal" href="#FDB::Database.options.set_snapshot_ryw_enable" title="FDB::Database.options.set_snapshot_ryw_enable"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_snapshot_ryw_enable</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
 <dt id="FDB::Transaction.options.set_priority_batch">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_priority_batch</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>This transaction should be treated as low priority (other transactions should be processed first).  Useful for doing potentially saturating batch work without interfering with the latency of other operations.</p>
+<dd><p>This transaction should be treated as low priority (other transactions will be processed first). Batch priority transactions will also be throttled at load levels smaller than for other types of transactions and may be fully cut off in the event of machine failures. Useful for doing potentially saturating batch work without interfering with the latency of other operations.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1169,13 +1169,13 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.options.set_retry_limit">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_retry_limit</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Set a maximum number of retries after which additional calls to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> will throw the most recently seen error code. (By default, a transaction permits an unlimited number of retries.) Valid parameter values are [-1, INT_MAX]. If set to -1, the transaction returns to the default of unlimited retries.</p>
-<p>Like all transaction options, the retry limit must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. This behavior allows the user to make the retry limit dynamic.</p>
+<p>Prior to API version 610, Like all other transaction options, the retry limit must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. If the API version is 610 or newer, then the retry limit is not reset. Note that at all API versions, it is safe and legal to call this option after each call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can also set the default retry limit for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_retry_limit" title="FDB::Database.options.set_transaction_retry_limit"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_retry_limit</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
 <dt id="FDB::Transaction.options.set_max_retry_delay">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_max_retry_delay</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>Set the maximum backoff delay incurred in the call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> if the error is retryable.</p>
+<dd><p>Set the maximum backoff delay incurred in the call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_max_retry_delay" title="FDB::Database.options.set_transaction_max_retry_delay"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_max_retry_delay</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1183,7 +1183,7 @@ both the caching and the increased network bandwidth.</p>
 <code class="descclassname">Transaction.options.</code><code class="descname">set_timeout</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Set a timeout duration in milliseconds after which the transaction automatically to be cancelled. The time is measured from transaction creation (or the most call to <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>, if any). Valid parameter values are [0, INT_MAX]. If set to 0, all timeouts will be disabled. Once a transaction has timed out, all pending or future uses of the transaction will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_timed_out</span></a> exception. The transaction can be used again after it is <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>.</p>
 <p>Timeouts employ transaction cancellation, so you should note the issues raised by <a class="reference internal" href="#FDB::Transaction.cancel" title="FDB::Transaction.cancel"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.cancel</span></code></a> when using timeouts.</p>
-<p>Like all transaction options, a timeout must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. This behavior allows the user to make the timeout dynamic. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured.</p>
+<p>Prior to API version 610, like all other transaction options, a timeout must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>. Note that at all API versions, it is safe and legal to call this option after each call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>.</p>
 </dd></dl>
 
 </div>
@@ -1804,7 +1804,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

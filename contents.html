@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Site Map &#8212; FoundationDB 6.0</title>
+    <title>Site Map &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -119,7 +119,7 @@
 If you are having trouble finding something in particular, try the search box in the navbar.</p>
 <div class="toctree-wrapper compound">
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 6.0</a><ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 6.1</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
 <li class="toctree-l2"><a class="reference internal" href="index.html#documentation">Documentation</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="local-dev.html">Local Development</a><ul>
@@ -195,7 +195,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l4"><a class="reference internal" href="engineering.html">Engineering</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="engineering.html#flow">Flow</a></li>
 <li class="toctree-l5"><a class="reference internal" href="engineering.html#simulation">Simulation</a></li>
-<li class="toctree-l5"><a class="reference internal" href="engineering.html#ratekeeper">RateKeeper</a></li>
+<li class="toctree-l5"><a class="reference internal" href="engineering.html#ratekeeper">Ratekeeper</a></li>
 <li class="toctree-l5"><a class="reference internal" href="engineering.html#prioritization">Prioritization</a></li>
 <li class="toctree-l5"><a class="reference internal" href="engineering.html#range-clears">Range clears</a></li>
 <li class="toctree-l5"><a class="reference internal" href="engineering.html#range-reads">Range reads</a></li>
@@ -278,6 +278,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="flow.html#example-a-server-interface">Example: A Server Interface</a></li>
 </ul>
 </li>
+<li class="toctree-l5"><a class="reference internal" href="flow.html#caveats">Caveats</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="testing.html">Simulation and Testing</a><ul>
@@ -286,18 +287,29 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="testing.html#performance-testing-with-circus">Performance testing with Circus</a></li>
 </ul>
 </li>
+<li class="toctree-l4"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#coordinators">Coordinators</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#cluster-controller">Cluster Controller</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#master">Master</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#proxies">Proxies</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#transaction-logs">Transaction Logs</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#resolvers">Resolvers</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#storage-servers">Storage Servers</a></li>
+<li class="toctree-l5"><a class="reference internal" href="kv-architecture.html#clients">Clients</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="client-design.html">Client Design</a><ul>
 <li class="toctree-l4"><a class="reference internal" href="release-notes.html">Release Notes</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id1">6.0.15</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id1">6.1.8</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#features">Features</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#performance">Performance</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#fixes">Fixes</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes.html#fixes-only-impacting-6-0-0">Fixes only impacting 6.0.0+</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#status">Status</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#bindings">Bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#other-changes">Other Changes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#fixes-only-impacting-6-1-0">Fixes only impacting 6.1.0+</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#earlier-release-notes">Earlier release notes</a></li>
 </ul>
 </li>
@@ -706,7 +718,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#installation">Installation</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#api-versioning">API versioning</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#opening-a-database">Opening a database</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-python.html#cluster-objects">Cluster objects</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#keys-and-values">Keys and values</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-python.html#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
 </ul>
@@ -751,7 +762,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-ruby.html#installation">Installation</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-ruby.html#api-versioning">API versioning</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-ruby.html#opening-a-database">Opening a database</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-ruby.html#cluster-objects">Cluster objects</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-ruby.html#keys-and-values">Keys and values</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-ruby.html#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
 </ul>
@@ -800,7 +810,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#api-versioning">API versioning</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#network">Network</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#future">Future</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-c.html#cluster">Cluster</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#database">Database</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#transaction">Transaction</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-c.html#snapshot-reads">Snapshot reads</a></li>
@@ -941,6 +950,52 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="configuration.html">Configuration</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#system-requirements">System requirements</a></li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#choosing-coordination-servers">Choosing coordination servers</a></li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#changing-coordination-servers">Changing coordination servers</a></li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#changing-the-cluster-description">Changing the cluster description</a></li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#the-configuration-file">The configuration file</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#fdbmonitor-section"><code class="docutils literal"><span class="pre">[fdbmonitor]</span></code> section</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#general-section"><code class="docutils literal"><span class="pre">[general]</span></code> section</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#fdbserver-section"><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#fdbserver-id-section-s"><code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> section(s)</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#backup-agent-sections">Backup agent sections</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#choosing-a-redundancy-mode">Choosing a redundancy mode</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#single-datacenter-modes">Single datacenter modes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#datacenter-aware-mode">Datacenter-aware mode</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#changing-redundancy-mode">Changing redundancy mode</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#configuring-the-storage-subsystem">Configuring the storage subsystem</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#storage-engines">Storage engines</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#storage-locations">Storage locations</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#ssd-considerations">SSD considerations</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#filesystem">Filesystem</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#durability-and-caching">Durability and caching</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#disk-partitioning">Disk partitioning</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#configuring-regions">Configuring regions</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#specifying-datacenters">Specifying datacenters</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#changing-the-region-configuration">Changing the region configuration</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#asymmetric-configurations">Asymmetric configurations</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#changing-the-usable-regions-configuration">Changing the usable_regions configuration</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#changing-the-log-routers-configuration">Changing the log routers configuration</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#migrating-a-database-to-use-a-region-configuration">Migrating a database to use a region configuration</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#handling-datacenter-failures">Handling datacenter failures</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#region-change-safety">Region change safety</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#monitoring">Monitoring</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#choosing-coordinators">Choosing coordinators</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#comparison-to-other-multiple-datacenter-configurations">Comparison to other multiple datacenter configurations</a></li>
+<li class="toctree-l6"><a class="reference internal" href="configuration.html#known-limitations">Known limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="configuration.html#guidelines-for-setting-process-class">Guidelines for setting process class</a></li>
+</ul>
+</li>
 <li class="toctree-l4"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="moving-a-cluster.html#goal">Goal</a></li>
 <li class="toctree-l5"><a class="reference internal" href="moving-a-cluster.html#challenge">Challenge</a></li>
@@ -953,7 +1008,8 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="tls.html#enabling-tls-in-a-new-cluster">Enabling TLS in a new cluster</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="tls.html#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
+<li class="toctree-l5"><a class="reference internal" href="tls.html#converting-an-existing-cluster-to-use-tls-since-v6-1">Converting an existing cluster to use TLS (since v6.1)</a></li>
+<li class="toctree-l5"><a class="reference internal" href="tls.html#converting-an-existing-cluster-to-use-tls-v6-1">Converting an existing cluster to use TLS (&lt; v6.1)</a></li>
 <li class="toctree-l5"><a class="reference internal" href="tls.html#configuring-tls">Configuring TLS</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="tls.html#default-values">Default Values</a><ul>
 <li class="toctree-l7"><a class="reference internal" href="tls.html#certificate-file-default-location">Certificate file default location</a></li>
@@ -962,6 +1018,7 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l6"><a class="reference internal" href="tls.html#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="tls.html#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="tls.html#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
@@ -998,6 +1055,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="administration.html#accessing-cluster-file-information-from-a-client">Accessing cluster file information from a client</a></li>
 </ul>
 </li>
+<li class="toctree-l4"><a class="reference internal" href="administration.html#ipv6-support">IPv6 Support</a></li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#adding-machines-to-a-cluster">Adding machines to a cluster</a></li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#removing-machines-from-a-cluster">Removing machines from a cluster</a></li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#moving-a-cluster">Moving a cluster</a></li>
@@ -1027,6 +1085,7 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#version-specific-notes-on-upgrading">Version-specific notes on upgrading</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="administration.html#upgrading-from-6-1-x">Upgrading from 6.1.x</a></li>
 <li class="toctree-l5"><a class="reference internal" href="administration.html#upgrading-from-6-0-x">Upgrading from 6.0.x</a></li>
 <li class="toctree-l5"><a class="reference internal" href="administration.html#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
 <li class="toctree-l5"><a class="reference internal" href="administration.html#upgrading-from-5-0-x-5-1-x">Upgrading from 5.0.x - 5.1.x</a></li>
@@ -1479,6 +1538,34 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 </ul>
 </li>
+<li class="toctree-l4"><a class="reference internal" href="old-release-notes/release-notes-600.html">Release Notes</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="old-release-notes/release-notes-600.html#id1">6.0.18</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#fixes">Fixes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#features">Features</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="old-release-notes/release-notes-600.html#id5">6.0.17</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#id6">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="old-release-notes/release-notes-600.html#id7">6.0.16</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#performance">Performance</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#id8">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="old-release-notes/release-notes-600.html#id9">6.0.15</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#id10">Features</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#id11">Performance</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#id12">Fixes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#fixes-only-impacting-6-0-0">Fixes only impacting 6.0.0+</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#status">Status</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#bindings">Bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#other-changes">Other Changes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="old-release-notes/release-notes-600.html#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -1509,7 +1596,7 @@ If you are having trouble finding something in particular, try the search box in
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Engineering &#8212; FoundationDB 6.0</title>
+    <title>Engineering &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -84,7 +84,7 @@
 <li><a class="reference internal" href="#">Engineering</a><ul>
 <li><a class="reference internal" href="#flow">Flow</a></li>
 <li><a class="reference internal" href="#simulation">Simulation</a></li>
-<li><a class="reference internal" href="#ratekeeper">RateKeeper</a></li>
+<li><a class="reference internal" href="#ratekeeper">Ratekeeper</a></li>
 <li><a class="reference internal" href="#prioritization">Prioritization</a></li>
 <li><a class="reference internal" href="#range-clears">Range clears</a></li>
 <li><a class="reference internal" href="#range-reads">Range reads</a></li>
@@ -135,7 +135,7 @@
 <li><a class="reference internal" href="#">Engineering</a><ul>
 <li><a class="reference internal" href="#flow">Flow</a></li>
 <li><a class="reference internal" href="#simulation">Simulation</a></li>
-<li><a class="reference internal" href="#ratekeeper">RateKeeper</a></li>
+<li><a class="reference internal" href="#ratekeeper">Ratekeeper</a></li>
 <li><a class="reference internal" href="#prioritization">Prioritization</a></li>
 <li><a class="reference internal" href="#range-clears">Range clears</a></li>
 <li><a class="reference internal" href="#range-reads">Range reads</a></li>
@@ -160,8 +160,8 @@
 <p>We wanted FoundationDB to survive failures of machines, networks, disks, clocks, racks, data centers, file systems, etc., so we created a simulation framework closely tied to Flow. By replacing physical interfaces with shims, replacing the main epoll-based run loop with a time-based simulation, and running multiple logical processes as concurrent Flow Actors, Simulation is able to conduct a deterministic simulation of an entire FoundationDB cluster within a single-thread! Even better, we are able to execute this simulation in a deterministic way, enabling us to reproduce problems and add instrumentation ex post facto. This incredible capability enabled us to build FoundationDB exclusively in simulation for the first 18 months and ensure exceptional fault tolerance long before it sent its first real network packet. For a database with as strong a contract as the FoundationDB, testing is crucial, and over the years we have run the equivalent of <em>a trillion CPU-hours</em> of simulated stress testing. Read more about our <a class="reference internal" href="testing.html"><span class="doc">Simulation and Testing</span></a>.</p>
 </div>
 <div class="section" id="ratekeeper">
-<h2>RateKeeper</h2>
-<p>FoundationDB uses an intelligent control algorithm called RateKeeper to queue client transactions during heavy loads. Using principles from operational research and control theory, FoundationDB prevents system oscillation and reduces internal queue sizes by intelligently applying global backpressure. By handing out tickets and serving clients in order and at a controlled pace, latency is shifted from the read and commit operations to the transaction-creation line. This ensures continuous low-latency operation under all conditions and also allows transactions of different priorities to be queued separately, allowing concurrent batch and low-latency workloads.</p>
+<h2>Ratekeeper</h2>
+<p>FoundationDB uses an intelligent control algorithm called Ratekeeper to queue client transactions during heavy loads. Using principles from operational research and control theory, FoundationDB prevents system oscillation and reduces internal queue sizes by intelligently applying global backpressure. By handing out tickets and serving clients in order and at a controlled pace, latency is shifted from the read and commit operations to the transaction-creation line. This ensures continuous low-latency operation under all conditions and also allows transactions of different priorities to be queued separately, allowing concurrent batch and low-latency workloads.</p>
 </div>
 <div class="section" id="prioritization">
 <h2>Prioritization</h2>
@@ -201,7 +201,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

@@ -14,10 +14,10 @@ Simulation
 
 We wanted FoundationDB to survive failures of machines, networks, disks, clocks, racks, data centers, file systems, etc., so we created a simulation framework closely tied to Flow. By replacing physical interfaces with shims, replacing the main epoll-based run loop with a time-based simulation, and running multiple logical processes as concurrent Flow Actors, Simulation is able to conduct a deterministic simulation of an entire FoundationDB cluster within a single-thread! Even better, we are able to execute this simulation in a deterministic way, enabling us to reproduce problems and add instrumentation ex post facto. This incredible capability enabled us to build FoundationDB exclusively in simulation for the first 18 months and ensure exceptional fault tolerance long before it sent its first real network packet. For a database with as strong a contract as the FoundationDB, testing is crucial, and over the years we have run the equivalent of *a trillion CPU-hours* of simulated stress testing. Read more about our :doc:`Simulation and Testing <testing>`.
 
-RateKeeper
+Ratekeeper
 ==========
 
-FoundationDB uses an intelligent control algorithm called RateKeeper to queue client transactions during heavy loads. Using principles from operational research and control theory, FoundationDB prevents system oscillation and reduces internal queue sizes by intelligently applying global backpressure. By handing out tickets and serving clients in order and at a controlled pace, latency is shifted from the read and commit operations to the transaction-creation line. This ensures continuous low-latency operation under all conditions and also allows transactions of different priorities to be queued separately, allowing concurrent batch and low-latency workloads.
+FoundationDB uses an intelligent control algorithm called Ratekeeper to queue client transactions during heavy loads. Using principles from operational research and control theory, FoundationDB prevents system oscillation and reduces internal queue sizes by intelligently applying global backpressure. By handing out tickets and serving clients in order and at a controlled pace, latency is shifted from the read and commit operations to the transaction-creation line. This ensures continuous low-latency operation under all conditions and also allows transactions of different priorities to be queued separately, allowing concurrent batch and low-latency workloads.
 
 Prioritization
 ==============

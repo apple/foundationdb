@@ -106,7 +106,6 @@ var activeTableTab = "activeTableTab";
 <pre>public interface <span class="typeNameLabel">Database</span>
 extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb">TransactionContext</a></pre>
 <div class="block">A mutable, lexicographically ordered mapping from binary keys to binary values.
-  A <code>Database</code> is stored on a FoundationDB <a href="../../../com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb"><code>Cluster</code></a>.
   <a href="../../../com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>s are used to manipulate data within a single
   <code>Database</code> -- multiple, concurrent
   <code>Transaction</code>s on a <code>Database</code> enforce <b>ACID</b> properties.<br>

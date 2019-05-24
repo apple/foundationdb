@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Flow &#8212; FoundationDB 6.0</title>
+    <title>Flow &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -95,6 +95,7 @@
 <li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#caveats">Caveats</a></li>
 </ul>
 </li>
 </ul>
@@ -152,6 +153,7 @@
 <li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#caveats">Caveats</a></li>
 </ul>
 </li>
 </ul>
@@ -240,6 +242,57 @@
 </div>
 </div>
 </div>
+<div class="section" id="caveats">
+<h2>Caveats</h2>
+<p>Even though flow-code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.</p>
+<p>We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file <code class="docutils literal"><span class="pre">actorcompiler.h</span></code> in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn&#8217;t preprocess flow files. This mode can be used by passing <code class="docutils literal"><span class="pre">-DOPEN_FOR_IDE=ON</span></code> to cmake. Additionally we generate a special <code class="docutils literal"><span class="pre">compile_commands.json</span></code> into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.</p>
+<p>Some preprocessor definitions will not fix all issues though. When programming flow the following things have to be taken care of by the programmer:</p>
+<ul>
+<li><p class="first">Local variables don&#8217;t survive a call to <code class="docutils literal"><span class="pre">wait</span></code>. So this would be legal flow-code, but NOT legal C++-code:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="kt">void</span> <span class="n">foo</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span>
+    <span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>In order to make this not break IDE-support one can either rename the second occurrence of this variable or, if this is not desired as it might make the code unreadable, one can use scoping:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="kt">void</span> <span class="n">foo</span> <span class="p">{</span>
+    <span class="p">{</span>
+        <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="p">{</span>
+        <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span>
+        <span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+<li><p class="first">An <code class="docutils literal"><span class="pre">ACTOR</span></code> is compiled into a class internally. Which means that within an actor-function, <code class="docutils literal"><span class="pre">this</span></code> is a valid pointer to this class. But using them explicitely (or as described later implicitely) will break IDE support. One can use <code class="docutils literal"><span class="pre">THIS</span></code> and <code class="docutils literal"><span class="pre">THIS_ADDR</span></code> instead. But be careful as <code class="docutils literal"><span class="pre">THIS</span></code> will be of type <code class="docutils literal"><span class="pre">nullptr_t</span></code> in IDE-mode and of the actor-type in normal compilation mode.</p>
+</li>
+<li><p class="first">Lambdas and state variables are weird in a sense. After actorcompilation a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method <code class="docutils literal"><span class="pre">Foo::bar</span></code> is defined as <code class="docutils literal"><span class="pre">const</span></code>:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">state</span> <span class="n">Foo</span> <span class="n">f</span><span class="p">;</span>
+    <span class="n">foo</span><span class="p">([</span><span class="o">=</span><span class="p">]()</span> <span class="p">{</span> <span class="n">f</span><span class="p">.</span><span class="n">bar</span><span class="p">();</span> <span class="p">})</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>If it is not, one has to pass the member explictely as reference:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">state</span> <span class="n">Foo</span> <span class="n">f</span><span class="p">;</span>
+    <span class="k">auto</span> <span class="n">x</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">f</span><span class="p">;</span>
+    <span class="n">foo</span><span class="p">([</span><span class="n">x</span><span class="p">]()</span> <span class="p">{</span> <span class="n">x</span><span class="o">-&gt;</span><span class="n">bar</span><span class="p">();</span> <span class="p">})</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+<li><p class="first">state variables in don&#8217;t follow the normal scoping rules. So in flow a state variable can be defined in a inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.</p>
+</li>
+</ul>
+</div>
 </div>
 
 
@@ -262,7 +315,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

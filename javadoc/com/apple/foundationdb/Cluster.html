@@ -17,8 +17,8 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10};
-var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"]};
+var methods = {"i0":42,"i1":42,"i2":42,"i3":42,"i4":42,"i5":42};
+var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
 var tableTab = "tableTab";
@@ -110,11 +110,15 @@ var activeTableTab = "activeTableTab";
 <dd>java.lang.AutoCloseable</dd>
 </dl>
 <hr>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 <br>
-<pre>public class <span class="typeNameLabel">Cluster</span>
+<pre>@Deprecated
+public class <span class="typeNameLabel">Cluster</span>
 extends java.lang.Object</pre>
 <div class="block">The <code>Cluster</code> represents a connection to a physical set of cooperating machines
-  running FoundationDB. A <code>Cluster</code> is opened with a reference to a cluster file.<br>
+  running FoundationDB. A <code>Cluster</code> is opened with a reference to a cluster file.
+
+ This class is deprecated. Use <a href="../../../com/apple/foundationdb/FDB.html#open--"><code>FDB.open()</code></a> to open a <a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><code>Database</code></a> directly<br>
  <br>
  <b>Note:</b> <code>Cluster</code> objects must be <a href="../../../com/apple/foundationdb/Cluster.html#close--"><code>closed</code></a> when no longer in use
   in order to free any associated resources.</div>
@@ -131,7 +135,7 @@ extends java.lang.Object</pre>
 </a>
 <h3>Method Summary</h3>
 <table class="memberSummary" border="0" cellpadding="3" cellspacing="0" summary="Method Summary table, listing methods, and an explanation">
-<caption><span id="t0" class="activeTableTab"><span>All Methods</span><span class="tabEnd">&nbsp;</span></span><span id="t2" class="tableTab"><span><a href="javascript:show(2);">Instance Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t4" class="tableTab"><span><a href="javascript:show(8);">Concrete Methods</a></span><span class="tabEnd">&nbsp;</span></span></caption>
+<caption><span id="t0" class="activeTableTab"><span>All Methods</span><span class="tabEnd">&nbsp;</span></span><span id="t2" class="tableTab"><span><a href="javascript:show(2);">Instance Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t4" class="tableTab"><span><a href="javascript:show(8);">Concrete Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t6" class="tableTab"><span><a href="javascript:show(32);">Deprecated Methods</a></span><span class="tabEnd">&nbsp;</span></span></caption>
 <tr>
 <th class="colFirst" scope="col">Modifier and Type</th>
 <th class="colLast" scope="col">Method and Description</th>
@@ -151,18 +155,21 @@ extends java.lang.Object</pre>
 <tr id="i3" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Cluster.html#openDatabase--">openDatabase</a></span>()</code>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 </td>
 </tr>
 <tr id="i4" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Cluster.html#openDatabase-java.util.concurrent.Executor-">openDatabase</a></span>(java.util.concurrent.Executor&nbsp;e)</code>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 </td>
 </tr>
 <tr id="i5" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/ClusterOptions.html" title="class in com.apple.foundationdb">ClusterOptions</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/Cluster.html#options--">options</a></span>()</code>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 <div class="block">Returns a set of options that can be set on a <code>Cluster</code>.</div>
 </td>
 </tr>
@@ -195,6 +202,7 @@ extends java.lang.Object</pre>
 <li class="blockList">
 <h4>options</h4>
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/ClusterOptions.html" title="class in com.apple.foundationdb">ClusterOptions</a>&nbsp;options()</pre>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 <div class="block">Returns a set of options that can be set on a <code>Cluster</code>. In the current version
  of the API, there are no options that can be set on a <code>Cluster</code>.</div>
 <dl>
@@ -211,7 +219,8 @@ extends java.lang.Object</pre>
 <h4>openDatabase</h4>
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a>&nbsp;openDatabase()
                       throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a <code>Future</code> that will be set to a <code>Database</code> upon
@@ -229,7 +238,8 @@ extends java.lang.Object</pre>
 <h4>openDatabase</h4>
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a>&nbsp;openDatabase(java.util.concurrent.Executor&nbsp;e)
                       throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
-<div class="block">Creates a connection to a specific database on an <i>FDB</i> cluster.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Creates a connection to the database on an <i>FDB</i> cluster.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>e</code> - the <code>Executor</code> to use when executing asynchronous callbacks for the database</dd>

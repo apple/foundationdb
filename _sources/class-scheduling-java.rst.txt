@@ -30,7 +30,7 @@ Before using the API, we need to specify the API version. This allows programs t
   private static final Database db;
 
   static {
-    fdb = FDB.selectAPIVersion(600);
+    fdb = FDB.selectAPIVersion(610);
     db = fdb.open();
   }
 
@@ -66,7 +66,7 @@ If this is all working, it looks like we are ready to start building a real appl
     private static final Database db;
 
     static {
-      fdb = FDB.selectAPIVersion(600);
+      fdb = FDB.selectAPIVersion(610);
       db = fdb.open();
     }
 
@@ -153,6 +153,11 @@ is equivalent to something like:
     }
 
 If instead you pass a :class:`Transaction` for the :class:`TransactionContext` parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits functions using this pattern to be composed into larger transactions.
+
+Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the ``setRetryLimit`` or ``setTimeout`` transaction options or at the database level with the ``setTransactionRetryLimit`` or ``setTransactionTimeout`` database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling::
+
+    db.options().setTransactionTimeout(60000);  // 60,000 ms = 1 minute
+    db.options().setRetryLimit(100);
 
 Making some sample classes
 --------------------------
@@ -436,8 +441,10 @@ Here's the code for the scheduling tutorial:
     private static final Database db;
 
     static {
-      fdb = FDB.selectAPIVersion(600);
+      fdb = FDB.selectAPIVersion(610);
       db = fdb.open();
+      db.options().setTransactionTimeout(60000);  // 60,000 ms = 1 minute
+      db.options().setRetryLimit(100);
     }
 
     // Generate 1,620 classes like '9:00 chem for dummies'

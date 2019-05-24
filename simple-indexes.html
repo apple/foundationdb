@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Simple Indexes &#8212; FoundationDB 6.0</title>
+    <title>Simple Indexes &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -209,8 +209,8 @@
 <div class="section" id="code">
 <h2>Code</h2>
 <p>In this example, we’re storing user data based on user_ID but sometimes need to retrieve users based on their zipcode. We use a transactional function to set user data and its index and another to retrieve data using the index.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">user</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
-<span class="n">index</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;zipcode_index&#39;</span><span class="p">,))</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">user</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;zipcode_index&#39;</span><span class="p">,))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_user</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">ID</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">zipcode</span><span class="p">):</span>
@@ -220,12 +220,15 @@
 <span class="c1"># Normal lookup</span>
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_user</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">ID</span><span class="p">):</span>
-    <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">user</span><span class="p">[</span><span class="n">ID</span><span class="p">]]</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span><span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">user</span><span class="p">[</span><span class="n">ID</span><span class="p">]</span><span class="o">.</span><span class="n">range</span><span class="p">()]:</span>
+        <span class="k">return</span> <span class="n">v</span>
+
+    <span class="k">return</span> <span class="kc">None</span>
 
 <span class="c1"># Index lookup</span>
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span> <span class="nf">get_user_IDs_in_region</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">region</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">[</span><span class="n">index</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="n">region</span><span class="p">]</span><span class="o">.</span><span class="n">range</span><span class="p">()]]</span>
+<span class="k">def</span> <span class="nf">get_user_IDs_in_region</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">zipcode</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">index</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="n">zipcode</span><span class="p">]</span><span class="o">.</span><span class="n">range</span><span class="p">()]]</span>
 </pre></div>
 </div>
 <p>That&#8217;s just about all you need to create an index.</p>
@@ -252,7 +255,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

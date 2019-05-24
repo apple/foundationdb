@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 6.0</title>
+    <title>Configuration &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,6 +31,8 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
+    <link rel="prev" title="Administration" href="administration.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -50,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -133,6 +135,14 @@
             
               
                 
+  <li>
+    <a href="administration.html" title="Previous Chapter: Administration"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Administration</span>
+    </a>
+  </li>
+  <li>
+    <a href="moving-a-cluster.html" title="Next Chapter: Moving a Cluster to New Machines"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Moving a Clus... &raquo;</span>
+    </a>
+  </li>
               
             
             
@@ -581,15 +591,12 @@ after which data may be lost</td>
 <p class="last">FoundationDB replicates data to three machines, and at least three available machines are required to make progress. This is the recommended mode for a cluster of five or more machines in a single datacenter.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">three_data_hall</span></code> mode</dt>
-<dd>FoundationDB replicates data to three machines, and at least three available machines are required to make progress. Every piece of data that has been committed to storage servers
-will be replicated onto three different data halls, and the cluster will
-remain available after losing a single data hall and one machine in another
-data hall.</dd>
+<dd>FoundationDB stores data in triplicate, with one copy on a storage server in each of three data halls. The transaction logs are replicated four times, with two data halls containing two replicas apiece. Four available machines (two in each of two data halls) are therefore required to make progress. This configuration enables the cluster to remain available after losing a single data hall and one machine in another data hall.</dd>
 </dl>
 </div>
 <div class="section" id="datacenter-aware-mode">
 <h3>Datacenter-aware mode</h3>
-<p>In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters. Although data will always be triple replicated in this mode, it may not be replicated across all datacenters.</p>
+<p>In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters.</p>
 <blockquote>
 <div><div class="admonition note">
 <p class="first admonition-title">Note</p>
@@ -599,7 +606,7 @@ data hall.</dd>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">three_datacenter</span></code> mode</dt>
 <dd><p class="first"><em>(for 5+ machines in 3 datacenters)</em></p>
-<p class="last">FoundationDB attempts to replicate data across two datacenters and will stay up with only two available. Data is triple replicated.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.</p>
+<p class="last">FoundationDB attempts to replicate data across three datacenters and will stay up with only two available. Data is replicated 6 times. Transaction logs are stored in the same configuration as the <code class="docutils literal"><span class="pre">three_data_hall</span></code> mode, so commit latencies are tied to the latency between datacenters. For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.</p>
 </dd>
 </dl>
 <div class="admonition warning">
@@ -706,7 +713,7 @@ Configuration changed.
 <li>Copy-on-write type filesystems (such as Btrfs) will likely have poor performance with FoundationDB.</li>
 </ul>
 </div>
-<p>Ext4 filesystems should be mounted with mount options <code class="docutils literal"><span class="pre">default,noatime,discard</span></code>.</p>
+<p>Ext4 filesystems should be mounted with mount options <code class="docutils literal"><span class="pre">defaults,noatime,discard</span></code>.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">The <code class="docutils literal"><span class="pre">noatime</span></code> option disables updating of access times when reading files, an unneeded feature for FoundationDB that increases write activity on the disk. The discard option enables <a class="reference external" href="http://en.wikipedia.org/wiki/TRIM">TRIM</a> support, allowing the operating system to efficiently inform the SSD of erased blocks, maintaining high write speed and increasing drive lifetime.</p>
@@ -887,10 +894,6 @@ Configuration changed.
 </ol>
 </div></blockquote>
 <p>If you are running in a configuration without a satellite datacenter, or you have lost all machines in a region simultaneously, the <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command from <code class="docutils literal"><span class="pre">fdbcli</span></code> allows you to force a recovery to the other region.  This will discard the portion of the mutation log which did not make it across the WAN. Once the database has recovered, immediately follow the previous steps to drop the dead region the normal way.</p>
-<div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">In 6.0 the <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command from <code class="docutils literal"><span class="pre">fdbcli</span></code> can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster. In general this command has not be tested to same degree as the rest of the codebase, and should only be used in extreme emergencies.</p>
-</div>
 </div>
 <div class="section" id="region-change-safety">
 <h3>Region change safety</h3>
@@ -931,7 +934,6 @@ Configuration changed.
 <li>FoundationDB supports replicating data to at most two regions.</li>
 <li><code class="docutils literal"><span class="pre">two_satellite_fast</span></code> does not hide latency properly when configured with more than 4 satellite transaction logs.</li>
 <li>While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.</li>
-<li><code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster.</li>
 </ul>
 </div></blockquote>
 </div>
@@ -953,7 +955,7 @@ Configuration changed.
 <p class="first admonition-title">Warning</p>
 <p class="last">The conflict-resolution algorithm used by FoundationDB is conservative: it guarantees that no conflicting transactions will be committed, but it may fail to commit some transactions that theoretically could have been. The effects of this conservatism may increase as you increase the number of resolvers. It is therefore important to employ the recommended techniques for <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">minimizing conflicts</span></a> when increasing the number of resolvers.</p>
 </div>
-<p>You can contact us on the <a class="reference external" href="https://forums.foundationdb.org">community forums</a> if you are interested in more details or if you are benchmarking or performance-tuning on large clusters. Also see our <a class="reference external" href="/performance">performance benchmarks</a> for a baseline of how a well-configured cluster should perform.</p>
+<p>You can contact us on the <a class="reference external" href="https://forums.foundationdb.org">community forums</a> if you are interested in more details or if you are benchmarking or performance-tuning on large clusters. Also see our <a class="reference internal" href="performance.html"><span class="doc">performance benchmarks</span></a> for a baseline of how a well-configured cluster should perform.</p>
 </div>
 </div>
 
@@ -977,7 +979,7 @@ Configuration changed.
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

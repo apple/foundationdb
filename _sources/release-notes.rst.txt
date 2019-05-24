@@ -2,124 +2,139 @@
 Release Notes
 #############
 
-6.0.15
-======
+6.1.8
+=====
 
 Features
 --------
 
-* Added support for asynchronous replication to a remote DC with processes in a single cluster. This improves on the asynchronous replication offered by fdbdr because servers can fetch data from the remote DC if all replicas have been lost in one DC.
-* Added support for synchronous replication of the transaction log to a remote DC. This remote DC does not need to contain any storage servers, meaning you need much fewer servers in this remote DC.
-* The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
-* TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
-* TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
-* TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
-* Added the ``fileconfigure`` command to fdbcli, which configures a database from a JSON document. [6.0.10] `(PR #713) <https://github.com/apple/foundationdb/pull/713>`_
-* Backup-to-blobstore now accepts a "bucket" URL parameter for setting the bucket name where backup data will be read/written.  [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
+* Improved replication mechanism using a new hierarchical technique that significantly reduces the frequency of data loss events even when multiple fault-tolerance zones permanently fail at the same time. After upgrading to 6.1 clusters will experience a low level of background data movement to store data in accordance with the new policy. `(PR #964) <https://github.com/apple/foundationdb/pull/964>`_.
+* Added a background actor to remove redundant teams from team collection so that the healthy team number is guaranteed to not exceed the desired number. `(PR #1139) <https://github.com/apple/foundationdb/pull/1139>`_
+* Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. `(PR #1084) <https://github.com/apple/foundationdb/pull/1084>`_
+* Added configuration option to choose log spilling implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
+* Added configuration option to choose log system implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
+* Batch priority transactions are now limited separately by ratekeeper and will be throttled at lower levels of cluster saturation. This makes it possible to run a more intense background load at saturation without significantly affecting normal priority transactions. It is still recommended not to run excessive loads at batch priority. `(PR #1198) <https://github.com/apple/foundationdb/pull/1198>`_
+* Restore now requires the destination cluster to be specified explicitly to avoid confusion. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
+* Restore now accepts a timestamp that can be used to determine the restore version if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
+* Backup ``status`` and ``describe`` commands now have a ``--json`` output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
+* Separated data distribution from the master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
+* Separated ratekeeper from the master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
+* Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
+* Added support for IPv6. `(PR #1178) <https://github.com/apple/foundationdb/pull/1178>`_
+* FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* Added ``DISABLE_POSIX_KERNEL_AIO`` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) <https://github.com/apple/foundationdb/pull/1283>`_
+* Added support for configuring the cluster to use the primary and remote DC's as satellites. `(PR #1320) <https://github.com/apple/foundationdb/pull/1320>`_
+* Added support for restoring multiple key ranges in a single restore job. `(PR #1190) <https://github.com/apple/foundationdb/pull/1190>`_
+* Deprecated transaction option ``TRANSACTION_LOGGING_ENABLE``. Added two new transaction options ``DEBUG_TRANSACTION_IDENTIFIER`` and ``LOG_TRANSACTION`` that sets an identifier for the transaction and logs the transaction to the trace file respectively. `(PR #1200) <https://github.com/apple/foundationdb/pull/1200>`_
+* Clients can now specify default transaction timeouts and retry limits for all transactions through a database option. `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
+* The "timeout", "max retry delay", and "retry limit" transaction options are no longer reset when the transaction is reset after a call to ``onError`` (as of API version 610). `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
+* Added the ``force_recovery_with_data_loss`` command to ``fdbcli``. When a cluster is configured with usable_regions=2, this command will force the database to recover in the remote region. `(PR #1168) <https://github.com/apple/foundationdb/pull/1168>`_
+* Added a limit to the number of status requests the cluster controller will handle. `(PR #1093) <https://github.com/apple/foundationdb/pull/1093>`_ (submitted by tclinken)
+* Added a ``coordinator`` process class. Processes with this class can only be used as a coordinator, and ``coordinators auto`` will prefer to choose processes of this class. `(PR #1069) <https://github.com/apple/foundationdb/pull/1069>`_ (submitted by tclinken)
+* The ``consistencycheck`` fdbserver role will check the entire database at most once every week. `(PR #1126) <https://github.com/apple/foundationdb/pull/1126>`_
+* Added the metadata version key (``\xff/metadataVersion``). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
+* The ``fdbdr switch`` command verifies a ``dr_agent`` exists in both directions. `(Issue #1220) <https://github.com/apple/foundationdb/issues/1220>`_
+* Transaction logs that cannot commit to disk for more than 5 seconds are marked as degraded. The cluster controller will prefer to recruit transaction logs on other processes before using degraded processes. `(Issue #690) <https://github.com/apple/foundationdb/issues/690>`_
+* The ``memory`` storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. Existing clusters will NOT automatically change their configuration. `(PR #1314) <https://github.com/apple/foundationdb/pull/1314>`_
+* Trace logs can be output as JSON instead of XML using the ``--trace_format`` command line option. `(PR #976) <https://github.com/apple/foundationdb/pull/976>`_ (by atn34)
+* Added ``modify`` command to fdbbackup for modifying parameters of a running backup. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
+* Added ``header`` parameter to blobstore backup URLs for setting custom HTTP headers. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
+* Added the ``maintenance`` command to ``fdbcli``. This command will stop data distribution from moving data away from processes with a specified zoneID. `(PR #1397) <https://github.com/apple/foundationdb/pull/1397>`_
+* Added the ``three_data_hall_fallback`` configuration, which can be used to drop storage replicas in a dead data hall. [6.1.1] `(PR #1422) <https://github.com/apple/foundationdb/pull/1422>`_
 
 Performance
 -----------
 
-* Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
-* Load balancing temporarily avoids communicating with storage servers that have fallen behind.
-* Avoid assigning storage servers responsibility for keys they do not have.
-* Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
-* Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
-* Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
-* Significantly improved the CPU efficiency of generating status on the cluster controller. [6.0.11] `(PR #758) <https://github.com/apple/foundationdb/pull/758>`_
-* Reduced CPU cost of truncating files that are being cached. [6.0.12] `(PR #816) <https://github.com/apple/foundationdb/pull/816>`_
-* Significantly reduced master recovery times for clusters with large amounts of data. [6.0.14] `(PR #836) <https://github.com/apple/foundationdb/pull/836>`_
-* Reduced read and commit latencies for clusters which are processing transactions larger than 1MB. [6.0.14] `(PR #851) <https://github.com/apple/foundationdb/pull/851>`_
-* Significantly reduced recovery times when executing rollbacks on the memory storage engine. [6.0.14] `(PR #821) <https://github.com/apple/foundationdb/pull/821>`_
-* Clients update their key location cache much more efficiently after storage server reboots. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
-* Tuned multiple resolver configurations to do a better job balancing work between each resolver. [6.0.15] `(PR #911) <https://github.com/apple/foundationdb/pull/911>`_
+* Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
+* Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
+* Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
+* SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Avoid closing saturated network connections which have not received ping packets. [6.1.7] `(PR #1601) <https://github.com/apple/foundationdb/pull/1601>`_
 
 Fixes
 -----
 
-* Not all endpoint failures were reported to the failure monitor.
-* Watches registered on a lagging storage server would take a long time to trigger.
-* The cluster controller would not start a new generation until it recovered its files from disk.
-* Under heavy write load, storage servers would occasionally pause for ~100ms. [6.0.2] `(PR #597) <https://github.com/apple/foundationdb/pull/597>`_
-* Storage servers were not given time to rejoin the cluster before being marked as failed. [6.0.2] `(PR #592) <https://github.com/apple/foundationdb/pull/592>`_
-* Incorrect accounting of incompatible connections led to occasional assertion failures. [6.0.3] `(PR #616) <https://github.com/apple/foundationdb/pull/616>`_
-* A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
-* A large number of concurrent read attempts could bring the database down after a cluster reboot. [6.0.4] `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
-* Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
-* After a recovery, the rate at which transaction logs made mutations durable to disk was around 5 times slower than normal. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
-* Clusters configured to use TLS could get stuck spending all of their CPU opening new connections. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
-* A mismatched TLS certificate and key set could cause the server to crash. [6.0.5] `(PR #689) <https://github.com/apple/foundationdb/pull/689>`_
-* Sometimes a minority of coordinators would fail to converge after a new leader was elected. [6.0.6] `(PR #700) <https://github.com/apple/foundationdb/pull/700>`_
-* Calling status too many times in a 5 second interval caused the cluster controller to pause for a few seconds. [6.0.7] `(PR #711) <https://github.com/apple/foundationdb/pull/711>`_
-* TLS certificate reloading could cause TLS connections to drop until process restart. [6.0.9] `(PR #717) <https://github.com/apple/foundationdb/pull/717>`_
-* Watches polled the server much more frequently than intended. [6.0.10] `(PR #728) <https://github.com/apple/foundationdb/pull/728>`_
-* Backup and DR didn't allow setting certain knobs. [6.0.10] `(Issue #715) <https://github.com/apple/foundationdb/issues/715>`_
-* The failure monitor will become much less reactive after multiple successive failed recoveries. [6.0.10] `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_
-* Data distribution did not limit the number of source servers for a shard. [6.0.10] `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_
-* The cluster controller did not do locality aware reads when measuring status latencies. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* Storage recruitment would spin too quickly when the storage server responded with an error. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* Restoring a backup to the exact version a snapshot ends did not apply mutations done at the final version. [6.0.12] `(PR #787) <https://github.com/apple/foundationdb/pull/787>`_
-* Excluding a process that was both the cluster controller and something else would cause two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
-* Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
-* Very rarely, backup snapshots would stop making progress. [6.0.14] `(PR #837) <https://github.com/apple/foundationdb/pull/837>`_
-* Sometimes data distribution calculated the size of a shard incorrectly. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
-* Changing the storage engine configuration would not effect which storage engine was used by the transaction logs. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
-* On exit, fdbmonitor will only kill its child processes instead of its process group when run without the daemonize option. [6.0.15] `(PR #826) <https://github.com/apple/foundationdb/pull/826>`_
-* HTTP client used by backup-to-blobstore now correctly treats response header field names as case insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
-* Blobstore REST client was not following the S3 API in several ways (bucket name, date, and response formats). [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
-* Data distribution could queue shard movements for restoring replication at a low priority. [6.0.15] `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
-
-Fixes only impacting 6.0.0+
----------------------------
-
-* A cluster configured with usable_regions=2 did not limit the rate at which it could copy data from the primary DC to the remote DC. This caused poor performance when recovering from a DC outage. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
-* Configuring usable_regions=2 on a cluster with a large amount of data caused commits to pause for a few seconds. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
-* On clusters configured with usable_regions=2, status reported no replicas remaining when the primary DC was still healthy. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
-* Clients could crash when passing in TLS options. [6.0.5] `(PR #649) <https://github.com/apple/foundationdb/pull/649>`_
-* Databases with more than 10TB of data would pause for a few seconds after recovery. [6.0.6] `(PR #705) <https://github.com/apple/foundationdb/pull/705>`_
-* Configuring from usable_regions=2 to usable_regions=1 on a cluster with a large number of processes would prevent data distribution from completing. [6.0.12] `(PR #721) <https://github.com/apple/foundationdb/pull/721>`_ `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_ `(PR #780) <https://github.com/apple/foundationdb/pull/780>`_
-* Fixed a variety of problems with ``force_recovery_with_data_loss``. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* The transaction logs would leak memory when serving peek requests to log routers. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
-* The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* A bug in status collection led to various workload metrics being missing and the cluster reporting unhealthy. [6.0.13] `(PR #834) <https://github.com/apple/foundationdb/pull/834>`_
-* Data distribution did not stop tracking certain unhealthy teams, leading to incorrect status reporting. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
-* Fixed a variety of problems related to changing between different region configurations. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_ `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
-* fdbcli protects against configuration changes which could cause irreversible damage to a cluster. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_ `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
-* Significantly reduced both client and server memory usage in clusters with large amounts of data and usable_regions=2. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Python: Creating a ``SingleFloat`` for the tuple layer didn't work with integers. `(PR #1216) <https://github.com/apple/foundationdb/pull/1216>`_
+* In some cases, calling ``OnError`` with a non-retryable error would partially reset a transaction. As of API version 610, the transaction will no longer be reset in these cases and will instead put the transaction into an error state. `(PR #1298) <https://github.com/apple/foundationdb/pull/1298>`_
+* Standardized datetime string format across all backup and restore command options and outputs. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
+* Read workload status metrics would disappear when a storage server was missing. `(PR #1348) <https://github.com/apple/foundationdb/pull/1348>`_
+* The ``coordinators auto`` command could recruit multiple coordinators with the same zone ID. `(Issue #988) <https://github.com/apple/foundationdb/issues/988>`_
+* The data version of a cluster after a restore could have been lower than the restore version, making versionstamp operations get smaller. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
+* Fixed a few thread safety issues with slow task profiling. `(PR #1085) <https://github.com/apple/foundationdb/pull/1085>`_
+* Changing the class of a process would not change its preference for becoming the cluster controller. `(PR #1350) <https://github.com/apple/foundationdb/pull/1350>`_
+* The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. `(PR #1053) <https://github.com/apple/foundationdb/pull/1053>`_
+* The ``include`` command in fdbcli would falsely include all machines with IP addresses that
+  have the included IP address as a prefix (for example ``include 1.0.0.1`` would also include
+  ``1.0.0.10``). `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
+* Restore could crash when reading a file that ends on a block boundary (1MB default). `(PR #1205) <https://github.com/apple/foundationdb/pull/1205>`_
+* Java: Successful commits and range reads no longer create ``FDBException`` objects, which avoids wasting resources and reduces memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
+* Windows: Fixed a crash when deleting files. `(Issue #1380) <https://github.com/apple/foundationdb/issues/1380>`_ (by KrzysFR)
+* Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. `(PR #1394) <https://github.com/apple/foundationdb/pull/1394>`_
+* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
+* Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* The ``configure`` command in ``fdbcli`` returned successfully even when the configuration was not changed for some error types. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Safety protections in the ``configure`` command in ``fdbcli`` would trigger spuriously when changing between ``three_datacenter`` replication and a region configuration. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Status could report an incorrect reason for ongoing data movement. [6.1.5] `(PR #1544) <https://github.com/apple/foundationdb/pull/1544>`_
+* Storage servers were considered failed as soon as they were rebooted, instead of waiting to see if they rejoin the cluster. [6.1.8] `(PR #1618) <https://github.com/apple/foundationdb/pull/1618>`_
 
 Status
 ------
 
-* The replication factor in status JSON is stored under ``redundancy_mode`` instead of ``redundancy.factor``. `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
-* The metric ``data_version_lag`` has been replaced by ``data_lag.versions`` and ``data_lag.seconds``. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
-* Additional metrics for the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
-
+* Report the number of connected coordinators for each client. This aids in monitoring client TLS support when enabling TLS on a live cluster. `(PR #1222) <https://github.com/apple/foundationdb/pull/1222>`_
+* Degraded processes are reported in ``status json``. `(Issue #690) <https://github.com/apple/foundationdb/issues/690>`_
 
 Bindings
 --------
 
-* API version updated to 600. There are no changes since API version 520.
-* Several cases where functions in go might previously cause a panic now return a non-``nil`` error. `(PR #532) <https://github.com/apple/foundationdb/pull/532>`_
-* C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] `(Issue #518) <https://github.com/apple/foundationdb/issues/518>`_
-* The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] `(PR #710) <https://github.com/apple/foundationdb/pull/710>`_
-* Java: the `Versionstamp::getUserVersion() </javadoc/com/apple/foundationdb/tuple/Versionstamp.html#getUserVersion-->`_ method did not handle user versions greater than ``0x00FF`` due to operator precedence errors. [6.0.11] `(Issue #761) <https://github.com/apple/foundationdb/issues/761>`_
-* Python: bindings didn't work with Python 3.7 because of the new `async` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
-* Go: `PrefixRange` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
-* Go: Add Tuple layer support for `uint`, `uint64`, and `*big.Int` integers up to 255 bytes. Integer values will be decoded into the first of `int64`, `uint64`, or `*big.Int` in which they fit. `(PR #915) <https://github.com/apple/foundationdb/pull/915>`_ [6.0.15]
-* Ruby: Add Tuple layer support for integers up to 255 bytes. `(PR #915) <https://github.com/apple/foundationdb/pull/915>`_ [6.0.15]
-* Python: bindings didn't work with Python 3.7 because of the new ``async`` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
-* Go: ``PrefixRange`` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
+* API version updated to 610.
+* The API to create a database has been simplified across the bindings. All changes are backward compatible with previous API versions, with one exception in Java noted below. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* C: ``FDBCluster`` objects and related methods (``fdb_create_cluster``, ``fdb_cluster_create_database``, ``fdb_cluster_set_option``, ``fdb_cluster_destroy``, ``fdb_future_get_cluster``) have been removed. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* C: Added ``fdb_create_database`` that creates a new ``FDBDatabase`` object synchronously and removed ``fdb_future_get_database``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Python: Removed ``fdb.init``, ``fdb.create_cluster``, and ``fdb.Cluster``. ``fdb.open`` no longer accepts a ``database_name`` parameter. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Java: Deprecated ``FDB.createCluster`` and ``Cluster``. The preferred way to get a ``Database`` is by using ``FDB.open``, which should work in both new and old API versions. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Java: Removed ``Cluster(long cPtr, Executor executor)`` constructor. This is API breaking for any code that has subclassed the ``Cluster`` class and is not protected by API versioning. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Java: Several methods relevant to read-only transactions have been moved into the ``ReadTransaction`` interface.
+* Java: Tuples now cache previous hash codes and equality checking no longer requires packing the underlying Tuples. `(PR #1166) <https://github.com/apple/foundationdb/pull/1166>`_
+* Java: Tuple performance has been improved to use fewer allocations when packing and unpacking. `(Issue #1206) <https://github.com/apple/foundationdb/issues/1206>`_
+* Java: Unpacking a Tuple with a byte array or string that is missing the end-of-string character now throws an error. `(Issue #671) <https://github.com/apple/foundationdb/issues/671>`_
+* Java: Unpacking a Tuple constrained to a subset of the underlying array now throws an error when it encounters a truncated integer. `(Issue #672) <https://github.com/apple/foundationdb/issues/672>`_
+* Ruby: Removed ``FDB.init``, ``FDB.create_cluster``, and ``FDB.Cluster``. ``FDB.open`` no longer accepts a ``database_name`` parameter. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Golang: Deprecated ``fdb.StartNetwork``, ``fdb.Open``, ``fdb.MustOpen``, and ``fdb.CreateCluster`` and added ``fdb.OpenDatabase`` and ``fdb.MustOpenDatabase``. The preferred way to start the network and get a ``Database`` is by using ``FDB.OpenDatabase`` or ``FDB.OpenDefault``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Flow: Removed ``API::createCluster`` and ``Cluster`` and added ``API::createDatabase``. The new way to get a ``Database`` is by using ``API::createDatabase``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_ `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Changed ``DatabaseContext`` to ``Database``, and ``API::createDatabase`` returns ``Reference<Database>`` instead of ``Reference<<DatabaseContext>``.  `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Converted ``Transaction`` into an interface and moved its implementation into an internal class. Transactions should now be created using ``Database::createTransaction(db)``. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Added ``ReadTransaction`` interface that allows only read operations on a transaction. The ``Transaction`` interface inherits from ``ReadTransaction`` and can be used when a ``ReadTransaction`` is required. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Changed ``Transaction::setVersion`` to ``Transaction::setReadVersion``. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: On update to this version of the Flow bindings, client code will fail to build due to the changes in the API, irrespective of the API version used. Client code must be updated to use the new bindings API. These changes affect the bindings only and won't impact compatibility with different versions of the cluster. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Golang: Added ``fdb.Printable`` to print a human-readable string for a given byte array. Add ``Key.String()``, which converts the ``Key`` to a ``string`` using the ``Printable`` function. `(PR #1010) <https://github.com/apple/foundationdb/pull/1010>`_ (submitted by pjvds)
+* Golang: Tuples now support ``Versionstamp`` operations. `(PR #1187) <https://github.com/apple/foundationdb/pull/1187>`_ (submitted by ryanworl)
+* Python: Python signal handling didn't work when waiting on a future. In particular, pressing Ctrl-C would not successfully interrupt the program. `(PR #1138) <https://github.com/apple/foundationdb/pull/1138>`_
 
 Other Changes
 -------------
 
-* Does not support upgrades from any version older than 5.0.
-* Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
-* Increased the memory requirements of the transaction log by 400MB. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
+* Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
+* IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable. [6.1.1] `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+
+Fixes only impacting 6.1.0+
+---------------------------
+
+* The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
+* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
+* The background actor which removes redundant teams could leave data unbalanced. [6.1.3] `(PR #1479) <https://github.com/apple/foundationdb/pull/1479>`_
+* The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] `(PR #1527) <https://github.com/apple/foundationdb/pull/1527>`_
+* Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
+* TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
+* Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* The TLog's disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] `(PR #1617) <https://github.com/apple/foundationdb/pull/1617>`_
 
 Earlier release notes
 ---------------------
+* :doc:`6.0 (API Version 600) </old-release-notes/release-notes-600>`
 * :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`
 * :doc:`5.1 (API Version 510) </old-release-notes/release-notes-510>`
 * :doc:`5.0 (API Version 500) </old-release-notes/release-notes-500>`

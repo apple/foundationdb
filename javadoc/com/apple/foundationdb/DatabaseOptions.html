@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10};
+var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":10};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -175,6 +175,36 @@ extends java.lang.Object</pre>
 <div class="block">Set the maximum number of watches allowed to be outstanding on a database connection.</div>
 </td>
 </tr>
+<tr id="i5" class="rowColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setSnapshotRywDisable--">setSnapshotRywDisable</a></span>()</code>
+<div class="block">Snapshot read operations will not see the results of writes done in the same transaction.</div>
+</td>
+</tr>
+<tr id="i6" class="altColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setSnapshotRywEnable--">setSnapshotRywEnable</a></span>()</code>
+<div class="block">Snapshot read operations will see the results of writes done in the same transaction.</div>
+</td>
+</tr>
+<tr id="i7" class="rowColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setTransactionMaxRetryDelay-long-">setTransactionMaxRetryDelay</a></span>(long&nbsp;value)</code>
+<div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable.</div>
+</td>
+</tr>
+<tr id="i8" class="altColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setTransactionRetryLimit-long-">setTransactionRetryLimit</a></span>(long&nbsp;value)</code>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled.</div>
+</td>
+</tr>
+<tr id="i9" class="rowColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setTransactionTimeout-long-">setTransactionTimeout</a></span>(long&nbsp;value)</code>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled.</div>
+</td>
+</tr>
 </table>
 <ul class="blockList">
 <li class="blockList"><a name="methods.inherited.from.class.java.lang.Object">
@@ -268,6 +298,68 @@ extends java.lang.Object</pre>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>value</code> - Hexadecimal ID</dd>
 </dl>
+</li>
+</ul>
+<a name="setTransactionTimeout-long-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTransactionTimeout</h4>
+<pre>public&nbsp;void&nbsp;setTransactionTimeout(long&nbsp;value)</pre>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the <code>timeout</code> option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - value in milliseconds of timeout</dd>
+</dl>
+</li>
+</ul>
+<a name="setTransactionRetryLimit-long-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTransactionRetryLimit</h4>
+<pre>public&nbsp;void&nbsp;setTransactionRetryLimit(long&nbsp;value)</pre>
+<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the <code>retry_limit</code> option of each transaction created by this database. See the transaction option description for more information.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - number of times to retry</dd>
+</dl>
+</li>
+</ul>
+<a name="setTransactionMaxRetryDelay-long-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTransactionMaxRetryDelay</h4>
+<pre>public&nbsp;void&nbsp;setTransactionMaxRetryDelay(long&nbsp;value)</pre>
+<div class="block">Set the maximum amount of backoff delay incurred in the call to <code>onError</code> if the error is retryable. This sets the <code>max_retry_delay</code> option of each transaction created by this database. See the transaction option description for more information.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - value in milliseconds of maximum delay</dd>
+</dl>
+</li>
+</ul>
+<a name="setSnapshotRywEnable--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setSnapshotRywEnable</h4>
+<pre>public&nbsp;void&nbsp;setSnapshotRywEnable()</pre>
+<div class="block">Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.</div>
+</li>
+</ul>
+<a name="setSnapshotRywDisable--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setSnapshotRywDisable</h4>
+<pre>public&nbsp;void&nbsp;setSnapshotRywDisable()</pre>
+<div class="block">Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.</div>
 </li>
 </ul>
 <a name="getOptionConsumer--">

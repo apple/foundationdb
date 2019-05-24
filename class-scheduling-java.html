@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Class Scheduling in Java &#8212; FoundationDB 6.0</title>
+    <title>Class Scheduling in Java &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -198,7 +198,7 @@
 <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
 
 <span class="kd">static</span> <span class="o">{</span>
-  <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">600</span><span class="o">);</span>
+  <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">610</span><span class="o">);</span>
   <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
 <span class="o">}</span>
 </pre></div>
@@ -228,7 +228,7 @@
   <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
 
   <span class="kd">static</span> <span class="o">{</span>
-    <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">600</span><span class="o">);</span>
+    <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">610</span><span class="o">);</span>
     <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
   <span class="o">}</span>
 
@@ -304,6 +304,11 @@
 </pre></div>
 </div>
 <p>If instead you pass a <code class="xref py py-class docutils literal"><span class="pre">Transaction</span></code> for the <code class="xref py py-class docutils literal"><span class="pre">TransactionContext</span></code> parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits functions using this pattern to be composed into larger transactions.</p>
+<p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal"><span class="pre">setRetryLimit</span></code> or <code class="docutils literal"><span class="pre">setTimeout</span></code> transaction options or at the database level with the <code class="docutils literal"><span class="pre">setTransactionRetryLimit</span></code> or <code class="docutils literal"><span class="pre">setTransactionTimeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="p">()</span><span class="o">.</span><span class="n">setTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">);</span>  <span class="o">//</span> <span class="mi">60</span><span class="p">,</span><span class="mi">000</span> <span class="n">ms</span> <span class="o">=</span> <span class="mi">1</span> <span class="n">minute</span>
+<span class="n">db</span><span class="o">.</span><span class="n">options</span><span class="p">()</span><span class="o">.</span><span class="n">setRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">);</span>
+</pre></div>
+</div>
 </div>
 <div class="section" id="making-some-sample-classes">
 <h3>Making some sample classes</h3>
@@ -541,8 +546,10 @@
   <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
 
   <span class="kd">static</span> <span class="o">{</span>
-    <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">600</span><span class="o">);</span>
+    <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">610</span><span class="o">);</span>
     <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+    <span class="n">db</span><span class="o">.</span><span class="na">options</span><span class="o">().</span><span class="na">setTransactionTimeout</span><span class="o">(</span><span class="mi">60000</span><span class="o">);</span>  <span class="c1">// 60,000 ms = 1 minute</span>
+    <span class="n">db</span><span class="o">.</span><span class="na">options</span><span class="o">().</span><span class="na">setRetryLimit</span><span class="o">(</span><span class="mi">100</span><span class="o">);</span>
   <span class="o">}</span>
 
   <span class="c1">// Generate 1,620 classes like &#39;9:00 chem for dummies&#39;</span>
@@ -745,7 +752,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>

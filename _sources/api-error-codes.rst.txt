@@ -32,11 +32,15 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | accessed_unreadable                           | 1036| Read or wrote an unreadable key                                                |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| process_behind                                | 1037| Storage process does not have recent mutations                                 |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | database_locked                               | 1038| Database is locked                                                             |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | cluster_version_changed                       | 1039| Cluster has been upgraded to a new protocol version                            |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | external_client_already_loaded                | 1040| External client has already been loaded                                        |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| proxy_memory_limit_exceeded                   | 1042| Proxy commit memory limit exceeded                                             |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | operation_cancelled                           | 1101| Asynchronous operation cancelled                                               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
@@ -100,7 +104,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_invalid_version                   | 2020| Transaction does not have a valid commit version                               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| transaction_read_only                         | 2021| Transaction is read-only and therefore does not have a commit version          |
+| no_commit_version                             | 2021| Transaction is read-only and therefore does not have a commit version          |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | environment_variable_network_option_failed    | 2022| Environment variable network option could not be set                           |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

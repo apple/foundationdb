@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Time-Series Data &#8212; FoundationDB 6.0</title>
+    <title>Time-Series Data &#8212; FoundationDB 6.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.0.15',
+        VERSION:     '6.1.8',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -142,7 +142,7 @@
       </div>
     <div class="col-md-9 content">
       
-  <span class="target" id="module-FDB"></span><div class="section" id="time-series-data">
+  <div class="section" id="time-series-data">
 <h1>Time-Series Data</h1>
 <p>FoundationDB is a multi-model database that combines scalability, fault-tolerance, and high performance with multi-key ACID transactions. A common use case involves time-series data, which are easy to model in FoundationDB.</p>
 <div class="section" id="what-is-time-series-data">
@@ -245,7 +245,7 @@
 <div class="section" id="ordering-and-transactions">
 <h2>Ordering and Transactions</h2>
 <p>FoundationDB’s ability to let you structure your data in different ways, keep track of metrics, and search it with varying granularity is a direct result of two key features of our key-value store: global ordering and ACID transactions. And as you’ve seen from the code included above, the direct impact of these properties is simpler application code and overall faster development.</p>
-<p>Global ordering makes a big difference if you’re attempting to process significant amounts of sequential information because the database can retrieve that information quickly and efficiently. So rather than having to package your data into a single database object or broadcast a request for many individual data elements that correspond to a given range of application data (e.g. time0, time1, time2, . . ., timen), a globally ordered storage system, like FoundationDB, can generate a single range request to the database for the matching data. And internally, FoundationDB can further optimize requests by knowing which data resides on which machines, so there’s no need to broadcast the data request to all machines in the cluster.</p>
+<p>Global ordering makes a big difference if you’re attempting to process significant amounts of sequential information because the database can retrieve that information quickly and efficiently. So rather than having to package your data into a single database object or broadcast a request for many individual data elements that correspond to a given range of application data (e.g. time0, time1, time2, . . ., timeN), a globally ordered storage system, like FoundationDB, can generate a single range request to the database for the matching data. And internally, FoundationDB can further optimize requests by knowing which data resides on which machines, so there’s no need to broadcast the data request to all machines in the cluster.</p>
 <p>Global indexing also makes a huge difference in terms of application complexity and database efficiency. Many non-relational databases provide node-specific indexing and secondary indexing, but if you wanted global indexes, you would have to build those at the application level to ensure the index and related data get updated atomically.</p>
 <p>Because FoundationDB supports global indexing and ACID transactions, the database itself will handle updates to the relevant data without intervention or management by the application. (And because an index is just like regular data, it has the same properties, like ordering, for efficient access.) So now, the application interacting with the database can make simple requests to the database as part of a single transaction and avoid having to reason about whether the data requested from the data is actually up-to-date and valid.</p>
 </div>
@@ -275,7 +275,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 15, 2018.<br/>
+      Last updated on May 23, 2019.<br/>
     </p>
   </div>
 </footer>
