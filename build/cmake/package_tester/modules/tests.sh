@@ -69,15 +69,14 @@ then
        successOr "Loading python bindings failed"
 
        # Test cmake and pkg-config integration: https://github.com/apple/foundationdb/issues/1483
-       cd /foundationdb/build/cmake/package_tester/fdb_c_app
-       rm -rf build
-       mkdir build
-       cd build
-       cmake .. && make
+       rm -rf build-fdb_c_app
+       mkdir build-fdb_c_app
+       pushd build-fdb_c_app
+       cmake /foundationdb/build/cmake/package_tester/fdb_c_app && make
        successOr "FoundationDB-Client cmake integration failed"
-
-       cc ../app.c `pkg-config --libs --cflags foundationdb-client`
+       cc /foundationdb/build/cmake/package_tester/fdb_c_app/app.c `pkg-config --libs --cflags foundationdb-client`
        successOr "FoundationDB-Client pkg-config integration failed"
+       popd
    }
 
    keep_config() {
