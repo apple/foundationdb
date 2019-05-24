@@ -114,7 +114,7 @@ template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { re
 // MAYBE Later: We will support multiple restore roles on a worker
 struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerData> {
 	UID workerID;
-	std::map<UID, RestoreWorkerInterface> workers_workerInterface; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
+	std::map<UID, RestoreWorkerInterface> workerInterfaces; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
 
 	// Restore Roles
 	Optional<RestoreLoaderInterface> loaderInterf;
@@ -200,9 +200,9 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 
 // Periodically send worker heartbeat to 
  ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
-	ASSERT( !self->workers_workerInterface.empty() );
+	ASSERT( !self->workerInterfaces.empty() );
 	state int wIndex = 0;
-	for (auto &workerInterf : self->workers_workerInterface) {
+	for (auto &workerInterf : self->workerInterfaces) {
 		printf("[Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex, workerInterf.first.toString().c_str(), workerInterf.second.id().toString().c_str());
 		wIndex++;
 	}
@@ -212,7 +212,7 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 	loop {
 		wIndex = 0;
 		self->cmdID.initPhase(RestoreCommandEnum::Heart_Beat);
-		for ( workerInterf = self->workers_workerInterface.begin(); workerInterf !=  self->workers_workerInterface.end(); workerInterf++)  {
+		for ( workerInterf = self->workerInterfaces.begin(); workerInterf !=  self->workerInterfaces.end(); workerInterf++)  {
 			self->cmdID.nextCmd();
 			try {
 				wait( delay(1.0) );
@@ -339,7 +339,7 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 }
 
 
-// Read restoreWorkersKeys from DB to get each restore worker's restore workerInterface and set it to self->workers_workerInterface
+// Read restoreWorkersKeys from DB to get each restore worker's restore workerInterface and set it to self->workerInterfaces
 // This is done before we assign restore roles for restore workers
  ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers) {
 	state Transaction tr(cx);
@@ -348,7 +348,7 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 	
 	loop {
 		try {
-			self->workers_workerInterface.clear();
+			self->workerInterfaces.clear();
 			agents.clear();
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -360,7 +360,7 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 				for(auto& it : agentValues) {
 					agents.push_back(BinaryReader::fromStringRef<RestoreWorkerInterface>(it.value, IncludeVersion()));
 					// Save the RestoreWorkerInterface for the later operations
-					self->workers_workerInterface.insert(std::make_pair(agents.back().id(), agents.back()));
+					self->workerInterfaces.insert(std::make_pair(agents.back().id(), agents.back()));
 					printf("collectWorkerInterface, workerInterface id:%s\n", agents.back().id().toString().c_str());
 				}
 				break;
@@ -375,74 +375,74 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
 
-	TraceEvent("FastRestore").detail("CollectWorkerInterfaceNumWorkers", self->workers_workerInterface.size());
+	TraceEvent("FastRestore").detail("CollectWorkerInterfaceNumWorkers", self->workerInterfaces.size());
 
 	return Void();
  }
 
 
 // Keep only k restore workers and remove redundant restore workers
-ACTOR Future<Void> removeRedundantRestoreWorkers(Reference<RestoreWorkerData> self, Database cx)  {
-	printf("%s:Start configuring roles for workers\n", self->describeNode().c_str());
-	ASSERT( self->masterData.isValid() );
+// ACTOR Future<Void> removeRedundantRestoreWorkers(Reference<RestoreWorkerData> self, Database cx)  {
+// 	printf("%s:Start configuring roles for workers\n", self->describeNode().c_str());
+// 	ASSERT( self->masterData.isValid() );
 
-	// Set up the role, and the global status for each node
-	int numNodes = self->workers_workerInterface.size();
-	state int numLoader = NUM_LOADERS; //numNodes * ratio_loader_to_applier / (ratio_loader_to_applier + 1);
-	int numApplier = NUM_APPLIERS; //numNodes - numLoader;
-	state int numWorkers = numLoader + numApplier;
+// 	// Set up the role, and the global status for each node
+// 	int numNodes = self->workerInterfaces.size();
+// 	state int numLoader = NUM_LOADERS; //numNodes * ratio_loader_to_applier / (ratio_loader_to_applier + 1);
+// 	int numApplier = NUM_APPLIERS; //numNodes - numLoader;
+// 	state int numWorkers = numLoader + numApplier;
 
-	if ( numNodes == numWorkers ) {
-		return Void();
-	} else if ( numNodes < numWorkers ) {
-		fprintf(stderr, "actual number_of_workers:%d < expected number_of_workers:%d\n", numNodes, numWorkers);
-	}
+// 	if ( numNodes == numWorkers ) {
+// 		return Void();
+// 	} else if ( numNodes < numWorkers ) {
+// 		fprintf(stderr, "actual number_of_workers:%d < expected number_of_workers:%d\n", numNodes, numWorkers);
+// 	}
 
-	state int nodeIndex = 0;
-	state UID nodeID;
+// 	state int nodeIndex = 0;
+// 	state UID nodeID;
 	
-	loop {
-		try {
-			std::vector<Future<RestoreCommonReply>> cmdReplies;
-			nodeIndex = 0;
-			printf("Node:%s Start remove %d redundant restore worker\n", self->describeNode().c_str(), self->workers_workerInterface.size() - numWorkers);
-			self->cmdID.initPhase(RestoreCommandEnum::Remove_Redundant_Worker);
-			for (auto &workerInterf : self->workers_workerInterface)  {
-				if ( nodeIndex < numWorkers ) {
-					nodeIndex++;
-					continue;
-				}
-				nodeID = workerInterf.first;
-				self->cmdID.nextCmd();
-				printf("[CMD:%s] Node:%s Remove restore worker(index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
-						nodeIndex, nodeID.toString().c_str());
-				cmdReplies.push_back( workerInterf.second.terminateWorker.getReply(RestoreSimpleRequest(self->cmdID)) );
-				nodeIndex++;
-			}
-			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			// Get the updated key-value for restore worker interfaces
-			self->workers_workerInterface.clear();
-			wait( collectRestoreWorkerInterface(self, cx) );
-			if ( self->workers_workerInterface.size() == NUM_LOADERS + NUM_APPLIERS ) {
-				printf("[RemoveRedundantWorkers] Finished\n");
-				break;
-			} else {
-				printf("Redo removeRedundantRestoreWorkers. workers_workerInterface.size:%d, NUM_LOADERS:%d NUM_APPLIERS:%d\n",
-					self->workers_workerInterface.size(), NUM_LOADERS, NUM_APPLIERS);
-			}
-		} catch (Error &e) {
-			// Handle the command reply timeout error
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-						self->cmdID.toString().c_str(), e.code(), e.what());
-			printf("Node:%s waits on replies time out. Current phase: removeRedundantRestoreWorkers, Retry all commands.\n", self->describeNode().c_str());
-			wait( delay(5.0) );
-			self->workers_workerInterface.clear();
-			wait( collectRestoreWorkerInterface(self, cx) );
-		}
-	}
+// 	loop {
+// 		try {
+// 			std::vector<Future<RestoreCommonReply>> cmdReplies;
+// 			nodeIndex = 0;
+// 			printf("Node:%s Start remove %d redundant restore worker\n", self->describeNode().c_str(), self->workerInterfaces.size() - numWorkers);
+// 			self->cmdID.initPhase(RestoreCommandEnum::Remove_Redundant_Worker);
+// 			for (auto &workerInterf : self->workerInterfaces)  {
+// 				if ( nodeIndex < numWorkers ) {
+// 					nodeIndex++;
+// 					continue;
+// 				}
+// 				nodeID = workerInterf.first;
+// 				self->cmdID.nextCmd();
+// 				printf("[CMD:%s] Node:%s Remove restore worker(index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
+// 						nodeIndex, nodeID.toString().c_str());
+// 				cmdReplies.push_back( workerInterf.second.terminateWorker.getReply(RestoreSimpleRequest(self->cmdID)) );
+// 				nodeIndex++;
+// 			}
+// 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+// 			// Get the updated key-value for restore worker interfaces
+// 			self->workerInterfaces.clear();
+// 			wait( collectRestoreWorkerInterface(self, cx) );
+// 			if ( self->workerInterfaces.size() == NUM_LOADERS + NUM_APPLIERS ) {
+// 				printf("[RemoveRedundantWorkers] Finished\n");
+// 				break;
+// 			} else {
+// 				printf("Redo removeRedundantRestoreWorkers. workers_workerInterface.size:%d, NUM_LOADERS:%d NUM_APPLIERS:%d\n",
+// 					self->workerInterfaces.size(), NUM_LOADERS, NUM_APPLIERS);
+// 			}
+// 		} catch (Error &e) {
+// 			// Handle the command reply timeout error
+// 			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
+// 						self->cmdID.toString().c_str(), e.code(), e.what());
+// 			printf("Node:%s waits on replies time out. Current phase: removeRedundantRestoreWorkers, Retry all commands.\n", self->describeNode().c_str());
+// 			wait( delay(5.0) );
+// 			self->workerInterfaces.clear();
+// 			wait( collectRestoreWorkerInterface(self, cx) );
+// 		}
+// 	}
 
-	return Void();
-}
+// 	return Void();
+// }
 
 
 // RestoreWorker that has restore master role: Recruite a role for each worker
@@ -451,7 +451,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	ASSERT( self->masterData.isValid() );
 
 	// Set up the role, and the global status for each node
-	int numNodes = self->workers_workerInterface.size();
+	int numNodes = self->workerInterfaces.size();
 	state int numLoader = NUM_LOADERS; //numNodes * ratio_loader_to_applier / (ratio_loader_to_applier + 1);
 	state int numApplier = NUM_APPLIERS; //numNodes - numLoader;
 	if (numLoader <= 0 || numApplier <= 0) {
@@ -467,35 +467,27 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	state RestoreRole role;
 	state UID nodeID;
 	printf("Node:%s Start configuring roles for workers\n", self->describeNode().c_str());
-	loop {
-		try {
-			std::vector<Future<RestoreCommonReply>> cmdReplies;
-			self->cmdID.initPhase(RestoreCommandEnum::Recruit_Role_On_Worker);
-			printf("numLoader:%d, numApplier:%d, self->workers_workerInterface.size:%d\n", numLoader, numApplier, self->workers_workerInterface.size());
-			ASSERT( numLoader + numApplier == self->workers_workerInterface.size() ); // We assign 1 role per worker for now
-			for (auto &workerInterf : self->workers_workerInterface)  {
-				if ( nodeIndex < numLoader ) {
-					role = RestoreRole::Loader;
-				} else {
-					role = RestoreRole::Applier;
-				}
-				nodeID = workerInterf.first;
-				self->cmdID.nextCmd();
-				printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
-						getRoleStr(role).c_str(), nodeIndex, nodeID.toString().c_str());
-				cmdReplies.push_back( workerInterf.second.recruitRole.getReply(RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex)) );
-				nodeIndex++;
-			}
-			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			printf("[RecruitRestoreRoles] Finished\n");
-			break;
-		} catch (Error &e) {
-			// Handle the command reply timeout error
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-						self->cmdID.toString().c_str(), e.code(), e.what());
-			printf("Node:%s waits on replies time out. Current phase: Set_Role, Retry all commands.\n", self->describeNode().c_str());
+
+	self->cmdID.initPhase(RestoreCommandEnum::Recruit_Role_On_Worker);
+	printf("numLoader:%d, numApplier:%d, self->workerInterfaces.size:%d\n", numLoader, numApplier, self->workerInterfaces.size());
+	ASSERT( numLoader + numApplier == self->workerInterfaces.size() ); // We assign 1 role per worker for now
+	std::map<UID, RestoreRecruitRoleRequest> requests;
+	for (auto &workerInterf : self->workerInterfaces)  {
+		if ( nodeIndex < numLoader ) {
+			role = RestoreRole::Loader;
+		} else {
+			role = RestoreRole::Applier;
 		}
+		nodeID = workerInterf.first;
+		self->cmdID.nextCmd();
+		printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
+				getRoleStr(role).c_str(), nodeIndex, nodeID.toString().c_str());
+		requests[workerInterf.first] = RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex);
+		//cmdReplies.push_back( workerInterf.second.recruitRole.getReply(RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex)) );
+		nodeIndex++;
 	}
+	wait( getBatchReplies(&RestoreWorkerInterface::recruitRole, self->workerInterfaces, requests) );
+	printf("[RecruitRestoreRoles] Finished\n");
 
 	return Void();
 }
@@ -512,7 +504,7 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 
 	wait( collectRestoreWorkerInterface(self, cx, MIN_NUM_WORKERS) );
 
-	wait( removeRedundantRestoreWorkers(self, cx) );
+	//wait( removeRedundantRestoreWorkers(self, cx) );
 
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
