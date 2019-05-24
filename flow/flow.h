@@ -39,6 +39,7 @@
 
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
 #include "flow/Deque.h"
@@ -49,6 +50,17 @@
 #include <boost/version.hpp>
 
 using namespace std::rel_ops;
+
+// Sets the seed for the deterministic random number generator on the current thread
+void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+
+// Returns the random number generator that can be seeded. This generator should only 
+// be used in contexts where the choice to call it is deterministic.
+Reference<IRandom> deterministicRandom();
+
+// A random number generator that cannot be manually seeded and may be called in 
+// non-deterministic contexts.
+Reference<IRandom> nondeterministicRandom();
 
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \

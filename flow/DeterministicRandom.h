@@ -26,10 +26,11 @@
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
+#include "flow/FastRef.h"
 
 #include <random>
 
-class DeterministicRandom : public IRandom {
+class DeterministicRandom : public IRandom, public ReferenceCounted<DeterministicRandom> {
 private:
 	std::mt19937 random;
 	uint64_t next;
@@ -125,6 +126,9 @@ public:
 	}
 
 	uint64_t peek() const { return next; }
+
+	virtual void addref() { ReferenceCounted<DeterministicRandom>::addref(); }
+	virtual void delref() { ReferenceCounted<DeterministicRandom>::delref(); }
 };
 
 #endif

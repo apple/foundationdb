@@ -27,34 +27,25 @@
 INetwork *g_network = 0;
 
 FILE* randLog = 0;
-thread_local uint32_t deterministicRandomSeed = 0;
+thread_local Reference<IRandom> seededRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
 
 void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
-	deterministicRandomSeed = seed;
+	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
 }
 
-IRandom* deterministicRandom() {
-	static thread_local IRandom* random = nullptr;
-	if(!random) {
-		if(!deterministicRandomSeed) {
-			static thread_local IRandom* preseedRandom = nullptr;
-			if(!preseedRandom) {
-				preseedRandom = new DeterministicRandom(1, true);
-			}
-
-			return preseedRandom;
-		}
-		random = new DeterministicRandom(deterministicRandomSeed, true);
+Reference<IRandom> deterministicRandom() {
+	if(!seededRandom) {
+		seededRandom = Reference<IRandom>(new DeterministicRandom(1, true));
 	}
-	return random;
+	return seededRandom;
 }
 
-IRandom* nondeterministicRandom() {
-	static thread_local IRandom* random = nullptr;
+Reference<IRandom> nondeterministicRandom() {
+	static thread_local Reference<IRandom> random;
 	if(!random) {
-		random = new DeterministicRandom(platform::getRandomSeed());
+		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
 	}
 	return random;
 }
