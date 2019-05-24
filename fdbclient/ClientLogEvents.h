@@ -100,8 +100,8 @@ namespace FdbClientLogEvents {
 		EventType type{ EVENTTYPEEND };
 		double startTs{ 0 };
 
-		void logEvent(std::string id) const {}
-		void addToReqStats(RequestStats &reqStats) const {}
+		virtual void logEvent(std::string id) const {}
+		virtual void addToReqStats(RequestStats &reqStats) const {}
 	};
 
 	struct EventGetVersion : public Event {
