@@ -779,10 +779,10 @@ Future<Void> DatabaseContext::onConnected() {
 	return cluster->onConnected();
 }
 
-ACTOR static Future<Void> changeConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
-	TEST(true); // Change connection file
-	TraceEvent("ChangeClusterFile")
-	    .detail("ClusterFile", connFile->canGetFilename() ? connFile->getFilename() : "")
+ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
+	TEST(true); // Switch connection file
+	TraceEvent("SwitchConnectionFile")
+	    .detail("ConnectionFile", connFile->canGetFilename() ? connFile->getFilename() : "")
 	    .detail("ConnectionString", connFile->getConnectionString().toString());
 
 	// Reset state from former cluster.
@@ -797,16 +797,16 @@ ACTOR static Future<Void> changeConnectionFileImpl(Reference<ClusterConnectionFi
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			TraceEvent("ChangeClusterFileAttemptingGRV");
+			TraceEvent("SwitchConnectionFileAttemptingGRV");
 			Version v = wait(tr.getReadVersion());
-			TraceEvent("ChangeClusterFileGotRV")
+			TraceEvent("SwitchConnectionFileGotRV")
 			    .detail("ReadVersion", v)
 			    .detail("MinAcceptableReadVersion", self->minAcceptableReadVersion);
 			ASSERT(self->minAcceptableReadVersion != std::numeric_limits<Version>::max());
 			self->recreateWatchesTrigger.trigger();
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("ChangeClusterFileError").detail("Error", e.what());
+			TraceEvent("SwitchConnectionFileError").detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
@@ -817,8 +817,8 @@ Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 	return cluster->getConnectionFile()->get();
 }
 
-Future<Void> DatabaseContext::changeConnectionFile(Reference<ClusterConnectionFile> standby) {
-	return changeConnectionFileImpl(standby, this);
+Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFile> standby) {
+	return switchConnectionFileImpl(standby, this);
 }
 
 Future<Void> DatabaseContext::recreateWatches() {

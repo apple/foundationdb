@@ -51,8 +51,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		auto changeConnFileDb = Database::createDatabase(cx->getConnectionFile(), -1);
-		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this), doSwitch(changeConnFileDb, this),
+		auto switchConnFileDb = Database::createDatabase(cx->getConnectionFile(), -1);
+		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this), doSwitch(switchConnFileDb, this),
 			                                  writerClient(cx, this), writerClient(extraDB, this) };
 		return success(timeout(waitForAll(clients), testDuration));
 	}
@@ -130,9 +130,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_CopiedDatabase");
 		wait(advanceVersion(self->extraDB, rv));
 		TraceEvent("DifferentClusters_AdvancedVersion");
-		wait(cx->changeConnectionFile(Reference<ClusterConnectionFile>(
+		wait(cx->switchConnectionFile(Reference<ClusterConnectionFile>(
 		    new ClusterConnectionFile(self->extraDB->getConnectionFile()->getConnectionString()))));
-		TraceEvent("DifferentClusters_ChangedConnectionFile");
+		TraceEvent("DifferentClusters_SwitchdConnectionFile");
 		state Transaction tr(cx);
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -145,7 +145,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			TraceEvent("DifferentClusters_ReadError").error(e);
 			wait(tr.onError(e));
 		}
-		// In an actual switch we would call changeConnectionFile after unlocking the database. But it's possible
+		// In an actual switch we would call switchConnectionFile after unlocking the database. But it's possible
 		// that a storage server serves a read at |rv| even after the recovery caused by unlocking the database, and we
 		// want to make that more likely for this test. So read at |rv| then unlock.
 		wait(unlockDatabase(self->extraDB, lockUid));
