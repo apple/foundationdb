@@ -30,9 +30,12 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	int writesPerTransaction;
 	int transactionsCommitted;
 	int numShards;
+	int64_t avgBytes;
+	int64_t avgBytesPerKSec;
+	int64_t avgIOsPerKSec;
 
 	DataDistributionMetricsWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), transactionsCommitted(0), numShards(0) {
+	  : KVWorkload(wcx), transactionsCommitted(0), numShards(0), avgBytes(0), avgBytesPerKSec(0), avgIOsPerKSec(0) {
 		numTransactions = getOption(options, LiteralStringRef("numTransactions"), 100);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1000);
 	}
@@ -72,6 +75,18 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(KeyRef(start), KeyRef(end)), 100));
 			self->numShards = result.size();
 			if (self->numShards < 1) return false;
+			int64_t totalBytes = 0;
+			int64_t totalBytesPerKSec = 0;
+			int64_t totalIOsPerKSec = 0;
+			for (auto& kv : result) {
+				json_spirit::mObject statsObj = readJSONStrictly(kv.value.toString()).get_obj()["Stats"].get_obj();
+				totalBytes += statsObj["Bytes"].get_int64();
+				totalBytesPerKSec += statsObj["BytesPerKSecond"].get_int64();
+				totalIOsPerKSec += statsObj["IOsPerKSecond"].get_int64();
+			}
+			self->avgBytes = totalBytes / self->numShards;
+			self->avgBytesPerKSec = totalBytesPerKSec / self->numShards;
+			self->avgIOsPerKSec = totalIOsPerKSec / self->numShards;
 		} catch (Error& e) {
 			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 			return false;
@@ -86,7 +101,9 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
 		m.push_back(PerfMetric("NumShards", numShards, true));
-		// add extra metrics
+		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
+		m.push_back(PerfMetric("AvgBytesPerKSec", avgBytesPerKSec, true));
+		m.push_back(PerfMetric("AvgIOsPerKSec", avgIOsPerKSec, true));
 	}
 };
 
