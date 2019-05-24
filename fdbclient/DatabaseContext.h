@@ -54,11 +54,17 @@ public:
 
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
-	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
+	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
+	                       int taskID = TaskDefaultEndpoint, bool lockAware = false,
+	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware, apiVersion )); }
+	Database clone() const {
+		return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, dbId, taskID, clientLocality,
+		                                    enableLocalityLoadBalance, lockAware, apiVersion, switchable));
+	}
 
 	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -104,11 +110,13 @@ public:
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> recreateWatches();
+	bool switchable = false;
 
 	// private:
-	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
-		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
+	explicit DatabaseContext(Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	                         Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID,
+	                         LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware,
+	                         int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
 
 	explicit DatabaseContext( const Error &err );
 

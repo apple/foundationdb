@@ -1831,8 +1831,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	if( *isTooOld )
 		throw transaction_too_old();
 
-	cx->minAcceptableReadVersion =
-	    std::min(cx->minAcceptableReadVersion, version); // Suppress minAcceptableReadVersion check
+	ASSERT(!cx->switchable);
 	tr.setVersion( version );
 	limits.minRows = 0;
 

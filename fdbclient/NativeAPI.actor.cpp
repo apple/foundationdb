@@ -174,13 +174,13 @@ std::string unprintable( std::string const& val ) {
 }
 
 void DatabaseContext::validateVersion(Version version) {
-	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any reads.
-	// We throw client_invalid_operation because the caller didn't directly set the version, so the version_invalid error
-	// might be confusing.
-	if(version == 0) {
+	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
+	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
+	// version_invalid error might be confusing.
+	if (version == 0) {
 		throw client_invalid_operation();
 	}
-	if (version < minAcceptableReadVersion) {
+	if (switchable && version < minAcceptableReadVersion) {
 		TEST(true); // Attempted to read a version lower than any this client has seen from the current cluster
 		throw transaction_too_old();
 	}
@@ -511,17 +511,20 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-DatabaseContext::DatabaseContext(
-	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, 
-	int taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, int apiVersion ) 
-	: cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), dbId(dbId), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
-	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
-	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
-	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
-{
+DatabaseContext::DatabaseContext(Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo,
+                                 Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID,
+                                 LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware,
+                                 int apiVersion, bool switchable)
+  : cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), dbId(dbId), taskID(taskID),
+    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
+    apiVersion(apiVersion), switchable(switchable), provisional(false), transactionReadVersions(0),
+    transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0),
+    transactionCommittedMutationBytes(0), transactionsCommitStarted(0), transactionsCommitCompleted(0),
+    transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0),
+    transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0),
+    transactionMaxRetries(-1), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000),
+    mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0) {
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
@@ -605,8 +608,12 @@ Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>>
 	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false));
 }
 
-Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID, bool lockAware, int apiVersion) {
-	return Database( new DatabaseContext( Reference<Cluster>(nullptr), clientInfo, clientInfoMonitor, LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware, apiVersion ) );
+Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+                                 LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID,
+                                 bool lockAware, int apiVersion, bool switchable) {
+	return Database(new DatabaseContext(Reference<Cluster>(nullptr), clientInfo, clientInfoMonitor,
+	                                    LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance,
+	                                    lockAware, apiVersion, switchable));
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -818,6 +825,7 @@ Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 }
 
 Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFile> standby) {
+	ASSERT(switchable);
 	return switchConnectionFileImpl(standby, this);
 }
 
@@ -834,10 +842,13 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 	DatabaseContext *db;
 	if(preallocatedDb) {
-		db = new (preallocatedDb) DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false, apiVersion);
+		db = new (preallocatedDb)
+		    DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint,
+		                    clientLocality, true, false, apiVersion, /* switchable */ true);
 	}
 	else {
-		db = new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false, apiVersion);
+		db = new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint,
+		                         clientLocality, true, false, apiVersion, /* switchable */ true);
 	}
 
 	return Database(db);
