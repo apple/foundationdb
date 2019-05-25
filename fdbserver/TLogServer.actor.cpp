@@ -1902,17 +1902,12 @@ ACTOR Future<Void> tLogCommit(
 	state StringRef execCmd;
 	state Standalone<VectorRef<Tag>> execTags;
 	state vector<Future<Void>> playIgnoredPops;
+	state vector<Future<Void>> snapFailKeySetters;
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on critical section between here self->version.set() below!)
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
-		// Log the changes to the persistent queue, to be committed by commitQueue()
-		qe.version = req.version;
-		qe.knownCommittedVersion = logData->knownCommittedVersion;
-		qe.messages = req.messages;
-		qe.id = logData->logId;
-		state vector<Future<Void>> snapFailKeySetters;
 
 		if (req.hasExecOp) {
 			execProcessingHelper(self, logData, &req, &execTags, &execArg, &execCmd, &execVersion, &snapFailKeySetters, &playIgnoredPops);
@@ -1937,6 +1932,11 @@ ACTOR Future<Void> tLogCommit(
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
+		// Log the changes to the persistent queue, to be committed by commitQueue()
+		qe.version = req.version;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
+		qe.messages = req.messages;
+		qe.id = logData->logId;
 		self->persistentQueue->push( qe, logData );
 
 		self->diskQueueCommitBytes += qe.expectedSize();

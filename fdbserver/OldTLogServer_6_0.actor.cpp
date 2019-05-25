@@ -1541,12 +1541,6 @@ ACTOR Future<Void> tLogCommit(
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
-		// Log the changes to the persistent queue, to be committed by commitQueue()
-		qe.version = req.version;
-		qe.knownCommittedVersion = logData->knownCommittedVersion;
-		qe.messages = req.messages;
-		qe.id = logData->logId;
-
 		if (req.hasExecOp) {
 			execProcessingHelper(self, logData, &req, &execTags, &execArg, &execCmd, &execVersion, &snapFailKeySetters, &playIgnoredPops);
 			if (execVersion != invalidVersion) {
@@ -1570,6 +1564,11 @@ ACTOR Future<Void> tLogCommit(
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
+		// Log the changes to the persistent queue, to be committed by commitQueue()
+		qe.version = req.version;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
+		qe.messages = req.messages;
+		qe.id = logData->logId;
 		self->persistentQueue->push( qe, logData );
 
 		self->diskQueueCommitBytes += qe.expectedSize();
