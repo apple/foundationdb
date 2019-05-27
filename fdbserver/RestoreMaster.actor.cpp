@@ -35,7 +35,6 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> askLoadersToCollectRestoreAppliersInterfaces(Reference<RestoreMasterData> self);
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
 ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
@@ -63,8 +62,6 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
 	try {
-		wait( askLoadersToCollectRestoreAppliersInterfaces(self) );
-
 		state int restoreId = 0;
 		state int checkNum = 0;
 		loop {
@@ -87,19 +84,14 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 			// Step: Notify all restore requests have been handled by cleaning up the restore keys
 			wait( delay(5.0) );
 			printf("Finish my restore now!\n");
-			//wait( finishRestore(self) );
 			wait( finishRestore(self, cx, restoreRequests) ); 
 
 			printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
 			TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
-			// wait( delay(5.0) );
 			//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.
 			//Otherwise, this special workload never returns and tester will think the test workload is stuck and the tester will timesout
-			break; //TODO: this break will be removed later since we need the restore agent to run all the time!
+			break;
 		}
-
-		return Void();
-
 	} catch (Error &e) {
 		fprintf(stdout, "[ERROR] Restoer Master encounters error. error code:%d, error message:%s\n",
 				e.code(), e.what());
@@ -110,22 +102,22 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 
 
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
-	state Key tagName = request.tagName;
-	state Key url = request.url;
-	state bool waitForComplete = request.waitForComplete;
-	state Version targetVersion = request.targetVersion;
-	state bool verbose = request.verbose;
-	state KeyRange range = request.range;
-	state Key addPrefix = request.addPrefix;
-	state Key removePrefix = request.removePrefix;
-	state bool lockDB = request.lockDB;
-	state UID randomUid = request.randomUid;
+	// state Key tagName = request.tagName;
+	// state Key url = request.url;
+	// state bool waitForComplete = request.waitForComplete;
+	// state Version targetVersion = request.targetVersion;
+	// state bool verbose = request.verbose;
+	// state KeyRange range = request.range;
+	// state Key addPrefix = request.addPrefix;
+	// state Key removePrefix = request.removePrefix;
+	// state bool lockDB = request.lockDB;
+	// state UID randomUid = request.randomUid;
 
 	//MX: Lock DB if it is not locked
-	printf("RestoreRequest lockDB:%d\n", lockDB);
-	if ( lockDB == false ) {
-		printf("[WARNING] RestoreRequest lockDB:%d; we will overwrite request.lockDB to true and forcely lock db\n", lockDB);
-		lockDB = true;
+	printf("RestoreRequest lockDB:%d\n", request.lockDB);
+	if ( request.lockDB == false ) {
+		printf("[WARNING] RestoreRequest lockDB:%d; we will overwrite request.lockDB to true and forcely lock db\n", request.lockDB);
+		request.lockDB = true;
 		request.lockDB = true;
 	}
 
@@ -141,10 +133,10 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 
 	
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(randomUid));
+	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(request.randomUid));
 
 	// lock DB for restore
-	wait( _lockDB(cx, randomUid, lockDB) );
+	wait( _lockDB(cx, request.randomUid, request.lockDB) );
 	wait( _clearDB(tr) );
 
 	// Step: Collect all backup files
@@ -239,24 +231,24 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	}
 
 	// Unlock DB  at the end of handling the restore request
-	wait( unlockDB(cx, randomUid) );
-	printf("Finish restore uid:%s \n", randomUid.toString().c_str());
+	wait( unlockDB(cx, request.randomUid) );
+	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
 
-	return targetVersion;
+	return request.targetVersion;
 }
 
 // Distribution workload per version batch
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
-	state Key tagName = request.tagName;
-	state Key url = request.url;
-	state bool waitForComplete = request.waitForComplete;
-	state Version targetVersion = request.targetVersion;
-	state bool verbose = request.verbose;
-	state KeyRange restoreRange = request.range;
-	state Key addPrefix = request.addPrefix;
-	state Key removePrefix = request.removePrefix;
-	state bool lockDB = request.lockDB;
-	state UID randomUid = request.randomUid;
+	// state Key tagName = request.tagName;
+	// state Key url = request.url;
+	// state bool waitForComplete = request.waitForComplete;
+	// state Version targetVersion = request.targetVersion;
+	// state bool verbose = request.verbose;
+	// state KeyRange restoreRange = request.range;
+	// state Key addPrefix = request.addPrefix;
+	// state Key removePrefix = request.removePrefix;
+	// state bool lockDB = request.lockDB;
+	// state UID randomUid = request.randomUid;
 	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
 
 	if ( self->isBackupEmpty() ) {
@@ -366,9 +358,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					//param.length = self->files[curFileIndex].fileSize;
 					loadSizeB = param.length;
 					param.blockSize = self->files[curFileIndex].blockSize;
-					param.restoreRange = restoreRange;
-					param.addPrefix = addPrefix;
-					param.removePrefix = removePrefix;
+					param.restoreRange = request.range;
+					param.addPrefix = request.addPrefix;
+					param.removePrefix = request.removePrefix;
 					param.mutationLogPrefix = mutationLogPrefix;
 					
 					if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
@@ -782,36 +774,6 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, Rest
 	return Void();
 
 }
-
-// Restore Master: Ask each restore loader to collect all appliers' interfaces
-ACTOR Future<Void> askLoadersToCollectRestoreAppliersInterfaces(Reference<RestoreMasterData> self) {
-	state int index = 0;
-	loop {
-		try {
-			// wait(delay(1.0));
-			index = 0;
-			std::vector<Future<RestoreCommonReply>> cmdReplies;
-			for(auto& loaderInterf : self->loadersInterf) {
-				self->cmdID.nextCmd();
-				printf("[CMD:%s] Node:%s askLoadersToCollectRestoreAppliersInterfaces for node (index=%d uid=%s)\n", 
-						self->cmdID.toString().c_str(), self->describeNode().c_str(),
-						index, loaderInterf.first.toString().c_str());
-				cmdReplies.push_back( loaderInterf.second.collectRestoreRoleInterfaces.getReply(RestoreSimpleRequest(self->cmdID)) );
-				index++;
-			}
-			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			printf("[setWorkerInterface] Finished\n");
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-			printf("Node:%s waits on replies time out. Current phase: setWorkerInterface, Retry all commands.\n", self->describeNode().c_str());
-		}
-	}
-
-	return Void();
-}
-
 
 
 // TODO: Revise the way to collect the restore request. We may make it into 1 transaction
