@@ -302,15 +302,22 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 
 // Assume: Only update the local data if it (applierInterf) has not been set
 ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreWorkerData> self) {
-	ASSERT( self->loaderData.isValid() ); // Restore loader receives this request
+	printf("handleRestoreSysInfoRequest, self->id:%s loaderData.isValid:%d\n",
+		   self->id().toString().c_str(), self->loaderData.isValid());
+	// Applier does not need to know appliers interfaces
+	if ( !self->loaderData.isValid() ) {
+		req.reply.send(RestoreCommonReply(self->id()));
+		return Void();
+	}
+	// The loader has received the appliers interfaces
 	if ( !self->loaderData->appliersInterf.empty() ) {
-		req.reply.send(RestoreCommonReply());
+		req.reply.send(RestoreCommonReply(self->id()));
 		return Void();
 	}
 
 	self->loaderData->appliersInterf = req.sysInfo.appliers;
 	
-	req.reply.send(RestoreCommonReply() );
+	req.reply.send(RestoreCommonReply(self->id()) );
 	return Void();
 }
 
@@ -422,8 +429,8 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> self)  
 	ASSERT( !self->masterData->loadersInterf.empty() );
 	RestoreSysInfo sysInfo(self->masterData->appliersInterf);
 	std::map<UID, RestoreSysInfoRequest> requests;
-	for (auto &loader : self->masterData->loadersInterf) {
-		requests[loader.first] =  RestoreSysInfoRequest(sysInfo);
+	for (auto &worker : self->workerInterfaces) {
+		requests[worker.first] =  RestoreSysInfoRequest(sysInfo);
 	}
 	printf("Master: distributeRestoreSysInfo\n");
 	wait( sendBatchRequests(&RestoreWorkerInterface::updateRestoreSysInfo, self->workerInterfaces, requests) );
@@ -491,7 +498,6 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 					return Void();
 				}
 			}
-
 		} catch (Error &e) {
 			fprintf(stdout, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
 					requestTypeStr.c_str(), e.code(), e.what());
