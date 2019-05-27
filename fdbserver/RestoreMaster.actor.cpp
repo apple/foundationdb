@@ -51,6 +51,8 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> s
 ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 
+void dummySampleWorkload(Reference<RestoreMasterData> self);
+
 
 
 // The server of the restore master. It drives the restore progress with the following steps:
@@ -271,7 +273,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state double startTime = now();
 	state double startTimeBeforeSampling = now();
 	
-	wait( sampleWorkload(self, request, restoreConfig, sampleSizeMB) );
+	dummySampleWorkload(self);
+	//wait( sampleWorkload(self, request, restoreConfig, sampleSizeMB) );
 	// wait( delay(1.0) );
 
 	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
@@ -463,12 +466,10 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		}
 	}
 
-	//wait( delay(1.0) );
 	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
 
 	ASSERT( cmdReplies.empty() );
 	
-	//wait( delay(5.0) );
 	// Notify the applier to applly mutation to DB
 
 	startTime = now();
@@ -486,295 +487,26 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 }
 
-
-// RestoreMaster: Ask loaders to sample data and send mutations to master applier. Ask master applier to calculate the range for each applier
-ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, RestoreRequest request, Reference<RestoreConfig> restoreConfig, int64_t sampleMB_input) {
-	state Key tagName = request.tagName;
-	state Key url = request.url;
-	state bool waitForComplete = request.waitForComplete;
-	state Version targetVersion = request.targetVersion;
-	state bool verbose = request.verbose;
-	state KeyRange restoreRange = request.range;
-	state Key addPrefix = request.addPrefix;
-	state Key removePrefix = request.removePrefix;
-	state bool lockDB = request.lockDB;
-	state UID randomUid = request.randomUid;
-	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
-
-	state bool allLoadReqsSent = false;
-	state int64_t sampleMB = sampleMB_input; //100;
-	state int64_t sampleB = sampleMB * 1024 * 1024; // Sample a block for every sampleB bytes. // Should adjust this value differently for simulation mode and real mode
-	state int64_t curFileIndex = 0;
-	state int64_t curFileOffset = 0;
-	state int64_t loadSizeB = 0;
-	state int64_t loadingCmdIndex = 0;
-	state int64_t sampleIndex = 0;
-	state double totalBackupSizeB = 0;
-	state double samplePercent = 0.05; // sample 1 data block per samplePercent (0.01) of data. num_sample = 1 / samplePercent
-
-	// We should sample 1% data
-	for (int i = 0; i < self->files.size(); i++) {
-		totalBackupSizeB += self->files[i].fileSize;
+// Placehold for sample workload
+// Produce the key-range for each applier
+void dummySampleWorkload(Reference<RestoreMasterData> self) {
+	int numAppliers = self->appliersInterf.size();
+	std::vector<UID> keyrangeSplitter;
+	// We will use the splitter at [1, numAppliers - 1]. The first splitter is normalKeys.begin
+	int i;
+	for (i = 0; i < numAppliers - 1; i++) {
+		keyrangeSplitter.push_back(g_random->randomUniqueID());
 	}
-	sampleB = std::max((int) (samplePercent * totalBackupSizeB), 10 * 1024 * 1024); // The minimal sample size is 10MB
-	printf("Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%ld\n", self->describeNode().c_str(),
-			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB);
-
-	// Step: Distribute sampled file blocks to loaders to sample the mutations
-	self->cmdID.initPhase(RestoreCommandEnum::Sample_Range_File);
-	curFileIndex = 0;
-	state CMDUID checkpointCMDUID = self->cmdID;
-	state int checkpointCurFileIndex = curFileIndex;
-	state int64_t checkpointCurFileOffset = 0;
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state RestoreCommandEnum cmdType;
-	loop { // For retry on timeout
-		try {
-			if ( allLoadReqsSent ) {
-				break; // All load requests have been handled
-			}
-			//wait(delay(1.0));
-
-			cmdReplies.clear();
-
-			printf("[Sampling] Node:%s We will sample the workload among %ld backup files.\n", self->describeNode().c_str(), self->files.size());
-			printf("[Sampling] Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%ld, loadSize:%dB sampleIndex:%ld\n", self->describeNode().c_str(),
-				totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB, loadSizeB, sampleIndex);
-			for (auto &loader : self->loadersInterf) {
-				const UID &loaderID = loader.first;
-				RestoreLoaderInterface &loaderInterf= loader.second;
-
-				// Find the sample file
-				while ( curFileIndex < self->files.size() && self->files[curFileIndex].fileSize == 0 ) {
-					// NOTE: && self->files[curFileIndex].cursor >= self->files[curFileIndex].fileSize
-					printf("[Sampling] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
-							self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
-					curFileOffset = 0;
-					curFileIndex++;
-				}
-				// Find the next sample point
-				while ( loadSizeB / sampleB < sampleIndex && curFileIndex < self->files.size() ) {
-					if (self->files[curFileIndex].fileSize == 0) {
-						// NOTE: && self->files[curFileIndex].cursor >= self->files[curFileIndex].fileSize
-						printf("[Sampling] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
-								self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
-						curFileIndex++;
-						curFileOffset = 0;
-						continue;
-					}
-					if ( loadSizeB / sampleB >= sampleIndex ) {
-						break;
-					}
-					if (curFileIndex >= self->files.size()) {
-						break;
-					}
-					loadSizeB += std::min( self->files[curFileIndex].blockSize, std::max(self->files[curFileIndex].fileSize - curFileOffset * self->files[curFileIndex].blockSize, (int64_t) 0) );
-					curFileOffset++;
-					if ( self->files[curFileIndex].blockSize == 0 || curFileOffset >= self->files[curFileIndex].fileSize / self->files[curFileIndex].blockSize ) {
-						curFileOffset = 0;
-						curFileIndex++;
-					}
-				}
-				if ( curFileIndex >= self->files.size() ) {
-					allLoadReqsSent = true;
-					break;
-				}
-
-				//sampleIndex++;
-
-				// Notify loader to sample the file
-				LoadingParam param;
-				param.url = request.url;
-				param.version = self->files[curFileIndex].version;
-				param.filename = self->files[curFileIndex].fileName;
-				param.offset = curFileOffset * self->files[curFileIndex].blockSize; // The file offset in bytes
-				//param.length = std::min(self->files[curFileIndex].fileSize - self->files[curFileIndex].cursor, loadSizeB);
-				param.length = std::min(self->files[curFileIndex].blockSize, std::max((int64_t)0, self->files[curFileIndex].fileSize - param.offset));
-				loadSizeB += param.length;
-				sampleIndex = std::ceil(loadSizeB / sampleB);
-				curFileOffset++;
-
-				//loadSizeB = param.length;
-				param.blockSize = self->files[curFileIndex].blockSize;
-				param.restoreRange = restoreRange;
-				param.addPrefix = addPrefix;
-				param.removePrefix = removePrefix;
-				param.mutationLogPrefix = mutationLogPrefix;
-				if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
-					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth file:%s\n",
-							param.length, param.offset, self->files[curFileIndex].fileSize, curFileIndex,
-							self->files[curFileIndex].toString().c_str());
-				}
-
-
-				printf("[Sampling][File:%ld] filename:%s offset:%ld blockSize:%ld filesize:%ld loadSize:%ldB sampleIndex:%ld\n",
-						curFileIndex, self->files[curFileIndex].fileName.c_str(), curFileOffset,
-						self->files[curFileIndex].blockSize, self->files[curFileIndex].fileSize,
-						loadSizeB, sampleIndex);
-
-
-				ASSERT( param.length > 0 );
-				ASSERT( param.offset >= 0 );
-				ASSERT( param.offset <= self->files[curFileIndex].fileSize );
-
-				printf("[Sampling][CMD] Node:%s Loading %s on node %s\n", 
-						self->describeNode().c_str(), param.toString().c_str(), loaderID.toString().c_str());
-
-				self->cmdID.nextCmd(); // The cmd index is the i^th file (range or log file) to be processed
-				if (!self->files[curFileIndex].isRange) {
-					cmdType = RestoreCommandEnum::Sample_Log_File;
-					self->cmdID.setPhase(RestoreCommandEnum::Sample_Log_File);
-					cmdReplies.push_back( loaderInterf.sampleLogFile.getReply(RestoreLoadFileRequest(self->cmdID, param)) );
-				} else {
-					cmdType = RestoreCommandEnum::Sample_Range_File;
-					self->cmdID.setPhase(RestoreCommandEnum::Sample_Range_File);
-					cmdReplies.push_back( loaderInterf.sampleRangeFile.getReply(RestoreLoadFileRequest(self->cmdID, param)) );
-				}
-				
-				printf("[Sampling] Master cmdType:%d cmdUID:%s isRange:%d destinationNode:%s\n", 
-						(int) cmdType, self->cmdID.toString().c_str(), (int) self->files[curFileIndex].isRange,
-						loaderID.toString().c_str());
-				
-				if (param.offset + param.length >= self->files[curFileIndex].fileSize) { // Reach the end of the file
-					curFileIndex++;
-					curFileOffset = 0;
-				}
-				if ( curFileIndex >= self->files.size() ) {
-					allLoadReqsSent = true;
-					break;
-				}
-				++loadingCmdIndex;
-			}
-
-			printf("[Sampling] Wait for %ld loaders to accept the cmd Sample_Range_File or Sample_Log_File\n", cmdReplies.size());
-
-			if ( !cmdReplies.empty() ) {
-				//TODO: change to getAny. NOTE: need to keep the still-waiting replies
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); 
-				//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
-
-				for (int i = 0; i < reps.size(); ++i) {
-					printf("[Sampling][%d out of %d] Get reply:%s for  Sample_Range_File or Sample_Log_File\n",
-							i, reps.size(), reps[i].toString().c_str());
-				}
-				checkpointCMDUID = self->cmdID;
-				checkpointCurFileIndex = curFileIndex;
-				checkpointCurFileOffset = curFileOffset;
-			}
-
-			if (allLoadReqsSent) {
-				printf("[Sampling] allLoadReqsSent, sampling finished\n");
-				break; // NOTE: need to change when change to wait on any cmdReplies
-			}
-
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-			self->cmdID = checkpointCMDUID;
-			curFileIndex = checkpointCurFileIndex;
-			curFileOffset = checkpointCurFileOffset;
-			allLoadReqsSent = false;
-			printf("[Sampling][Waring] Retry at CMDID:%s curFileIndex:%ld\n", self->cmdID.toString().c_str(), curFileIndex);
+	std::sort( keyrangeSplitter.begin(), keyrangeSplitter.end() );
+	i = 0;
+	for (auto& applier : self->appliersInterf) {
+		if ( i == 0 ) {
+			self->range2Applier[normalKeys.begin] = applier.first;
+		} else {
+			self->range2Applier[StringRef(keyrangeSplitter[i].toString())] = applier.first;
 		}
 	}
-
-	// wait(delay(1.0));
-
-	// Ask master applier to calculate the key ranges for appliers
-	state int numKeyRanges = 0;
-	loop {
-		try {
-			printf("[Sampling][CMD] Ask master applier %s for the key ranges for appliers\n", self->masterApplierInterf.toString().c_str());
-
-			ASSERT(self->appliersInterf.size() > 0);
-			self->cmdID.initPhase(RestoreCommandEnum::Calculate_Applier_KeyRange);
-			self->cmdID.nextCmd();
-			GetKeyRangeNumberReply rep = wait( timeoutError( 
-				self->masterApplierInterf.calculateApplierKeyRange.getReply(RestoreCalculateApplierKeyRangeRequest(self->cmdID, self->appliersInterf.size())),  FastRestore_Failure_Timeout) );
-			printf("[Sampling][CMDRep] number of key ranges calculated by master applier:%d\n", rep.keyRangeNum);
-			numKeyRanges = rep.keyRangeNum;
-
-			if (numKeyRanges <= 0 || numKeyRanges > self->appliersInterf.size() ) {
-				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%ld) from other phases. appliersInterf.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, self->appliersInterf.size());
-				UNREACHABLE();
-			}
-
-			if ( numKeyRanges < self->appliersInterf.size() ) {
-				printf("[WARNING][Sampling] numKeyRanges:%d < appliers number:%ld. %ld appliers will not be used!\n",
-						numKeyRanges, self->appliersInterf.size(), self->appliersInterf.size() - numKeyRanges);
-			}
-
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-			printf("[Sampling] [Warning] Retry on Calculate_Applier_KeyRange\n");
-		}
-	}
-
-	wait(delay(1.0));
-
-	// Ask master applier to return the key range for appliers
-	state std::vector<Future<GetKeyRangeReply>> keyRangeReplies;
-	state std::map<UID, RestoreApplierInterface>::iterator applier;
-	state int applierIndex = 0;
-	loop {
-		try {
-			self->range2Applier.clear();
-			keyRangeReplies.clear(); // In case error happens in try loop
-			self->cmdID.initPhase(RestoreCommandEnum::Get_Applier_KeyRange);
-			//self->cmdID.nextCmd();
-			for ( applier = self->appliersInterf.begin(), applierIndex = 0;
-				  applierIndex < numKeyRanges;
-				  applier++, applierIndex++) {
-				self->cmdID.nextCmd();
-				printf("[Sampling][Master] Node:%s, CMDID:%s Ask masterApplierInterf:%s for the lower boundary of the key range for applier:%s\n",
-						self->describeNode().c_str(), self->cmdID.toString().c_str(),
-						self->masterApplierInterf.toString().c_str(), applier->first.toString().c_str());
-				ASSERT( applier != self->appliersInterf.end() );
-				keyRangeReplies.push_back( self->masterApplierInterf.getApplierKeyRangeRequest.getReply(
-					RestoreGetApplierKeyRangeRequest(self->cmdID, applierIndex)) );
-			}
-			std::vector<GetKeyRangeReply> reps = wait( timeoutError( getAll(keyRangeReplies), FastRestore_Failure_Timeout) );
-
-			ASSERT( reps.size() <= self->appliersInterf.size() );
-
-			// TODO: Directly use the replied lowerBound and upperBound
-			applier = self->appliersInterf.begin();
-			for (int i = 0; i < reps.size() && i < numKeyRanges; ++i) {
-				UID applierID = applier->first;
-				Standalone<KeyRef> lowerBound = reps[i].lowerBound;
-				// if (i < numKeyRanges) {
-				// 	lowerBound = reps[i].lowerBound;
-				// } else {
-				// 	lowerBound = normalKeys.end;
-				// }
-
-				if (i == 0) {
-					lowerBound = LiteralStringRef("\x00"); // The first interval must starts with the smallest possible key
-				}
-				printf("[INFO] Node:%s Assign key-to-applier map: Key:%s -> applierID:%s\n", self->describeNode().c_str(),
-						getHexString(lowerBound).c_str(), applierID.toString().c_str());
-				self->range2Applier.insert(std::make_pair(lowerBound, applierID));
-				applier++;
-			}
-
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-			printf("[Sampling] [Warning] Retry on Get_Applier_KeyRange\n");
-		}
-	}
-	printf("[Sampling] self->range2Applier has been set. Its size is:%d\n", self->range2Applier.size());
-	self->printAppliersKeyRange();
-
-	// wait(delay(1.0));
-
-	return Void();
-
 }
-
 
 // TODO: Revise the way to collect the restore request. We may make it into 1 transaction
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {

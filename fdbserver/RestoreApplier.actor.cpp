@@ -64,23 +64,10 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
-				when ( RestoreGetApplierKeyRangeRequest req = waitNext(applierInterf.getApplierKeyRangeRequest.getFuture()) ) {
-					requestTypeStr = "getApplierKeyRangeRequest";
-					actors.add(handleGetApplierKeyRangeRequest(req, self));
-				}
 				when ( RestoreSetApplierKeyRangeRequest req = waitNext(applierInterf.setApplierKeyRangeRequest.getFuture()) ) {
 					requestTypeStr = "setApplierKeyRangeRequest";
 					actors.add(handleSetApplierKeyRangeRequest(req, self));
 				}
-
-				when ( RestoreCalculateApplierKeyRangeRequest req = waitNext(applierInterf.calculateApplierKeyRange.getFuture()) ) {
-					requestTypeStr = "calculateApplierKeyRange";
-					actors.add(handleCalculateApplierKeyRangeRequest(req, self));
-				}
-				when ( RestoreSendMutationVectorRequest req = waitNext(applierInterf.sendSampleMutationVector.getFuture()) ) {
-					requestTypeStr = "sendSampleMutationVector";
-					actors.add( handleSendSampleMutationVectorRequest(req, self));
-				} 
 				when ( RestoreSendMutationVectorVersionedRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
 					//actors.add( handleSendMutationVectorRequest(req, self) );

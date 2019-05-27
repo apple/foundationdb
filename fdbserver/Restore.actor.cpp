@@ -270,8 +270,6 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface &recruited = self->loaderInterf.get();
-		DUMPTOKEN(recruited.sampleRangeFile);
-		DUMPTOKEN(recruited.sampleLogFile);
 		DUMPTOKEN(recruited.setApplierKeyRangeVectorRequest);
 		DUMPTOKEN(recruited.loadRangeFile);
 		DUMPTOKEN(recruited.loadLogFile);
@@ -286,10 +284,7 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface &recruited = self->applierInterf.get();
-		DUMPTOKEN(recruited.calculateApplierKeyRange);
-		DUMPTOKEN(recruited.getApplierKeyRangeRequest);
 		DUMPTOKEN(recruited.setApplierKeyRangeRequest);
-		DUMPTOKEN(recruited.sendSampleMutationVector);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
@@ -430,7 +425,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> self)  
 	for (auto &loader : self->masterData->loadersInterf) {
 		requests[loader.first] =  RestoreSysInfoRequest(sysInfo);
 	}
-
+	printf("Master: distributeRestoreSysInfo\n");
 	wait( sendBatchRequests(&RestoreWorkerInterface::updateRestoreSysInfo, self->workerInterfaces, requests) );
 
 	TraceEvent("FastRestore").detail("DistributeRestoreSysInfo", "Finish");

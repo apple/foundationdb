@@ -29,7 +29,7 @@
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
 ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
-ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreLoaderData> self);
+
 
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreLoaderData> self,
  									Reference<IBackupContainer> bc, Version version,
@@ -40,8 +40,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<RestoreLo
  									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
  									KeyRange restoreRange, Key addPrefix, Key removePrefix);
-ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self);
-ACTOR Future<Void> registerMutationsToApplierV2(Reference<RestoreLoaderData> self, bool isRangeFile, Version prevVersion, Version endVersion);
+ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self, bool isRangeFile, Version prevVersion, Version endVersion);
 void parseSerializedMutation(Reference<RestoreLoaderData> self, bool isSampling);
 bool isRangeMutation(MutationRef m);
 void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) ;
@@ -67,16 +66,6 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreSimpleRequest req = waitNext(loaderInterf.heartbeat.getFuture()) ) {
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, loaderInterf.id()));
-				}
-				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleRangeFile.getFuture()) ) {
-					requestTypeStr = "sampleRangeFile";
-					self->initBackupContainer(req.param.url);
-					actors.add( handleLoadRangeFileRequest(req, self, true) );
-				}
-				when ( RestoreLoadFileRequest req = waitNext(loaderInterf.sampleLogFile.getFuture()) ) {
-					self->initBackupContainer(req.param.url);
-					requestTypeStr = "sampleLogFile";
-					actors.add( handleLoadLogFileRequest(req, self, true) );
 				}
 				when ( RestoreSetApplierKeyRangeVectorRequest req = waitNext(loaderInterf.setApplierKeyRangeVectorRequest.getFuture()) ) {
 					requestTypeStr = "setApplierKeyRangeVectorRequest";
@@ -219,12 +208,14 @@ ACTOR Future<Void> handleLoadRangeFileRequest(RestoreLoadFileRequest req, Refere
 			param.filename.c_str());
 	// TODO: Send to applier to apply the mutations
 	// printf("[INFO][Loader] Node:%s CMDUID:%s will send range mutations to applier\n",
-	// 		self->describeNode().c_str(), self->cmdID.toString().c_str());
-	if ( isSampling ) {
-		wait( registerMutationsToMasterApplier(self) );
-	} else {
-		wait( registerMutationsToApplierV2(self, true, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
-	}
+	// // 		self->describeNode().c_str(), self->cmdID.toString().c_str());
+	// if ( isSampling ) {
+	// 	wait( registerMutationsToMasterApplier(self) );
+	// } else {
+	// 	wait( registerMutationsToApplier(self, true, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	// }
+
+	wait( registerMutationsToApplier(self, true, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
 	
 	// wait ( delay(1.0) );
 	
@@ -325,11 +316,12 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 	printf("[INFO][Loader] Node:%s CMDUID:%s will send log mutations to applier\n",
 			self->describeNode().c_str(), req.cmdID.toString().c_str());
 	
-	if ( isSampling ) {
-		wait( registerMutationsToMasterApplier(self) );
-	} else {
-		wait( registerMutationsToApplierV2(self, false, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
-	}
+	// if ( isSampling ) {
+	// 	wait( registerMutationsToMasterApplier(self) );
+	// } else {
+	// 	wait( registerMutationsToApplier(self, false, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	// }
+	wait( registerMutationsToApplier(self, false, req.param.prevVersion, req.param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
 	// TODO: NOTE: If we parse log file, the DB status will be incorrect.
 	if ( !isSampling ) {
@@ -350,267 +342,7 @@ ACTOR Future<Void> handleLoadLogFileRequest(RestoreLoadFileRequest req, Referenc
 }
 
 
-
-// Loader: Register sampled mutations
-ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreLoaderData> self) {
-	printf("[Sampling] Node:%s registerMutationsToMaster() self->masterApplierInterf:%s\n",
-			self->describeNode().c_str(), self->masterApplierInterf.toString().c_str());
-
-	state RestoreApplierInterface applierCmdInterf = self->masterApplierInterf;
-	state int packMutationNum = 0;
-	state int packMutationThreshold = 1;
-	state int kvCount = 0;
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-
-	state int splitMutationIndex = 0;
-	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
-	state int mIndex;
-	state uint64_t commitVersion;
-	state MutationRef kvm;
-
-	state Standalone<VectorRef<MutationRef>> mutationsBuffer; // The mutation vector to be sent to master applier
-	state double mutationsSize = 0;
-	//state double mutationVectorThreshold = 1; //1024 * 10; // Bytes
-	loop {
-		try {
-			cmdReplies.clear();
-			mutationsBuffer.pop_front(mutationsBuffer.size());
-			mutationsSize = 0;
-			packMutationNum = 0;
-			self->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier); 
-			// TODO: Consider using a different EndPoint for loader and applier communication.
-			// Otherwise, applier may receive loader's message while applier is waiting for master to assign key-range
-			for ( kvOp = self->kvOps.begin(); kvOp != self->kvOps.end(); kvOp++) {
-				commitVersion = kvOp->first;
-				
-				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-					kvm = kvOp->second[mIndex];
-					self->cmdID.nextCmd();
-					if ( debug_verbose || true ) { // Debug deterministic bug
-						printf("[VERBOSE_DEBUG] send mutation to applier, mIndex:%d mutation:%s\n", mIndex, kvm.toString().c_str());
-					}
-					mutationsBuffer.push_back(mutationsBuffer.arena(), kvm);
-					mutationsSize += kvm.expectedSize();
-					if ( mutationsSize >= mutationVectorThreshold ) {
-						self->cmdID.nextCmd();
-						cmdReplies.push_back(applierCmdInterf.sendSampleMutationVector.getReply(
-							RestoreSendMutationVectorRequest(self->cmdID, commitVersion, mutationsBuffer)));
-							mutationsBuffer.pop_front(mutationsBuffer.size());
-							mutationsSize = 0;
-						if ( debug_verbose ) {
-							printf("[INFO][Loader] Waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
-						}
-						std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-						//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-						cmdReplies.clear();
-					}
-
-					kvCount++;
-				}
-			}
-
-			// The leftover mutationVector whose size is < mutationVectorThreshold
-			if ( mutationsSize > 0 ) {
-				self->cmdID.nextCmd();
-				cmdReplies.push_back(applierCmdInterf.sendSampleMutationVector.getReply(
-					RestoreSendMutationVectorRequest(self->cmdID, commitVersion, mutationsBuffer)));
-					mutationsBuffer.pop_front(mutationsBuffer.size());
-					mutationsSize = 0;
-			}
-
-
-			if (!cmdReplies.empty()) {
-				printf("[INFO][Loader] Last waits for master applier to receive %ld mutations\n", mutationsBuffer.size());
-				//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
-				std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) );
-				cmdReplies.clear();
-			}
-
-			printf("[Sample Summary][Loader] Node:%s produces %d mutation operations\n", self->describeNode().c_str(), kvCount);
-			break;
-		} catch (Error &e) {
-			// TODO: Handle the command reply timeout error
-			if (e.code() != error_code_io_timeout) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", self->describeNode().c_str(), self->cmdID.toString().c_str());
-			} else {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-						self->cmdID.toString().c_str(), e.code(), e.what());
-			}
-			printf("[WARNING] Node:%s timeout at waiting on replies of Loader_Send_Sample_Mutation_To_Applier. Retry...\n", self->describeNode().c_str());
-		}
-	}
-
-	return Void();
-}
-
-
-// TODO: ATTENTION: Different loaders may generate the same CMDUID, which may let applier miss some mutations
-/*
-ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self) {
-	printf("[INFO][Loader] Node:%s self->masterApplierInterf:%s, registerMutationsToApplier\n",
-			self->describeNode().c_str(), self->masterApplierInterf.toString().c_str());
-
-	state int packMutationNum = 0;
-	state int packMutationThreshold = 10;
-	state int kvCount = 0;
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-
-	state int splitMutationIndex = 0;
-
-	self->printAppliersKeyRange();
-
-	//state double mutationVectorThreshold = 1;//1024 * 10; // Bytes.
-	state std::map<UID, Standalone<VectorRef<MutationRef>>> applierMutationsBuffer; // The mutation vector to be sent to each applier
-	state std::map<UID, double> applierMutationsSize; // buffered mutation vector size for each applier
-	state Standalone<VectorRef<MutationRef>> mvector;
-	state Standalone<VectorRef<UID>> nodeIDs;
-	// Initialize the above two maps
-	state std::vector<UID> applierIDs = self->getWorkingApplierIDs();
-	loop {
-		try {
-			packMutationNum = 0;
-			splitMutationIndex = 0;
-			kvCount = 0;
-			state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
-			// MX: NEED TO A WAY TO GENERATE NON_DUPLICATE CMDUID across loaders
-			self->cmdID.setPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier); //MX: THIS MAY BE WRONG! CMDID may duplicate across loaders 
-			// In case try-catch has error and loop back
-			applierMutationsBuffer.clear();
-			applierMutationsSize.clear();
-			for (auto &applierID : applierIDs) {
-				applierMutationsBuffer[applierID] = Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>());
-				applierMutationsSize[applierID] = 0.0;
-			}
-			for ( kvOp = self->kvOps.begin(); kvOp != self->kvOps.end(); kvOp++) {
-				state uint64_t commitVersion = kvOp->first;
-				state int mIndex;
-				state MutationRef kvm;
-				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-					kvm = kvOp->second[mIndex];
-					if ( debug_verbose ) {
-						printf("[VERBOSE_DEBUG] mutation to sent to applier, mutation:%s\n", kvm.toString().c_str());
-					}
-					// Send the mutation to applier
-					if ( isRangeMutation(kvm) ) { // MX: Use false to skip the range mutation handling
-						// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
-						// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-						mvector.pop_front(mvector.size());
-						nodeIDs.pop_front(nodeIDs.size());
-						//state std::map<Standalone<MutationRef>, UID> m2appliers;
-						// '' Bug may be here! The splitMutation() may be wrong!
-						splitMutation(self, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
-						// m2appliers = splitMutationv2(self, kvm);
-						// // convert m2appliers to mvector and nodeIDs
-						// for (auto& m2applier : m2appliers) {
-						// 	mvector.push_back(m2applier.first);
-						// 	nodeIDs.push_back(m2applier.second);
-						// }
-					
-						printf("SPLITMUTATION: mvector.size:%d\n", mvector.size());
-						ASSERT(mvector.size() == nodeIDs.size());
-
-						for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++ ) {
-							MutationRef mutation = mvector[splitMutationIndex];
-							UID applierID = nodeIDs[splitMutationIndex];
-							printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex, mutation.toString().c_str(), applierID.toString().c_str());
-							applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
-							applierMutationsSize[applierID] += mutation.expectedSize();
-
-							kvCount++;
-						}
-
-						for (auto &applierID : applierIDs) {
-							if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
-								state int tmpNumMutations = applierMutationsBuffer[applierID].size();
-								self->cmdID.nextCmd();
-								cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
-									RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
-								applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-								applierMutationsSize[applierID] = 0;
-
-								printf("[INFO][Loader] Waits for applier:%s to receive %ld range mutations\n", applierID.toString().c_str(), tmpNumMutations);
-								std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-								cmdReplies.clear();
-							}
-						}
-					} else { // mutation operates on a particular key
-						std::map<Standalone<KeyRef>, UID>::iterator itlow = self->range2Applier.lower_bound(kvm.param1); // lower_bound returns the iterator that is >= m.param1
-						// make sure itlow->first <= m.param1
-						if ( itlow == self->range2Applier.end() || itlow->first > kvm.param1 ) {
-							if ( itlow == self->range2Applier.begin() ) {
-								printf("KV-Applier: SHOULD NOT HAPPEN. kvm.param1:%s\n", kvm.param1.toString().c_str());
-							}
-							--itlow;
-						}
-						ASSERT( itlow->first <= kvm.param1 );
-						MutationRef mutation = kvm;
-						UID applierID = itlow->second;
-						printf("KV--Applier: K:%s ApplierID:%s\n", kvm.param1.toString().c_str(), applierID.toString().c_str());
-						kvCount++;
-
-						applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation); // Q: Maybe push_back_deep()?
-						applierMutationsSize[applierID] += mutation.expectedSize();
-						if ( applierMutationsSize[applierID] >= mutationVectorThreshold ) {
-							self->cmdID.nextCmd();
-							cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
-												RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
-							printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
-							applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-							applierMutationsSize[applierID] = 0;
-
-							std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-							cmdReplies.clear();
-						}
-					}
-				} // Mutations at the same version
-
-				// In case the mutation vector is not larger than mutationVectorThreshold
-				// We must send out the leftover mutations any way; otherwise, the mutations at different versions will be mixed together
-				printf("[DEBUG][Loader] sendMutationVector sends the remaining applierMutationsBuffer, applierIDs.size:%d\n", applierIDs.size());
-				for (auto &applierID : applierIDs) {
-					if (applierMutationsBuffer[applierID].empty()) { //&& applierMutationsSize[applierID] >= 1
-						ASSERT( applierMutationsSize[applierID] == 0 );
-						continue;
-					}
-					printf("[DEBUG][Loader] sendMutationVector size:%d for applierID:%s\n", applierMutationsBuffer[applierID].size(), applierID.toString().c_str());
-					self->cmdID.nextCmd();
-					cmdReplies.push_back(self->appliersInterf[applierID].sendMutationVector.getReply(
-										RestoreSendMutationVectorRequest(self->cmdID, commitVersion, applierMutationsBuffer[applierID])));
-					printf("[INFO][Loader] Waits for applier to receive %ld range mutations\n", applierMutationsBuffer[applierID].size());
-					applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-					applierMutationsSize[applierID] = 0;
-					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
-					cmdReplies.clear();
-				}
-			} // all versions of mutations
-
-			if (!cmdReplies.empty()) {
-				printf("[INFO][Loader] Last Waits for applier to receive %ld range mutations\n", cmdReplies.size());
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
-				cmdReplies.clear();
-			}
-			printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
-					self->describeNode().c_str(), self->cmdID.toString().c_str(), kvCount);
-
-			self->kvOps.clear();
-			break;
-
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] registerMutationsToApplier Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-		}
-	};
-
-	return Void();
-}
-*/
-
-ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self) {
-	return Void();
-}
-
-ACTOR Future<Void> registerMutationsToApplierV2(Reference<RestoreLoaderData> self, bool isRangeFile, Version startVersion, Version endVersion) {
+ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self, bool isRangeFile, Version startVersion, Version endVersion) {
 	printf("[INFO][Loader] Node:%s self->masterApplierInterf:%s, registerMutationsToApplier\n",
 			self->describeNode().c_str(), self->masterApplierInterf.toString().c_str());
 
