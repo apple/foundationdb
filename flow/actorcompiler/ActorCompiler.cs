@@ -424,12 +424,20 @@ namespace actorcompiler
             Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
         }
 
-        void WriteProbe(Function fun, string probe, params object[] args)
-        {
-            if (generateProbes) {
-                var p = String.Format(probe, args);
-                fun.WriteLine("FDB_TRACE_PROBE(FDB_TRACE_PROBE_STRING_CONCAT({0}_, FNAME));", p);
-            }
+        void ProbeEnter(Function fun, string name, int index = -1) {
+            fun.WriteLine("FDB_TRACE_PROBE(actor_enter, \"{0}\", {1})", name, index);
+        }
+
+        void ProbeExit(Function fun, string name, int index = -1) {
+            fun.WriteLine("FDB_TRACE_PROBE(actor_exit, \"{0}\", {1})", name, index);
+        }
+
+        void ProbeCreate(Function fun, string name) {
+            fun.WriteLine("FDB_TRACE_PROBE(actor_create, \"{0}\")", name);
+        }
+
+        void ProbeDestroy(Function fun, string name) {
+            fun.WriteLine("FDB_TRACE_PROBE(actor_destroy, \"{0}\")", name);
         }
 
         void LineNumber(TextWriter writer, int SourceLine)
@@ -793,12 +801,12 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
-                WriteProbe(cbFunc, "actor_enter_{0}_fire_{1}", actor.name, ch.Index);
+                ProbeEnter(cbFunc, actor.name, ch.Index);
                 cbFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(cbFunc), cx.catchFErr, cx.tryLoopDepth, () => {
                     cbFunc.WriteLine("{0};", ch.Body.call("value", "0"));
                 }, false);
-                WriteProbe(cbFunc, "actor_exit_{0}_fire_{1}", actor.name, ch.Index);
+                ProbeExit(cbFunc, actor.name, ch.Index);
 
                 var errFunc = new Function
                 {
@@ -812,13 +820,13 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", errFunc.name, ch.Index), errFunc);
                 errFunc.Indent(codeIndent);
-                WriteProbe(errFunc, "actor_enter_{0}_fireError_{1}", actor.name, ch.Index);
+                ProbeEnter(errFunc, actor.name, ch.Index);
                 errFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(errFunc), cx.catchFErr, cx.tryLoopDepth, () =>
                 {
                     errFunc.WriteLine("{0};", cx.catchFErr.call("err", "0"));
                 }, false);
-                WriteProbe(errFunc, "actor_exit_{0}_fireError_{1}", actor.name, ch.Index);
+                ProbeExit(errFunc, actor.name, ch.Index);
             }
 
             bool firstChoice = true;
@@ -1174,9 +1182,9 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
-            WriteProbe(constructor, "actor_enter_{0}_body", actor.name);
+            ProbeEnter(constructor, actor.name);
             constructor.WriteLine("this->{0};", body.call());
-            WriteProbe(constructor, "actor_exit_{0}_body", actor.name);
+            ProbeExit(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1217,7 +1225,7 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
-            WriteProbe(constructor, "actor_create_{0}", actor.name);
+            ProbeCreate(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1234,7 +1242,7 @@ namespace actorcompiler
             destructor.Indent(-1);
             destructor.WriteLine("{");
             destructor.Indent(+1);
-            WriteProbe(destructor, "actor_destroy_{0}", actor.name);
+            ProbeDestroy(destructor, actor.name);
             WriteFunction(writer, destructor, destructor.BodyText);
         }
 
