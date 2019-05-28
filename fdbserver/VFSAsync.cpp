@@ -696,7 +696,7 @@ static void asyncDlClose(sqlite3_vfs *pVfs, void *pHandle){
 */
 static int asyncRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
   for(int i=0; i<nByte; i++)
-	  zByte[i] = g_random->randomInt(0,256);
+	  zByte[i] = deterministicRandom()->randomInt(0,256);
   return SQLITE_OK;
 }
 

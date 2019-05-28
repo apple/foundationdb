@@ -83,9 +83,7 @@ void fdb_flow_test() {
 
 	int randomSeed = platform::getRandomSeed();
 
-	g_random = new DeterministicRandom(randomSeed);
-	g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-	g_debug_random = new DeterministicRandom(platform::getRandomSeed());
+	setThreadLocalDeterministicRandomSeed(randomSeed);
 
 	g_network = newNet2( false );
 

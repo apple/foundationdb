@@ -244,7 +244,7 @@ public:
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
 		double freeSpaceMultiplier = SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF, minFreeSpaceRatio ), 0.000001 ) );
 
-		if(freeSpaceMultiplier > 1 && g_random->random01() < 0.001)
+		if(freeSpaceMultiplier > 1 && deterministicRandom()->random01() < 0.001)
 			TraceEvent(SevWarn, "DiskNearCapacity").detail("FreeSpaceRatio", minFreeSpaceRatio);
 
 		return (physicalBytes + (inflightPenalty*inFlightBytes)) * freeSpaceMultiplier;
@@ -784,7 +784,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				if( !req.wantsTrueBest ) {
 					while( similarTeams.size() && randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT ) {
-						int randomTeam = g_random->randomInt( 0, similarTeams.size() );
+						int randomTeam = deterministicRandom()->randomInt( 0, similarTeams.size() );
 						randomTeams.push_back( std::make_pair( SOME_SHARED, similarTeams[randomTeam] ) );
 						swapAndPop( &similarTeams, randomTeam );
 					}
@@ -806,7 +806,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			else {
 				int nTries = 0;
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
-					Reference<IDataDistributionTeam> dest = g_random->randomChoice(self->teams);
+					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
 					for(int i=0; ok && i<randomTeams.size(); i++)
@@ -1359,7 +1359,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// We will use forcedAttribute to call existing function to form a team
 			if (leastUsedMachines.size()) {
 				// Randomly choose 1 least used machine
-				Reference<TCMachineInfo> tcMachineInfo = g_random->randomChoice(leastUsedMachines);
+				Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
 				ASSERT(!tcMachineInfo->serversOnMachine.empty());
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
@@ -1508,7 +1508,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		return g_random->randomChoice(leastUsedServers);
+		return deterministicRandom()->randomChoice(leastUsedServers);
 	}
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
@@ -1522,7 +1522,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 			if (!healthyMachineTeamsForChosenServer.empty()) {
-				return g_random->randomChoice(healthyMachineTeamsForChosenServer);
+				return deterministicRandom()->randomChoice(healthyMachineTeamsForChosenServer);
 			}
 		}
 
@@ -1713,7 +1713,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 								healthyProcesses.push_back(it);
 							}
 						}
-						serverID = g_random->randomChoice(healthyProcesses)->id;
+						serverID = deterministicRandom()->randomChoice(healthyProcesses)->id;
 					}
 					serverTeam.push_back(serverID);
 				}
@@ -2553,7 +2553,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						if(g_random->random01() < 0.01) {
+						if(deterministicRandom()->random01() < 0.01) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
 								.detail("Team", team->getDesc())
 								.detail("KeyBegin", rs.keys.begin)
@@ -2757,7 +2757,7 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 	state double lastUpdate = now();
 	loop {
 		wait( updateServerMetrics( server ) );
-		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * g_random->random01(), TaskDataDistributionLaunch ) );
+		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(), TaskDataDistributionLaunch ) );
 		lastUpdate = now();
 	}
 }
@@ -3135,11 +3135,11 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 	// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 	self->recruitingStream.set(self->recruitingStream.get()+1);
 
-	state UID interfaceId = g_random->randomUniqueID();
+	state UID interfaceId = deterministicRandom()->randomUniqueID();
 	InitializeStorageRequest isr;
 	isr.storeType = self->configuration.storageServerStoreType;
 	isr.seedTag = invalidTag;
-	isr.reqId = g_random->randomUniqueID();
+	isr.reqId = deterministicRandom()->randomUniqueID();
 	isr.interfaceId = interfaceId;
 
 	TraceEvent("DDRecruiting").detail("State", "Sending request to worker").detail("WorkerID", candidateWorker.worker.id())

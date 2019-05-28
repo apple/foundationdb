@@ -73,9 +73,9 @@ int getSBVar(std::string file, int line);
 void enableBuggify(bool enabled);   // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled();
 
-#define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__) && g_random->random01() < (x))
+#define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__) && deterministicRandom()->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES)
-#define EXPENSIVE_VALIDATION (validationIsEnabled() && g_random->random01() < P_EXPENSIVE_VALIDATION)
+#define EXPENSIVE_VALIDATION (validationIsEnabled() && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
@@ -904,8 +904,9 @@ struct ActorSingleCallback : SingleCallback<ValueType> {
 inline double now() { return g_network->now(); }
 inline Future<Void> delay(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds, taskID); }
 inline Future<Void> delayUntil(double time, int taskID = TaskDefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
-inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*g_random->random01()), taskID); }
+inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
 inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
 inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
+
 #include "flow/genericactors.actor.h"
 #endif

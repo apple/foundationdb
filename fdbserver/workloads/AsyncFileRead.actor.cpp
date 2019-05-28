@@ -245,14 +245,14 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 			if (fixedRate)
 				wait( poisson( &lastTime, 1.0 / fixedRate ) );
 
-			//state Future<Void> d = delay( 1/25. * (.75 + 0.5*g_random->random01()) );
+			//state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
 			if(self->unbufferedIO)
-				offset = (int64_t)(g_random->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
+				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
 			else
-				offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
+				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 
-			writeFlag = g_random->random01() < self->writeFraction;
+			writeFlag = deterministicRandom()->random01() < self->writeFraction;
 			if (writeFlag)
 				self->rbg.writeRandomBytesToBuffer((char*)self->readBuffers[bufferIndex]->buffer, self->readSize);
 
@@ -307,9 +307,9 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 						offset = 0;
 				}
 				else if(self->unbufferedIO)
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
 				else
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 
 				//Perform the read.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and don't allow
 				//objects that the read uses to be deleted

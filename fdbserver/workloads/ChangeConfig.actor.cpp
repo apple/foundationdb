@@ -59,7 +59,7 @@ struct ChangeConfigWorkload : TestWorkload {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			state Database extraDB = Database::createDatabase(extraFile, -1);
 
-			wait(delay(5*g_random->random01()));
+			wait(delay(5*deterministicRandom()->random01()));
 			if (self->configMode.size()) {
 				wait(success(changeConfig(extraDB, self->configMode, true)));
 				TraceEvent("WaitForReplicasExtra");
@@ -71,15 +71,15 @@ struct ChangeConfigWorkload : TestWorkload {
 				else
 					wait(success(changeQuorum(extraDB, specifiedQuorumChange(NetworkAddress::parseList(self->networkAddresses)))));
 			}
-			wait(delay(5*g_random->random01()));
+			wait(delay(5*deterministicRandom()->random01()));
 		}
 		return Void();
 	}
 
 	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
-		wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
+		wait( delay( self->minDelayBeforeChange + deterministicRandom()->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
 
-		state bool extraConfigureBefore = g_random->random01() < 0.5;
+		state bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 
 		if(extraConfigureBefore) {
 			wait( self->extraDatabaseConfigure(self) );

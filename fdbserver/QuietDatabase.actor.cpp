@@ -397,7 +397,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6 ) {
-	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo, "QuietDatabase");
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (deterministicRandom()->random01()*100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 

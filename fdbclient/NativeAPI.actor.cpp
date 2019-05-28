@@ -56,7 +56,6 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-extern IRandom* trace_random;
 extern const char* getHGVersion();
 
 using std::make_pair;
@@ -366,9 +365,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			state std::vector<TrInfoChunk> trChunksQ;
 			for (auto &entry : cx->clientStatusUpdater.outStatusQ) {
 				auto &bw = entry.second;
-				int64_t value_size_limit = BUGGIFY ? g_random->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				int64_t value_size_limit = BUGGIFY ? deterministicRandom()->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
-				std::string random_id = g_random->randomAlphaNumeric(16);
+				std::string random_id = deterministicRandom()->randomAlphaNumeric(16);
 				std::string user_provided_id = entry.first.size() ? entry.first + "/" : "";
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
@@ -388,7 +387,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			}
 
 			// Commit the chunks splitting into different transactions if needed
-			state int64_t dataSizeLimit = BUGGIFY ? g_random->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+			state int64_t dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
 			tr = Transaction(Database(Reference<DatabaseContext>::addRef(cx)));
 			ASSERT(commitQ.empty() && (txBytes == 0));
@@ -433,7 +432,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			cx->clientStatusUpdater.outStatusQ.clear();
 			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : cx->clientInfo->get().clientTxnInfoSizeLimit;
-			if (!trChunksQ.empty() && g_random->random01() < clientSamplingProbability)
+			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
@@ -1005,10 +1004,8 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if( g_network )
 		throw network_already_setup();
 
-	g_random = new DeterministicRandom( platform::getRandomSeed() );
-	trace_random = new DeterministicRandom( platform::getRandomSeed() );
-	g_nondeterministic_random = trace_random;
-	g_debug_random = trace_random;
+	setThreadLocalDeterministicRandomSeed(platform::getRandomSeed());
+
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
@@ -1330,10 +1327,10 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 		state uint64_t startTime;
 		state double startTimeD;
 		try {
-			//GetValueReply r = wait( g_random->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
+			//GetValueReply r = wait( deterministicRandom()->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
 			//return r.value;
 			if( info.debugID.present() ) {
-				getValueID = g_nondeterministic_random->randomUniqueID();
+				getValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1468,7 +1465,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
 			if( info.debugID.present() ) {
-				watchValueID = g_nondeterministic_random->randomUniqueID();
+				watchValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1872,7 +1869,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 					if( BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) ) {
 						output.more = true;
-						output.resize(output.arena(), g_random->randomInt(std::max(1,originalLimits.minRows),output.size()));
+						output.resize(output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows),output.size()));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 						return output;
 					}
@@ -2240,7 +2237,7 @@ void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {
 void Transaction::makeSelfConflicting() {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
-	wr << g_random->randomUniqueID();
+	wr << deterministicRandom()->randomUniqueID();
 	auto r = singleKeyRange( wr.toValue(), tr.arena );
 	tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
 	tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
@@ -2355,7 +2352,7 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 }
 
 double Transaction::getBackoff(int errCode) {
-	double b = backoff * g_random->random01();
+	double b = backoff * deterministicRandom()->random01();
 	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
 				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
@@ -2458,7 +2455,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		return;
 	}
 
-	wait( delay( g_random->random01() ) ); // delay between 0 and 1 seconds
+	wait( delay( deterministicRandom()->random01() ) ); // delay between 0 and 1 seconds
 
 	//Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
@@ -2576,7 +2573,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 		if(info.debugID.present()) {
-			commitID = g_nondeterministic_random->randomUniqueID();
+			commitID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", info.debugID.get().first(), commitID.get().first());
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
 		}
@@ -2705,7 +2702,7 @@ Future<Void> Transaction::commitMutations() {
 		if( !readVersion.isValid() )
 			getReadVersion( GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY ); // sets up readVersion field.  We had no reads, so no need for (expensive) full causal consistency.
 
-		bool isCheckingWrites = options.checkWritesEnabled && g_random->random01() < 0.01;
+		bool isCheckingWrites = options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
 			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first < extraConflictRanges[i].get().second )
 				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
@@ -2719,7 +2716,7 @@ Future<Void> Transaction::commitMutations() {
 		}
 
 		if ( options.debugDump ) {
-			UID u = g_nondeterministic_random->randomUniqueID();
+			UID u = nondeterministicRandom()->randomUniqueID();
 			TraceEvent("TransactionDump", u);
 			for(auto i=tr.transaction.mutations.begin(); i!=tr.transaction.mutations.end(); ++i)
 				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", i->param1).detail("P2", i->param2);
@@ -2944,7 +2941,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
 				if (req.second.present()) {
 					if (!debugID.present())
-						debugID = g_nondeterministic_random->randomUniqueID();
+						debugID = nondeterministicRandom()->randomUniqueID();
 					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
 				}
 				requests.push_back(req.first);
@@ -3250,7 +3247,7 @@ void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
 	if(!cx->isError()) {
 		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && deterministicRandom()->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
 			return Reference<TransactionLogInfo>(new TransactionLogInfo(TransactionLogInfo::DATABASE));
 		}
 	}

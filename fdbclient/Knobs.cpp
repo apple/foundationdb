@@ -44,10 +44,10 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
-	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = g_random->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
-	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = g_random->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
+	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
 	init( REPLY_BYTE_LIMIT,                      80000 );
-	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = g_random->random01();
+	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
@@ -185,8 +185,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());
 	if (randomize && BUGGIFY) {
-		CSI_SAMPLING_PROBABILITY = g_random->random01() / 10; // rand range 0 - 0.1
-		CSI_SIZE_LIMIT = g_random->randomInt(1024 * 1024, 100 * 1024 * 1024); // 1 MB - 100 MB
+		CSI_SAMPLING_PROBABILITY = deterministicRandom()->random01() / 10; // rand range 0 - 0.1
+		CSI_SIZE_LIMIT = deterministicRandom()->randomInt(1024 * 1024, 100 * 1024 * 1024); // 1 MB - 100 MB
 	}
 	init(CSI_STATUS_DELAY,						  10.0  );
 
@@ -194,5 +194,5 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
 
 	// TLS related
-	init( CHECK_CONNECTED_COORDINATOR_NUM_DELAY,  1.0 ); if( randomize && BUGGIFY ) CHECK_CONNECTED_COORDINATOR_NUM_DELAY =  g_random->random01() * 60.0; // In seconds
+	init( CHECK_CONNECTED_COORDINATOR_NUM_DELAY,  1.0 ); if( randomize && BUGGIFY ) CHECK_CONNECTED_COORDINATOR_NUM_DELAY =  deterministicRandom()->random01() * 60.0; // In seconds
 }

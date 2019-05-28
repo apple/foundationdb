@@ -66,7 +66,7 @@ namespace FDB {
 			}
 
 			loop {
-				state int64_t candidate = g_random->randomInt(start, start + window);
+				state int64_t candidate = deterministicRandom()->randomInt(start, start + window);
 
 				// if thread safety is needed, this should be locked {
 				state Future<FDBStandalone<RangeResultRef>> latestCounter = tr->getRange(counters.range(), 1, true, true);

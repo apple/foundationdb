@@ -277,7 +277,7 @@ struct TLogData : NonCopyable {
 	Reference<AsyncVar<bool>> degraded;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded)
-			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
+			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0), queueCommitEnd(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
@@ -1226,7 +1226,7 @@ ACTOR Future<Void> tLogCommit(
 	state Optional<UID> tlogDebugID;
 	if(req.debugID.present())
 	{
-		tlogDebugID = g_nondeterministic_random->randomUniqueID();
+		tlogDebugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), tlogDebugID.get().first());
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
@@ -1359,7 +1359,7 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		{
 			TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
 				.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
-			if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * g_random->random01() ) );
+			if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );
 			throw worker_removed();
 		}
 
@@ -1492,7 +1492,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 		}
 		when (TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())){
 			if (req.debugID.present() ) {
-				UID tlogDebugID = g_nondeterministic_random->randomUniqueID();
+				UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
 				g_traceBatch.addEvent("TransactionDebug", tlogDebugID.first(), "TLogServer.TLogConfirmRunningRequest");
 			}
@@ -2199,12 +2199,12 @@ TEST_CASE("/fdbserver/tlogserver/VersionMessagesOverheadFactor" ) {
 			DequeAllocator<TestType> allocator;
 			std::deque<TestType, DequeAllocator<TestType>> d(allocator);
 
-			int numElements = g_random->randomInt(pow(10, i-1), pow(10, i));
+			int numElements = deterministicRandom()->randomInt(pow(10, i-1), pow(10, i));
 			for(int k = 0; k < numElements; ++k) {
 				d.push_back(TestType());
 			}
 
-			int removedElements = 0;//g_random->randomInt(0, numElements); // FIXME: the overhead factor does not accurately account for removal!
+			int removedElements = 0;//deterministicRandom()->randomInt(0, numElements); // FIXME: the overhead factor does not accurately account for removal!
 			for(int k = 0; k < removedElements; ++k) {
 				d.pop_front();
 			}

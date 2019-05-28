@@ -63,7 +63,7 @@ public:
 	MultiInterface( const vector<T>& v, LocalityData const& locality = LocalityData() ) : bestCount(0) {
 		for(int i=0; i<v.size(); i++)
 			alternatives.push_back(KVPair<int,T>(LBDistance::DISTANT,v[i]));
-		g_random->randomShuffle(alternatives);
+		deterministicRandom()->randomShuffle(alternatives);
 		if ( LBLocalityData<T>::Present ) {
 			for(int a=0; a<alternatives.size(); a++)
 				alternatives[a].k = loadBalanceDistance( locality, LBLocalityData<T>::getLocality( alternatives[a].v ), LBLocalityData<T>::getAddress( alternatives[a].v ) );
@@ -108,7 +108,7 @@ template <class T>
 class MultiInterface<ReferencedInterface<T>> : public ReferenceCounted<MultiInterface<ReferencedInterface<T>>> {
 public:
 	MultiInterface( const vector<Reference<ReferencedInterface<T>>>& v ) : alternatives(v), bestCount(0) {
-		g_random->randomShuffle(alternatives);
+		deterministicRandom()->randomShuffle(alternatives);
 		if ( LBLocalityData<T>::Present ) {
 			std::stable_sort( alternatives.begin(), alternatives.end(), ReferencedInterface<T>::sort_by_distance );
 		}

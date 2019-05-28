@@ -286,7 +286,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 			vector<int> cdf = vector<int>(cdfArray, cdfArray + 6);
 
 			//Choose a random operation type (READ, WRITE, SYNC, REOPEN, TRUNCATE).
-			int random = g_random->randomInt(0, cdf.back());
+			int random = deterministicRandom()->randomInt(0, cdf.back());
 			for(int i = 0; i < cdf.size() - 1; i++)
 			{
 				if(cdf[i] <= random && random < cdf[i + 1])
@@ -322,13 +322,13 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 					//Generate random length and offset
 					if(unbufferedIO)
 					{
-						info.length = g_random->randomInt(1, maxOperationSize / _PAGE_SIZE + 1) * _PAGE_SIZE;
-						info.offset = (int64_t)(g_random->random01() * maxOffset / _PAGE_SIZE) * _PAGE_SIZE;
+						info.length = deterministicRandom()->randomInt(1, maxOperationSize / _PAGE_SIZE + 1) * _PAGE_SIZE;
+						info.offset = (int64_t)(deterministicRandom()->random01() * maxOffset / _PAGE_SIZE) * _PAGE_SIZE;
 					}
 					else
 					{
-						info.length = g_random->randomInt(1, maxOperationSize);
-						info.offset = (int64_t)(g_random->random01() * maxOffset);
+						info.length = deterministicRandom()->randomInt(1, maxOperationSize);
+						info.offset = (int64_t)(deterministicRandom()->random01() * maxOffset);
 					}
 
 				} while(checkFileLocked(info.operation, info.offset, info.length));
@@ -362,9 +362,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 				//Choose a random length to truncate to
 				if(unbufferedIO)
-					info.offset = (int64_t)(g_random->random01() * (2 * targetFileSize) / _PAGE_SIZE) * _PAGE_SIZE;
+					info.offset = (int64_t)(deterministicRandom()->random01() * (2 * targetFileSize) / _PAGE_SIZE) * _PAGE_SIZE;
 				else
-					info.offset = (int64_t)(g_random->random01() * (2 * targetFileSize));
+					info.offset = (int64_t)(deterministicRandom()->random01() * (2 * targetFileSize));
 			}
 
 		} while(!allowFlushingOperations && info.flushOperations);
@@ -389,7 +389,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 	{
 		for(int i = 0; i < length; i+= sizeof(uint32_t))
 		{
-			uint32_t val = g_random->randomUInt32();
+			uint32_t val = deterministicRandom()->randomUInt32();
 			memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
 		}
 	}

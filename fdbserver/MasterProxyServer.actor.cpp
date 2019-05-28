@@ -431,13 +431,13 @@ ACTOR Future<Void> commitBatch(
 	for (int t = 0; t<trs.size(); t++) {
 		if (trs[t].debugID.present()) {
 			if (!debugID.present())
-				debugID = g_nondeterministic_random->randomUniqueID();
+				debugID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", trs[t].debugID.get().first(), debugID.get().first());
 		}
 	}
 
 	if(localBatchNumber == 2 && !debugID.present() && self->firstProxy && !g_network->isSimulated()) {
-		debugID = g_random->randomUniqueID();
+		debugID = deterministicRandom()->randomUniqueID();
 		TraceEvent("SecondCommitBatch", self->dbgid).detail("DebugID", debugID.get());
 	}
 
@@ -1143,7 +1143,7 @@ ACTOR static Future<Void> transactionStarter(
 			}
 
 			if (req.debugID.present()) {
-				if (!debugID.present()) debugID = g_nondeterministic_random->randomUniqueID();
+				if (!debugID.present()) debugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 			}
 

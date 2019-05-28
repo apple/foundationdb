@@ -116,7 +116,7 @@ struct StreamingReadWorkload : TestWorkload {
 				loop {
 					try {
 						if(!self->readSequentially)
-							currentIndex = g_random->randomInt( 0, self->nodeCount - thisRangeSize );
+							currentIndex = deterministicRandom()->randomInt( 0, self->nodeCount - thisRangeSize );
 						else if(currentIndex > maxIndex - thisRangeSize)
 							currentIndex = minIndex;
 

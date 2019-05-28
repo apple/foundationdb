@@ -1450,7 +1450,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 }
 
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
-										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
+										std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1491,7 +1491,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				}
 			}
 
-			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * deterministicRandom()->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
 			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
@@ -1506,7 +1506,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	std::string id = nondeterministicRandom()->randomUniqueID().toString();
 	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
 	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
