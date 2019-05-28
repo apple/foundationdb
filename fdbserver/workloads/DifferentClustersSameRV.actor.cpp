@@ -194,13 +194,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				tr2.setVersion(rv);
 				state Future<Optional<Value>> val1 = tr1.get(self->keyToRead);
 				state Future<Optional<Value>> val2 = tr2.get(self->keyToRead);
-				try {
-					wait(success(val1) && success(val2));
-					// We're reading from different db's with the same read version. We can get a different value.
-					TEST(val1.get() != val2.get());
-				} catch (...) {
-					throw;
-				}
+				wait(success(val1) && success(val2));
+				// We're reading from different db's with the same read version. We can get a different value.
+				TEST(val1.get() != val2.get());
 			} catch (Error& e) {
 				wait(tr1.onError(e) && tr2.onError(e));
 			}
