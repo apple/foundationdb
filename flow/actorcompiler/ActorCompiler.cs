@@ -425,19 +425,19 @@ namespace actorcompiler
         }
 
         void ProbeEnter(Function fun, string name, int index = -1) {
-            fun.WriteLine("FDB_TRACE_PROBE(actor_enter, \"{0}\", {1})", name, index);
+            fun.WriteLine("FDB_TRACE_PROBE(actor_enter, \"{0}\", {1});", name, index);
         }
 
         void ProbeExit(Function fun, string name, int index = -1) {
-            fun.WriteLine("FDB_TRACE_PROBE(actor_exit, \"{0}\", {1})", name, index);
+            fun.WriteLine("FDB_TRACE_PROBE(actor_exit, \"{0}\", {1});", name, index);
         }
 
         void ProbeCreate(Function fun, string name) {
-            fun.WriteLine("FDB_TRACE_PROBE(actor_create, \"{0}\")", name);
+            fun.WriteLine("FDB_TRACE_PROBE(actor_create, \"{0}\");", name);
         }
 
         void ProbeDestroy(Function fun, string name) {
-            fun.WriteLine("FDB_TRACE_PROBE(actor_destroy, \"{0}\")", name);
+            fun.WriteLine("FDB_TRACE_PROBE(actor_destroy, \"{0}\");", name);
         }
 
         void LineNumber(TextWriter writer, int SourceLine)
