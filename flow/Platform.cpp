@@ -2880,6 +2880,22 @@ void* checkThread(void *arg) {
 #endif
 }
 
+#if defined(DTRACE_PROBES)
+void fdb_probe_actor_create(const char* name) {
+	FDB_TRACE_PROBE(actor_create, name);
+}
+void fdb_probe_actor_destroy(const char* name) {
+	FDB_TRACE_PROBE(actor_destroy, name);
+}
+void fdb_probe_actor_enter(const char* name, int index) {
+	FDB_TRACE_PROBE(actor_enter, name, index);
+}
+void fdb_probe_actor_exit(const char* name, int index) {
+	FDB_TRACE_PROBE(actor_exit, name, index);
+}
+#endif
+
+
 void setupSlowTaskProfiler() {
 #ifdef __linux__
 	if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
