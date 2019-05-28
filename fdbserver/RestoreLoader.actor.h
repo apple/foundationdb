@@ -44,21 +44,12 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
-public:	
+	std::map<LoadingParam, Future<Void>> processedFileParams;
+
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
 	int numSampledMutations; // The total number of mutations received from sampled data.
-
-	// Loader's state to handle the duplicate delivery of loading commands
-	std::map<std::string, int> processedFiles; //first is filename of processed file, second is not used
-
-	// Temporary data structure for parsing range and log files into (version, <K, V, mutationType>)
-	std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
-	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
-	std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; // Key is the unique identifier for a batch of mutation logs at the same version
-	std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Recoself the most recent
-
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -95,11 +86,7 @@ public:
 		keyOpsCount.clear();
 		numSampledMutations = 0;
 		
-		processedFiles.clear();
-		
-        kvOps.clear();
-        mutationMap.clear();
-        mutationPartMap.clear();
+		processedFileParams.clear();
 
 		curWorkloadSize = 0;
 	}

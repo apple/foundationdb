@@ -239,18 +239,10 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	return request.targetVersion;
 }
 
+enum RestoreFileType { RangeFileType = 0, LogFileType = 1 };
+
 // Distribution workload per version batch
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
-	// state Key tagName = request.tagName;
-	// state Key url = request.url;
-	// state bool waitForComplete = request.waitForComplete;
-	// state Version targetVersion = request.targetVersion;
-	// state bool verbose = request.verbose;
-	// state KeyRange restoreRange = request.range;
-	// state Key addPrefix = request.addPrefix;
-	// state Key removePrefix = request.removePrefix;
-	// state bool lockDB = request.lockDB;
-	// state UID randomUid = request.randomUid;
 	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
 
 	if ( self->isBackupEmpty() ) {
@@ -313,165 +305,117 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state int loadSizeB = loadingSizeMB * 1024 * 1024;
 	state int loadingCmdIndex = 0;
 
-	state int checkpointCurFileIndex = 0;
-	state long checkpointCurOffset = 0; 
-
 	startTime = now();
 	// We should load log file before we do range file
-	state RestoreCommandEnum phaseType = RestoreCommandEnum::Assign_Loader_Log_File;
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
+	state int typeOfFilesProcessed = 0;
+	state RestoreFileType processedFileType = RestoreFileType::LogFileType;
+	state int curFileIndex;
+	state long curOffset;
+	state bool allLoadReqsSent;
+	state Version prevVersion;
+	
 	loop {
-		state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
-		state long curOffset = 0;
-		state bool allLoadReqsSent = false;
-		state Version prevVersion = 0; // Start version for range or log file is 0
+		curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
+		curOffset = 0;
+		allLoadReqsSent = false;
+		prevVersion = 0; // Start version for range or log file is 0
+		std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 		loop {
-			try {
-				if ( allLoadReqsSent ) {
-					break; // All load requests have been handled
+			if ( allLoadReqsSent ) {
+				break; // All load requests have been handled
+			}
+
+			printf("[INFO] Number of backup files:%ld\n", self->files.size());
+			for (auto &loader : self->loadersInterf) {
+				UID loaderID = loader.first;
+				RestoreLoaderInterface loaderInterf = loader.second;
+
+				while (  curFileIndex < self->files.size() && self->files[curFileIndex].fileSize == 0 ) {
+					// NOTE: && self->files[curFileIndex].cursor >= self->files[curFileIndex].fileSize
+					printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
+							self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
+					curFileIndex++;
+					curOffset = 0;
 				}
-				// wait(delay(1.0));
+				if ( curFileIndex >= self->files.size() ) {
+					allLoadReqsSent = true;
+					break;
+				}
+				LoadingParam param;
+				param.url = request.url;
+				param.version = self->files[curFileIndex].version;
+				param.filename = self->files[curFileIndex].fileName;
+				param.offset = 0; //curOffset; //self->files[curFileIndex].cursor;
+				//param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
+				//param.cursor = 0;
+				param.length = self->files[curFileIndex].fileSize;
+				loadSizeB = param.length;
+				param.blockSize = self->files[curFileIndex].blockSize;
+				param.restoreRange = request.range;
+				param.addPrefix = request.addPrefix;
+				param.removePrefix = request.removePrefix;
+				param.mutationLogPrefix = mutationLogPrefix;
+				param.isRangeFile = self->files[curFileIndex].isRange;
+				
+				if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
+					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth filename:%s\n",
+							param.length, param.offset, self->files[curFileIndex].fileSize, curFileIndex,
+							self->files[curFileIndex].fileName.c_str());
+				}
+				ASSERT( param.length > 0 );
+				ASSERT( param.offset >= 0 );
+				ASSERT( param.offset < self->files[curFileIndex].fileSize );
 
-				cmdReplies.clear();
-				printf("[INFO] Number of backup files:%ld\n", self->files.size());
-				self->cmdID.initPhase(phaseType);
-				for (auto &loader : self->loadersInterf) {
-					UID loaderID = loader.first;
-					RestoreLoaderInterface loaderInterf = loader.second;
+				if ( (processedFileType == RestoreFileType::LogFileType && self->files[curFileIndex].isRange) 
+					|| (processedFileType == RestoreFileType::RangeFileType && !self->files[curFileIndex].isRange) ) {
+					printf("Skip fileIndex:%d processedFileType:%d file.isRange:%d\n", curFileIndex, processedFileType, self->files[curFileIndex].isRange);
+					self->files[curFileIndex].cursor = 0;
+					curFileIndex++;
+					curOffset = 0;
+				} else { // Create the request
+					param.prevVersion = prevVersion; 
+					prevVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
+					param.endVersion = prevVersion;
+					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(self->cmdID, param)) );
+					printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
+						curFileIndex, self->files[curFileIndex].toString().c_str(), 
+						param.toString().c_str(), loaderID.toString().c_str()); // VERY USEFUL INFO
+					printf("[INFO] Node:%s CMDUID:%s isRange:%d loaderNode:%s\n", self->describeNode().c_str(), self->cmdID.toString().c_str(),
+							(int) self->files[curFileIndex].isRange, loaderID.toString().c_str());
+					//curOffset += param.length;
 
-					while (  curFileIndex < self->files.size() && self->files[curFileIndex].fileSize == 0 ) {
-						// NOTE: && self->files[curFileIndex].cursor >= self->files[curFileIndex].fileSize
-						printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
-								self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
+					// Reach the end of the file
+					if ( param.length + param.offset >= self->files[curFileIndex].fileSize ) {
 						curFileIndex++;
 						curOffset = 0;
 					}
-					if ( curFileIndex >= self->files.size() ) {
-						allLoadReqsSent = true;
-						break;
-					}
-					LoadingParam param;
-					//self->files[curFileIndex].cursor = 0; // This is a hacky way to make sure cursor is correct in current version when we load 1 file at a time
-					// MX: May Need to specify endVersion as well because the 
-					param.url = request.url;
-					param.version = self->files[curFileIndex].version;
-					param.filename = self->files[curFileIndex].fileName;
-					param.offset = curOffset; //self->files[curFileIndex].cursor;
-					param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
-					//param.length = self->files[curFileIndex].fileSize;
-					loadSizeB = param.length;
-					param.blockSize = self->files[curFileIndex].blockSize;
-					param.restoreRange = request.range;
-					param.addPrefix = request.addPrefix;
-					param.removePrefix = request.removePrefix;
-					param.mutationLogPrefix = mutationLogPrefix;
-					
-					if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
-						printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth filename:%s\n",
-								param.length, param.offset, self->files[curFileIndex].fileSize, curFileIndex,
-								self->files[curFileIndex].fileName.c_str());
-					}
-					ASSERT( param.length > 0 );
-					ASSERT( param.offset >= 0 );
-					ASSERT( param.offset < self->files[curFileIndex].fileSize );
-					self->files[curFileIndex].cursor = self->files[curFileIndex].cursor +  param.length;
-
-					RestoreCommandEnum cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
-					if (self->files[curFileIndex].isRange) {
-						cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
-						self->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Range_File);
-						
-					} else {
-						cmdType = RestoreCommandEnum::Assign_Loader_Log_File;
-						self->cmdID.setPhase(RestoreCommandEnum::Assign_Loader_Log_File);
-						
-					}
-
-					if ( (phaseType == RestoreCommandEnum::Assign_Loader_Log_File && self->files[curFileIndex].isRange) 
-						|| (phaseType == RestoreCommandEnum::Assign_Loader_Range_File && !self->files[curFileIndex].isRange) ) {
-						self->files[curFileIndex].cursor = 0;
-						curFileIndex++;
-						curOffset = 0;
-					} else { // load the type of file in the phaseType
-						self->cmdID.nextCmd();
-						param.prevVersion = prevVersion; 
-						prevVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
-						param.endVersion = prevVersion;
-						printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
-							curFileIndex, self->files[curFileIndex].toString().c_str(), 
-							param.toString().c_str(), loaderID.toString().c_str()); // VERY USEFUL INFO
-						printf("[INFO] Node:%s CMDUID:%s cmdType:%d isRange:%d loaderNode:%s\n", self->describeNode().c_str(), self->cmdID.toString().c_str(),
-								(int) cmdType, (int) self->files[curFileIndex].isRange, loaderID.toString().c_str());
-						if (self->files[curFileIndex].isRange) {
-							cmdReplies.push_back( loaderInterf.loadRangeFile.getReply(RestoreLoadFileRequest(self->cmdID, param)) );
-						} else {
-							cmdReplies.push_back( loaderInterf.loadLogFile.getReply(RestoreLoadFileRequest(self->cmdID, param)) );
-						}
-						curOffset += param.length;
-
-						// Reach the end of the file
-						if ( param.length + param.offset >= self->files[curFileIndex].fileSize ) {
-							curFileIndex++;
-							curOffset = 0;
-						}
-						
-						// if (param.length <= loadSizeB) { // Reach the end of the file
-						// 	ASSERT( self->files[curFileIndex].cursor == self->files[curFileIndex].fileSize );
-						// 	curFileIndex++;
-						// }
-					}
-					
-					if ( curFileIndex >= self->files.size() ) {
-						allLoadReqsSent = true;
-						break;
-					}
-					//++loadingCmdIndex; // Replaced by cmdUID
 				}
-
-				printf("[INFO] Wait for %ld loaders to accept the cmd Assign_Loader_File\n", cmdReplies.size());
-
-				// Question: How to set reps to different value based on cmdReplies.empty()?
-				if ( !cmdReplies.empty() ) {
-					std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
-					//std::vector<RestoreCommonReply> reps = wait( getAll(cmdReplies) ); 
-
-					cmdReplies.clear();
-					for (int i = 0; i < reps.size(); ++i) {
-						printf("[INFO] Get Ack reply:%s for Assign_Loader_File\n",
-								reps[i].toString().c_str());
-					}
-					checkpointCurFileIndex = curFileIndex; // Save the previous success point
-					checkpointCurOffset = curOffset;
+				
+				if ( curFileIndex >= self->files.size() ) {
+					allLoadReqsSent = true;
+					break;
 				}
+			}
 
-				// TODO: Let master print all nodes status. Note: We need a function to print out all nodes status
-
-				if (allLoadReqsSent) {
-					printf("[INFO] allLoadReqsSent has finished.\n");
-					break; // NOTE: need to change when change to wait on any cmdReplies
-				}
-
-			} catch (Error &e) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-						self->cmdID.toString().c_str(), e.code(), e.what());
-				curFileIndex = checkpointCurFileIndex;
-				curOffset = checkpointCurOffset;
+			if (allLoadReqsSent) {
+				printf("[INFO] allLoadReqsSent has finished.\n");
+				break; // NOTE: need to change when change to wait on any cmdReplies
 			}
 		}
+		// Wait on the batch of load files or log files
+		++typeOfFilesProcessed;
+		wait( sendBatchRequests(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests) );
 
-		if (phaseType == RestoreCommandEnum::Assign_Loader_Log_File) {
-			phaseType = RestoreCommandEnum::Assign_Loader_Range_File;
-		} else if (phaseType == RestoreCommandEnum::Assign_Loader_Range_File) {
+		processedFileType = RestoreFileType::RangeFileType; // The second batch is RangeFile
+
+		if ( typeOfFilesProcessed == 2 ) { // We only have 2 types of files
 			break;
 		}
 	}
 
 	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
-
-	ASSERT( cmdReplies.empty() );
 	
 	// Notify the applier to applly mutation to DB
-
 	startTime = now();
 	wait( notifyApplierToApplyMutations(self) );
 	printf("[Progress] distributeWorkloadPerVersionBatch applyToDB time:%.2f seconds\n", now() - startTime);
@@ -484,7 +428,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 			runningTime, endTime - startTimeAfterSampling);
 
 	return Void();
-
 }
 
 // Placehold for sample workload
@@ -675,34 +618,33 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
 	self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
 
-	std::map<UID, RestoreVersionBatchRequest> applierRequests;
+	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 	for (auto &applier : self->appliersInterf) {
 		self->cmdID.nextCmd();
-		applierRequests[applier.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
+		requests.push_back( std::make_pair(applier.first, RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
 	}
-	wait( sendBatchRequests(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, applierRequests) );
+	wait( sendBatchRequests(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, requests) );
 
-	std::map<UID, RestoreVersionBatchRequest> loaderRequests;
+	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 	for (auto &loader : self->loadersInterf) {
 		self->cmdID.nextCmd();
-		loaderRequests[loader.first] = RestoreVersionBatchRequest(self->cmdID, self->batchIndex);
+		requests.push_back( std::make_pair(loader.first, RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
 	}
-	wait( sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, loaderRequests) );
+	wait( sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, requests) );
 
 	return Void();
 }
 
 
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self) {
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
 	loop {
 		try {
 			self->cmdID.initPhase( RestoreCommandEnum::Apply_Mutation_To_DB );
 			// Prepare the applyToDB requests
-			std::map<UID, RestoreSimpleRequest> requests;
+			std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
 			for (auto& applier : self->appliersInterf) {
 				self->cmdID.nextCmd();
-				requests[applier.first] = RestoreSimpleRequest(self->cmdID);
+				requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest(self->cmdID)) );
 			}
 			wait( sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
 

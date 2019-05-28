@@ -81,7 +81,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx);
 ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreWorkerData> self);
 
-bool debug_verbose = true;
+bool debug_verbose = false;
 void printGlobalNodeStatus(Reference<RestoreWorkerData>);
 
 
@@ -428,9 +428,9 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> self)  
 	ASSERT( self->masterData.isValid() );
 	ASSERT( !self->masterData->loadersInterf.empty() );
 	RestoreSysInfo sysInfo(self->masterData->appliersInterf);
-	std::map<UID, RestoreSysInfoRequest> requests;
+	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
 	for (auto &worker : self->workerInterfaces) {
-		requests[worker.first] =  RestoreSysInfoRequest(sysInfo);
+		requests.push_back( std::make_pair(worker.first, RestoreSysInfoRequest(sysInfo)) );
 	}
 	printf("Master: distributeRestoreSysInfo\n");
 	wait( sendBatchRequests(&RestoreWorkerInterface::updateRestoreSysInfo, self->workerInterfaces, requests) );
