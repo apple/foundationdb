@@ -3189,7 +3189,7 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 	return ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit );
 }
 
-ACTOR Future< Standalone<RangeResultRef> > waitStorageMetricsList(
+ACTOR Future< Standalone<RangeResultRef> > waitDataDistributionMetricsList(
 	Database cx,
 	KeyRange keys,
 	int shardLimit )
@@ -3212,7 +3212,7 @@ ACTOR Future< Standalone<RangeResultRef> > waitStorageMetricsList(
 }
 
 Future<Standalone<RangeResultRef>> Transaction::getDataDistributionMetricsList(KeyRange const& keys, int shardLimit) {
-	return ::waitStorageMetricsList(cx, keys, shardLimit);
+	return ::waitDataDistributionMetricsList(cx, keys, shardLimit);
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
