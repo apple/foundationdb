@@ -641,9 +641,18 @@ EXTERNC void setProfilingEnabled(int enabled);
 								 DTRACE_PROBE4, DTRACE_PROBE3, DTRACE_PROBE2,  \
 								 DTRACE_PROBE1, DTRACE_PROBE)                  \
 	(foundationdb, __VA_ARGS__)
+
+extern void fdb_probe_actor_create(const char* name);
+extern void fdb_probe_actor_destroy(const char* name);
+extern void fdb_probe_actor_enter(const char* name, int index);
+extern void fdb_probe_actor_exit(const char* name, int index);
 #else
 #define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
 #define FDB_TRACE_PROBE(...)
+inline void fdb_probe_actor_create(const char*) {}
+inline void fdb_probe_actor_destroy(const char*) {}
+inline void fdb_probe_actor_enter(const char*, int) {}
+inline void fdb_probe_actor_exit(const char*, int) {}
 #endif
 
 #endif /* FLOW_PLATFORM_H */
