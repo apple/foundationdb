@@ -52,14 +52,14 @@ struct MakoWorkload : KVWorkload {
 		commitGet = getOption(options, LiteralStringRef("commitGet"), false);
 		// Target total transaction-per-second (TPS) of all clients
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100000.0) / clientCount;
-		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
-		actorCountPerClient = ceil(transactionsPerSecond * allowedLatency);
-		actorCountPerClient = getOption(options, LiteralStringRef("actorCountPerClient"), actorCountPerClient);
+		actorCountPerClient = getOption(options, LiteralStringRef("actorCountPerClient"), 16);
 		// Sampling rate (1 sample / <sampleSize> ops) for latency stats
-        sampleSize = getOption(options, LiteralStringRef("sampling"), 10);
+        sampleSize = getOption(options, LiteralStringRef("sampleSize"), rowCount / 100);
 		// If true, record latency metrics per periodicLoggingInterval; For details, see tracePeriodically()
-		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
 		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
+		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
+		// Minimum key string length, overwrite the default value by KVWorkload
+		keyBytes = std::max(keyBytes, 16);
 		// The inserted key is formatted as: fixed prefix('mako') + sequential number + padding('x')
 		// assume we want to insert 10000 rows with keyBytes set to 16, 
 		// then the key goes from 'mako00000xxxxxxx' to 'mako09999xxxxxxx'
