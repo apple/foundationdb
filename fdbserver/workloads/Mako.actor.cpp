@@ -162,18 +162,18 @@ struct MakoWorkload : KVWorkload {
 	static void randStr(std::string& str, const int& len) {
 		str.resize(len);
 		for (int i = 0; i < len; ++i) {
-			str[i] = g_random->randomAlphaNumeric();
+			str[i] = deterministicRandom()->randomAlphaNumeric();
 		}
 	}
 
 	static void randStr(char *str, const int& len){
 		for (int i = 0; i < len; ++i) {
-			str[i] = g_random->randomAlphaNumeric();
+			str[i] = deterministicRandom()->randomAlphaNumeric();
 		}
 	}
 
 	Value randomValue() {
-		const int length = g_random->randomInt(minValueBytes, maxValueBytes + 1);
+		const int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
 		randStr(valueString, length);
 		return StringRef(reinterpret_cast<const uint8_t*>(valueString.c_str()), length);
 	}
@@ -425,7 +425,7 @@ struct MakoWorkload : KVWorkload {
 
 	int64_t getRandomKey(uint64_t rowCount) {
 		// TODO: support other distribution like zipf
-		return g_random->randomInt64(0, rowCount); 
+		return deterministicRandom()->randomInt64(0, rowCount); 
 	}
 	int parseOperationsSpec() {
 		const char *ptr = operationsSpec.c_str();
