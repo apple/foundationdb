@@ -394,6 +394,54 @@ struct LogSystemConfig {
 		return false;
 	}
 
+	bool hasTLog(UID tid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool hasLogRouter(UID rid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.logRouters.begin(), log.logRouters.end(), rid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.logRouters.begin(), log.logRouters.end(), rid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool hasBackupWorker(UID bid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt, pseudoLocalities, txsTags);

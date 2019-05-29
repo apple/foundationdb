@@ -1459,28 +1459,16 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		} else {
 			isDisplaced = isDisplaced && ( ( inf.recoveryCount > recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED ) || ( inf.recoveryCount == recoveryCount && inf.recoveryState == RecoveryState::FULLY_RECOVERED ) );
 		}
-		if(isDisplaced) {
-			for(auto& log : inf.logSystemConfig.tLogs) {
-				 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-					isDisplaced = false;
-					break;
-				 }
-			}
-		}
-		if(isDisplaced) {
-			for(auto& old : inf.logSystemConfig.oldTLogs) {
-				for(auto& log : old.tLogs) {
-					 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-		}
-		if ( isDisplaced )
-		{
-			TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
-				.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
+		isDisplaced = isDisplaced && !inf.logSystemConfig.hasTLog(tli.id());
+		if (isDisplaced) {
+			TraceEvent("TLogDisplaced", tli.id())
+			    .detail("Reason", "DBInfoDoesNotContain")
+			    .detail("RecoveryCount", recoveryCount)
+			    .detail("InfRecoveryCount", inf.recoveryCount)
+			    .detail("RecoveryState", (int)inf.recoveryState)
+			    .detail("LogSysConf", describe(inf.logSystemConfig.tLogs))
+			    .detail("PriorLogs", describe(inf.priorCommittedLogServers))
+			    .detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
 			if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );
 			throw worker_removed();
 		}
