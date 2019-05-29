@@ -262,7 +262,7 @@ struct RedwoodRecordRef {
 		// Values > 15 bits in length are not valid input but this is not checked for.
 		void writeVarInt(int x) {
 			if(x >= 128) {
-				*wptr++ = (uint8_t)( (x >> 8) & 0x7f );
+				*wptr++ = (uint8_t)( (x >> 8) | 0x80 );
 			}
 			*wptr++ = (uint8_t)x;
 		}
@@ -3206,14 +3206,17 @@ void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	RedwoodRecordRef::Delta &d = *(RedwoodRecordRef::Delta *)buf;
 
 	Arena mem;
-	rec.writeDelta(d, base);
+	int expectedSize = rec.deltaSize(base);
+	int deltaSize = rec.writeDelta(d, base);
 	RedwoodRecordRef decoded = d.apply(base, mem);
 
-	if(decoded != rec) {
-		printf("BASE:    %s\n", base.toString().c_str());
-		printf("DELTA:   %s\n", d.toString().c_str());
-		printf("REC:     %s\n", rec.toString().c_str());
-		printf("DECODED: %s\n", decoded.toString().c_str());
+	if(decoded != rec || expectedSize < deltaSize) {
+		printf("Base:         %s\n", base.toString().c_str());
+		printf("ExpectedSize: %d\n", expectedSize);
+		printf("DeltaSize:    %d\n", deltaSize);
+		printf("Delta:        %s\n", d.toString().c_str());
+		printf("Record:       %s\n", rec.toString().c_str());
+		printf("Decoded:      %s\n", decoded.toString().c_str());
 		printf("RedwoodRecordRef::Delta test failure!\n");
 		ASSERT(false);
 	}
@@ -3265,6 +3268,16 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 5, 0),
 			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 5, 1)
 	);
+
+	RedwoodRecordRef::byte varInts[100];
+	RedwoodRecordRef::Writer w(varInts);
+	RedwoodRecordRef::Reader r(varInts);
+	w.writeVarInt(1);
+	w.writeVarInt(128);
+	w.writeVarInt(32000);
+	ASSERT(r.readVarInt() == 1);
+	ASSERT(r.readVarInt() == 128);
+	ASSERT(r.readVarInt() == 32000);
 
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
@@ -3392,7 +3405,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 5e6;
+	count = 1e6;
 	for(i = 0; i < count; ++i) {
 		Standalone<RedwoodRecordRef> a = randomRedwoodRecordRef();
 		Standalone<RedwoodRecordRef> b = randomRedwoodRecordRef();
