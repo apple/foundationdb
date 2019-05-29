@@ -20,7 +20,7 @@ Features
 * Separated data distribution from the master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
 * Separated ratekeeper from the master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
 * Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
-* Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
+* Added support for IPv6. `(PR #1178) <https://github.com/apple/foundationdb/pull/1178>`_
 * FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
 * Added ``DISABLE_POSIX_KERNEL_AIO`` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) <https://github.com/apple/foundationdb/pull/1283>`_
 * Added support for configuring the cluster to use the primary and remote DC's as satellites. `(PR #1320) <https://github.com/apple/foundationdb/pull/1320>`_
