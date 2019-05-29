@@ -113,9 +113,7 @@ public:
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
 	// so it will be private to a simulation.
 
-	static bool  isClient() {
-		return g_network->global(INetwork::enClientFailureMonitor) != nullptr;
-	}
+	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 
 	void initMetrics();
 	// Metrics must be initialized after FlowTransport::createInstance has been called

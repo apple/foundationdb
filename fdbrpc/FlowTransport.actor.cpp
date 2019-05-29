@@ -466,8 +466,9 @@ struct Peer : NonCopyable {
 			.detail("PeerAddr", self->destination)
 			.detail("ConnSet", (bool)conn);
 
-		// This is used only at client side and is used to override waiting for unsent data to update failure monitoring status. Overriding is only
-		// useful when making first connection ever, or an existing connection fails. If `connect` itself fails, it is clear peer is down anyway.
+		// This is used only at client side and is used to override waiting for unsent data to update failure monitoring
+		// status. At client, if an existing connection fails, we retry making a connection and if that fails, then only
+		// we report that address as failed.
 		state bool clientReconnectDelay = false;
 		loop {
 			try {
@@ -475,20 +476,24 @@ struct Peer : NonCopyable {
 					self->outgoingConnectionIdle = true;
 
 					// Wait until there is something to send.
-					while ( self->unsent.empty() ) {
-						Future<Void>  clientReconnectDelayF = FlowTransport::transport().isClient() && self->destination.isPublic() && clientReconnectDelay
-							? delay(0)
-							: Never();
+					while (self->unsent.empty()) {
+						Future<Void> clientReconnectDelayF = FlowTransport::transport().isClient() &&
+						                                             self->destination.isPublic() &&
+						                                             clientReconnectDelay
+						                                         ? delay(0)
+						                                         : Never();
 						choose {
-							when (wait( self->dataToSend.onTrigger() )) { }
-							when (wait( clientReconnectDelayF )) { break; }
+							when(wait(self->dataToSend.onTrigger())) {}
+							when(wait(clientReconnectDelayF)) { break; }
 						}
 					}
 
 					ASSERT( self->destination.isPublic() );
 					self->outgoingConnectionIdle = false;
 					if (!FlowTransport::transport().isClient())
-						wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
+						wait(delayJittered(
+						    std::max(0.0, self->lastConnectTime + self->reconnectionDelay -
+						                      now()))); // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
 					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
@@ -503,7 +508,9 @@ struct Peer : NonCopyable {
 							continue;
 						} else {
 							conn = _conn;
-							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+							    .suppressFor(1.0)
+							    .detail("PeerAddr", self->destination);
 							self->prependConnectPacket();
 						}
 					} else {
@@ -523,8 +530,9 @@ struct Peer : NonCopyable {
 					self->transport->countConnEstablished++;
 					wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
 				} catch (Error& e) {
-					if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || e.code() == error_code_connection_unreferenced ||
-						( g_network->isSimulated() && e.code() == error_code_checksum_failed))
+					if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
+					    e.code() == error_code_connection_unreferenced ||
+					    (g_network->isSimulated() && e.code() == error_code_checksum_failed))
 						self->transport->countConnClosedWithoutError++;
 					else
 						self->transport->countConnClosedWithError++;
@@ -540,8 +548,9 @@ struct Peer : NonCopyable {
 				}
 				self->discardUnreliablePackets();
 				reader = Future<Void>();
-				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || e.code() == error_code_connection_unreferenced ||
-					( g_network->isSimulated() && e.code() == error_code_checksum_failed );
+				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
+				          e.code() == error_code_connection_unreferenced ||
+				          (g_network->isSimulated() && e.code() == error_code_checksum_failed);
 
 				if(self->compatible) {
 					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
@@ -1217,8 +1226,7 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 	return self->numIncompatibleConnections > 0;
 }
 
-void FlowTransport::createInstance( bool isClient, uint64_t transportId )
-{
+void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 	if (isClient) {
 		g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
 		g_network->setGlobal(INetwork::enClientFailureMonitor, (flowGlobalType)1);

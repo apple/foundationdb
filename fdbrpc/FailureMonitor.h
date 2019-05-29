@@ -106,7 +106,7 @@ public:
 	virtual void notifyDisconnect( NetworkAddress const& ) = 0;
 
 	// Called to update the failure status of network address directly when running client.
-	virtual void setStatus( NetworkAddress const& address, FailureStatus const& status ) = 0;
+	virtual void setStatus(NetworkAddress const& address, FailureStatus const& status) = 0;
 
 	// Returns when the known status of endpoint is next equal to status.  Returns immediately
 	//   if appropriate.
@@ -121,7 +121,9 @@ public:
 	Future<Void> onFailedFor( Endpoint const& endpoint, double sustainedFailureDuration, double sustainedFailureSlope = 0.0 );
 
 	// Returns the failure monitor that the calling machine should use
-	static IFailureMonitor& failureMonitor() { return *static_cast<IFailureMonitor*>((void*) g_network->global(INetwork::enFailureMonitor)); }
+	static IFailureMonitor& failureMonitor() {
+		return *static_cast<IFailureMonitor*>((void*)g_network->global(INetwork::enFailureMonitor));
+	}
 };
 
 // SimpleFailureMonitor is the sole implementation of IFailureMonitor.  It has no
@@ -130,8 +132,7 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
-	SimpleFailureMonitor();
-	~SimpleFailureMonitor();
+	SimpleFailureMonitor() : endpointKnownFailed() { }
 	void setStatus( NetworkAddress const& address, FailureStatus const& status );
 	void endpointNotFound( Endpoint const& );
 	virtual void notifyDisconnect( NetworkAddress const& );

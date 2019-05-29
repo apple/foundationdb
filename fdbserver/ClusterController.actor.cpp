@@ -1499,7 +1499,10 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 }
 
 ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
-	state Future<Void> failed = (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass) ? Never() : waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+	state Future<Void> failed =
+	    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
+	        ? Never()
+	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch fails for the worker.
 	wait(delay(0));

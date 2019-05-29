@@ -62,15 +62,6 @@ Future<Void> IFailureMonitor::onFailedFor( Endpoint const& endpoint, double sust
 	return waitForContinuousFailure( this, endpoint, sustainedFailureDuration, slope );
 }
 
-SimpleFailureMonitor::SimpleFailureMonitor()
-	: endpointKnownFailed() {
-	//
-}
-
-SimpleFailureMonitor::~SimpleFailureMonitor() {
-	//
-}
-
 void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStatus const& status ) {
 
 	//if (status.failed)
