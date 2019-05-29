@@ -407,7 +407,7 @@ struct RedwoodRecordRef {
 			}
 
 			// Version offset is used to skip the version bytes in the int field array when version is missing (aka 0)
-			int versionOffset = flags & HAS_VERSION ? 0 : 8;
+			int versionOffset = ( (intFieldPrefixLen == 0) && (~flags & HAS_VERSION) ) ? 8 : 0;
 
 			// If there are suffix bytes, copy those into place after the prefix
 			if(intFieldSuffixLen > 0) {
@@ -439,13 +439,19 @@ struct RedwoodRecordRef {
 		std::string toString() const {
 			Reader r(data);
 
+			std::string flagString;
+			if(flags & PREFIX_SOURCE) flagString += "prefixSource ";
+			if(flags & HAS_KEY_SUFFIX) flagString += "keySuffix ";
+			if(flags & HAS_VERSION) flagString += "Version ";
+			if(flags & HAS_VALUE) flagString += "Value ";
+
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
 			int prefixLen = r.readVarInt();
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
-			return format("flags: %02x  prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
-				flags, prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
+			return format("flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
+				flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
 		}
 	};
 #pragma pack(pop)
@@ -579,7 +585,7 @@ struct RedwoodRecordRef {
 
 			// Start copying after any prefix bytes that matched the int fields of the base
 			int intFieldPrefixLen = std::max(0, commonPrefix - key.size());
-			int startPos = intFieldPrefixLen + (version == 0 ? 8 : 0);
+			int startPos = intFieldPrefixLen + (intFieldPrefixLen == 0 && version == 0 ? 8 : 0);
 			int suffixLen = std::max(0, endPos - startPos);
 
 			if(suffixLen > 0) {
@@ -3204,14 +3210,32 @@ void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	RedwoodRecordRef decoded = d.apply(base, mem);
 
 	if(decoded != rec) {
-		printf("RedwoodRecordRef::Delta test failure!\n");
 		printf("BASE:    %s\n", base.toString().c_str());
 		printf("DELTA:   %s\n", d.toString().c_str());
 		printf("REC:     %s\n", rec.toString().c_str());
 		printf("DECODED: %s\n", decoded.toString().c_str());
-		printf("\n");
+		printf("RedwoodRecordRef::Delta test failure!\n");
 		ASSERT(false);
 	}
+}
+
+Standalone<RedwoodRecordRef> randomRedwoodRecordRef(int maxKeySize = 3, int maxValueSize = 255) {
+	RedwoodRecordRef rec;
+	KeyValue kv = randomKV(3, 10);
+	rec.key = kv.key;
+
+	if(g_random->random01() < .9) {
+		rec.value = kv.value;
+	}
+
+	rec.version = g_random->coinflip() ? 0 : g_random->randomInt64(0, std::numeric_limits<Version>::max());
+
+	if(g_random->coinflip()) {
+		rec.chunk.total = g_random->randomInt(1, 100000);
+		rec.chunk.start = g_random->randomInt(0, rec.chunk.total);
+	}
+
+	return Standalone<RedwoodRecordRef>(rec, kv.arena());
 }
 
 TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
@@ -3296,7 +3320,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 1000000000;
+	count = 1e9;
 	for(i = 0; i < count; ++i) {
 		rec1.chunk.total = i & 0xffffff;
 		rec2.chunk.total = i & 0xffffff;
@@ -3311,7 +3335,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 1000000000;
+	count = 1e9;
 	for(i = 0; i < count; ++i) {
 		RedwoodRecordRef::byte fields[RedwoodRecordRef::intFieldArraySize];
 		rec1.chunk.start = i & 0xffffff;
@@ -3323,7 +3347,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 1000000000;
+	count = 100e6;
 	for(i = 0; i < count; ++i) {
 		rec1.chunk.start = i & 0xffffff;
 		rec2.chunk.start = (i + 1) & 0xffffff;
@@ -3333,7 +3357,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 1000000000;
+	count = 100e6;
 	for(i = 0; i < count; ++i) {
 		rec1.chunk.start = i & 0xffffff;
 		rec2.chunk.start = (i + 1) & 0xffffff;
@@ -3346,7 +3370,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 100000000;
+	count = 100e6;
 	int commonPrefix = rec1.getCommonPrefixLen(rec2, 0);
 
 	for(i = 0; i < count; ++i) {
@@ -3358,13 +3382,23 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 100000000;
+	count = 10e6;
 	for(i = 0; i < count; ++i) {
 		rec1.chunk.start = i & 0xffffff;
 		rec2.chunk.start = (i + 1) & 0xffffff;
 		total += rec1.writeDelta(d, rec2);
 	}
 	printf("%" PRId64 " writeDelta() %g M/s\n", total, count / (timer() - start) / 1e6);
+
+	start = timer();
+	total = 0;
+	count = 5e6;
+	for(i = 0; i < count; ++i) {
+		Standalone<RedwoodRecordRef> a = randomRedwoodRecordRef();
+		Standalone<RedwoodRecordRef> b = randomRedwoodRecordRef();
+		deltaTest(a, b);
+	}
+	printf("Random deltaTest() %g M/s\n", count / (timer() - start) / 1e6);
 
 	return Void();
 }
