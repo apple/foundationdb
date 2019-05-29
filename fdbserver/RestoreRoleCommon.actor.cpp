@@ -20,6 +20,8 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -35,64 +37,44 @@ struct RestoreWorkerData;
 // id is the id of the worker to be monitored	
 // This actor is used for both restore loader and restore applier
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
-	wait( delay(0.1) ); // To avoid warning
+	wait( delay(g_random->random01() + 0.01) ); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id, req.cmdID));
 
 	return Void();
 }
 
 ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx) {
- 	state Transaction tr(cx);
-	
-	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	if ( self->versionBatchStart ) {
+		self->versionBatchStart = false;
+
+		wait( runRYWTransaction( cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			if ( self->role == RestoreRole::Loader ) {
-				tr.clear(restoreLoaderKeyFor(self->id()));
+				tr->clear(restoreLoaderKeyFor(self->id()));
 			} else if ( self->role == RestoreRole::Applier ) {
-				tr.clear(restoreApplierKeyFor(self->id()));
+				tr->clear(restoreApplierKeyFor(self->id()));
 			} else {
 				UNREACHABLE();
 			}
-			wait( tr.commit() ) ;
 			printf("Node:%s finish restore, clear the interface keys for all roles on the worker (id:%s) and the worker itself. Then exit\n", self->describeNode().c_str(),  self->id().toString().c_str()); 
-			req.reply.send( RestoreCommonReply(self->id(), req.cmdID) );
-			break;
-		} catch( Error &e ) {
-			printf("[WARNING] Node:%s finishRestoreHandler() transaction error:%s\n", self->describeNode().c_str(), e.what());
-			wait( tr.onError(e) );
-		}
-	};
-
+			return Void();
+		}) );
+	}
+	
+	req.reply.send( RestoreCommonReply(self->id(), req.cmdID) );
 	return Void();
  }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	// wait( delay(1.0) );
-	printf("[Batch:%d] Node:%s Start...\n", req.batchID, self->describeNode().c_str());
-	while (self->isInProgress(RestoreCommandEnum::Reset_VersionBatch)) {
-		printf("[DEBUG] NODE:%s handleVersionBatchRequest wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
+	if ( !self->versionBatchStart ) {
+		self->versionBatchStart = true;
+		self->resetPerVersionBatch();
 	}
 
-	// Handle duplicate, assuming cmdUID is always unique for the same workload
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-		return Void();
-	} 
-
-	self->setInProgressFlag(RestoreCommandEnum::Reset_VersionBatch);
-
-	self->resetPerVersionBatch();
+	printf("[Batch:%d] Node:%s Start...\n", req.batchID, self->describeNode().c_str());
 	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
 
-	self->processedCmd[req.cmdID] = 1;
-	self->clearInProgressFlag(RestoreCommandEnum::Reset_VersionBatch);
-
-	// This actor never returns. You may cancel it in master
 	return Void();
 }
 

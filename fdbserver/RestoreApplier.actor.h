@@ -45,6 +45,7 @@ extern double transactionBatchSizeThreshold;
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> { 
 	NotifiedVersion rangeVersion; // All requests of mutations in range file below this version has been processed
 	NotifiedVersion logVersion; // All requests of mutations in log file below this version has been processed
+	Optional<Future<Void>> dbApplier;
 
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
@@ -86,6 +87,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 		inProgressApplyToDB = false;
 		kvOps.clear();
+		dbApplier = Optional<Future<Void>>();
 	}
 
 	void sanityCheckMutationOps() {

@@ -114,7 +114,8 @@ public:
 	std::map<UID, RestoreApplierInterface> appliersInterf;
 	RestoreApplierInterface masterApplierInterf;
 
-	std::map<CMDUID, int> processedCmd;
+	bool versionBatchStart = false;
+
 	uint32_t inProgressFlag = 0;
 
 	RestoreRoleData() : role(RestoreRole::Invalid) {};
@@ -123,9 +124,6 @@ public:
 
 	UID id() const { return nodeID; }
 
-	bool isCmdProcessed(CMDUID const &cmdID) {
-		return processedCmd.find(cmdID) != processedCmd.end();
-	}
 
 	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.
 	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
@@ -147,7 +145,6 @@ public:
 	}
 
 	void resetPerVersionBatch() {
-		processedCmd.clear();		
 		inProgressFlag = 0;
 	}
 

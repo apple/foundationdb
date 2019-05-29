@@ -108,33 +108,15 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 // Restore Loader
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
-	// The applier should remember the key range it is responsible for
-	//ASSERT(req.cmd == (RestoreCommandEnum) req.cmdID.phase);
-	//self->applierStatus.keyRange = req.range;
-	while (self->isInProgress(RestoreCommandEnum::Notify_Loader_ApplierKeyRange)) {
-		printf("[DEBUG] NODE:%s handleSetApplierKeyRangeVectorRequest wait for 1s\n",  self->describeNode().c_str());
-		wait(delay(1.0));
-	}
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		req.reply.send(RestoreCommonReply(self->id(),req.cmdID));
-		return Void();
-	}
-	self->setInProgressFlag(RestoreCommandEnum::Notify_Loader_ApplierKeyRange);
-
-	VectorRef<UID> appliers = req.applierIDs;
-	VectorRef<KeyRange> ranges = req.ranges;
-	for ( int i = 0; i < appliers.size(); i++ ) {
-		self->range2Applier[ranges[i].begin] = appliers[i];
+	if ( self->range2Applier.empty() ) {
+		self->range2Applier = req.range2Applier;
 	}
 	
-	self->processedCmd[req.cmdID] = 1;
-	self->clearInProgressFlag(RestoreCommandEnum::Notify_Loader_ApplierKeyRange);
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();
 }
 
-// TODO: MX: 
 ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoaderData> self) {
 	// Temporary data structure for parsing range and log files into (version, <K, V, mutationType>)
 	state std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;

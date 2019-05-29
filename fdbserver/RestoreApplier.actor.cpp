@@ -35,12 +35,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplierKeyRangeRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleSendMutationVectorVersionedRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
+ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
 ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx);
 
 
@@ -64,14 +59,9 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
-				when ( RestoreSetApplierKeyRangeRequest req = waitNext(applierInterf.setApplierKeyRangeRequest.getFuture()) ) {
-					requestTypeStr = "setApplierKeyRangeRequest";
-					actors.add(handleSetApplierKeyRangeRequest(req, self));
-				}
 				when ( RestoreSendMutationVectorVersionedRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
-					//actors.add( handleSendMutationVectorRequest(req, self) );
-					actors.add( handleSendMutationVectorVersionedRequest(req, self) );
+					actors.add( handleSendMutationVectorRequest(req, self) ); //handleSendMutationVectorRequest
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.applyToDB.getFuture()) ) {
 					requestTypeStr = "applyToDB";
@@ -102,170 +92,16 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 	return Void();
 }
 
-// Based on the number of sampled mutations operated in the key space, split the key space evenly to k appliers
-// If the number of splitted key spaces is smaller than k, some appliers will not be used
-ACTOR Future<Void> handleCalculateApplierKeyRangeRequest(RestoreCalculateApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
-	state int numMutations = 0;
-	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
-
-	while (self->isInProgress(RestoreCommandEnum::Calculate_Applier_KeyRange)) {
-		printf("[DEBUG] NODE:%s Calculate_Applier_KeyRange wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
-	}
-
-	wait( delay(1.0) );
-	// Handle duplicate message
-	// We need to recalculate the value for duplicate message! Because the reply to duplicate message may arrive earlier!
-	if (self->isCmdProcessed(req.cmdID) && !keyRangeLowerBounds.empty() ) {
-		printf("[DEBUG] Node:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));
-		return Void();
-	}
-	self->setInProgressFlag(RestoreCommandEnum::Calculate_Applier_KeyRange);
-
-	// Applier will calculate applier key range
-	printf("[INFO][Applier] CMD:%s, Node:%s Calculate key ranges for %d appliers\n",
-			req.cmdID.toString().c_str(), self->describeNode().c_str(), req.numAppliers);
-
-	if ( keyRangeLowerBounds.empty() ) {
-		keyRangeLowerBounds = self->calculateAppliersKeyRanges(req.numAppliers); // keyRangeIndex is the number of key ranges requested
-		self->keyRangeLowerBounds = keyRangeLowerBounds;
-	}
-	
-	printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%ld\n",
-			req.cmdID.toString().c_str(), self->describeNode().c_str(), keyRangeLowerBounds.size());
-	req.reply.send(GetKeyRangeNumberReply(keyRangeLowerBounds.size()));
-	self->processedCmd[req.cmdID] = 1; // We should not skip this command in the following phase. Otherwise, the handler in other phases may return a wrong number of appliers
-	self->clearInProgressFlag(RestoreCommandEnum::Calculate_Applier_KeyRange);
-
-	return Void();
-}
-
-// Reply with the key range for the aplier req.applierIndex.
-// This actor cannot return until the applier has calculated the key ranges for appliers
-ACTOR Future<Void> handleGetApplierKeyRangeRequest(RestoreGetApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
-	state int numMutations = 0;
-	//state std::vector<Standalone<KeyRef>> keyRangeLowerBounds = self->keyRangeLowerBounds;
-
-	while (self->isInProgress(RestoreCommandEnum::Get_Applier_KeyRange)) {
-		printf("[DEBUG] NODE:%s Calculate_Applier_KeyRange wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
-	}
-
-	wait( delay(1.0) );
-	//NOTE: Must reply a valid lowerBound and upperBound! Otherwise, the master will receive an invalid value!
-	// if (self->isCmdProcessed(req.cmdID) ) {
-	// 	printf("[DEBUG] Node:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-	// 	req.reply.send(GetKeyRangeReply(workerInterf.id(), req.cmdID)); // Must wait until the previous command returns
-	// 	return Void();
-	// }
-	self->setInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
-	
-	if ( req.applierIndex < 0 || req.applierIndex >= self->keyRangeLowerBounds.size() ) {
-		printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%ld\n",
-				self->describeNode().c_str(), req.applierIndex,  self->keyRangeLowerBounds.size());
-	}
-
-	printf("[INFO][Applier] NodeID:%s replies Get_Applier_KeyRange. keyRangeIndex:%d lower_bound_of_keyRange:%s\n",
-			self->describeNode().c_str(), req.applierIndex, getHexString(self->keyRangeLowerBounds[req.applierIndex]).c_str());
-
-	KeyRef lowerBound = self->keyRangeLowerBounds[req.applierIndex];
-	KeyRef upperBound = (req.applierIndex + 1) < self->keyRangeLowerBounds.size() ? self->keyRangeLowerBounds[req.applierIndex+1] : normalKeys.end;
-
-	req.reply.send(GetKeyRangeReply(self->id(), req.cmdID, req.applierIndex, lowerBound, upperBound));
-	self->clearInProgressFlag(RestoreCommandEnum::Get_Applier_KeyRange);
-
-	return Void();
-
-}
-
-// Assign key range to applier req.applierID
-// Idempodent operation. OK to re-execute the duplicate cmd
-// The applier should remember the key range it is responsible for
-ACTOR Future<Void> handleSetApplierKeyRangeRequest(RestoreSetApplierKeyRangeRequest req, Reference<RestoreApplierData> self) {
-	while (self->isInProgress(RestoreCommandEnum::Assign_Applier_KeyRange)) {
-		printf("[DEBUG] NODE:%s handleSetApplierKeyRangeRequest wait for 1s\n",  self->describeNode().c_str());
-		wait(delay(1.0));
-	}
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		req.reply.send(RestoreCommonReply(self->id(),req.cmdID));
-		return Void();
-	}
-	self->setInProgressFlag(RestoreCommandEnum::Assign_Applier_KeyRange);
-
-	self->range2Applier[req.range.begin] = req.applierID;
-
-	self->processedCmd.clear(); // The Loader_Register_Mutation_to_Applier command can be sent in both sampling and actual loading phases
-	self->processedCmd[req.cmdID] = 1;
-	self->clearInProgressFlag(RestoreCommandEnum::Assign_Applier_KeyRange);
-
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-
-	return Void();
-}
-
-
-
-// Applier receive mutation from loader
-ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self) {
-	state int numMutations = 0;
-
-	if ( debug_verbose ) {
-		printf("[VERBOSE_DEBUG] Node:%s receive mutation number:%d\n", self->describeNode().c_str(), req.mutations.size());
-	}
-
-	// NOTE: We have insert operation to self->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
-	// Otherwise, race condition may happen!
-	while (self->isInProgress(RestoreCommandEnum::Loader_Send_Mutations_To_Applier)) {
-		printf("[DEBUG] NODE:%s sendMutation wait for 1s\n",  self->describeNode().c_str());
-		wait(delay(1.0));
-	}
-
-	// Handle duplicat cmd
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:% handleSendMutationVectorRequest skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		//printf("[DEBUG] Skipped duplicate cmd:%s\n", req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));	
-		return Void();
-	}
-	self->setInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-
-	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-	state uint64_t commitVersion = req.commitVersion;
-	VectorRef<MutationRef> mutations(req.mutations);
-	printf("[DEBUG] Node:%s receive %d mutations at version:%ld\n", self->describeNode().c_str(), mutations.size(), commitVersion);
-	if ( self->kvOps.find(commitVersion) == self->kvOps.end() ) {
-		self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
-	}
-	state int mIndex = 0;
-	for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
-		MutationRef mutation = mutations[mIndex];
-		self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
-		numMutations++;
-		//if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
-			printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
-					self->describeNode().c_str(), numMutations, mutation.toString().c_str());
-		//}
-	}
-	
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-	// Avoid race condition when this actor is called twice on the same command
-	self->processedCmd[req.cmdID] = 1;
-	self->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-
-	return Void();
-}
-
 // ATTENTION: If a loader sends mutations of range and log files at the same time,
 // Race condition may happen in this actor? 
 // MX: Maybe we won't have race condition even in the above situation because all actors run on 1 thread
 // as long as we do not wait or yield when operate the shared data, it should be fine.
-ACTOR Future<Void> handleSendMutationVectorVersionedRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
+ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
 	if ( debug_verbose ) {
 		// NOTE: Print out the current version and received req is helpful in debugging
-		printf("[VERBOSE_DEBUG] handleSendMutationVectorVersionedRequest Node:%s at rangeVersion:%ld logVersion:%ld receive mutation number:%d, req:%s\n",
+		printf("[VERBOSE_DEBUG] handleSendMutationVectorRequest Node:%s at rangeVersion:%ld logVersion:%ld receive mutation number:%d, req:%s\n",
 			self->describeNode().c_str(), self->rangeVersion.get(), self->logVersion.get(), req.mutations.size(), req.toString().c_str());
 	}
 
@@ -310,79 +146,14 @@ ACTOR Future<Void> handleSendMutationVectorVersionedRequest(RestoreSendMutationV
 	return Void();
 }
 
-ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVectorRequest req, Reference<RestoreApplierData> self) {
-	state int numMutations = 0;
-	self->numSampledMutations = 0;
-
-	// NOTE: We have insert operation to self->kvOps. For the same worker, we should only allow one actor of this kind to run at any time!
-	// Otherwise, race condition may happen!
-	while (self->isInProgress(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier)) {
-		printf("[DEBUG] NODE:%s handleSendSampleMutationVectorRequest wait for 1s\n",  self->describeNode().c_str());
-		wait(delay(1.0));
-	}
-
-	// Handle duplicate message
-	if (self->isCmdProcessed(req.cmdID)) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-		return Void();
-	}
-	self->setInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
-
-	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-	state uint64_t commitVersion = req.commitVersion;
-	// TODO: Change the req.mutation to a vector of mutations
-	VectorRef<MutationRef> mutations(req.mutations);
-
-	state int mIndex = 0;
-	for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
-		MutationRef mutation = mutations[mIndex];
-		if ( self->keyOpsCount.find(mutation.param1) == self->keyOpsCount.end() ) {
-			self->keyOpsCount.insert(std::make_pair(mutation.param1, 0));
-		}
-		// NOTE: We may receive the same mutation more than once due to network package lost.
-		// Since sampling is just an estimation and the network should be stable enough, we do NOT handle the duplication for now
-		// In a very unreliable network, we may get many duplicate messages and get a bad key-range splits for appliers. But the restore should still work except for running slower.
-		self->keyOpsCount[mutation.param1]++;
-		self->numSampledMutations++;
-
-		if ( debug_verbose && self->numSampledMutations % 1000 == 1 ) {
-			printf("[Sampling][Applier] Node:%s Receives %d sampled mutations. cur_mutation:%s\n",
-					self->describeNode().c_str(), self->numSampledMutations, mutation.toString().c_str());
-		}
-	}
-	
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-	self->processedCmd[req.cmdID] = 1;
-
-	self->clearInProgressFlag(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier);
-
-	return Void();
-}
-
- ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx) {
+ ACTOR Future<Void> applyToDB(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx) {
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
-
-	// Wait in case the  applyToDB request was delivered twice;
-	while (self->inProgressApplyToDB) {
-		printf("[DEBUG] NODE:%s inProgressApplyToDB wait for 5s\n",  self->describeNode().c_str());
-		wait(delay(5.0));
-	}
-	
-	if ( self->isCmdProcessed(req.cmdID) ) {
-		printf("[DEBUG] NODE:%s skip duplicate cmd:%s\n", self->describeNode().c_str(), req.cmdID.toString().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-		return Void();
-	}
-
-	self->inProgressApplyToDB = true;
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
 		printf("Node:%s kvOps is empty. No-op for apply to DB\n", self->describeNode().c_str());
 		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-		self->processedCmd[req.cmdID] = 1;
 		self->inProgressApplyToDB = false;
 		return Void();
 	}
@@ -500,12 +271,18 @@ ACTOR Future<Void> handleSendSampleMutationVectorRequest(RestoreSendMutationVect
  	self->kvOps.clear();
  	printf("Node:%s ApplyKVOPsToDB number of kv mutations:%d\n", self->describeNode().c_str(), count);
 
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
-	printf("self->processedCmd size:%d req.cmdID:%s\n", self->processedCmd.size(), req.cmdID.toString().c_str());
-	self->processedCmd[req.cmdID] = 1;
-	self->inProgressApplyToDB = false;
-
  	return Void();
+ }
+
+ ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx) {
+	if ( !self->dbApplier.present() ) {
+		self->dbApplier = applyToDB(req, self, cx);
+	}
+	wait( self->dbApplier.get() );
+
+	req.reply.send(RestoreCommonReply(self->id()));
+
+	return Void();
 }
 
 

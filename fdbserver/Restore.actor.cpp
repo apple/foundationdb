@@ -127,7 +127,6 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	CMDUID cmdID;
 
 	uint32_t inProgressFlag = 0; // To avoid race between duplicate message delivery that invokes the same actor multiple times
-	std::map<CMDUID, int> processedCmd;
 
 	UID id() const { return workerID; };
 
@@ -141,10 +140,6 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 		std::stringstream ss;
 		ss << "RestoreWorker workerID:" << workerID.toString();
 		return ss.str();
-	}
-
-	bool isCmdProcessed(CMDUID const &cmdID) {
-		return processedCmd.find(cmdID) != processedCmd.end();
 	}
 
 	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.

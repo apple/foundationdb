@@ -46,9 +46,7 @@ ACTOR static Future<Void> unlockDB(Database cx, UID uid);
 ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr);
 ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB);
 ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status);
-ACTOR static Future<Void> sampleWorkload(Reference<RestoreMasterData> self, RestoreRequest request, Reference<RestoreConfig> restoreConfig, int64_t sampleMB_input);
 ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> self, Database cx);
-ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 
 void dummySampleWorkload(Reference<RestoreMasterData> self);
@@ -104,17 +102,6 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 
 
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
-	// state Key tagName = request.tagName;
-	// state Key url = request.url;
-	// state bool waitForComplete = request.waitForComplete;
-	// state Version targetVersion = request.targetVersion;
-	// state bool verbose = request.verbose;
-	// state KeyRange range = request.range;
-	// state Key addPrefix = request.addPrefix;
-	// state Key removePrefix = request.removePrefix;
-	// state bool lockDB = request.lockDB;
-	// state UID randomUid = request.randomUid;
-
 	//MX: Lock DB if it is not locked
 	printf("RestoreRequest lockDB:%d\n", request.lockDB);
 	if ( request.lockDB == false ) {
@@ -188,8 +175,6 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 			printf("[Progress][Start version batch] Node:%s, restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", self->describeNode().c_str(), self->batchIndex, self->curWorkloadSize);
 
 			wait( initializeVersionBatch(self) );
-
-			// wait( delay(1.0) );
 
 			wait( distributeWorkloadPerVersionBatch(self, cx, request, restoreConfig) );
 
@@ -266,21 +251,15 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state double startTimeBeforeSampling = now();
 	
 	dummySampleWorkload(self);
-	//wait( sampleWorkload(self, request, restoreConfig, sampleSizeMB) );
-	// wait( delay(1.0) );
 
 	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
 	state double startTimeAfterSampling = now();
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
 	startTime = now();
-	wait( assignKeyRangeToAppliers(self, cx) );
-	// wait( delay(1.0) );
-	printf("[Progress] distributeWorkloadPerVersionBatch assignKeyRangeToAppliers time:%.2f seconds\n", now() - startTime);
 
 	startTime = now();
 	wait( notifyAppliersKeyRangeToLoader(self, cx) );
-	// wait( delay(1.0) );
 	printf("[Progress] distributeWorkloadPerVersionBatch notifyAppliersKeyRangeToLoader time:%.2f seconds\n", now() - startTime);
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
@@ -658,121 +637,14 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> se
 	return Void();
 }
 
-
-
-ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreMasterData> self, Database cx)  { //, VectorRef<RestoreWorkerInterface> ret_agents
-	//construct the key range for each applier
-	std::vector<KeyRef> lowerBounds;
-	std::vector<Standalone<KeyRangeRef>> keyRanges;
-	std::vector<UID> applierIDs;
-
-	// printf("[INFO] Node:%s, Assign key range to appliers. num_appliers:%ld\n", self->describeNode().c_str(), self->range2Applier.size());
-	for (auto& applier : self->range2Applier) {
-		lowerBounds.push_back(applier.first);
-		applierIDs.push_back(applier.second);
-		// printf("\t[INFO] ApplierID:%s lowerBound:%s\n",
-		// 		applierIDs.back().toString().c_str(),
-		// 		lowerBounds.back().toString().c_str());
-	}
-	for (int i  = 0; i < lowerBounds.size(); ++i) {
-		KeyRef startKey = lowerBounds[i];
-		KeyRef endKey;
-		if ( i < lowerBounds.size() - 1) {
-			endKey = lowerBounds[i+1];
-		} else {
-			endKey = normalKeys.end;
-		}
-
-		if (startKey > endKey) {
-			fprintf(stderr, "ERROR at assignKeyRangeToAppliers, startKey:%s > endKey:%s\n", startKey.toString().c_str(), endKey.toString().c_str());
-		}
-
-		keyRanges.push_back(KeyRangeRef(startKey, endKey));
-	}
-
-	ASSERT( applierIDs.size() == keyRanges.size() );
-	state std::map<UID, Standalone<KeyRangeRef>> appliers;
-	appliers.clear(); // If this function is called more than once in multiple version batches, appliers may carry over the data from earlier version batch
-	for (int i = 0; i < applierIDs.size(); ++i) {
-		if (appliers.find(applierIDs[i]) != appliers.end()) {
-			printf("[ERROR] ApplierID appear more than once. appliers size:%ld applierID: %s\n",
-					appliers.size(), applierIDs[i].toString().c_str());
-			printApplierKeyRangeInfo(appliers);
-		}
-		ASSERT( appliers.find(applierIDs[i]) == appliers.end() ); // we should not have a duplicate applierID respoinsbile for multiple key ranges
-		appliers.insert(std::make_pair(applierIDs[i], keyRanges[i]));
-	}
-
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	loop {
-		try {
-			cmdReplies.clear();
-			self->cmdID.initPhase(RestoreCommandEnum::Assign_Applier_KeyRange);
-			for (auto& applier : appliers) {
-				KeyRangeRef keyRange = applier.second;
-				UID applierID = applier.first;
-				printf("[CMD] Node:%s, Assign KeyRange:%s [begin:%s end:%s] to applier ID:%s\n", self->describeNode().c_str(),
-						keyRange.toString().c_str(),
-						getHexString(keyRange.begin).c_str(), getHexString(keyRange.end).c_str(),
-						applierID.toString().c_str());
-
-				ASSERT( self->appliersInterf.find(applierID) != self->appliersInterf.end() );
-				RestoreApplierInterface applierInterf = self->appliersInterf[applierID];
-				self->cmdID.nextCmd();
-				cmdReplies.push_back( applierInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(self->cmdID, applier.first, keyRange)) );
-
-			}
-			printf("[INFO] Wait for %ld applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
-			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			printf("All appliers have been assigned for ranges\n");
-			
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
-		}
-	}
-
-	return Void();
-}
-
 // Restore Master: Notify loader about appliers' responsible key range
 ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> self, Database cx)  {
-	state std::vector<UID> loaders = self->getLoaderIDs();
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state Standalone<VectorRef<UID>> appliers;
-	state Standalone<VectorRef<KeyRange>> ranges;
-
-	state std::map<Standalone<KeyRef>, UID>::iterator applierRange;
-	for (applierRange = self->range2Applier.begin(); applierRange != self->range2Applier.end(); applierRange++) {
-		KeyRef beginRange = applierRange->first;
-		KeyRange range(KeyRangeRef(beginRange, beginRange)); // TODO: Use the end of key range
-		appliers.push_back(appliers.arena(), applierRange->second);
-		ranges.push_back(ranges.arena(), range);
+	std::vector<std::pair<UID, RestoreSetApplierKeyRangeVectorRequest>> requests;
+	for (auto& loader : self->loadersInterf) {
+		requests.push_back(std::make_pair(loader.first, RestoreSetApplierKeyRangeVectorRequest(self->range2Applier)) );
 	}
 
-	printf("Notify_Loader_ApplierKeyRange: number of appliers:%d\n", appliers.size());
-	ASSERT( appliers.size() == ranges.size() && appliers.size() != 0 );
-
-	self->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
-	state std::map<UID, RestoreLoaderInterface>::iterator loader;
-	for (loader = self->loadersInterf.begin(); loader != self->loadersInterf.end(); loader++) {
-		self->cmdID.nextCmd();
-		loop {
-			try {
-				cmdReplies.clear();
-				printf("[CMD] Node:%s Notify node:%s about appliers key range\n", self->describeNode().c_str(), loader->first.toString().c_str());
-				cmdReplies.push_back( loader->second.setApplierKeyRangeVectorRequest.getReply(RestoreSetApplierKeyRangeVectorRequest(self->cmdID, appliers, ranges)) );
-				printf("[INFO] Wait for node:%s to accept the cmd Notify_Loader_ApplierKeyRange\n", loader->first.toString().c_str());
-				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-				printf("Finished Notify_Loader_ApplierKeyRange: number of appliers:%d\n", appliers.size());
-				cmdReplies.clear();
-				break;
-			} catch (Error &e) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", self->describeNode().c_str(), self->cmdID.toString().c_str());
-			}
-		}
-	}
+	wait( sendBatchRequests(&RestoreLoaderInterface::setApplierKeyRangeVectorRequest, self->loadersInterf, requests) );
 
 	return Void();
 }
