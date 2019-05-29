@@ -41,6 +41,15 @@ struct ClusterInterface {
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
+	bool hasMessage() {
+		return openDatabase.getFuture().isReady() ||
+		failureMonitoring.getFuture().isReady() || 
+		databaseStatus.getFuture().isReady() ||
+		ping.getFuture().isReady() ||
+		getClientWorkers.getFuture().isReady() ||
+		forceRecovery.getFuture().isReady();
+	}
+
 	void initEndpoints() {
 		openDatabase.getEndpoint( TaskClusterController );
 		failureMonitoring.getEndpoint( TaskFailureMonitor );
