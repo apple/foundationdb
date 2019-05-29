@@ -180,7 +180,7 @@ public: // workload functions
 		state vector<int64_t> keys;
 
 		for (int i = 0; i < 1000; i++) {
-			keys.push_back(g_random->randomInt64(0, INT64_MAX - 2));
+			keys.push_back(deterministicRandom()->randomInt64(0, INT64_MAX - 2));
 		}
 
 		state int retry = 0;
@@ -220,7 +220,7 @@ public: // workload functions
 			wait(self->_create_keys(cx, "snapKey"));
 		} else if (self->testID == 1) {
 			// create a snapshot
-			state double toDelay = fmod(g_random->randomUInt32(), self->maxSnapDelay);
+			state double toDelay = fmod(deterministicRandom()->randomUInt32(), self->maxSnapDelay);
 			TraceEvent("ToDelay").detail("Value", toDelay);
 			ASSERT(toDelay < self->maxSnapDelay);
 			wait(delay(toDelay));
@@ -228,7 +228,7 @@ public: // workload functions
 			state int retry = 0;
 			state bool snapFailed = false;
 			loop {
-				self->snapUID = g_random->randomUniqueID();
+				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create.sh");
 					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
@@ -339,7 +339,7 @@ public: // workload functions
 			state bool testedFailure = false;
 			snapFailed = false;
 			loop {
-				self->snapUID = g_random->randomUniqueID();
+				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create1.sh");
 					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);

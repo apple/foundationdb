@@ -97,7 +97,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	// for async calls in simulator, always delay by a fixed time, otherwise
 	// the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
-		wait(delay(g_random->random01()));
+		wait(delay(deterministicRandom()->random01()));
 	}
 
 	if (!isSync && !g_network->isSimulated()) {
