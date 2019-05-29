@@ -180,7 +180,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 				 e.code(), e.what());
 	}
 
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	req.reply.send(RestoreCommonReply(self->id()));
 	return Void();
 }
 
@@ -220,8 +220,6 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
 			splitMutationIndex = 0;
 			kvCount = 0;
 			state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
-			// MX: NEED TO A WAY TO GENERATE NON_DUPLICATE CMDUID across loaders
-			self->cmdID.setPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier); //MX: THIS MAY BE WRONG! CMDID may duplicate across loaders 
 			
 			for ( kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
 				// In case try-catch has error and loop back
@@ -292,8 +290,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
 				printf("[DEBUG][Loader] sendMutationVector send mutations at Version:%ld to appliers, applierIDs.size:%d\n", commitVersion, applierIDs.size());
 				for (auto &applierID : applierIDs) {
 					printf("[DEBUG][Loader] sendMutationVector size:%d for applierID:%s\n", applierMutationsBuffer[applierID].size(), applierID.toString().c_str());
-					self->cmdID.nextCmd(); // no-use
-					requests.push_back( std::make_pair(applierID, RestoreSendMutationVectorVersionedRequest(self->cmdID, prevVersion, commitVersion, isRangeFile, applierMutationsBuffer[applierID])) );
+					requests.push_back( std::make_pair(applierID, RestoreSendMutationVectorVersionedRequest(prevVersion, commitVersion, isRangeFile, applierMutationsBuffer[applierID])) );
 					applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
 					applierMutationsSize[applierID] = 0;
 					//std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); // Q: We need to wait for each reply, otherwise, correctness has error. Why?
@@ -305,15 +302,15 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
 				prevVersion = commitVersion;
 			} // all versions of mutations
 
-			printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
-					self->describeNode().c_str(), self->cmdID.toString().c_str(), kvCount);
+			printf("[Summary][Loader] Node:%s produces %d mutation operations\n",
+					self->describeNode().c_str(), kvCount);
 
 			//kvOps.clear();
 			break;
 
 		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] registerMutationsToApplier Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
+			fprintf(stdout, "[ERROR] registerMutationsToApplier Node:%s, error. error code:%d, error message:%s\n", self->describeNode().c_str(),
+					e.code(), e.what());
 		}
 	};
 

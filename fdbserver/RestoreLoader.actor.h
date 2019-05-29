@@ -54,8 +54,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
-	CMDUID cmdID;
-
     // Performance statistics
     double curWorkloadSize;
 
@@ -66,7 +64,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
-		cmdID.nodeIndex = nodeIndex;
 	}
 
 	~RestoreLoaderData() {}

@@ -158,7 +158,6 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 			curStartTime = now();
 			self->files.clear();
 			self->resetPerVersionBatch();
-			self->cmdID.setBatch(self->batchIndex);
 			// Checkpoint the progress of the previous version batch
 			prevBatchIndex = self->batchIndex;
 			prevCurBackupFilesBeginIndex = self->curBackupFilesBeginIndex;
@@ -355,11 +354,11 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					param.prevVersion = prevVersion; 
 					prevVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
 					param.endVersion = prevVersion;
-					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(self->cmdID, param)) );
+					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(param)) );
 					printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
 						curFileIndex, self->files[curFileIndex].toString().c_str(), 
 						param.toString().c_str(), loaderID.toString().c_str()); // VERY USEFUL INFO
-					printf("[INFO] Node:%s CMDUID:%s isRange:%d loaderNode:%s\n", self->describeNode().c_str(), self->cmdID.toString().c_str(),
+					printf("[INFO] Node:%s isRange:%d loaderNode:%s\n", self->describeNode().c_str(),
 							(int) self->files[curFileIndex].isRange, loaderID.toString().c_str());
 					//curOffset += param.length;
 
@@ -595,19 +594,16 @@ ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
 
 
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
-	self->cmdID.initPhase(RestoreCommandEnum::Reset_VersionBatch);
 
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 	for (auto &applier : self->appliersInterf) {
-		self->cmdID.nextCmd();
-		requests.push_back( std::make_pair(applier.first, RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
+		requests.push_back( std::make_pair(applier.first, RestoreVersionBatchRequest(self->batchIndex)) );
 	}
 	wait( sendBatchRequests(&RestoreApplierInterface::initVersionBatch, self->appliersInterf, requests) );
 
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 	for (auto &loader : self->loadersInterf) {
-		self->cmdID.nextCmd();
-		requests.push_back( std::make_pair(loader.first, RestoreVersionBatchRequest(self->cmdID, self->batchIndex)) );
+		requests.push_back( std::make_pair(loader.first, RestoreVersionBatchRequest(self->batchIndex)) );
 	}
 	wait( sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, requests) );
 
@@ -618,19 +614,16 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self) {
 	loop {
 		try {
-			self->cmdID.initPhase( RestoreCommandEnum::Apply_Mutation_To_DB );
 			// Prepare the applyToDB requests
 			std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
 			for (auto& applier : self->appliersInterf) {
-				self->cmdID.nextCmd();
-				requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest(self->cmdID)) );
+				requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest()) );
 			}
 			wait( sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
 
 			break;
 		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-					self->cmdID.toString().c_str(), e.code(), e.what());
+			fprintf(stdout, "[ERROR] Node:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(), e.code(), e.what());
 		}
 	}
 
@@ -658,15 +651,12 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 	loop {
 		try {
 			cmdReplies.clear();
-			self->cmdID.initPhase(RestoreCommandEnum::Finish_Restore);
 
 			for ( loader = self->loadersInterf.begin(); loader != self->loadersInterf.end(); loader++ ) {
-				self->cmdID.nextCmd();
-				cmdReplies.push_back(loader->second.finishRestore.getReply(RestoreSimpleRequest(self->cmdID)));
+				cmdReplies.push_back(loader->second.finishRestore.getReply(RestoreSimpleRequest()));
 			}
 			for ( applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++ ) {
-				self->cmdID.nextCmd();
-				cmdReplies.push_back(applier->second.finishRestore.getReply(RestoreSimpleRequest(self->cmdID)));
+				cmdReplies.push_back(applier->second.finishRestore.getReply(RestoreSimpleRequest()));
 			}
 
 			if (!cmdReplies.empty()) {

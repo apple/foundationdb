@@ -108,7 +108,7 @@ struct RestoreRoleData :  NonCopyable, public ReferenceCounted<RestoreRoleData> 
 public:	
 	RestoreRole role;
 	UID nodeID; // 
-	int nodeIndex; // The index (starts from 0) of each role should be unique. We use nodeIndex to ensure cmdID is not duplicate across loaders
+	int nodeIndex;
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf;
 	std::map<UID, RestoreApplierInterface> appliersInterf;
@@ -123,26 +123,6 @@ public:
 	~RestoreRoleData() {};
 
 	UID id() const { return nodeID; }
-
-
-	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.
-	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		inProgressFlag |= (1UL << phase);
-	}
-
-	void clearInProgressFlag(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		inProgressFlag &= ~(1UL << phase);
-	}
-
-	bool isInProgress(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		return (inProgressFlag & (1UL << phase));
-	}
 
 	void resetPerVersionBatch() {
 		inProgressFlag = 0;

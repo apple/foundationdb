@@ -46,7 +46,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 
-	CMDUID cmdID; // Command id to recoself the progress
 
 	// Temporary variables to hold files and data to restore
 	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
@@ -76,9 +75,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-
-		cmdID = CMDUID();
-		cmdID.nodeIndex = -1; // uint16_t maximum value
 
 		batchIndex = 0;
 		curWorkloadSize = 0;
@@ -245,7 +241,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 				}
 				// Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
 				//resetPerVersionBatch();
-				//cmdID.setBatch(batchIndex);
 				if ( curBackupFilesBeginIndex < allFiles.size()) {
 					for (int fileIndex = curBackupFilesBeginIndex; fileIndex <= curBackupFilesEndIndex && fileIndex < allFiles.size(); fileIndex++) {
 						files.push_back(allFiles[fileIndex]);

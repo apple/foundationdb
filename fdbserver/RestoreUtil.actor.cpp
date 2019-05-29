@@ -34,39 +34,3 @@ std::string getRoleStr(RestoreRole role) {
 	}
 	return RestoreRoleStr[(int)role];
 }
-
-// CMDUID implementation
-void CMDUID::initPhase(RestoreCommandEnum newPhase) {
-	//printf("CMDID, current phase:%d, new phase:%d\n", phase, newPhase);
-	phase = (uint16_t) newPhase;
-	cmdID = 0;
-}
-
-void CMDUID::nextPhase() {
-	phase++;
-	cmdID = 0;
-}
-
-void CMDUID::nextCmd() {
-	cmdID++;
-}
-
-RestoreCommandEnum CMDUID::getPhase() {
-	return (RestoreCommandEnum) phase;
-}
-
-void CMDUID::setPhase(RestoreCommandEnum newPhase) {
-	phase = (uint16_t) newPhase;
-}
-
-void CMDUID::setBatch(int newBatchIndex) {
-	batch = newBatchIndex;
-}
-
-uint64_t CMDUID::getIndex() {
-	return cmdID;
-}
-
-std::string CMDUID::toString() const {
-	return format("%04ld|%04ld|%04ld|%016lld", nodeIndex, batch, phase, cmdID);
-}

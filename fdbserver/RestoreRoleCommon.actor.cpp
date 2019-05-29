@@ -38,7 +38,7 @@ struct RestoreWorkerData;
 // This actor is used for both restore loader and restore applier
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	wait( delay(g_random->random01() + 0.01) ); // Random jitter reduces heat beat monitor's pressure
-	req.reply.send(RestoreCommonReply(id, req.cmdID));
+	req.reply.send(RestoreCommonReply(id));
 
 	return Void();
 }
@@ -62,7 +62,7 @@ ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Referen
 		}) );
 	}
 	
-	req.reply.send( RestoreCommonReply(self->id(), req.cmdID) );
+	req.reply.send( RestoreCommonReply(self->id()) );
 	return Void();
  }
 
@@ -73,7 +73,7 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	}
 
 	printf("[Batch:%d] Node:%s Start...\n", req.batchID, self->describeNode().c_str());
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();
 }

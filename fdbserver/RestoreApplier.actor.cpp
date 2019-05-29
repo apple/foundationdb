@@ -142,7 +142,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 		}
 	}
 
-	req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+	req.reply.send(RestoreCommonReply(self->id()));
 	return Void();
 }
 
@@ -153,7 +153,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
 		printf("Node:%s kvOps is empty. No-op for apply to DB\n", self->describeNode().c_str());
-		req.reply.send(RestoreCommonReply(self->id(), req.cmdID));
+		req.reply.send(RestoreCommonReply(self->id()));
 		self->inProgressApplyToDB = false;
 		return Void();
 	}

@@ -84,19 +84,6 @@ ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Refere
 bool debug_verbose = false;
 void printGlobalNodeStatus(Reference<RestoreWorkerData>);
 
-
-const char *RestoreCommandEnumStr[] = {"Init",
-		"Sample_Range_File", "Sample_Log_File", "Sample_File_Done",
-		"Loader_Send_Sample_Mutation_To_Applier", "Loader_Send_Sample_Mutation_To_Applier_Done",
-		"Calculate_Applier_KeyRange", "Get_Applier_KeyRange", "Get_Applier_KeyRange_Done",
-		"Assign_Applier_KeyRange", "Assign_Applier_KeyRange_Done",
-		"Assign_Loader_Range_File", "Assign_Loader_Log_File", "Assign_Loader_File_Done",
-		"Loader_Send_Mutations_To_Applier", "Loader_Send_Mutations_To_Applier_Done",
-		"Apply_Mutation_To_DB", "Apply_Mutation_To_DB_Skip",
-		"Loader_Notify_Appler_To_Apply_Mutation",
-		"Notify_Loader_ApplierKeyRange", "Notify_Loader_ApplierKeyRange_Done"
-};
-
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val); // { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { return (ERestoreState)val.getInt(0); }
 
@@ -124,8 +111,6 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	Reference<RestoreApplierData> applierData;
 	Reference<RestoreMasterData> masterData;
 
-	CMDUID cmdID;
-
 	uint32_t inProgressFlag = 0; // To avoid race between duplicate message delivery that invokes the same actor multiple times
 
 	UID id() const { return workerID; };
@@ -141,26 +126,6 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 		ss << "RestoreWorker workerID:" << workerID.toString();
 		return ss.str();
 	}
-
-	// Helper functions to set/clear the flag when a worker is in the middle of processing an actor.
-	void setInProgressFlag(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		inProgressFlag |= (1UL << phase);
-	}
-
-	void clearInProgressFlag(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		inProgressFlag &= ~(1UL << phase);
-	}
-
-	bool isInProgress(RestoreCommandEnum phaseEnum) {
-		int phase = (int) phaseEnum;
-		ASSERT(phase < 32);
-		return (inProgressFlag & (1UL << phase));
-	}
-
 };
 
 // Remove the worker interface from restoreWorkerKey and remove its roles interfaces from their keys.
@@ -181,7 +146,7 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 			}
 			wait( tr.commit() ) ;
 			printf("Node:%s finish restore, clear the interface keys for all roles on the worker (id:%s) and the worker itself. Then exit\n", self->describeNode().c_str(),  workerInterf.id().toString().c_str()); 
-			req.reply.send( RestoreCommonReply(workerInterf.id(), req.cmdID) );
+			req.reply.send( RestoreCommonReply(workerInterf.id()) );
 			break;
 		} catch( Error &e ) {
 			printf("[WARNING] Node:%s finishRestoreHandler() transaction error:%s\n", self->describeNode().c_str(), e.what());
@@ -205,18 +170,16 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 	state std::map<UID, RestoreWorkerInterface>::iterator workerInterf;
 	loop {
 		wIndex = 0;
-		self->cmdID.initPhase(RestoreCommandEnum::Heart_Beat);
 		for ( workerInterf = self->workerInterfaces.begin(); workerInterf !=  self->workerInterfaces.end(); workerInterf++)  {
-			self->cmdID.nextCmd();
 			try {
 				wait( delay(1.0) );
-				cmdReplies.push_back( workerInterf->second.heartbeat.getReply(RestoreSimpleRequest(self->cmdID)) );
+				cmdReplies.push_back( workerInterf->second.heartbeat.getReply(RestoreSimpleRequest()) );
 				std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 				cmdReplies.clear();
 				wIndex++;
 			} catch (Error &e) {
-				fprintf(stdout, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(),
-							self->cmdID.toString().c_str(), e.code(), e.what());
+				fprintf(stdout, "[ERROR] Node:%s, error. error code:%d, error message:%s\n", self->describeNode().c_str(),
+							 e.code(), e.what());
 				printf("[Heartbeat: Node may be down][Worker:%d][UID:%s][Interf.NodeInfo:%s]\n", wIndex,  workerInterf->first.toString().c_str(), workerInterf->second.id().toString().c_str());
 			}
 		}
@@ -279,7 +242,6 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface &recruited = self->applierInterf.get();
-		DUMPTOKEN(recruited.setApplierKeyRangeRequest);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
@@ -380,7 +342,6 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 	state RestoreRole role;
 	printf("Node:%s Start configuring roles for workers\n", self->describeNode().c_str());
 
-	self->cmdID.initPhase(RestoreCommandEnum::Recruit_Role_On_Worker);
 	printf("numLoader:%d, numApplier:%d, self->workerInterfaces.size:%d\n", numLoader, numApplier, self->workerInterfaces.size());
 	ASSERT( numLoader + numApplier <= self->workerInterfaces.size() ); // We assign 1 role per worker for now
 	std::map<UID, RestoreRecruitRoleRequest> requests;
@@ -392,11 +353,10 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self)  {
 			// [numApplier, numApplier + numLoader) are loaders
 			role = RestoreRole::Loader;
 		}
-		self->cmdID.nextCmd();
-		printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", self->cmdID.toString().c_str(), self->describeNode().c_str(),
+
+		printf("Node:%s Set role (%s) to node (index=%d uid=%s)\n", self->describeNode().c_str(),
 				getRoleStr(role).c_str(), nodeIndex,  workerInterf.first.toString().c_str());
-		requests[workerInterf.first] = RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex);
-		//cmdReplies.push_back( workerInterf.second.recruitRole.getReply(RestoreRecruitRoleRequest(self->cmdID, role, nodeIndex)) );
+		requests[workerInterf.first] = RestoreRecruitRoleRequest(role, nodeIndex);
 		nodeIndex++;
 	}
 	state std::vector<RestoreRecruitRoleReply> replies;
