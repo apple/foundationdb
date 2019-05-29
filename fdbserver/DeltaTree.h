@@ -39,16 +39,21 @@
 //
 //    Must be compatible with Standalone<T> and must implement the following additional methods:
 //
-//    // Writes to d a delta which can create *this from prev and next
-//    void writeDelta(dT &d, const T &prev, const T &next)
+//    // Writes to d a delta which can create *this from base
+//    // commonPrefix can be passed in if known
+//    void writeDelta(dT &d, const T &base, int commonPrefix = -1) const;
 //
 //    // Compare *this to t, returns < 0 for less than, 0 for equal, > 0 for greater than
-//    int compare(const T &rhs)
+//    int compare(const T &rhs) const;
 //
-//    // Returns the delta size needed to make *this from base
+//    // Get the common prefix bytes between *this and base
+//    // skip is a hint of how many prefix bytes are already known to be the same
+//    int getCommonPrefixLen(const T &base, int skip) const;
+//
+//    // Returns the size of the delta object needed to make *this from base
 //    // TODO: Explain contract required for deltaSize to be used to predict final 
 //    // balanced tree size incrementally while adding sorted items to a build set
-//    int deltaSize(const T &base)
+//    int deltaSize(const T &base) const;
 //
 // DeltaT requirements
 //
@@ -56,7 +61,13 @@
 //    int size();
 //
 //    // Returns the T created by applying the delta to prev or next
-//    T apply(const T &prev, const T &next, Arena &localStorage)
+//    T apply(const T &base, Arena &localStorage) const;
+//
+//    // Stores a boolean which DeltaTree will later use to determine the base node for a node's delta
+//    void setPrefixSource(bool val);
+//
+//    // Retrieves the previously stored boolean
+//    bool getPrefixSource() const;
 //
 template <typename T, typename DeltaT = typename T::Delta, typename OffsetT = uint16_t>
 struct DeltaTree {
@@ -108,7 +119,7 @@ public:
 	struct DecodedNode {
 		DecodedNode(Node *raw, const T *prev, const T *next, Arena &arena)
 		  : raw(raw), parent(nullptr), left(nullptr), right(nullptr), prev(prev), next(next),
-		    item(raw->delta->apply(*prev, *next, arena))
+		    item(raw->delta->apply(raw->delta->getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta->toString().c_str());
 		}
@@ -117,7 +128,7 @@ public:
 		  : parent(parent), raw(raw), left(nullptr), right(nullptr),
 		    prev(left ? parent->prev : &parent->item),
 		    next(left ? &parent->item : parent->next),
-		    item(raw->delta->apply(*prev, *next, arena))
+		    item(raw->delta->apply(raw->delta->getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta->toString().c_str());
 		}
@@ -338,11 +349,32 @@ private:
 		int mid = perfectSubtreeSplitPointCached(count);
 		const T &item = begin[mid];
 
-		item.writeDelta(*root.delta, *prev, *next);
+		// Get the common prefix length between next and prev
+		// Since mid is between them, we can skip that length to determine the common prefix length
+		// between mid and prev and between mid and next.
+		int nextPrevCommon = prev->getCommonPrefixLen(*next, 0);
+		int commonWithPrev = begin[mid].getCommonPrefixLen(*prev, nextPrevCommon);
+		int commonWithNext = begin[mid].getCommonPrefixLen(*next, nextPrevCommon);
+
+		bool prefixSourcePrev;
+		int commonPrefix;
+		const T *base;
+		if(commonWithNext > commonWithPrev) {
+			prefixSourcePrev = true;
+			commonPrefix = commonWithPrev;
+			base = prev;
+		}
+		else {
+			prefixSourcePrev = false;
+			commonPrefix = commonWithNext;
+			base = next;
+		}
+		root.delta->setPrefixSource(prefixSourcePrev);
+
+		int deltaSize = item.writeDelta(*root.delta, *base, commonPrefix);
 		//printf("Serialized %s to %p\n", item.toString().c_str(), root.delta);
 
-		// Delta can have variable size, so calculate wptr which is where to write to next
-		int deltaSize = root.delta->size();
+		// Continue writing after the serialized Delta.
 		uint8_t *wptr = (uint8_t *)root.delta + deltaSize;
 
 		// Serialize left child
