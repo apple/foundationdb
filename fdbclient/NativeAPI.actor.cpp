@@ -3385,7 +3385,7 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
 
 	if (BUGGIFY) {
-		int32_t toDelay = g_random->randomInt(1, 30);
+		int32_t toDelay = deterministicRandom()->randomInt(1, 30);
 		wait(delay(toDelay));
 	}
 

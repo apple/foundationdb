@@ -1478,7 +1478,7 @@ ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
 	state int retryCount = 0;
 
 	loop {
-		state UID snapUID = g_random->randomUniqueID();
+		state UID snapUID = deterministicRandom()->randomUniqueID();
 		try {
 			wait(snapCreate(cx, snapCmd, snapUID));
 			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
