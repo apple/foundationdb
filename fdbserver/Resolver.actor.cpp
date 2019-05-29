@@ -79,7 +79,7 @@ ACTOR Future<Void> resolveBatch(
 	state ProxyRequestsInfo &proxyInfo = self->proxyInfoMap[proxyAddress];
 
 	if(req.debugID.present()) {
-		debugID = g_nondeterministic_random->randomUniqueID();
+		debugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), debugID.get().first());
 		g_traceBatch.addEvent("CommitDebug",debugID.get().first(),"Resolver.resolveBatch.Before");
 	}

@@ -44,7 +44,7 @@ struct StatusWorkload : TestWorkload {
 	{
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		requestsPerSecond = getOption(options, LiteralStringRef("requestsPerSecond"), 0.5);
-		enableLatencyBands = getOption(options, LiteralStringRef("enableLatencyBands"), g_random->random01() < 0.5);
+		enableLatencyBands = getOption(options, LiteralStringRef("enableLatencyBands"), deterministicRandom()->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), JSONSchemas::statusSchema);
 		if (statusSchemaStr.size()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
@@ -112,11 +112,11 @@ struct StatusWorkload : TestWorkload {
 	}
 
 	static std::string generateBands() {
-		int numBands = g_random->randomInt(0, 10);
+		int numBands = deterministicRandom()->randomInt(0, 10);
 		std::vector<double> bands;
 
 		while(bands.size() < numBands) {
-			bands.push_back(g_random->random01() * pow(10, g_random->randomInt(-5, 1)));
+			bands.push_back(deterministicRandom()->random01() * pow(10, deterministicRandom()->randomInt(-5, 1)));
 		}
 
 		std::string result = "\"bands\":[";
@@ -141,18 +141,18 @@ struct StatusWorkload : TestWorkload {
 
 					std::string config = "{"
 						"\"get_read_version\":{" + generateBands() + "},"
-						"\"read\":{" + generateBands() + format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},", g_random->randomInt(0, 10000), g_random->randomInt(0, 1000000)) + ""
-						"\"commit\":{" + generateBands() + format(", \"max_commit_bytes\":%d", g_random->randomInt(0, 1000000)) + "}"
+						"\"read\":{" + generateBands() + format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},", deterministicRandom()->randomInt(0, 10000), deterministicRandom()->randomInt(0, 1000000)) + ""
+						"\"commit\":{" + generateBands() + format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) + "}"
 						"}";
 
 					tr.set(latencyBandConfigKey, ValueRef(config));
 					wait(tr.commit());
 			
-					if(g_random->random01() < 0.3) {
+					if(deterministicRandom()->random01() < 0.3) {
 						return Void();
 					}
 
-					wait(delay(g_random->random01() * 120));
+					wait(delay(deterministicRandom()->random01() * 120));
 				}
 				catch(Error &e) {
 					wait(tr.onError(e));

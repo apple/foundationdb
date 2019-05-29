@@ -283,4 +283,8 @@ extern const KeyRef healthyZoneKey;
 const Value healthyZoneValue( StringRef const& zoneId, Version version );
 std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 
+// All mutations done to this range are blindly copied into txnStateStore.
+// Used to create artifically large txnStateStore instances in testing.
+extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
+
 #endif

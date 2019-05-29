@@ -42,7 +42,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 
 			state int64_t newData;
 			if(self->lastData == 0)
-				newData = g_random->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+				newData = deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
 			else {
 				++newData;
 				int readBytes = wait(file->file->read(buffer->buffer, size, offset));
@@ -156,14 +156,14 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		state Reference<AsyncFileBuffer> buffer = Reference<AsyncFileBuffer>(new AsyncFileBuffer(_PAGE_SIZE, true));
 		state int logfp = (int)ceil(log2(self->filePages));
 		loop {
-			int block = intHash(std::min<int>(g_random->randomInt(0, 1 << g_random->randomInt(0, logfp)), self->filePages - 1)) % self->filePages;
+			int block = intHash(std::min<int>(deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(0, logfp)), self->filePages - 1)) % self->filePages;
 			wait(self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer));
 		}
 	}
 
 	ACTOR static Future<Void> syncLoop(DiskDurabilityWorkload *self) {
 		loop {
-			wait(delay(g_random->random01() * self->syncInterval));
+			wait(delay(deterministicRandom()->random01() * self->syncInterval));
 			wait(self->fileHandle->file->sync());
 		}
 	}

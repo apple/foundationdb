@@ -96,7 +96,7 @@ struct CycleWorkload : TestWorkload {
 				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
-				state int r = g_random->randomInt(0, self->nodeCount);
+				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
 				while (true) {
 					try {

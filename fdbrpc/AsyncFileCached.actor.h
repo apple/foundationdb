@@ -98,7 +98,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 		if (RANDOM == cacheEvictionType) {
 			if (pages.size() >= (uint64_t)maxPages && !pages.empty()) {
 				for (int i = 0; i < FLOW_KNOBS->MAX_EVICT_ATTEMPTS; i++) { // If we don't manage to evict anything, just go ahead and exceed the cache limit
-					int toEvict = g_random->randomInt(0, pages.size());
+					int toEvict = deterministicRandom()->randomInt(0, pages.size());
 					if (pages[toEvict]->evict()) {
 						++cacheEvictions;
 						break;

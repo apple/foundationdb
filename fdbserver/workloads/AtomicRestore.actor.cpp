@@ -61,12 +61,12 @@ struct AtomicRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 
-		wait( delay(self->startAfter * g_random->random01()) );
+		wait( delay(self->startAfter * deterministicRandom()->random01()) );
 		TraceEvent("AtomicRestore_Start");
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			wait(backupAgent.submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
+			wait(backupAgent.submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
 		}
 		catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -76,12 +76,12 @@ struct AtomicRestoreWorkload : TestWorkload {
 		TraceEvent("AtomicRestore_Wait");
 		wait(success( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) ));
 		TraceEvent("AtomicRestore_BackupStart");
-		wait( delay(self->restoreAfter * g_random->random01()) );
+		wait( delay(self->restoreAfter * deterministicRandom()->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");
 
 		loop {
 			std::vector<Future<Version>> restores;
-			if (g_random->random01() < 0.5) {
+			if (deterministicRandom()->random01() < 0.5) {
 				for (auto &range : self->backupRanges)
 					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
 			}

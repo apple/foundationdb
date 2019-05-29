@@ -131,10 +131,10 @@ struct QueuePushWorkload : TestWorkload {
 					std::pair<int, int> unpacked = valuesForKey( lastKey );
 
 					if( self->forward )
-						tr.set( keyForIndex( unpacked.first + unpacked.second, g_random->randomInt(1, 1000) ), 
+						tr.set( keyForIndex( unpacked.first + unpacked.second, deterministicRandom()->randomInt(1, 1000) ), 
 								StringRef(self->valueString) );
 					else
-						tr.set( keyForIndex( unpacked.first - unpacked.second, g_random->randomInt(1, 1000) ), 
+						tr.set( keyForIndex( unpacked.first - unpacked.second, deterministicRandom()->randomInt(1, 1000) ), 
 								StringRef(self->valueString) );
 
 					start = now();

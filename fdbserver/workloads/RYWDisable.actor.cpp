@@ -58,18 +58,18 @@ struct RYWDisableWorkload : TestWorkload {
 			loop {
 				try {
 					//do some operations
-					state int opType = g_random->randomInt(0,4);
+					state int opType = deterministicRandom()->randomInt(0,4);
 					state bool shouldError = true;
 
 					if( opType == 0 ) {
 						//TraceEvent("RYWSetting");
-						tr.set( self->keyForIndex(g_random->randomInt(0, self->nodes)), StringRef());
+						tr.set( self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)), StringRef());
 					} else if( opType == 1 ) {
 						//TraceEvent("RYWGetNoWait");
-						Future<Optional<Value>> _ = tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes)));
+						Future<Optional<Value>> _ = tr.get( self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
 					} else if( opType == 2 ) {
 						//TraceEvent("RYWGetAndWait");
-						wait(success( tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes))) ));
+						wait(success( tr.get( self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes))) ));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;
@@ -91,7 +91,7 @@ struct RYWDisableWorkload : TestWorkload {
 					if( now() - testStart > self->testDuration )
 						return Void();
 
-					if( g_random->random01() < 0.5 )
+					if( deterministicRandom()->random01() < 0.5 )
 						break;
 
 					tr.reset();

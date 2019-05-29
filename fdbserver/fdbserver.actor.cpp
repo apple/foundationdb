@@ -178,7 +178,6 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 
 extern const char* getHGVersion();
 
-extern IRandom* trace_random;
 extern void flushTraceFileVoid();
 
 extern bool noUnseed;
@@ -330,7 +329,7 @@ UID getSharedMemoryMachineId() {
 		try {
 			// "0" is the default parameter "addr"
 			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
-			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
+			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
@@ -1412,19 +1411,7 @@ int main(int argc, char* argv[]) {
 		if( zoneId.present() )
 			printf("ZoneId set to %s, dcId to %s\n", printable(zoneId).c_str(), printable(dcId).c_str());
 
-		g_random = new DeterministicRandom(randomSeed);
-		if (role == Simulation)
-			trace_random = new DeterministicRandom(1);
-		else
-			trace_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_nondeterministic_random = new DeterministicRandom(2);
-		else
-			g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_debug_random = new DeterministicRandom(3);
-		else
-			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(randomSeed);
 
 		if(role==Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
@@ -1737,7 +1724,7 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
+		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime").detail("SimTime", now()-startNow).detail("RealTime", timer()-start)
 			.detail("RandomUnseed", unseed);
 

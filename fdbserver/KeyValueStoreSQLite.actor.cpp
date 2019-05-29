@@ -237,7 +237,7 @@ struct SQLiteDB : NonCopyable {
 	}
 
 	void checkError( const char* context, int rc ) {
-		//if (g_random->random01() < .001) rc = SQLITE_INTERRUPT;
+		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
@@ -1307,7 +1307,7 @@ void SQLiteDB::open(bool writable) {
 			// Either we died partway through creating this DB, or died partway through deleting it, or someone is monkeying with our files
 			// Create a new blank DB by backing up the WAL file (just in case it is important) and then hitting the next case
 			walFile = file_not_found();
-			renameFile( walpath, walpath + "-old-" + g_random->randomUniqueID().toString() );
+			renameFile( walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString() );
 			ASSERT_WE_THINK(false);  //< This code should not be hit in FoundationDB at the moment, because worker looks for databases to open by listing .fdb files, not .fdb-wal files
 			//TEST(true);  // Replace a partially constructed or destructed DB
 		}
@@ -1344,7 +1344,7 @@ void SQLiteDB::open(bool writable) {
 	if( !g_network->isSimulated() ) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
 	} else if( BUGGIFY ) {
-		chunkSize = 4096 * g_random->randomInt(0, 100);
+		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
 	} else {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
 	}
@@ -1691,7 +1691,7 @@ private:
 			cursor = new Cursor(conn, true);
 			checkFreePages();
 			++writesComplete;
-			if (t3-a.issuedTime > 10.0*g_random->random01())
+			if (t3-a.issuedTime > 10.0*deterministicRandom()->random01())
 				TraceEvent("KVCommit10sSample", dbgid).detail("Queued", t1-a.issuedTime).detail("Commit", t2-t1).detail("Checkpoint", t3-t2);
 
 			diskBytesUsed = waitForAndGet( conn.dbFile->size() ) + waitForAndGet( conn.walFile->size() );
@@ -1766,7 +1766,7 @@ private:
 					break;
 				}
 
-				if(canDelete && (!canVacuum || g_random->random01() < lazyDeleteBatchProbability)) {
+				if(canDelete && (!canVacuum || deterministicRandom()->random01() < lazyDeleteBatchProbability)) {
 					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
 					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
 

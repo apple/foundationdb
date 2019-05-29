@@ -2540,7 +2540,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
 
 		try {
-			state UID randomID = g_random->randomUniqueID();
+			state UID randomID = deterministicRandom()->randomUniqueID();
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;

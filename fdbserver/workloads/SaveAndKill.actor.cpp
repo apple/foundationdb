@@ -53,7 +53,7 @@ struct SaveAndKillWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start( SaveAndKillWorkload* self) {
 		state int i;
-		wait(delay(g_random->random01()*self->testDuration));
+		wait(delay(deterministicRandom()->random01()*self->testDuration));
 
 		CSimpleIni ini;
 		ini.SetUnicode();

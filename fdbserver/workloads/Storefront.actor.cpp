@@ -128,8 +128,8 @@ struct StorefrontWorkload : TestWorkload {
 				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
-				state int itemsToOrder = g_random->randomInt(1, self->maxOrderSize);
-				state orderID id = g_random->randomUniqueID().hash();
+				state int itemsToOrder = deterministicRandom()->randomInt(1, self->maxOrderSize);
+				state orderID id = deterministicRandom()->randomUniqueID().hash();
 				state Key orderKey = self->orderKey( id );
 				state Transaction tr(cx);
 				loop {
@@ -143,7 +143,7 @@ struct StorefrontWorkload : TestWorkload {
 						// pick items
 						state std::map<int, int> items;
 						for(int i=0; i < itemsToOrder; i++)
-							items[g_random->randomInt(0, self->itemCount)]++;
+							items[deterministicRandom()->randomInt(0, self->itemCount)]++;
 
 						// create "value"
 						state vector<int> itemList;
