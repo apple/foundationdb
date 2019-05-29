@@ -2687,7 +2687,8 @@ Future<Void> Transaction::commitMutations() {
 				.detail("Size", transactionSize)
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("ReadConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
-				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize());
+				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
+				.detail("DebugIdentifier", trLogInfo ? trLogInfo->identifier : "");
 		}
 
 		if(!apiVersionAtLeast(300)) {
@@ -2839,15 +2840,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 			if (trLogInfo) {
 				if (trLogInfo->identifier.empty()) {
-					trLogInfo->identifier = printable(value.get());
+					trLogInfo->identifier = value.get().printable();
 				}
-				else if (trLogInfo->identifier != printable(value.get())) {
-					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", printable(value.get()));
+				else if (trLogInfo->identifier != value.get().printable()) {
+					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", value.get().printable());
 					throw client_invalid_operation();
 				}
 			}
 			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::DONT_LOG));
+				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
 			}
 			break;
 
