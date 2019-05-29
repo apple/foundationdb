@@ -76,6 +76,8 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 					exitRole =  handlerFinishRestoreRequest(req, self, cx);
 				}
 				when ( wait(exitRole) ) {
+					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole");
+					//actors.clear(false);
 					break;
 				}
 			}
@@ -89,6 +91,7 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 			}
 		}
 	}
+	TraceEvent("FastRestore").detail("RestoreApplierCore", "Exit");
 	return Void();
 }
 
@@ -146,15 +149,13 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 	return Void();
 }
 
- ACTOR Future<Void> applyToDB(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx) {
+ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
 		printf("Node:%s kvOps is empty. No-op for apply to DB\n", self->describeNode().c_str());
-		req.reply.send(RestoreCommonReply(self->id()));
-		self->inProgressApplyToDB = false;
 		return Void();
 	}
 	
@@ -200,7 +201,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 								self->describeNode().c_str(), count, it->first, it->second.size());
 					}
 
-					if ( debug_verbose || true ) {
+					if ( debug_verbose ) {
 						printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", self->describeNode().c_str(), m.toString().c_str());
 					}
 
@@ -276,10 +277,14 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 
  ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx) {
 	if ( !self->dbApplier.present() ) {
-		self->dbApplier = applyToDB(req, self, cx);
+		self->dbApplier = Never();
+		self->dbApplier = applyToDB(self, cx);
+		wait( self->dbApplier.get() );
+	} else {
+		ASSERT( self->dbApplier.present() );
+		wait( self->dbApplier.get() );
 	}
-	wait( self->dbApplier.get() );
-
+	
 	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();

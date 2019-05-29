@@ -42,9 +42,7 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig);
-ACTOR static Future<Void> unlockDB(Database cx, UID uid);
-ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr);
-ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB);
+ACTOR static Future<Void> _clearDB(Database cx);
 ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status);
 ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
@@ -62,36 +60,31 @@ void dummySampleWorkload(Reference<RestoreMasterData> self);
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
 	try {
-		state int restoreId = 0;
 		state int checkNum = 0;
-		loop {
-			printf("Node:%s---Wait on restore requests...---\n", self->describeNode().c_str());
-			state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
+		state UID randomUID = g_random->randomUniqueID();
+	
+		printf("Node:%s---Wait on restore requests...---\n", self->describeNode().c_str());
+		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
 
-			printf("Node:%s ---Received  restore requests as follows---\n", self->describeNode().c_str());
-			// Print out the requests info
-			for ( auto &it : restoreRequests ) {
-				printf("\t[INFO][Master]Node:%s RestoreRequest info:%s\n", self->describeNode().c_str(), it.toString().c_str());
-			}
+		// lock DB for restore
+		wait(lockDatabase(cx,randomUID));
+		wait( _clearDB(cx) );
 
-			// Step: Perform the restore requests
-			for ( auto &it : restoreRequests ) {
-				TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
-				printf("Node:%s Got RestoreRequestInfo:%s\n", self->describeNode().c_str(), it.toString().c_str());
-				Version ver = wait( processRestoreRequest(it, self, cx) );
-			}
-
-			// Step: Notify all restore requests have been handled by cleaning up the restore keys
-			wait( delay(5.0) );
-			printf("Finish my restore now!\n");
-			wait( finishRestore(self, cx, restoreRequests) ); 
-
-			printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
-			TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
-			//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.
-			//Otherwise, this special workload never returns and tester will think the test workload is stuck and the tester will timesout
-			break;
+		printf("Node:%s ---Received  restore requests as follows---\n", self->describeNode().c_str());
+		// Step: Perform the restore requests
+		for ( auto &it : restoreRequests ) {
+			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
+			printf("Node:%s Got RestoreRequestInfo:%s\n", self->describeNode().c_str(), it.toString().c_str());
+			Version ver = wait( processRestoreRequest(it, self, cx) );
 		}
+
+		// Step: Notify all restore requests have been handled by cleaning up the restore keys
+		printf("Finish my restore now!\n");
+		wait( finishRestore(self, cx, restoreRequests) ); 
+
+		wait(unlockDatabase(cx,randomUID));
+
+		TraceEvent("MXRestoreEndHere");
 	} catch (Error &e) {
 		fprintf(stdout, "[ERROR] Restoer Master encounters error. error code:%d, error message:%s\n",
 				e.code(), e.what());
@@ -124,9 +117,10 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(request.randomUid));
 
-	// lock DB for restore
-	wait( _lockDB(cx, request.randomUid, request.lockDB) );
-	wait( _clearDB(tr) );
+	// // lock DB for restore
+	// ASSERT( request.lockDB );
+	// wait(lockDatabase(cx, request.randomUid));
+	// wait( _clearDB(cx) );
 
 	// Step: Collect all backup files
 	printf("===========Restore request start!===========\n");
@@ -216,15 +210,12 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 		}
 	}
 
-	// Unlock DB  at the end of handling the restore request
-	wait( unlockDB(cx, request.randomUid) );
 	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
 
 	return request.targetVersion;
 }
 
 enum RestoreFileType { RangeFileType = 0, LogFileType = 1 };
-
 // Distribution workload per version batch
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
 	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
@@ -244,7 +235,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT( numAppliers > 0 );
 
 	state int loadingSizeMB = 0; //numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
-	int64_t sampleSizeMB = 0; //loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
 
 	state double startTime = now();
 	state double startTimeBeforeSampling = now();
@@ -254,39 +244,22 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
 	state double startTimeAfterSampling = now();
 
-	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
-	startTime = now();
-
 	startTime = now();
 	wait( notifyAppliersKeyRangeToLoader(self, cx) );
 	printf("[Progress] distributeWorkloadPerVersionBatch notifyAppliersKeyRangeToLoader time:%.2f seconds\n", now() - startTime);
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
-	// Notify the loader about the data block and send the cmd to the loader to start loading the data
-	// Wait for the ack from loader and repeats
-
-	// Prepare the file's loading status
-	for (int i = 0; i < self->files.size(); ++i) {
-		self->files[i].cursor = 0;
-	}
-
-	// Send loading cmd to available loaders whenever loaders become available
+	// Prepare the request for each loading request to each loader
+	// Send all requests in batch and wait for the ack from loader and repeats
 	// NOTE: We must split the workload in the correct boundary:
 	// For range file, it's the block boundary;
-	// For log file, it is the version boundary.
-	// This is because
+	// For log file, it is the version boundary. This is because
 	// (1) The set of mutations at a version may be encoded in multiple KV pairs in log files.
 	// We need to concatenate the related KVs to a big KV before we can parse the value into a vector of mutations at that version
 	// (2) The backuped KV are arranged in blocks in range file.
 	// For simplicity, we distribute at the granularity of files for now.
-
-	state int loadSizeB = loadingSizeMB * 1024 * 1024;
-	state int loadingCmdIndex = 0;
-
 	startTime = now();
-	// We should load log file before we do range file
-	state int typeOfFilesProcessed = 0;
-	state RestoreFileType processedFileType = RestoreFileType::LogFileType;
+	state RestoreFileType processedFileType = RestoreFileType::LogFileType; // We should load log file before we do range file
 	state int curFileIndex;
 	state long curOffset;
 	state bool allLoadReqsSent;
@@ -303,47 +276,25 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 				break; // All load requests have been handled
 			}
 
-			printf("[INFO] Number of backup files:%ld\n", self->files.size());
+			printf("[INFO] Number of backup files:%ld curFileIndex:%d\n", self->files.size(), curFileIndex);
+			// Future: Load balance the amount of data for loaders
 			for (auto &loader : self->loadersInterf) {
 				UID loaderID = loader.first;
 				RestoreLoaderInterface loaderInterf = loader.second;
 
+				// Skip empty files
 				while (  curFileIndex < self->files.size() && self->files[curFileIndex].fileSize == 0 ) {
-					// NOTE: && self->files[curFileIndex].cursor >= self->files[curFileIndex].fileSize
 					printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
 							self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
 					curFileIndex++;
 					curOffset = 0;
 				}
+				// All files under the same type have been loaded
 				if ( curFileIndex >= self->files.size() ) {
 					allLoadReqsSent = true;
 					break;
 				}
-				LoadingParam param;
-				param.url = request.url;
-				param.version = self->files[curFileIndex].version;
-				param.filename = self->files[curFileIndex].fileName;
-				param.offset = 0; //curOffset; //self->files[curFileIndex].cursor;
-				//param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
-				//param.cursor = 0;
-				param.length = self->files[curFileIndex].fileSize;
-				loadSizeB = param.length;
-				param.blockSize = self->files[curFileIndex].blockSize;
-				param.restoreRange = request.range;
-				param.addPrefix = request.addPrefix;
-				param.removePrefix = request.removePrefix;
-				param.mutationLogPrefix = mutationLogPrefix;
-				param.isRangeFile = self->files[curFileIndex].isRange;
-				
-				if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < self->files[curFileIndex].fileSize) ) {
-					printf("[ERROR] param: length:%ld offset:%ld fileSize:%ld for %ldth filename:%s\n",
-							param.length, param.offset, self->files[curFileIndex].fileSize, curFileIndex,
-							self->files[curFileIndex].fileName.c_str());
-				}
-				ASSERT( param.length > 0 );
-				ASSERT( param.offset >= 0 );
-				ASSERT( param.offset < self->files[curFileIndex].fileSize );
-
+			
 				if ( (processedFileType == RestoreFileType::LogFileType && self->files[curFileIndex].isRange) 
 					|| (processedFileType == RestoreFileType::RangeFileType && !self->files[curFileIndex].isRange) ) {
 					printf("Skip fileIndex:%d processedFileType:%d file.isRange:%d\n", curFileIndex, processedFileType, self->files[curFileIndex].isRange);
@@ -351,22 +302,34 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 					curFileIndex++;
 					curOffset = 0;
 				} else { // Create the request
+					// Prepare loading
+					LoadingParam param;
+					param.url = request.url;
 					param.prevVersion = prevVersion; 
-					prevVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
-					param.endVersion = prevVersion;
-					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(param)) );
-					printf("[CMD] Loading fileIndex:%ld fileInfo:%s loadingParam:%s on node %s\n",
-						curFileIndex, self->files[curFileIndex].toString().c_str(), 
-						param.toString().c_str(), loaderID.toString().c_str()); // VERY USEFUL INFO
-					printf("[INFO] Node:%s isRange:%d loaderNode:%s\n", self->describeNode().c_str(),
-							(int) self->files[curFileIndex].isRange, loaderID.toString().c_str());
-					//curOffset += param.length;
+					param.endVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
+					prevVersion = param.endVersion;
+					param.isRangeFile = self->files[curFileIndex].isRange;
+					param.version = self->files[curFileIndex].version;
+					param.filename = self->files[curFileIndex].fileName;
+					param.offset = 0; //curOffset; //self->files[curFileIndex].cursor;
+					//param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
+					param.length = self->files[curFileIndex].fileSize; // We load file by file, instead of data block by data block for now
+					param.blockSize = self->files[curFileIndex].blockSize;
+					param.restoreRange = request.range;
+					param.addPrefix = request.addPrefix;
+					param.removePrefix = request.removePrefix;
+					param.mutationLogPrefix = mutationLogPrefix;
+					ASSERT_WE_THINK( param.length > 0 );
+					ASSERT_WE_THINK( param.offset >= 0 );
+					ASSERT_WE_THINK( param.offset < self->files[curFileIndex].fileSize );
+					ASSERT_WE_THINK( param.prevVersion <= param.endVersion );
 
-					// Reach the end of the file
-					if ( param.length + param.offset >= self->files[curFileIndex].fileSize ) {
-						curFileIndex++;
-						curOffset = 0;
-					}
+					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(param)) );
+					// Log file to be loaded
+					TraceEvent("FastRestore").detail("LoadFileIndex", curFileIndex)
+						 .detail("LoadParam", param.toString())
+						 .detail("LoaderID", loaderID.toString());
+					curFileIndex++;
 				}
 				
 				if ( curFileIndex >= self->files.size() ) {
@@ -377,18 +340,16 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 			if (allLoadReqsSent) {
 				printf("[INFO] allLoadReqsSent has finished.\n");
-				break; // NOTE: need to change when change to wait on any cmdReplies
+				break;
 			}
 		}
 		// Wait on the batch of load files or log files
-		++typeOfFilesProcessed;
 		wait( sendBatchRequests(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests) );
 
-		processedFileType = RestoreFileType::RangeFileType; // The second batch is RangeFile
-
-		if ( typeOfFilesProcessed == 2 ) { // We only have 2 types of files
+		if ( processedFileType ==  RestoreFileType::RangeFileType ) {
 			break;
 		}
+		processedFileType = RestoreFileType::RangeFileType; // The second batch is RangeFile
 	}
 
 	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
@@ -429,7 +390,6 @@ void dummySampleWorkload(Reference<RestoreMasterData> self) {
 	}
 }
 
-// TODO: Revise the way to collect the restore request. We may make it into 1 transaction
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
 	state int restoreId = 0;
 	state int checkNum = 0;
@@ -438,7 +398,6 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 
 	//wait for the restoreRequestTriggerKey to be set by the client/test workload
 	state ReadYourWritesTransaction tr(cx);
-
 	loop{
 		try {
 			tr.reset();
@@ -468,7 +427,6 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 				break;
 			}
 		} catch(Error &e) {
-			printf("[WARNING] Transaction for restore request in watch restoreRequestTriggerKey. Error:%s\n", e.name());
 			wait(tr.onError(e));
 		}
 	}
@@ -492,9 +450,7 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 	ASSERT( lockDB == true );
 
 	self->initBackupContainer(url);
-
-	state Reference<IBackupContainer> bc = self->bc;
-	state BackupDescription desc = wait(bc->describeBackup());
+	state BackupDescription desc = wait(self->bc->describeBackup());
 
 	wait(desc.resolveVersionTimes(cx));
 
@@ -504,7 +460,7 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 		targetVersion = desc.maxRestorableVersion.get();
 
 	printf("[INFO] collectBackupFiles: now getting backup files for restore request: %s\n", request.toString().c_str());
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(targetVersion));
+	Optional<RestorableFileSet> restorable = wait(self->bc->getRestoreSet(targetVersion));
 
 	if(!restorable.present()) {
 		printf("[WARNING] restoreVersion:%ld (%lx) is not restorable!\n", targetVersion, targetVersion);
@@ -535,59 +491,13 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 	return Void();
 }
 
-
-ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
-	printf("[Lock] DB will be locked, uid:%s, lockDB:%d\n", uid.toString().c_str(), lockDB);
-	
-	ASSERT( lockDB );
-
-	loop {
-		try {
-			wait(lockDatabase(cx, uid));
-			break;
-		} catch( Error &e ) {
-			printf("Transaction Error when we lockDB. Error:%s\n", e.what());
-			wait(tr->onError(e));
-		}
-	}
-
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			wait(checkDatabaseLock(tr, uid));
-
-			tr->commit();
-			break;
-		} catch( Error &e ) {
-			printf("Transaction Error when we lockDB. Error:%s\n", e.what());
-			wait(tr->onError(e));
-		}
-	}
-
-
-	return Void();
-}
-
-ACTOR static Future<Void> _clearDB(Reference<ReadYourWritesTransaction> tr) {
-	loop {
-		try {
-			tr->reset();
+ACTOR static Future<Void> _clearDB(Database cx) {
+	wait( runRYWTransaction( cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->clear(normalKeys);
-			tr->commit();
-			break;
-		} catch(Error &e) {
-			printf("Retry at clean up DB before restore. error code:%d message:%s. Retry...\n", e.code(), e.what());
-			if(e.code() != error_code_restore_duplicate_tag) {
-				wait(tr->onError(e));
-			}
-		}
-	}
+			return Void();
+  		}) );
 
 	return Void();
 }
@@ -612,20 +522,12 @@ ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self) {
 
 
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self) {
-	loop {
-		try {
-			// Prepare the applyToDB requests
-			std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
-			for (auto& applier : self->appliersInterf) {
-				requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest()) );
-			}
-			wait( sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
-
-			break;
-		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Node:%s error. error code:%d, error message:%s\n", self->describeNode().c_str(), e.code(), e.what());
-		}
+	// Prepare the applyToDB requests
+	std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
+	for (auto& applier : self->appliersInterf) {
+		requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest()) );
 	}
+	wait( sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests) );
 
 	return Void();
 }
@@ -644,109 +546,39 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> s
 
 
 ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests) {
-	// Make restore workers quit
-	state std::vector<Future<RestoreCommonReply>> cmdReplies;
-	state std::map<UID, RestoreLoaderInterface>::iterator loader;
-	state std::map<UID, RestoreApplierInterface>::iterator applier;
-	loop {
-		try {
-			cmdReplies.clear();
-
-			for ( loader = self->loadersInterf.begin(); loader != self->loadersInterf.end(); loader++ ) {
-				cmdReplies.push_back(loader->second.finishRestore.getReply(RestoreSimpleRequest()));
-			}
-			for ( applier = self->appliersInterf.begin(); applier != self->appliersInterf.end(); applier++ ) {
-				cmdReplies.push_back(applier->second.finishRestore.getReply(RestoreSimpleRequest()));
-			}
-
-			if (!cmdReplies.empty()) {
-				std::vector<RestoreCommonReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout / 100 ) );
-				//std::vector<RestoreCommonReply> reps =  wait( getAll(cmdReplies) );
-				cmdReplies.clear();
-			}
-			printf("All restore workers have quited\n");
-
-			break;
-		} catch(Error &e) {
-			printf("[ERROR] At sending finishRestore request. error code:%d message:%s. Retry...\n", e.code(), e.what());
-			self->loadersInterf.clear();
-			self->appliersInterf.clear();
-			cmdReplies.clear();
-		}
+	std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
+	for ( auto &loader : self->loadersInterf ) {
+		requests.push_back( std::make_pair(loader.first, RestoreSimpleRequest()) );
 	}
+	wait( sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests) );
+
+	std::vector<std::pair<UID, RestoreSimpleRequest>> requests;
+	for ( auto &applier : self->appliersInterf ) {
+		requests.push_back( std::make_pair(applier.first, RestoreSimpleRequest()) );
+	}
+	wait( sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests) );
 
 	// Notify tester that the restore has finished
-	state ReadYourWritesTransaction tr3(cx);
-	loop {
-		try {
-			//Standalone<StringRef> versionStamp = wait( tr3.getVersionstamp() );
-			tr3.reset();
-			tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr3.clear(restoreRequestTriggerKey);
-			tr3.clear(restoreRequestKeys);
-			Version readVersion = wait(tr3.getReadVersion());
-			tr3.set(restoreRequestDoneKey, restoreRequestDoneVersionValue(readVersion));
-			wait(tr3.commit());
-			TraceEvent("LeaderFinishRestoreRequest");
-			printf("[INFO] RestoreLeader write restoreRequestDoneKey\n");
-
-			break;
-		}  catch( Error &e ) {
-			TraceEvent("RestoreAgentLeaderErrorTr3").detail("ErrorCode", e.code()).detail("ErrorName", e.name());
-			printf("[Error] RestoreLead operation on restoreRequestDoneKey, error:%s\n", e.what());
-			wait( tr3.onError(e) );
-		}
-	};
-
-
- 	// TODO:  Validate that the range version map has exactly the restored ranges in it.  This means that for any restore operation
- 	// the ranges to restore must be within the backed up ranges, otherwise from the restore perspective it will appear that some
- 	// key ranges were missing and so the backup set is incomplete and the restore has failed.
- 	// This validation cannot be done currently because Restore only supports a single restore range but backups can have many ranges.
-
- 	// Clear the applyMutations stuff, including any unapplied mutations from versions beyond the restored version.
- 	//	restore.clearApplyMutationsKeys(tr);
-
-	printf("[INFO] Notify the end of the restore\n");
-	TraceEvent("NotifyRestoreFinished");
-
-	return Void();
-}
-
-
-
-ACTOR static Future<Void> unlockDB(Database cx, UID uid) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			printf("CheckDBlock:%s START\n", uid.toString().c_str());
-			wait(checkDatabaseLock(tr, uid));
-			printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
-
-			printf("UnlockDB now. Start.\n");
-			wait(unlockDatabase(tr, uid)); //NOTE: unlockDatabase didn't commit inside the function!
-
-			printf("CheckDBlock:%s START\n", uid.toString().c_str());
-			wait(checkDatabaseLock(tr, uid));
-			printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
-
-			printf("UnlockDB now. Commit.\n");
+			tr->clear(restoreRequestTriggerKey);
+			tr->clear(restoreRequestKeys);
+			Version readVersion = wait(tr->getReadVersion());
+			tr->set(restoreRequestDoneKey, restoreRequestDoneVersionValue(readVersion));
 			wait( tr->commit() );
-
-			printf("UnlockDB now. Done.\n");
 			break;
-		} catch( Error &e ) {
-			printf("Error when we unlockDB. Error:%s\n", e.what());
+		}  catch( Error &e ) {
 			wait(tr->onError(e));
 		}
-	};
+	}
 
- 	return Void();
- }
+	TraceEvent("FastRestore").detail("RestoreRequestsSize", restoreRequests.size());
+
+	return Void();
+}
 
 ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status) {
  	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -772,7 +604,6 @@ ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus s
 
 			break;
 		} catch( Error &e ) {
-			printf("Transaction Error when we registerStatus. Error:%s\n", e.what());
 			wait(tr->onError(e));
 		}
 	 };

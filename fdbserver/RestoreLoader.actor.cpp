@@ -89,6 +89,7 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 					exitRole = handlerFinishRestoreRequest(req, self, cx);
 				}
 				when ( wait(exitRole) ) {
+					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole");
 					break;
 				}
 			}
@@ -102,6 +103,7 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 			}
 		}
 	}
+	TraceEvent("FastRestore").detail("RestoreApplierCore", "Exit");
 	return Void();
 }
 

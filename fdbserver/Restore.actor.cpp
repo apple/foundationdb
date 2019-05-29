@@ -130,29 +130,21 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 
 // Remove the worker interface from restoreWorkerKey and remove its roles interfaces from their keys.
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx) {
- 	state Transaction tr(cx);
-	
-	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.clear(restoreWorkerKeyFor(workerInterf.id()));
-			if ( self->loaderInterf.present() ) {
-				tr.clear(restoreLoaderKeyFor(self->loaderInterf.get().id()));
-			}
-			if ( self->applierInterf.present() ) {
-				tr.clear(restoreApplierKeyFor(self->applierInterf.get().id()));
-			}
-			wait( tr.commit() ) ;
-			printf("Node:%s finish restore, clear the interface keys for all roles on the worker (id:%s) and the worker itself. Then exit\n", self->describeNode().c_str(),  workerInterf.id().toString().c_str()); 
-			req.reply.send( RestoreCommonReply(workerInterf.id()) );
-			break;
-		} catch( Error &e ) {
-			printf("[WARNING] Node:%s finishRestoreHandler() transaction error:%s\n", self->describeNode().c_str(), e.what());
-			wait( tr.onError(e) );
+	wait( runRYWTransaction( cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->clear(restoreWorkerKeyFor(workerInterf.id()));
+		if ( self->loaderInterf.present() ) {
+			tr->clear(restoreLoaderKeyFor(self->loaderInterf.get().id()));
 		}
-	};
+		if ( self->applierInterf.present() ) {
+			tr->clear(restoreApplierKeyFor(self->applierInterf.get().id()));
+		}
+		return Void();
+  	}) );
+
+	printf("Node:%s finish restore, clear the interface keys for all roles on the worker (id:%s) and the worker itself. Then exit\n", self->describeNode().c_str(),  workerInterf.id().toString().c_str()); 
+			req.reply.send( RestoreCommonReply(workerInterf.id()) );
 
 	return Void();
  }
@@ -454,7 +446,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 				}
 			}
 		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
+			fprintf(stdout, "[ERROR] RestoreWorker handle received request:%s error. error code:%d, error message:%s\n",
 					requestTypeStr.c_str(), e.code(), e.what());
 			if ( requestTypeStr.find("[Init]") != std::string::npos ) {
 				printf("Exit due to error at requestType:%s", requestTypeStr.c_str());

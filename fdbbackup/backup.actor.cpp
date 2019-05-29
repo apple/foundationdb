@@ -3791,7 +3791,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
 				printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
 			}
-			printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction");
+			printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction\n");
 			tr2.clear(restoreRequestDoneKey);
 			// NOTE: The clear transaction may fail in uncertain state. We need to retry to clear the key
 			wait( tr2.commit() );
