@@ -36,8 +36,17 @@ struct Actor {
 	void exit(unsigned long time) { runTime += time - lastStart; }
 	void collect() {
 		std::stringstream ss;
-		for (const auto& s : stack) {
-			ss << s << ';';
+		for (auto i = stack.begin(); i != stack.end();) {
+			int num = 0;
+			auto name = *i;
+			for (; i != stack.end() && *i == name ; ++i) {
+				++num;
+			}
+			ss << name;
+			if (num > 1) {
+				ss << " ("<< num << ')';
+			}
+			ss << ';';
 		}
 		ss << name;
 		auto myStack = ss.str();
