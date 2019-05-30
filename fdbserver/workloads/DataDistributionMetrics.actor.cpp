@@ -40,7 +40,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1000);
 	}
 
-	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%08d", g_random->randomInt(0, 10e6))); }
+	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%08d", deterministicRandom()->randomInt(0, 10e6))); }
 
 	ACTOR static Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
 		state int tNum;
