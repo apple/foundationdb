@@ -535,6 +535,9 @@ struct RedwoodRecordRef {
 			}
 
 			size += std::max(0, intFieldArraySize - intFieldPrefixLen - trailingNulls);
+			if(intFieldPrefixLen == 0 && version == 0) {
+				size -= 8;
+			}
 		}
 
 		return size;
@@ -3210,7 +3213,8 @@ void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	int deltaSize = rec.writeDelta(d, base);
 	RedwoodRecordRef decoded = d.apply(base, mem);
 
-	if(decoded != rec || expectedSize < deltaSize) {
+	if(decoded != rec || expectedSize != deltaSize) {
+		printf("\n");
 		printf("Base:         %s\n", base.toString().c_str());
 		printf("ExpectedSize: %d\n", expectedSize);
 		printf("DeltaSize:    %d\n", deltaSize);
