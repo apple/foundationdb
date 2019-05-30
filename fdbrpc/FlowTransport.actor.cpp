@@ -633,16 +633,16 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");
-				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+				int flipBits = 32 - (int) floor(log2(deterministicRandom()->randomUInt32()));
 
-				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
+				int firstFlipBitLocation = deterministicRandom()->randomInt(0, 8);
 				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
 				flipBits--;
 
 				for (int i = 0; i < flipBits; i++) {
-					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-					int bitLocation = g_random->randomInt(0, 8);
+					uint32_t byteLocation = deterministicRandom()->randomUInt32() % packetLen;
+					int bitLocation = deterministicRandom()->randomInt(0, 8);
 					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
 						*(p + byteLocation) ^= 1 << bitLocation;
 					}
@@ -1008,7 +1008,7 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 }
 
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.token = g_random->randomUniqueID();
+	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );

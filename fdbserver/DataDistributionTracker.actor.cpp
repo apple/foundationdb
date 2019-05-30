@@ -327,7 +327,7 @@ ACTOR Future<Void> shardSplitter(
 	//}
 	int numShards = splitKeys.size() - 1;
 
-	if( g_random->random01() < 0.01 ) {
+	if( deterministicRandom()->random01() < 0.01 ) {
 		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
 			.detail("Begin", keys.begin)
 			.detail("End", keys.end)
@@ -339,7 +339,7 @@ ACTOR Future<Void> shardSplitter(
 	}
 
 	if( numShards > 1 ) {
-		int skipRange = g_random->randomInt(0, numShards);
+		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
 		for( int i = 0; i < skipRange; i++ )

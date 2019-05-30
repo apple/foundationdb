@@ -27,19 +27,19 @@
 
 ACTOR Future<GenerationRegReadReply> waitAndSendRead( RequestStream<GenerationRegReadRequest> to, GenerationRegReadRequest req ) {
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	state GenerationRegReadReply reply = wait( retryBrokenPromise( to, req ) );
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	return reply;
 }
 
 ACTOR Future<UniqueGeneration> waitAndSendWrite(RequestStream<GenerationRegWriteRequest> to, GenerationRegWriteRequest req) {
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	state UniqueGeneration reply = wait( retryBrokenPromise( to, req ) );
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	return reply;
 }
 
@@ -82,7 +82,7 @@ struct CoordinatedStateImpl {
 			self->stage = 1;
 			GenerationRegReadReply rep = wait( self->replicatedRead( self, GenerationRegReadRequest( self->coordinators.clusterKey, UniqueGeneration() ) ) );
 			self->conflictGen = std::max( self->conflictGen, std::max(rep.gen.generation, rep.rgen.generation) ) + 1;
-			self->gen = UniqueGeneration( self->conflictGen, g_random->randomUniqueID() );
+			self->gen = UniqueGeneration( self->conflictGen, deterministicRandom()->randomUniqueID() );
 		}
 
 		{

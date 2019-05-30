@@ -88,10 +88,10 @@ struct InventoryTestWorkload : TestWorkload {
 	}
 
 	Key chooseProduct() {
-		int p = g_random->randomInt(0,nProducts);
+		int p = deterministicRandom()->randomInt(0,nProducts);
 		return doubleToTestKey( (double)p / nProducts );
 		//std::string s = std::string(1,'a' + (p%26)) + format("%d",p/26);
-		/*int c = g_random->randomInt(0,10);
+		/*int c = deterministicRandom()->randomInt(0,10);
 		s += ',';
 		for(int i=0; i<c; i++)
 			s += format("%d", c);
@@ -171,7 +171,7 @@ struct InventoryTestWorkload : TestWorkload {
 			wait( poisson( &lastTime, transactionDelay ) );
 			state double st = now();
 			state Transaction tr( cx );
-			if (g_random->random01() < fractionWriteTransactions) {
+			if (deterministicRandom()->random01() < fractionWriteTransactions) {
 				state std::set<Key> products;
 				for(int i=0; i<productsPerWrite; i++)
 					products.insert( self->chooseProduct() );

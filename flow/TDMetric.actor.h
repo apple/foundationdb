@@ -800,7 +800,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 			return 0;
 
 		uint64_t t = explicitTime ? explicitTime : timer_int();
-		double x = g_random->random01();
+		double x = deterministicRandom()->random01();
 
 		int64_t l = 0;
 		if (x == 0.0)
@@ -1290,7 +1290,7 @@ public:
 		int64_t bytes = 0;
 
 		if(tv.time != 0) {
-			double x = g_random->random01();
+			double x = deterministicRandom()->random01();
 
 			int64_t l = 0;
 			if (x == 0.0)

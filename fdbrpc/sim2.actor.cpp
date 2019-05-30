@@ -41,7 +41,7 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 
 	auto p = g_simulator.getCurrentProcess();
 
-	if (p->fault_injection_p2 && g_random->random01() < p->fault_injection_p2 && !g_simulator.speedUpSimulation) {
+	if (p->fault_injection_p2 && deterministicRandom()->random01() < p->fault_injection_p2 && !g_simulator.speedUpSimulation) {
 		uint32_t h1 = line + (p->fault_injection_r >> 32);
 
 		if (h1 < p->fault_injection_p1*std::numeric_limits<uint32_t>::max()) {
@@ -158,7 +158,7 @@ private:
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
 	double halfLatency() {
-		double a = g_random->random01();
+		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
 		if (a <= pFast) {
 			a = a / pFast;
@@ -174,7 +174,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn( ISimulator::ProcessInfo* process )
-		: process(process), dbgid( g_random->randomUniqueID() ), opened(false), closedByCaller(false), stopReceive(Never())
+		: process(process), dbgid( deterministicRandom()->randomUniqueID() ), opened(false), closedByCaller(false), stopReceive(Never())
 	{
 		pipes = sender(this) && receiver(this);
 	}
@@ -187,8 +187,8 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		this->peerEndpoint = peerEndpoint;
 
 		// Every one-way connection gets a random permanent latency and a random send buffer for the duration of the connection
-		auto latency = g_clogging.setPairLatencyIfNotSet( peerProcess->address.ip, process->address.ip, FLOW_KNOBS->MAX_CLOGGING_LATENCY*g_random->random01() );
-		sendBufSize = std::max<double>( g_random->randomInt(0, 5000000), 25e6 * (latency + .002) );
+		auto latency = g_clogging.setPairLatencyIfNotSet( peerProcess->address.ip, process->address.ip, FLOW_KNOBS->MAX_CLOGGING_LATENCY*deterministicRandom()->random01() );
+		sendBufSize = std::max<double>( deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002) );
 		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
 	}
 
@@ -247,7 +247,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY) toSend = std::min(toSend, g_random->randomInt(0, 1000));
+		if (BUGGIFY) toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer) return toSend;
 		toSend = std::min( toSend, peer->availableSendBufferForPeer() );
@@ -302,7 +302,7 @@ private:
 		loop {
 			wait( self->writtenBytes.onChange() );  // takes place on peer!
 			ASSERT( g_simulator.getCurrentProcess() == self->peerProcess );
-			wait( delay( .002 * g_random->random01() ) );
+			wait( delay( .002 * deterministicRandom()->random01() ) );
 			self->sentBytes.set( self->writtenBytes.get() );  // or possibly just some sometimes...
 		}
 	}
@@ -313,7 +313,7 @@ private:
 			while ( self->sentBytes.get() == self->receivedBytes.get() )
 				wait( self->sentBytes.onChange() );
 			ASSERT( g_simulator.getCurrentProcess() == self->peerProcess );
-			state int64_t pos = g_random->random01() < .5 ? self->sentBytes.get() : g_random->randomInt64( self->receivedBytes.get(), self->sentBytes.get()+1 );
+			state int64_t pos = deterministicRandom()->random01() < .5 ? self->sentBytes.get() : deterministicRandom()->randomInt64( self->receivedBytes.get(), self->sentBytes.get()+1 );
 			wait( delay( g_clogging.getSendDelay( self->process->address, self->peerProcess->address ) ) );
 			wait( g_simulator.onProcess( self->process ) );
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
@@ -365,9 +365,9 @@ private:
 	}
 
 	void rollRandomClose() {
-		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && g_random->random01() < .00001) {
+		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
-			double a = g_random->random01(), b = g_random->random01();
+			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
 			TEST(true);  // Simulated connection failure
 			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
 			if (a < .66 && peer) peer->closeInternal();
@@ -441,7 +441,7 @@ public:
 
 		wait( g_simulator.onMachine( currentProcess ) );
 		try {
-			wait( delay(FLOW_KNOBS->MIN_OPEN_TIME + g_random->random01() * (FLOW_KNOBS->MAX_OPEN_TIME - FLOW_KNOBS->MIN_OPEN_TIME) ) );
+			wait( delay(FLOW_KNOBS->MIN_OPEN_TIME + deterministicRandom()->random01() * (FLOW_KNOBS->MAX_OPEN_TIME - FLOW_KNOBS->MIN_OPEN_TIME) ) );
 
 			std::string open_filename = filename;
 			if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
@@ -517,7 +517,7 @@ private:
 	bool delayOnWrite;
 
 	SimpleFile(int h, Reference<DiskParameters> diskParameters, bool delayOnWrite, const std::string& filename, const std::string& actualFilename, int flags)
-		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(g_random->randomUniqueID()), flags(flags) {}
+		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion( int flags ) {
 		int outFlags = O_BINARY;
@@ -533,7 +533,7 @@ private:
 	ACTOR static Future<int> read_impl( SimpleFile* self, void* data, int length, int64_t offset ) {
 		ASSERT( ( self->flags & IAsyncFile::OPEN_NO_AIO ) != 0 ||
 		        ( (uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0 ) );  // Required by KAIO.
-		state UID opId = g_random->randomUniqueID();
+		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf( randLog, "SFR1 %s %s %s %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
 
@@ -565,7 +565,7 @@ private:
 	}
 
 	ACTOR static Future<Void> write_impl( SimpleFile* self, StringRef data, int64_t offset ) {
-		state UID opId = g_random->randomUniqueID();
+		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a=0, b=0;
 			hashlittle2( data.begin(), data.size(), &a, &b );
@@ -604,7 +604,7 @@ private:
 	}
 
 	ACTOR static Future<Void> truncate_impl( SimpleFile* self, int64_t size ) {
-		state UID opId = g_random->randomUniqueID();
+		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf( randLog, "SFT1 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
@@ -631,7 +631,7 @@ private:
 	}
 
 	ACTOR static Future<Void> sync_impl( SimpleFile* self ) {
-		state UID opId = g_random->randomUniqueID();
+		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf( randLog, "SFC1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
@@ -664,7 +664,7 @@ private:
 	}
 
 	ACTOR static Future<int64_t> size_impl( SimpleFile* self ) {
-		state UID opId = g_random->randomUniqueID();
+		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
@@ -717,7 +717,7 @@ private:
 	ACTOR static void incoming( Reference<Sim2Listener> self, double seconds, Reference<IConnection> conn ) {
 		wait( g_simulator.onProcess(self->process) );
 		wait( delay( seconds ) );
-		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && g_random->random01()<0.5)
+		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && deterministicRandom()->random01()<0.5)
 			return;
 		TraceEvent("Sim2IncomingConn", conn->getDebugID())
 			.detail("ListenAddress", self->getListenAddress())
@@ -750,8 +750,8 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if(!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 && g_random->random01() < 0.25) { //FIXME: why doesnt this work when we are changing machines?
-			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY*pow(g_random->random01(),1000.0);
+		if(!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 && deterministicRandom()->random01() < 0.25) { //FIXME: why doesnt this work when we are changing machines?
+			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY*pow(deterministicRandom()->random01(),1000.0);
 		}
 
 		mutex.enter();
@@ -778,7 +778,7 @@ public:
 	virtual bool check_yield( int taskID ) {
 		if (yielded) return true;
 		if (--yield_limit <= 0) {
-			yield_limit = g_random->randomInt(1, 150);  // If yield returns false *too* many times in a row, there could be a stack overflow, since we can't deterministically check stack size as the real network does
+			yield_limit = deterministicRandom()->randomInt(1, 150);  // If yield returns false *too* many times in a row, there could be a stack overflow, since we can't deterministically check stack size as the real network does
 			return yielded = true;
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
@@ -804,22 +804,22 @@ public:
 		if (getCurrentProcess()->address.ip.isV6()) {
 			IPAddress::IPAddressStore store = getCurrentProcess()->address.ip.toV6();
 			uint16_t* ipParts = (uint16_t*)store.data();
-			ipParts[7] += g_random->randomInt(0, 256);
+			ipParts[7] += deterministicRandom()->randomInt(0, 256);
 			localIp = IPAddress(store);
 		} else {
-			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + g_random->randomInt(0, 256));
+			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 		}
-		peerc->connect(myc, NetworkAddress(localIp, g_random->randomInt(40000, 60000)));
+		peerc->connect(myc, NetworkAddress(localIp, deterministicRandom()->randomInt(40000, 60000)));
 
-		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
-		return onConnect( ::delay(0.5*g_random->random01()), myc );
+		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
+		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) {
 		throw lookup_failed();
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
-		if (conn->isPeerGone() && g_random->random01()<0.5) {
+		if (conn->isPeerGone() && deterministicRandom()->random01()<0.5) {
 			conn.clear();
 			wait(Never());
 		}
@@ -836,7 +836,7 @@ public:
 			NetworkAddress toAddr, INetworkConnections *self ) {
 		// We have to be able to connect to processes that don't yet exist, so we do some silly polling
 		loop {
-			wait( ::delay( 0.1 * g_random->random01() ) );
+			wait( ::delay( 0.1 * deterministicRandom()->random01() ) );
 			if (g_sim2.addressMap.count(toAddr)) {
 				Reference<IConnection> c = wait( self->connect( toAddr ) );
 				return c;
@@ -890,14 +890,14 @@ public:
 		}
 
 		if(diskSpace.totalSpace == 0) {
-			diskSpace.totalSpace = 5e9 + g_random->random01() * 100e9; //Total space between 5GB and 105GB
-			diskSpace.baseFreeSpace = std::min<int64_t>(diskSpace.totalSpace, std::max(5e9, (g_random->random01() * (1 - .075) + .075) * diskSpace.totalSpace) + totalFileSize); //Minimum 5GB or 7.5% total disk space, whichever is higher
+			diskSpace.totalSpace = 5e9 + deterministicRandom()->random01() * 100e9; //Total space between 5GB and 105GB
+			diskSpace.baseFreeSpace = std::min<int64_t>(diskSpace.totalSpace, std::max(5e9, (deterministicRandom()->random01() * (1 - .075) + .075) * diskSpace.totalSpace) + totalFileSize); //Minimum 5GB or 7.5% total disk space, whichever is higher
 
 			TraceEvent("Sim2DiskSpaceInitialization").detail("TotalSpace", diskSpace.totalSpace).detail("BaseFreeSpace", diskSpace.baseFreeSpace).detail("TotalFileSize", totalFileSize).detail("NumFiles", numFiles);
 		}
 		else {
 			int64_t maxDelta = std::min(5.0, (now() - diskSpace.lastUpdate)) * (BUGGIFY ? 10e6 : 1e6); //External processes modifying the disk
-			int64_t delta = -maxDelta + g_random->random01() * maxDelta * 2;
+			int64_t delta = -maxDelta + deterministicRandom()->random01() * maxDelta * 2;
 			diskSpace.baseFreeSpace = std::min<int64_t>(diskSpace.totalSpace, std::max<int64_t>(diskSpace.baseFreeSpace + delta, totalFileSize));
 		}
 
@@ -921,16 +921,16 @@ public:
 			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
 			g_simulator.getCurrentProcess()->machine->deletingFiles.insert(filename);
 		}
-		if ( mustBeDurable || g_random->random01() < 0.5 ) {
+		if ( mustBeDurable || deterministicRandom()->random01() < 0.5 ) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 			state int currentTaskID = g_network->getCurrentTask();
 			wait( g_simulator.onMachine( currentProcess ) );
 			try {
-				wait( ::delay(0.05 * g_random->random01()) );
+				wait( ::delay(0.05 * deterministicRandom()->random01()) );
 				if (!currentProcess->rebooting) {
 					auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
 					ASSERT( f.isReady() );
-					wait( ::delay(0.05 * g_random->random01()) );
+					wait( ::delay(0.05 * deterministicRandom()->random01()) );
 					TEST( true );  // Simulated durable delete
 				}
 				wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
@@ -1244,9 +1244,9 @@ public:
 		} else if (kt == InjectFaults) {
 			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
 			should_inject_fault = simulator_should_inject_fault;
-			machine->fault_injection_r = g_random->randomUniqueID().first();
+			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
-			machine->fault_injection_p2 = g_random->random01();
+			machine->fault_injection_p2 = deterministicRandom()->random01();
 		} else {
 			ASSERT( false );
 		}
@@ -1273,7 +1273,7 @@ public:
 				}
 			}
 			if( processes.size() )
-				doReboot( g_random->randomChoice( processes ), RebootProcess );
+				doReboot( deterministicRandom()->randomChoice( processes ), RebootProcess );
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
@@ -1489,7 +1489,7 @@ public:
 
 		KillType	ktResult, ktMin = kt;
 		for (auto& datacenterMachine : datacenterMachines) {
-			if(g_random->random01() < 0.99) {
+			if(deterministicRandom()->random01() < 0.99) {
 				killMachine(datacenterMachine.first, kt, true, &ktResult);
 				if (ktResult != kt) {
 					TraceEvent(SevWarn, "KillDCFail")
@@ -1526,7 +1526,7 @@ public:
 	}
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) {
 		if (mode == ClogDefault) {
-			double a = g_random->random01();
+			double a = deterministicRandom()->random01();
 			if ( a < 0.3 ) mode = ClogSend;
 			else if (a < 0.6 ) mode = ClogReceive;
 			else mode = ClogAll;
@@ -1624,7 +1624,7 @@ public:
 				ASSERT( this->currentProcess == t.machine );
 				/*auto elapsed = getCPUTicks() - before;
 				currentProcess->cpuTicks += elapsed;
-				if (g_random->random01() < 0.01){
+				if (deterministicRandom()->random01() < 0.01){
 					TraceEvent("TaskDuration").detail("CpuTicks", currentProcess->cpuTicks);
 					currentProcess->cpuTicks = 0;
 				}*/
@@ -1638,7 +1638,7 @@ public:
 			//}
 
 			if (randLog)
-				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(g_random->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
+				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
 	}
 
@@ -1690,7 +1690,7 @@ public:
 void startNewSimulator(bool objSerializer) {
 	ASSERT( !g_network );
 	g_network = g_pSimulator = new Sim2(objSerializer);
-	g_simulator.connectionFailuresDisableDuration = g_random->random01() < 0.5 ? 0 : 1e6;
+	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
@@ -1732,9 +1732,9 @@ Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64
 
 	double randomLatency;
 	if(sync) {
-		randomLatency = .005 + g_random->random01() * (BUGGIFY ? 1.0 : .010);
+		randomLatency = .005 + deterministicRandom()->random01() * (BUGGIFY ? 1.0 : .010);
 	} else
-		randomLatency = 10 * g_random->random01() / diskParameters->iops;
+		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
 
 	return delayUntil( diskParameters->nextOperation + randomLatency );
 }
@@ -1807,7 +1807,7 @@ Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDura
 Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
-	if (BUGGIFY && g_random->random01() < 0.01) {
+	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];

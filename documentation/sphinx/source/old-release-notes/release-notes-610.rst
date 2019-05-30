@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.1.7
+6.1.8
 =====
 
 Features
@@ -20,7 +20,7 @@ Features
 * Separated data distribution from the master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
 * Separated ratekeeper from the master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
 * Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
-* Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
+* Added support for IPv6. `(PR #1178) <https://github.com/apple/foundationdb/pull/1178>`_
 * FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
 * Added ``DISABLE_POSIX_KERNEL_AIO`` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) <https://github.com/apple/foundationdb/pull/1283>`_
 * Added support for configuring the cluster to use the primary and remote DC's as satellites. `(PR #1320) <https://github.com/apple/foundationdb/pull/1320>`_
@@ -77,6 +77,7 @@ Fixes
 * The ``configure`` command in ``fdbcli`` returned successfully even when the configuration was not changed for some error types. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
 * Safety protections in the ``configure`` command in ``fdbcli`` would trigger spuriously when changing between ``three_datacenter`` replication and a region configuration. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
 * Status could report an incorrect reason for ongoing data movement. [6.1.5] `(PR #1544) <https://github.com/apple/foundationdb/pull/1544>`_
+* Storage servers were considered failed as soon as they were rebooted, instead of waiting to see if they rejoin the cluster. [6.1.8] `(PR #1618) <https://github.com/apple/foundationdb/pull/1618>`_
 
 Status
 ------
@@ -129,6 +130,7 @@ Fixes only impacting 6.1.0+
 * TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
 * Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
 * Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* The TLog's disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] `(PR #1617) <https://github.com/apple/foundationdb/pull/1617>`_
 
 Earlier release notes
 ---------------------

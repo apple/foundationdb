@@ -42,6 +42,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -1664,7 +1665,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
-		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
+		std::string tempfilename = joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();

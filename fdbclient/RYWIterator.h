@@ -76,14 +76,14 @@ private:
 class RandomTestImpl {
 public:
 	static ValueRef getRandomValue(Arena& arena) {
-		return ValueRef(arena, std::string(g_random->randomInt(0, 1000), 'x'));
+		return ValueRef(arena, std::string(deterministicRandom()->randomInt(0, 1000), 'x'));
 	}
 
 	static ValueRef getRandomVersionstampValue(Arena& arena) {
-		int len = g_random->randomInt(10, 98);
+		int len = deterministicRandom()->randomInt(10, 98);
 		std::string value = std::string(len, 'x');
-		int32_t pos = g_random->randomInt(0, len - 9);
-		if (g_random->random01() < 0.01) {
+		int32_t pos = deterministicRandom()->randomInt(0, len - 9);
+		if (deterministicRandom()->random01() < 0.01) {
 			pos = value.size() - 10;
 		}
 		pos = littleEndian32(pos);
@@ -92,26 +92,26 @@ public:
 	}
 
 	static ValueRef getRandomVersionstampKey(Arena& arena) {
-		int idx = g_random->randomInt(0, 100);
+		int idx = deterministicRandom()->randomInt(0, 100);
 		std::string key = format("%010d", idx / 3);
 		if (idx % 3 >= 1)
 			key += '\x00';
 		if (idx % 3 >= 2)
 			key += '\x00';
-		int32_t pos = key.size() - g_random->randomInt(0, 3);
-		if (g_random->random01() < 0.01) {
+		int32_t pos = key.size() - deterministicRandom()->randomInt(0, 3);
+		if (deterministicRandom()->random01() < 0.01) {
 			pos = 0;
 		}
 		key = key.substr(0, pos);
 		key += "XXXXXXXXYY";
-		key += std::string(g_random->randomInt(0, 3), 'z');
+		key += std::string(deterministicRandom()->randomInt(0, 3), 'z');
 		pos = littleEndian32(pos);
 		key += std::string((const char*)&pos, sizeof(int32_t));
 		return ValueRef(arena, key);
 	}
 
 	static KeyRef getRandomKey(Arena& arena) {
-		return getKeyForIndex(arena, g_random->randomInt(0, 100));
+		return getKeyForIndex(arena, deterministicRandom()->randomInt(0, 100));
 	}
 
 	static KeyRef getKeyForIndex(Arena& arena, int idx) {
@@ -124,14 +124,14 @@ public:
 	}
 
 	static KeyRangeRef getRandomRange(Arena& arena) {
-		int startLocation = g_random->randomInt(0, 100);
-		int endLocation = startLocation + g_random->randomInt(1, 1 + 100 - startLocation);
+		int startLocation = deterministicRandom()->randomInt(0, 100);
+		int endLocation = startLocation + deterministicRandom()->randomInt(1, 1 + 100 - startLocation);
 
 		return KeyRangeRef(getKeyForIndex(arena, startLocation), getKeyForIndex(arena, endLocation));
 	}
 
 	static KeySelectorRef getRandomKeySelector(Arena& arena) {
-		return KeySelectorRef(getRandomKey(arena), g_random->random01() < 0.5, g_random->randomInt(-10, 10));
+		return KeySelectorRef(getRandomKey(arena), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-10, 10));
 	}
 };
 

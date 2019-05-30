@@ -238,7 +238,7 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
 .. program:: fdbbackup modify
 
 ``modify``
----------
+----------
 
 The ``modify`` subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.
 

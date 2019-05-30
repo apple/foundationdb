@@ -175,8 +175,8 @@ struct WatchesWorkload : TestWorkload {
 		state double chainStartTime;
 		loop {
 			state Transaction tr( cx );
-			state bool isValue = g_random->random01() > 0.5;
-			state Value assignedValue = Value( g_random->randomUniqueID().toString() );
+			state bool isValue = deterministicRandom()->random01() > 0.5;
+			state Value assignedValue = Value( deterministicRandom()->randomUniqueID().toString() );
 			state bool firstAttempt = true;
 			loop {
 				try {
@@ -236,7 +236,7 @@ struct WatchesWorkload : TestWorkload {
 			++self->cycles;
 
 			if( g_network->isSimulated() )
-				wait( delay( g_random->random01() < 0.5 ? 0 : g_random->random01() * 60 ) );
+				wait( delay( deterministicRandom()->random01() < 0.5 ? 0 : deterministicRandom()->random01() * 60 ) );
 
 			if( now() - startTime > self->testDuration )
 				break;

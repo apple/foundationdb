@@ -393,7 +393,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
-		/*if( g_random->random01() < 0.1 ) {
+		/*if( deterministicRandom()->random01() < 0.1 ) {
 			std::string name = "RatekeeperUpdateRate" + limits.context;
 			TraceEvent(name, ss.id)
 				.detail("MinFreeSpace", minFreeSpace)
@@ -584,7 +584,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
 
-	if (g_random->random01() < 0.1) {
+	if (deterministicRandom()->random01() < 0.1) {
 		std::string name = "RkUpdate" + limits->context;
 		TraceEvent(name.c_str())
 			.detail("TPSLimit", limits->tpsLimit)

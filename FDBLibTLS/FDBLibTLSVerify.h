@@ -25,7 +25,7 @@
 
 #include <stdint.h>
 
-#include "ReferenceCounted.h"
+#include "flow/FastRef.h"
 
 #include <map>
 #include <string>

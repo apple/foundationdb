@@ -26,13 +26,15 @@
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
+#include "flow/FastRef.h"
 
 #include <random>
 
-class DeterministicRandom : public IRandom {
+class DeterministicRandom : public IRandom, public ReferenceCounted<DeterministicRandom> {
 private:
 	std::mt19937 random;
 	uint64_t next;
+	bool useRandLog;
 
 	uint64_t gen64() {
 		uint64_t curr = next;
@@ -42,13 +44,13 @@ private:
 	}
 
 public:
-	DeterministicRandom( uint32_t seed ) : random( (unsigned long)seed ), next( (uint64_t(random()) << 32) ^ random() ) {
+	DeterministicRandom( uint32_t seed, bool useRandLog=false ) : random( (unsigned long)seed ), next( (uint64_t(random()) << 32) ^ random() ), useRandLog(useRandLog) {
 		UNSTOPPABLE_ASSERT( seed != 0 );  // docs for mersenne twister say x0>0
 	};
 
 	double random01() {
 		double d = gen64() / double(uint64_t(-1));
-		if (randLog && g_random==this) fprintf(randLog, "R01  %f\n", d);
+		if (randLog && useRandLog) fprintf(randLog, "R01  %f\n", d);
 		return d;
 	}
 
@@ -67,7 +69,7 @@ public:
 			i = -(int)(((unsigned int) -min) - v);
 		else
 			i = v + min;
-		if (randLog && g_random==this) fprintf(randLog, "Rint %d\n", i);
+		if (randLog && useRandLog) fprintf(randLog, "Rint %d\n", i);
 		return i;
 	}
 
@@ -86,7 +88,7 @@ public:
 			i = -(int64_t)(((uint64_t) -min) - v);
 		else
 			i = v + min;
-		if (randLog && g_random==this) fprintf(randLog, "Rint64 %" PRId64 "\n", i);
+		if (randLog && useRandLog) fprintf(randLog, "Rint64 %" PRId64 "\n", i);
 		return i;
 	}
 
@@ -104,14 +106,14 @@ public:
 		uint64_t x,y;
 		x = gen64();
 		y = gen64();
-		if (randLog && g_random == this) fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
+		if (randLog && useRandLog) fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
 		return UID(x,y);
 	}
 
 	char randomAlphaNumeric() {
 		static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 		char c = alphanum[ gen64() % 62 ];
-		if (randLog && g_random==this) fprintf(randLog, "Rchar %c\n", c);
+		if (randLog && useRandLog) fprintf(randLog, "Rchar %c\n", c);
 		return c;
 	}
 
@@ -124,6 +126,9 @@ public:
 	}
 
 	uint64_t peek() const { return next; }
+
+	virtual void addref() { ReferenceCounted<DeterministicRandom>::addref(); }
+	virtual void delref() { ReferenceCounted<DeterministicRandom>::delref(); }
 };
 
 #endif
