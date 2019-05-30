@@ -1,0 +1,31 @@
+* How to Build
+
+- Use system-wide FDB installation
+cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
+make
+
+- Use a production package installed somewhere else
+cmake -G "Unix Makefiles" -DFDB_DIR=<fdbdir> -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
+make
+
+- Use the development source/build directories
+cmake -G "Unix Makefiles" -DFDB_BUILD_DIR=<fdb_builddir> -DFDB_SOURCE_DIR=<fdb_srcdir> -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
+make
+
+
+
+* How to Run
+
+1. Create FDB cluster and database
+
+2. Populate initial data
+  e.g.
+    Populate 1 million rows with 8 processes, using 32-byte key and 16-byte value
+  mako --mode build --keylen 32 --vallen 16 --rows 1000000 -p 8
+
+3. Run
+   e.g.
+     Run a GET RANGE test for 100 seconds.
+     16 GET RANGE operations with 10-key range in one transaction (not committed),
+     using 8 processes and 32 threads per process, total of 256 threads.
+  mako --mode run --keylen 32 --vallen 16 --rows 1000000 -p 8 -t 32 --transaction "gr16:10" --seconds 100
