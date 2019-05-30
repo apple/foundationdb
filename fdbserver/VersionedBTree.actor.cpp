@@ -193,6 +193,24 @@ struct RedwoodRecordRef {
 		return 14;
 	}
 
+	// Truncate (key, version, chunk.total, chunk.start) tuple to len bytes.
+	void truncate(int len) {
+		if(len <= key.size()) {
+			key = key.substr(0, len);
+			version = 0;
+			chunk.total = 0;
+			chunk.start = 0;
+		}
+		else {
+			byte fields[intFieldArraySize];
+			serializeIntFields(fields);
+			int end = len - key.size();
+			for(int i = intFieldArraySize - 1; i >= end; --i) {
+				fields[i] = 0;
+			}
+		}
+	}
+
 	// Find the common prefix between two records, assuming that the first
 	// skip bytes are the same.
 	inline int getCommonPrefixLen(const RedwoodRecordRef &other, int skip) const {
@@ -439,7 +457,7 @@ struct RedwoodRecordRef {
 		std::string toString() const {
 			Reader r(data);
 
-			std::string flagString;
+			std::string flagString = " ";
 			if(flags & PREFIX_SOURCE) flagString += "prefixSource ";
 			if(flags & HAS_KEY_SUFFIX) flagString += "keySuffix ";
 			if(flags & HAS_VERSION) flagString += "Version ";
@@ -450,8 +468,8 @@ struct RedwoodRecordRef {
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
-			return format("flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
-				flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
+			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
+				size(), flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
 		}
 	};
 #pragma pack(pop)
@@ -741,9 +759,6 @@ struct BoundaryAndPage {
 // TODO:  Refactor this as an accumulator you add sorted keys to which makes pages.
 template<typename Allocator>
 static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, const RedwoodRecordRef &lowerBound, const RedwoodRecordRef &upperBound,  std::vector<RedwoodRecordRef> entries, uint8_t newFlags, Allocator const &newBlockFn, int usableBlockSize) {
-	// TODO:  Figure out how to do minimal boundaries with RedwoodRecordRef
-	minimalBoundaries = false;
-
 	// This is how much space for the binary tree exists in the page, after the header
 	int pageSize = usableBlockSize - BTreePage::GetHeaderSize();
 
@@ -807,18 +822,7 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, const Red
 					}
 				}
 				if(!fits) {
-					// Flush page
-					if(minimalBoundaries) {
-						// TODO:  Write minimal boundaries
-						// Note that prefixLen is guaranteed to be < entry.key.size() because entries are in increasing order and cannot repeat.
-// 						int len = prefixLen + 1;
-// 						if(entry.key[prefixLen] == 0)
-// 							len = std::min(len + 1, entry.key.size());
-// 						pageUpperBound = entry.key.substr(0, len);
-					}
-					else {
-						pageUpperBound = entry.withoutValue();
-					}
+					pageUpperBound = entry.withoutValue();
 				}
 			}
 
@@ -841,6 +845,12 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, const Red
 			if(!end) {
 				i -= count / 3;
 				pageUpperBound = entries[i].withoutValue();
+			}
+
+			// If this isn't the final page, shorten the upper boundary
+			if(!end && minimalBoundaries) {
+				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[i - 1], 0);
+				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
 			debug_printf("Flushing page start=%d i=%d count=%d\nlower: %s\nupper: %s\n", start, i, count, pageLowerBound.toString().c_str(), pageUpperBound.toString().c_str());
@@ -2660,7 +2670,7 @@ printf("\nCommitted: %s\n", self->counts.toString(true).c_str());
 };
 
 RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
-RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff"), std::numeric_limits<Version>::max());
+RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
 VersionedBTree::Counts VersionedBTree::counts;
 
 ACTOR template<class T>
