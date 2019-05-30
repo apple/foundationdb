@@ -150,7 +150,9 @@ else()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
-      add_link_options(-lc++abi -Wl,-build-id=sha1)
+      if (NOT APPLE)
+        add_link_options(-lc++abi -Wl,-build-id=sha1)
+      endif()
     endif()
     add_compile_options(
       -Wno-unknown-warning-option
