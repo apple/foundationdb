@@ -61,7 +61,7 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 				when ( RestoreSendMutationVectorVersionedRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
 					requestTypeStr = "sendMutationVector";
-					actors.add( handleSendMutationVectorRequest(req, self) ); //handleSendMutationVectorRequest
+					actors.add( handleSendMutationVectorRequest(req, self) );
 				}
 				when ( RestoreSimpleRequest req = waitNext(applierInterf.applyToDB.getFuture()) ) {
 					requestTypeStr = "applyToDB";
@@ -77,7 +77,6 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 				when ( wait(exitRole) ) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole");
-					//actors.clear(false);
 					break;
 				}
 			}
@@ -95,10 +94,9 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 	return Void();
 }
 
-// ATTENTION: If a loader sends mutations of range and log files at the same time,
-// Race condition may happen in this actor? 
-// MX: Maybe we won't have race condition even in the above situation because all actors run on 1 thread
-// as long as we do not wait or yield when operate the shared data, it should be fine.
+// The actor may be invovked multiple times and executed async.
+// No race condition as long as we do not wait or yield when operate the shared data, it should be fine,
+// because all actors run on 1 thread.
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
@@ -113,9 +111,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 	} else {
 		wait( self->logVersion.whenAtLeast(req.prevVersion) );
 	}
-
-	// ASSUME: Log file is processed before range file. We do NOT mix range and log file.
-	//ASSERT_WE_THINK( self->rangeVersion.get() > 0 && req.isRangeFile );
 
 	if ( (req.isRangeFile &&  self->rangeVersion.get() == req.prevVersion) ||
 	     (!req.isRangeFile && self->logVersion.get() == req.prevVersion) )  {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
@@ -211,10 +206,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 						KeyRangeRef mutationRange(m.param1, m.param2);
 						tr->clear(mutationRange);
 					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
-						//// Now handle atomic operation from this if statement
-						// TODO: Have not de-duplicated the mutations for multiple network delivery
-						// ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << MinV2) | (1 << AndV2),
-						//atomicOp( const KeyRef& key, const ValueRef& operand, uint32_t operationType )
 						tr->atomicOp(m.param1, m.param2, m.type);
 					} else {
 						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
