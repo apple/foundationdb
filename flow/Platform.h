@@ -642,17 +642,17 @@ EXTERNC void setProfilingEnabled(int enabled);
 								 DTRACE_PROBE1, DTRACE_PROBE)                  \
 	(foundationdb, __VA_ARGS__)
 
-extern void fdb_probe_actor_create(const char* name);
-extern void fdb_probe_actor_destroy(const char* name);
-extern void fdb_probe_actor_enter(const char* name, int index);
-extern void fdb_probe_actor_exit(const char* name, int index);
+extern void fdb_probe_actor_create(const char* name, unsigned long id);
+extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
+extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
+extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
 #else
 #define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
 #define FDB_TRACE_PROBE(...)
-inline void fdb_probe_actor_create(const char*) {}
-inline void fdb_probe_actor_destroy(const char*) {}
-inline void fdb_probe_actor_enter(const char*, int) {}
-inline void fdb_probe_actor_exit(const char*, int) {}
+inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
+inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
 #endif
 
 #endif /* FLOW_PLATFORM_H */

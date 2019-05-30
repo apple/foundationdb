@@ -424,27 +424,29 @@ namespace actorcompiler
             Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
         }
 
+        const string thisAddress = "reinterpret_cast<unsigned long>(this)";
+
         void ProbeEnter(Function fun, string name, int index = -1) {
             if (generateProbes) {
-                fun.WriteLine("fdb_probe_actor_enter(\"{0}\", {1});", name, index);
+                fun.WriteLine("fdb_probe_actor_enter(\"{0}\", {1}, {2});", name, thisAddress, index);
             }
         }
 
         void ProbeExit(Function fun, string name, int index = -1) {
             if (generateProbes) {
-                fun.WriteLine("fdb_probe_actor_exit(\"{0}\", {1});", name, index);
+                fun.WriteLine("fdb_probe_actor_exit(\"{0}\", {1}, {2});", name, thisAddress, index);
             }
         }
 
         void ProbeCreate(Function fun, string name) {
             if (generateProbes) {
-                fun.WriteLine("fdb_probe_actor_create(\"{0}\");", name);
+                fun.WriteLine("fdb_probe_actor_create(\"{0}\", {1});", name, thisAddress);
             }
         }
 
         void ProbeDestroy(Function fun, string name) {
             if (generateProbes) {
-                fun.WriteLine("fdb_probe_actor_destroy(\"{0}\");", name);
+                fun.WriteLine("fdb_probe_actor_destroy(\"{0}\", {1});", name, thisAddress);
             }
         }
 
