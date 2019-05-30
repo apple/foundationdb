@@ -59,7 +59,7 @@ var (
 	// ErrDirAlreadyExists is returned when trying to create a directory while it already exists.
 	ErrDirAlreadyExists = errors.New("the directory already exists")
 
-	// ErrDirNotExists is returned when opening or listing a directory that does not exists.
+	// ErrDirNotExists is returned when opening or listing a directory that does not exist.
 	ErrDirNotExists = errors.New("the directory does not exist")
 
 	// ErrParentDirDoesNotExist is returned when opening a directory and one or more
