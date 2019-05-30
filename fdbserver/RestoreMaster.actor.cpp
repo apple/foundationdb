@@ -37,11 +37,13 @@
 
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
+ACTOR static Future<Version> processRestoreRequestV2(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
 ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
 
 ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig);
+ACTOR static Future<Void> distributeWorkloadPerVersionBatchV2(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch);
 ACTOR static Future<Void> _clearDB(Database cx);
 ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status);
 ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> self, Database cx);
@@ -75,7 +77,8 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 		for ( auto &it : restoreRequests ) {
 			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
 			printf("Node:%s Got RestoreRequestInfo:%s\n", self->describeNode().c_str(), it.toString().c_str());
-			Version ver = wait( processRestoreRequest(it, self, cx) );
+			//Version ver = wait( processRestoreRequest(it, self, cx) );
+			Version ver = wait( processRestoreRequestV2(it, self, cx) );
 		}
 
 		// Step: Notify all restore requests have been handled by cleaning up the restore keys
@@ -134,6 +137,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	sort(self->allFiles.begin(), self->allFiles.end());
 	self->printAllBackupFilesInfo();
 
+	self->buildVersionBatches();
+
 	self->buildForbiddenVersionRange();
 	self->printForbiddenVersionRange();
 	if ( self->isForbiddenVersionRangeOverlapped() ) {
@@ -146,6 +151,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	state long prevCurBackupFilesEndIndex = 0;
 	state double prevCurWorkloadSize = 0;
 	state double prevtotalWorkloadSize = 0;
+
 
 	loop {
 		try {
@@ -212,6 +218,21 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 
 	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
 
+	return request.targetVersion;
+}
+
+
+ACTOR static Future<Version> processRestoreRequestV2(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
+	wait( _collectBackupFiles(self, cx, request) );
+	self->constructFilesWithVersionRange();
+	self->buildVersionBatches();
+	state std::map<Version, VersionBatch>::iterator versionBatch;
+	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
+		wait( initializeVersionBatch(self) );
+		wait( distributeWorkloadPerVersionBatchV2(self, cx, request, versionBatch->second) );
+	}
+
+	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
 	return request.targetVersion;
 }
 
@@ -369,6 +390,87 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	return Void();
 }
 
+ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch, bool isRangeFile ) {
+	Key mutationLogPrefix;
+	std::vector<RestoreFileFR> *files;
+	if ( isRangeFile ) {
+		files = &versionBatch.rangeFiles;
+	} else {
+		files = &versionBatch.logFiles;
+		Reference<RestoreConfig> restoreConfig(new RestoreConfig(request.randomUid));
+		mutationLogPrefix = restoreConfig->mutationLogPrefix();
+	}
+
+	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
+	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
+	Version prevVersion = 0;
+
+	for (auto &file : *files) {
+		if (file.fileSize <= 0) {
+			continue;
+		}
+		if ( loader == self->loadersInterf.end() ) {
+			loader = self->loadersInterf.begin();
+		}
+		// Prepare loading
+		LoadingParam param;
+		param.url = request.url;
+		param.prevVersion = prevVersion; 
+		param.endVersion = file.isRange ? file.version : file.endVersion;
+		prevVersion = param.endVersion;
+		param.isRangeFile = file.isRange;
+		param.version = file.version;
+		param.filename = file.fileName;
+		param.offset = 0; //curOffset; //self->files[curFileIndex].cursor;
+		//param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
+		param.length = file.fileSize; // We load file by file, instead of data block by data block for now
+		param.blockSize = file.blockSize;
+		param.restoreRange = request.range;
+		param.addPrefix = request.addPrefix;
+		param.removePrefix = request.removePrefix;
+		param.mutationLogPrefix = mutationLogPrefix;
+		ASSERT_WE_THINK( param.length > 0 );
+		ASSERT_WE_THINK( param.offset >= 0 );
+		ASSERT_WE_THINK( param.offset < file.fileSize );
+		ASSERT_WE_THINK( param.prevVersion <= param.endVersion );
+
+		requests.push_back( std::make_pair(loader->first, RestoreLoadFileRequest(param)) );
+		// Log file to be loaded
+		TraceEvent("FastRestore").detail("LoadParam", param.toString())
+				.detail("LoaderID", loader->first.toString());
+		loader++;
+	}
+
+	// Wait on the batch of load files or log files
+	wait( sendBatchRequests(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests) );
+
+	return Void();
+}
+
+ACTOR static Future<Void> distributeWorkloadPerVersionBatchV2(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch) {
+	if ( self->isBackupEmpty() ) {
+		printf("[WARNING] Node:%s distributeWorkloadPerVersionBatch() load an empty batch of backup. Print out the empty backup files info.\n", self->describeNode().c_str());
+		self->printBackupFilesInfo();
+		return Void();
+	}
+
+	ASSERT( self->loadersInterf.size() > 0 );
+	ASSERT( self->appliersInterf.size() > 0 );
+	
+	dummySampleWorkload(self);
+
+	wait( notifyAppliersKeyRangeToLoader(self, cx) );
+
+	// Parse log files and send mutations to appliers before we parse range files
+	wait( loadFilesOnLoaders(self, cx, request, versionBatch, false) );
+	wait( loadFilesOnLoaders(self, cx, request, versionBatch, true) );
+	
+	wait( notifyApplierToApplyMutations(self) );
+
+	return Void();
+}
+
+
 // Placehold for sample workload
 // Produce the key-range for each applier
 void dummySampleWorkload(Reference<RestoreMasterData> self) {
@@ -447,7 +549,7 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
 
-	ASSERT( lockDB == true );
+	//ASSERT( lockDB == true );
 
 	self->initBackupContainer(url);
 	state BackupDescription desc = wait(self->bc->describeBackup());

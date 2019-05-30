@@ -203,7 +203,7 @@ struct RestoreFileFR {
 		return r;
 	}
 
-	bool operator<(const RestoreFileFR& rhs) const { return endVersion < rhs.endVersion; }
+	bool operator<(const RestoreFileFR& rhs) const { return beginVersion < rhs.beginVersion; }
 
 	RestoreFileFR() : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion), beginVersion(invalidVersion), cursor(0) {}
 

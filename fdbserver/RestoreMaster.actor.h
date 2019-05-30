@@ -42,10 +42,18 @@
 extern double loadBatchSizeThresholdB;
 extern int restoreStatusIndex;
 
+struct VersionBatch {
+	Version beginVersion; // Inclusive
+	Version endVersion; // Exclusive
+	std::vector<RestoreFileFR> logFiles;
+	std::vector<RestoreFileFR> rangeFiles;
+};
+
 struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 
+	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	// Temporary variables to hold files and data to restore
 	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
@@ -88,6 +96,58 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		std::stringstream ss;
 		ss << "Master versionBatch:"  << batchIndex;
 		return ss.str();
+	}
+
+	void buildVersionBatches() {
+		// A version batch includes a log file 
+		// Because log file's verion range does not overlap, we use log file's version range as the version range of a version batch
+		// Create a version batch for a log file
+		Version beginVersion = 0;
+		Version maxVersion = 0;
+		for ( int i = 0; i < allFiles.size(); ++i ) {
+			if ( !allFiles[i].isRange ) {
+				ASSERT( versionBatches.find(allFiles[i].beginVersion) ==  versionBatches.end() );
+				VersionBatch vb;
+				vb.beginVersion = beginVersion;
+				vb.endVersion = allFiles[i].endVersion;
+				versionBatches[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
+				beginVersion = allFiles[i].endVersion;
+			}
+			if ( maxVersion < allFiles[i].endVersion ) {
+				maxVersion = allFiles[i].endVersion;
+			}
+		}
+		// In case there is no log file
+		if ( versionBatches.empty() ) {
+			VersionBatch vb;
+			vb.beginVersion = 0;
+			vb.endVersion = maxVersion + 1; // version batch's endVersion is exclusive
+			versionBatches[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
+		}
+		// Put range and log files into its version batch
+		for ( int i = 0; i < allFiles.size(); ++i ) {
+			std::map<Version, VersionBatch>::iterator vbIter = versionBatches.upper_bound(allFiles[i].beginVersion); // vbiter's beginVersion > allFiles[i].beginVersion
+			--vbIter;
+			ASSERT_WE_THINK( vbIter != versionBatches.end() );
+			if ( allFiles[i].isRange ) {
+				vbIter->second.rangeFiles.push_back(allFiles[i]);	
+			} else {
+				vbIter->second.logFiles.push_back(allFiles[i]);
+			}
+		}
+		printf("versionBatches.size:%d\n", versionBatches.size());
+		// Sanity check
+		for (auto &versionBatch : versionBatches) {
+			for ( auto &logFile : versionBatch.second.logFiles ) {
+				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
+				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
+			}
+			for ( auto &rangeFile : versionBatch.second.rangeFiles ) {
+				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
+				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
+				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
+			}
+		}
 	}
 
 	void constructFilesWithVersionRange() {
