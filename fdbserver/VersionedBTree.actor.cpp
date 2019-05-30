@@ -506,14 +506,14 @@ struct RedwoodRecordRef {
 		}
 
 		int prefixLen = getCommonPrefixLen(base, 0);
-		size += (prefixLen > 128) ? 2 : 1;
+		size += (prefixLen >= 128) ? 2 : 1;
 
 		int intFieldPrefixLen;
 
 		// Currently using a worst-guess guess where int fields in suffix are stored in their entirety if nonzero.
 		if(prefixLen < key.size()) {
 			int keySuffixLen = key.size() - prefixLen;
-			size += (keySuffixLen > 128) ? 2 : 1;
+			size += (keySuffixLen >= 128) ? 2 : 1;
 			size += keySuffixLen;
 			intFieldPrefixLen = 0;
 		}

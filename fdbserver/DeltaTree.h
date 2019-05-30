@@ -353,13 +353,13 @@ private:
 		// Since mid is between them, we can skip that length to determine the common prefix length
 		// between mid and prev and between mid and next.
 		int nextPrevCommon = prev->getCommonPrefixLen(*next, 0);
-		int commonWithPrev = begin[mid].getCommonPrefixLen(*prev, nextPrevCommon);
-		int commonWithNext = begin[mid].getCommonPrefixLen(*next, nextPrevCommon);
+		int commonWithPrev = item.getCommonPrefixLen(*prev, nextPrevCommon);
+		int commonWithNext = item.getCommonPrefixLen(*next, nextPrevCommon);
 
 		bool prefixSourcePrev;
 		int commonPrefix;
 		const T *base;
-		if(commonWithNext > commonWithPrev) {
+		if(commonWithPrev >= commonWithNext) {
 			prefixSourcePrev = true;
 			commonPrefix = commonWithPrev;
 			base = prev;
@@ -369,9 +369,9 @@ private:
 			commonPrefix = commonWithNext;
 			base = next;
 		}
-		root.delta->setPrefixSource(prefixSourcePrev);
 
 		int deltaSize = item.writeDelta(*root.delta, *base, commonPrefix);
+		root.delta->setPrefixSource(prefixSourcePrev);
 		//printf("Serialized %s to %p\n", item.toString().c_str(), root.delta);
 
 		// Continue writing after the serialized Delta.
