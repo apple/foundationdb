@@ -40,7 +40,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern double transactionBatchSizeThreshold;
 
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> { 
 	NotifiedVersion rangeVersion; // All requests of mutations in range file below this version has been processed
@@ -58,8 +57,8 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	// TODO: This block of variables may be moved to RestoreRoleData
 	bool inProgressApplyToDB = false;
 
-	// Temporary data structure for parsing range and log files into (version, <K, V, mutationType>)
-	std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
+	// Mutations at each version
+	VersionedMutationsMap kvOps;
 
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }

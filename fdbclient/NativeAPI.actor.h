@@ -30,7 +30,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/FDBOptions.g.h" //Must use the generated .h
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"

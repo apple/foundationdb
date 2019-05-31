@@ -38,7 +38,6 @@
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
 ACTOR Future<Void> handleApplyToDBRequest(RestoreSimpleRequest req, Reference<RestoreApplierData> self, Database cx);
 
-
 ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, RestoreApplierInterface applierInterf, Database cx) {
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
@@ -81,16 +80,11 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 			}
 		} catch (Error &e) {
-			fprintf(stdout, "[ERROR] Loader handle received request:%s error. error code:%d, error message:%s\n",
-					requestTypeStr.c_str(), e.code(), e.what());
-
-			if ( requestTypeStr.find("[Init]") != std::string::npos ) {
-				printf("Exit due to error at requestType:%s", requestTypeStr.c_str());
-				break;
-			}
+			TraceEvent(SevWarn, "FastRestore").detail("RestoreLoaderError", e.what()).detail("RequestType", requestTypeStr);
+			break;
 		}
 	}
-	TraceEvent("FastRestore").detail("RestoreApplierCore", "Exit");
+
 	return Void();
 }
 
@@ -100,6 +94,9 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
+	TraceEvent("FastRestore").detail("ApplierNode", self->id())
+			.detail("LogVersion", self->logVersion.get()).detail("RangeVersion", self->rangeVersion.get())
+			.detail("Request", req.toString());
 	if ( debug_verbose ) {
 		// NOTE: Print out the current version and received req is helpful in debugging
 		printf("[VERBOSE_DEBUG] handleSendMutationVectorRequest Node:%s at rangeVersion:%ld logVersion:%ld receive mutation number:%d, req:%s\n",
@@ -213,7 +210,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 					++count;
 					transactionSize += m.expectedSize();
 					
-					if ( transactionSize >= transactionBatchSizeThreshold ) { // commit per 1000 mutations
+					if ( transactionSize >= opConfig.transactionBatchSizeThreshold ) { // commit per 1000 mutations
 						wait(tr->commit());
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

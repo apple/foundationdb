@@ -28,10 +28,8 @@
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and
 	// quickly serialized, (forward) iterated or appended to.
-	// MX: MutationListRef is a list of struct Blob
-	// MX: Each blob has a struct Header following by the mutation's param1 and param2 content. The Header has the mutation's type and the length of param1 and param2
-
-
+	// MutationListRef is a list of struct Blob
+	// Each blob has a struct Header following by the mutation's param1 and param2 content. The Header has the mutation's type and the length of param1 and param2
 
 private:
 	struct Blob {

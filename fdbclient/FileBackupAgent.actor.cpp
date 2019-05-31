@@ -192,7 +192,6 @@ public:
 		Version endVersion;  // not meaningful for range files
 
 		Tuple pack() const {
-			//fprintf(stderr, "Filename:%s\n", fileName.c_str());
 			return Tuple()
 				.append(version)
 				.append(StringRef(fileName))
@@ -358,8 +357,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 		.detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 		.detail("BytesWritten", bytesWritten.get())
 		.detail("ApplyLag", lag.get())
-		.detail("TaskInstance", THIS_ADDR)
-		.backtrace();
+		.detail("TaskInstance", THIS_ADDR);
 
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
@@ -3381,8 +3379,6 @@ namespace fileBackup {
 
 			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
 
-			printf("restorable.present:%d, which must be present!\n", restorable.present());
-
 			if(!restorable.present())
 				throw restore_missing_data();
 
@@ -3393,20 +3389,11 @@ namespace fileBackup {
 			// Order does not matter, they will be put in order when written to the restoreFileMap below.
 			state std::vector<RestoreConfig::RestoreFile> files;
 
-			printf("restorable.get() ranges:%d logs:%d\n", restorable.get().ranges.size(), restorable.get().logs.size());
 			for(const RangeFile &f : restorable.get().ranges) {
-				printf("Add file:%s, filename:%s\n", f.toString().c_str(), f.fileName.c_str());
-				RestoreConfig::RestoreFile tmpFile = {f.version, f.fileName, true, f.blockSize, f.fileSize, -1};
-				files.push_back(tmpFile);
+				files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
 			}
 			for(const LogFile &f : restorable.get().logs) {
-				printf("Add file:%s filename:%s\n", f.toString().c_str(), f.fileName.c_str());
-				RestoreConfig::RestoreFile tmpFile = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
-				files.push_back(tmpFile);
-			}
-
-			for (auto& testfile : files) {
-				printf("Files: filename:%d\n", testfile.fileName.c_str());
+				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
 			}
 
 			state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
@@ -3418,9 +3405,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					//fprintf(stdout, "taskBucket->keepRunning start\n");
 					wait(taskBucket->keepRunning(tr, task));
-					//fprintf(stdout, "taskBucket->keepRunning end\n");
 
 					state std::vector<RestoreConfig::RestoreFile>::iterator i = start;
 
@@ -3429,19 +3414,15 @@ namespace fileBackup {
 					state int nFiles = 0;
 					auto fileSet = restore.fileSet();
 					for(; i != end && txBytes < 1e6; ++i) {
-						//fprintf(stdout, "txBytes:%d\n", txBytes);
 						txBytes += fileSet.insert(tr, *i);
 						nFileBlocks += (i->fileSize + i->blockSize - 1) / i->blockSize;
 						++nFiles;
 					}
 
-					//fprintf(stdout, "nFiles:%d nFileBlocks:%d\n", nFiles, nFileBlocks);
-					// Increment counts
 					restore.fileCount().atomicOp(tr, nFiles, MutationRef::Type::AddValue);
 					restore.fileBlockCount().atomicOp(tr, nFileBlocks, MutationRef::Type::AddValue);
 
 					wait(tr->commit());
-					//fprintf(stdout, "nFiles:%d nFileBlocks:%d committed\n", nFiles, nFileBlocks);
 
 					TraceEvent("FileRestoreLoadedFiles")
 						.detail("RestoreUID", restore.getUid())
@@ -3453,12 +3434,9 @@ namespace fileBackup {
 					start = i;
 					tr->reset();
 				} catch(Error &e) {
-					//fprintf(stdout, "Error at FileRestoreLoadedFiles. Error:%s\n", e.what());
 					wait(tr->onError(e));
 				}
 			}
-
-			printf("StartFullRestoreTaskFunc::_execute finish\n");
 
 			return Void();
 		}
@@ -3696,12 +3674,10 @@ public:
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		printf("[Debug] submitRestore tag:%s, uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
 
 		// Get old restore config for this tag
 		state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 		state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
-		printf("oldUidAndAborted present:%d\n", oldUidAndAborted.present());
 		if(oldUidAndAborted.present()) {
 			if (oldUidAndAborted.get().first == uid) {
 				if (oldUidAndAborted.get().second) {
@@ -3742,7 +3718,6 @@ public:
 		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
 
 		// Configure the new restore
-		TraceEvent("BARW_RestoreDebug").detail("TagName", tagName.toString()).detail("RestoreUID", uid);
 		restore.tag().set(tr, tagName.toString());
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
@@ -3756,9 +3731,7 @@ public:
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix);
 
-		printf("fileBackup::StartFullRestoreTaskFunc::addTask uid:%s starts\n", uid.toString().c_str());
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
-		printf("fileBackup::StartFullRestoreTaskFunc::addTask uid:%s finishes\n", uid.toString().c_str());
 
 		if (lockDB)
 			wait(lockDatabase(tr, uid));

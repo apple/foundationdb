@@ -213,7 +213,7 @@ struct KeyRangeRef {
 	};
 
 	std::string toString() const {
-		return "begin:" + begin.printable() + " end:" + end.printable();
+		return "Begin:" + begin.printable() + "End:" + end.printable();
 	}
 };
 

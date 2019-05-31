@@ -526,7 +526,7 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 
 // Apply mutations constant variables
 // \xff/applyMutationsEnd/[16-byte UID] := serialize( endVersion, Unversioned() )
-// MX: This indicates what is the highest version the mutation log can be applied
+// This indicates what is the highest version the mutation log can be applied
 const KeyRangeRef applyMutationsEndRange(LiteralStringRef("\xff/applyMutationsEnd/"), LiteralStringRef("\xff/applyMutationsEnd0"));
 
 // \xff/applyMutationsBegin/[16-byte UID] := serialize( beginVersion, Unversioned() )
@@ -601,14 +601,6 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
-const KeyRangeRef restoreLoaderKeys(
-	LiteralStringRef("\xff\x02/restoreLoaders/"),
-	LiteralStringRef("\xff\x02/restoreLoaders0")
-);
-const KeyRangeRef restoreApplierKeys(
-	LiteralStringRef("\xff\x02/restoreAppliers/"),
-	LiteralStringRef("\xff\x02/restoreAppliers0")
-);
 const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
 
@@ -627,21 +619,6 @@ const Key restoreWorkerKeyFor( UID const& workerID ) {
 	return wr.toValue();
 }
 
-// Encode restore role (loader or applier) for roleID
-const Key restoreLoaderKeyFor( UID const& roleID ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreLoaderKeys.begin );
-	wr << roleID;
-	return wr.toValue();
-}
-
-const Key restoreApplierKeyFor( UID const& roleID ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreApplierKeys.begin );
-	wr << roleID;
-	return wr.toValue();
-}
-
 // Encode restore agent value
 const Value restoreWorkerInterfaceValue( RestoreWorkerInterface const& cmdInterf ) {
 	BinaryWriter wr(IncludeVersion());
@@ -655,33 +632,6 @@ RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value 
 	reader >> s;
 	return s;
 }
-
-const Value restoreLoaderInterfaceValue( RestoreLoaderInterface const& cmdInterf ) {
-	BinaryWriter wr(IncludeVersion());
-	wr << cmdInterf;
-	return wr.toValue();
-}
-
-RestoreLoaderInterface decodeRestoreLoaderInterfaceValue( ValueRef const& value ) {
-	RestoreLoaderInterface s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
-}
-
-const Value restoreApplierInterfaceValue( RestoreApplierInterface const& cmdInterf ) {
-	BinaryWriter wr(IncludeVersion());
-	wr << cmdInterf;
-	return wr.toValue();
-}
-
-RestoreApplierInterface decodeRestoreApplierInterfaceValue( ValueRef const& value ) {
-	RestoreApplierInterface s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
-}
-
 
 // Encode and decode restore request value
 // restoreRequestTrigger key

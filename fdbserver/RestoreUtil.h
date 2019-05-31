@@ -35,14 +35,22 @@
 
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
 BINARY_SERIALIZABLE( RestoreRole );
+std::string getRoleStr(RestoreRole role);
 
 extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
 
-std::string getRoleStr(RestoreRole role);
+// Fast restore operation configuration
+// The initRestoreWorkerConfig function will reset the configuration params in simulation
+struct FastRestoreOpConfig {
+	int num_loaders = 120;
+	int num_appliers = 40;
+	// transactionBatchSizeThreshold is used when applier applies multiple mutations in a transaction to DB 
+	double transactionBatchSizeThreshold = 512; //512 in Bytes
+};
+extern FastRestoreOpConfig opConfig;
 
-// Common restore request/response interface
-// Reply type
+
 struct RestoreCommonReply { 
 	UID id; // unique ID of the server who sends the reply
 	

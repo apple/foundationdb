@@ -1021,8 +1021,6 @@ public:
 				snapshot = s;
 		}
 
-		printf("[INFO] Snapshot present:%d\n", snapshot.present());
-
 		if(snapshot.present()) {
 			state RestorableFileSet restorable;
 			restorable.snapshot = snapshot.get();
@@ -1031,11 +1029,8 @@ public:
 			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = ranges;
 
-			printf("[INFO] Snapshot has the number of range files:%d\n", ranges.size());
-
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if(snapshot.get().beginVersion == snapshot.get().endVersion && snapshot.get().endVersion == targetVersion) {
-				printf("[INFO] No log file is needed for restore at the targetVersion. Restore with only range files\n");
 				return Optional<RestorableFileSet>(restorable);
 			}
 
@@ -1044,16 +1039,11 @@ public:
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
 
-			printf("[INFO] Number of all logs:%d targetVersion:%lld\n", logs.size(), targetVersion);
-			printf("[INFO] Use the following log files for restore\n");
-
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
 				auto i = logs.begin();
 				Version end = i->endVersion;
 				restorable.logs.push_back(*i);
-
-				printf("\t[INFO] Log File:%s\n", i->toString().c_str());
 
 				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 				while(++i != logs.end()) {
@@ -1063,7 +1053,6 @@ public:
 					if(i->beginVersion == end) {
 						restorable.logs.push_back(*i);
 						end = i->endVersion;
-						printf("\t[INFO] Log File:%s\n", i != logs.end() ? i->toString().c_str() : "[End]");
 					}
 				}
 
@@ -1071,8 +1060,6 @@ public:
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
-
-			printf("[INFO] Number of all logs:%d Done\n", logs.size());
 		}
 
 		return Optional<RestorableFileSet>();

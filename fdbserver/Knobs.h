@@ -386,6 +386,9 @@ public:
 	int64_t TIME_KEEPER_DELAY;
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
+	// Fast Restore
+	int64_t FASTRESTORE_FAILURE_TIMEOUT;
+	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

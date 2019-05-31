@@ -41,7 +41,6 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 extern bool debug_verbose;
-extern double mutationVectorThreshold;
 
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
@@ -51,6 +50,8 @@ struct RestoreRoleData;
 struct RestoreMasterData;
 
 struct RestoreSimpleRequest;
+
+typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutationsMap;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);

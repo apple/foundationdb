@@ -39,7 +39,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern double loadBatchSizeThresholdB;
 extern int restoreStatusIndex;
 
 struct VersionBatch {

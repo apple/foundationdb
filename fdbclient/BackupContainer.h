@@ -74,7 +74,6 @@ struct LogFile {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
-	//return info
 	std::string toString() const {
 		std::string ret;
 		ret = "beginVersion:" + std::to_string(beginVersion) + " endVersion:" + std::to_string(endVersion)
@@ -94,7 +93,6 @@ struct RangeFile {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
 	}
 
-	//return info
 	std::string toString() const {
 		std::string ret;
 		ret = "version:" + std::to_string(version) + " blockSize:" + std::to_string(blockSize) + " fileName:" + fileName

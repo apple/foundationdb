@@ -544,16 +544,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			TEST(!startRestore.isReady()); //Restore starts at specified time
 			wait(startRestore);
 
-			wait(checkDB(cx, "BeforeRestore", self));
-//			wait(dumpDB(cx, "BeforeRestore", self));
-
 			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
-					//TODO: MX: Need to check if restore can be successful even after we attemp dirty restore
 					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
+					// TODO: To support restore even after we attempt dirty restore. Not implemented in the 1st version fast restore
 					//wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
-				// MX: Clear DB before restore
+				// Clear DB before restore
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					for (auto &kvrange : self->backupRanges)
 						tr->clear(kvrange);
@@ -562,7 +559,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// restore database
 				TraceEvent("BAFRW_Restore", randomID).detail("LastBackupContainer", lastBackupContainer->getURL()).detail("RestoreAfter", self->restoreAfter).detail("BackupTag", printable(self->backupTag));
-				printf("MX:BAFRW_Restore, LastBackupContainer url:%s BackupTag:%s\n",lastBackupContainer->getURL().c_str(), printable(self->backupTag).c_str() );
 				
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait( container->describeBackup() );
@@ -584,34 +580,31 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 				state int restoreIndex;
 
-				// MX: Restore each range by calling backupAgent.restore()
+				// Restore each range by calling backupAgent.restore()
 				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
-				state int numTry = 0;
+				state Transaction tr1(cx);
 				loop {
-					state Transaction tr1(cx);
 					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
-						printf("Prepare for restore requests. Number of backupRanges:%d, numTry:%d\n", self->backupRanges.size(), numTry++);
-						//TODO: MXX: Should we lock DB here in case DB is modified at the bacupRanges boundary.
+						printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
+						// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
 						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
 							auto range = self->backupRanges[restoreIndex];
 							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 							restoreTags.push_back(restoreTag);
-//							restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
-							//MX: restore the key range
+							// Register the request request in DB, which will be picked up by restore worker leader
 							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, g_random->randomUniqueID());
 							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 						}
 						tr1.set(restoreRequestTriggerKey, restoreRequestTriggerValue(self->backupRanges.size()));
-						wait(tr1.commit()); //Trigger MX restore
+						wait(tr1.commit()); // Trigger restore
 						break;
 					} catch( Error &e ) {
-						TraceEvent("SetRestoreRequestError").detail("ErrorInfo", e.what());
 						wait( tr1.onError(e) );
 					}
 				};
-				printf("MX:Test workload triggers the restore by setting up restoreRequestTriggerKey\n");
+				printf("FastRestore:Test workload triggers the restore by setting up restoreRequestTriggerKey\n");
 
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
@@ -634,45 +627,29 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// MX: We should wait on all restore before proceeds
 				printf("Wait for restore to finish\n");
-				state int waitNum = 0;
+				state bool restoreDone = false;
 				state ReadYourWritesTransaction tr2(cx);
 				state Future<Void> watch4RestoreRequestDone;
 				loop {
 					try {
-						tr2.reset();
-						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						//TraceEvent("CheckRestoreRequestDoneMX");
-						watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
-						wait( tr2.commit() );
-						printf("[INFO] Finish setting up watch for restoreRequestDoneKey\n");
-						break;
-					} catch( Error &e ) {
-						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						printf("[WARNING] Transaction error: setting up watch for restoreRequestDoneKey, error:%s\n", e.what());
-						wait( tr2.onError(e) );
-					}
-				}
-
-				loop {
-					try {
+						if ( restoreDone ) break;
 						tr2.reset();
 						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						Optional<Value> restoreRequestDoneKeyValue = wait( tr2.get(restoreRequestDoneKey) );
 						// Restore may finish before restoreAgent waits on the restore finish event.
 						if ( restoreRequestDoneKeyValue.present() ) {
-							printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction");
+							restoreDone = true; // In case commit clears the key but in unknown_state
 							tr2.clear(restoreRequestDoneKey);
 							wait( tr2.commit() );
 							break;
+						} else {
+							watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
+							wait( tr2.commit() );
+							wait(watch4RestoreRequestDone);
+							break;
 						}
-						wait(watch4RestoreRequestDone);
-						printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
-						//break;
 					} catch( Error &e ) {
-						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						//printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
 						wait( tr2.onError(e) );
 					}
 				}

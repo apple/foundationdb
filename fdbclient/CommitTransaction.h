@@ -47,12 +47,8 @@ static const char* typeString[] = { "SetValue",
 	                                "CompareAndClear" };
 
 struct MutationRef;
-
 std::string getHexString(StringRef input);
 std::string getHexKey(StringRef input, int skip);
-void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string prefix);
-
-
 
 struct MutationRef { 
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries

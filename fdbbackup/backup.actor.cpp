@@ -3587,6 +3587,7 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case EXE_FASTRESTORE_AGENT:
+			// TODO: We have not implmented the code commented out in this case
 			if(!initCluster())
 				return FDB_EXIT_ERROR;
 			switch(restoreType) {
@@ -3733,81 +3734,42 @@ int main(int argc, char* argv[]) {
 	flushAndExit(status);
 }
 
-
-// Fast Restore Functions
-
 //------Restore Agent: Kick off the restore by sending the restore requests
 ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx, Key tagName, bool verbose) {
-	// MX: We should wait on all restore before proceeds
+	// We should wait on all restore to finish before proceeds
 	printf("Wait for restore to finish\n");
-	state int waitNum = 0;
-	state ReadYourWritesTransaction tr2(cx);
+	state ReadYourWritesTransaction tr(cx);
 	state Future<Void> watch4RestoreRequestDone;
-	loop {
-		try {
-			tr2.reset();
-			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
-			wait( tr2.commit() );
-			printf("[INFO] Finish setting up watch for restoreRequestDoneKey\n");
-			break;
-		} catch( Error &e ) {
-			TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-			printf("[WARNING] Transaction error: setting up watch for restoreRequestDoneKey, error:%s\n", e.what());
-			wait( tr2.onError(e) );
-		}
-	}
+	state bool restoreRequestDone = false;
 
 	loop {
 		try {
-			tr2.reset();
-			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> restoreRequestDoneKeyValue = wait( tr2.get(restoreRequestDoneKey) );
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			// In case restoreRequestDoneKey is already set before we set watch on it
+			Optional<Value> restoreRequestDoneKeyValue = wait( tr.get(restoreRequestDoneKey) );
 			if ( restoreRequestDoneKeyValue.present() ) {
-				//printf("!!! restoreRequestTriggerKey has been set before we wait on the key: Restore has been done before restore agent waits for the done key\n");
+				restoreRequestDone = true; 
+				tr.clear(restoreRequestDoneKey);
+				wait( tr.commit() );
 				break;
+			} else {
+				watch4RestoreRequestDone = tr.watch(restoreRequestDoneKey);
+				wait( tr.commit() );
 			}
-			wait(watch4RestoreRequestDone);
-			printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
-			break;
-		} catch( Error &e ) {
-			TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-			//printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
-			wait( tr2.onError(e) );
-		}
-	}
-
-	loop {
-		try {
-			tr2.reset();
-			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
-			if (numFinished.present()) {
-				int num = decodeRestoreRequestDoneValue(numFinished.get());
-				TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
-				printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
+			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
+			if ( !restoreRequestDone ) {
+				wait(watch4RestoreRequestDone);
 			}
-			printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction\n");
-			tr2.clear(restoreRequestDoneKey);
-			// NOTE: The clear transaction may fail in uncertain state. We need to retry to clear the key
-			wait( tr2.commit() );
-			break;
 		} catch( Error &e ) {
-			TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-			printf("[WARNING] Clearing the restoreRequestDoneKey has error in transaction: %s. We will retry to clear the key\n", e.what());
-			wait( tr2.onError(e) );
+			wait( tr.onError(e) );
 		}
-
 	}
 
 	printf("MX: Restore is finished\n");
 
 	return FileBackupAgent::ERestoreState::COMPLETED;
-
 }
 
 
@@ -3816,23 +3778,17 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 	state BackupDescription desc = wait(bc->describeBackup());
 	wait(desc.resolveVersionTimes(cx));
 
-	printf("Backup Description\n%s", desc.toString().c_str());
 	if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 		targetVersion = desc.maxRestorableVersion.get();
 
 	Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
-	printf("targetVersion:%ldd restoreSet present:%d\n", (long long)  targetVersion,  restoreSet.present());
+	TraceEvent("FastRestore").detail("BackupDesc", desc.toString()).detail("TargetVersion", targetVersion);
 
 	if(!restoreSet.present()) {
 		TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			.detail("BackupContainer", bc->getURL())
 			.detail("TargetVersion", targetVersion);
-		fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
 		throw restore_invalid_version();
-	}
-
-	if (verbose) {
-		printf("Restoring backup to version: %lld\n", (long long) targetVersion);
 	}
 
 	// NOTE: The restore agent makes sure we only support 1 restore range for each restore request for now!
@@ -3848,7 +3804,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 			struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(bc->getURL()), true, targetVersion, true, range, Key(), Key(), locked, g_random->randomUniqueID());
 			tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 			tr->set(restoreRequestTriggerKey, restoreRequestTriggerValue(1)); //backupRanges.size = 1 because we only support restoring 1 range in real mode
-			wait(tr->commit()); //Trigger MX restore
+			wait(tr->commit()); // Trigger fast restore
 			break;
 		} catch(Error &e) {
 			if(e.code() != error_code_restore_duplicate_tag) {
