@@ -37,12 +37,10 @@
 
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
-ACTOR static Future<Version> processRestoreRequestV2(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
 ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Database cx, Standalone<VectorRef<RestoreRequest>> restoreRequests);
 
 ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
-ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig);
 ACTOR static Future<Void> distributeWorkloadPerVersionBatchV2(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch);
 ACTOR static Future<Void> _clearDB(Database cx);
 ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status);
@@ -77,8 +75,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 		for ( auto &it : restoreRequests ) {
 			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
 			printf("Node:%s Got RestoreRequestInfo:%s\n", self->describeNode().c_str(), it.toString().c_str());
-			//Version ver = wait( processRestoreRequest(it, self, cx) );
-			Version ver = wait( processRestoreRequestV2(it, self, cx) );
+			Version ver = wait( processRestoreRequest(it, self, cx) );
 		}
 
 		// Step: Notify all restore requests have been handled by cleaning up the restore keys
@@ -96,133 +93,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 	return Void();
 }
 
-
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
-	//MX: Lock DB if it is not locked
-	printf("RestoreRequest lockDB:%d\n", request.lockDB);
-	if ( request.lockDB == false ) {
-		printf("[WARNING] RestoreRequest lockDB:%d; we will overwrite request.lockDB to true and forcely lock db\n", request.lockDB);
-		request.lockDB = true;
-		request.lockDB = true;
-	}
-
-	state long curBackupFilesBeginIndex = 0;
-	state long curBackupFilesEndIndex = 0;
-
-	state double totalWorkloadSize = 0;
-	state double totalRunningTime = 0; // seconds
-	state double curRunningTime = 0; // seconds
-	state double curStartTime = 0;
-	state double curEndTime = 0;
-	state double curWorkloadSize = 0; //Bytes
-
-	
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(request.randomUid));
-
-	// // lock DB for restore
-	// ASSERT( request.lockDB );
-	// wait(lockDatabase(cx, request.randomUid));
-	// wait( _clearDB(cx) );
-
-	// Step: Collect all backup files
-	printf("===========Restore request start!===========\n");
-	state double startTime = now();
-	wait( _collectBackupFiles(self, cx, request) );
-	printf("[Perf] Node:%s collectBackupFiles takes %.2f seconds\n", self->describeNode().c_str(), now() - startTime);
-	self->constructFilesWithVersionRange();
-	self->files.clear(); // Ensure no mistakely use self->files
-	
-	// Sort the backup files based on end version.
-	sort(self->allFiles.begin(), self->allFiles.end());
-	self->printAllBackupFilesInfo();
-
-	self->buildVersionBatches();
-
-	self->buildForbiddenVersionRange();
-	self->printForbiddenVersionRange();
-	if ( self->isForbiddenVersionRangeOverlapped() ) {
-		fprintf(stderr, "[ERROR] forbidden version ranges are overlapped! Check out the forbidden version range above\n");
-	}
-
-	self->batchIndex = 0;
-	state int prevBatchIndex = 0;
-	state long prevCurBackupFilesBeginIndex = 0;
-	state long prevCurBackupFilesEndIndex = 0;
-	state double prevCurWorkloadSize = 0;
-	state double prevtotalWorkloadSize = 0;
-
-
-	loop {
-		try {
-			curStartTime = now();
-			self->files.clear();
-			self->resetPerVersionBatch();
-			// Checkpoint the progress of the previous version batch
-			prevBatchIndex = self->batchIndex;
-			prevCurBackupFilesBeginIndex = self->curBackupFilesBeginIndex;
-			prevCurBackupFilesEndIndex = self->curBackupFilesEndIndex;
-			prevCurWorkloadSize = self->curWorkloadSize;
-			prevtotalWorkloadSize = self->totalWorkloadSize;
-			
-			bool hasBackupFilesToProcess = self->collectFilesForOneVersionBatch();
-			if ( !hasBackupFilesToProcess ) { // No more backup files to restore
-				printf("No backup files to process any more\n");
-				break;
-			}
-
-			printf("[Progress][Start version batch] Node:%s, restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", self->describeNode().c_str(), self->batchIndex, self->curWorkloadSize);
-
-			wait( initializeVersionBatch(self) );
-
-			wait( distributeWorkloadPerVersionBatch(self, cx, request, restoreConfig) );
-
-			curEndTime = now();
-			curRunningTime = curEndTime - curStartTime;
-			ASSERT(curRunningTime >= 0);
-			totalRunningTime += curRunningTime;
-
-			struct FastRestoreStatus status;
-			status.curRunningTime = curRunningTime;
-			status.curWorkloadSize = self->curWorkloadSize;
-			status.curSpeed = self->curWorkloadSize /  curRunningTime;
-			status.totalRunningTime = totalRunningTime;
-			status.totalWorkloadSize = self->totalWorkloadSize;
-			status.totalSpeed = self->totalWorkloadSize / totalRunningTime;
-
-			printf("[Progress][Finish version batch] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
-					self->batchIndex, self->curWorkloadSize,
-					status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
-
-			wait( registerStatus(cx, status) );
-			printf("[Progress] Finish 1 version batch. curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld allFiles.size():%ld",
-				self->curBackupFilesBeginIndex, self->curBackupFilesEndIndex, self->allFiles.size());
-
-			self->curBackupFilesBeginIndex = self->curBackupFilesEndIndex + 1;
-			self->curBackupFilesEndIndex++;
-			self->curWorkloadSize = 0;
-			self->batchIndex++;
-
-		} catch(Error &e) {
-			fprintf(stdout, "!!![MAY HAVE BUG] Reset the version batch state to the start of the current version batch, due to error:%s\n", e.what());
-			if(e.code() != error_code_restore_duplicate_tag) {
-				wait(tr->onError(e));
-			}
-			self->batchIndex = prevBatchIndex;
-			self->curBackupFilesBeginIndex = prevCurBackupFilesBeginIndex;
-			self->curBackupFilesEndIndex = prevCurBackupFilesEndIndex;
-			self->curWorkloadSize = prevCurWorkloadSize;
-			self->totalWorkloadSize = prevtotalWorkloadSize;
-		}
-	}
-
-	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
-
-	return request.targetVersion;
-}
-
-
-ACTOR static Future<Version> processRestoreRequestV2(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
 	wait( _collectBackupFiles(self, cx, request) );
 	self->constructFilesWithVersionRange();
 	self->buildVersionBatches();
@@ -234,160 +105,6 @@ ACTOR static Future<Version> processRestoreRequestV2(RestoreRequest request, Ref
 
 	printf("Finish restore uid:%s \n", request.randomUid.toString().c_str());
 	return request.targetVersion;
-}
-
-enum RestoreFileType { RangeFileType = 0, LogFileType = 1 };
-// Distribution workload per version batch
-ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
-	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
-
-	if ( self->isBackupEmpty() ) {
-		printf("[WARNING] Node:%s distributeWorkloadPerVersionBatch() load an empty batch of backup. Print out the empty backup files info.\n", self->describeNode().c_str());
-		self->printBackupFilesInfo();
-		return Void();
-	}
-
-	printf("[INFO] Node:%s mutationLogPrefix:%s (hex value:%s)\n", self->describeNode().c_str(), mutationLogPrefix.toString().c_str(), getHexString(mutationLogPrefix).c_str());
-
-	// Determine the key range each applier is responsible for
-	int numLoaders = self->loadersInterf.size();
-	int numAppliers = self->appliersInterf.size();
-	ASSERT( numLoaders > 0 );
-	ASSERT( numAppliers > 0 );
-
-	state int loadingSizeMB = 0; //numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
-
-	state double startTime = now();
-	state double startTimeBeforeSampling = now();
-	
-	dummySampleWorkload(self);
-
-	printf("[Progress] distributeWorkloadPerVersionBatch sampling time:%.2f seconds\n", now() - startTime);
-	state double startTimeAfterSampling = now();
-
-	startTime = now();
-	wait( notifyAppliersKeyRangeToLoader(self, cx) );
-	printf("[Progress] distributeWorkloadPerVersionBatch notifyAppliersKeyRangeToLoader time:%.2f seconds\n", now() - startTime);
-
-	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
-	// Prepare the request for each loading request to each loader
-	// Send all requests in batch and wait for the ack from loader and repeats
-	// NOTE: We must split the workload in the correct boundary:
-	// For range file, it's the block boundary;
-	// For log file, it is the version boundary. This is because
-	// (1) The set of mutations at a version may be encoded in multiple KV pairs in log files.
-	// We need to concatenate the related KVs to a big KV before we can parse the value into a vector of mutations at that version
-	// (2) The backuped KV are arranged in blocks in range file.
-	// For simplicity, we distribute at the granularity of files for now.
-	startTime = now();
-	state RestoreFileType processedFileType = RestoreFileType::LogFileType; // We should load log file before we do range file
-	state int curFileIndex;
-	state long curOffset;
-	state bool allLoadReqsSent;
-	state Version prevVersion;
-	
-	loop {
-		curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
-		curOffset = 0;
-		allLoadReqsSent = false;
-		prevVersion = 0; // Start version for range or log file is 0
-		std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
-		loop {
-			if ( allLoadReqsSent ) {
-				break; // All load requests have been handled
-			}
-
-			printf("[INFO] Number of backup files:%ld curFileIndex:%d\n", self->files.size(), curFileIndex);
-			// Future: Load balance the amount of data for loaders
-			for (auto &loader : self->loadersInterf) {
-				UID loaderID = loader.first;
-				RestoreLoaderInterface loaderInterf = loader.second;
-
-				// Skip empty files
-				while (  curFileIndex < self->files.size() && self->files[curFileIndex].fileSize == 0 ) {
-					printf("[INFO] File %ld:%s filesize:%ld skip the file\n", curFileIndex,
-							self->files[curFileIndex].fileName.c_str(), self->files[curFileIndex].fileSize);
-					curFileIndex++;
-					curOffset = 0;
-				}
-				// All files under the same type have been loaded
-				if ( curFileIndex >= self->files.size() ) {
-					allLoadReqsSent = true;
-					break;
-				}
-			
-				if ( (processedFileType == RestoreFileType::LogFileType && self->files[curFileIndex].isRange) 
-					|| (processedFileType == RestoreFileType::RangeFileType && !self->files[curFileIndex].isRange) ) {
-					printf("Skip fileIndex:%d processedFileType:%d file.isRange:%d\n", curFileIndex, processedFileType, self->files[curFileIndex].isRange);
-					self->files[curFileIndex].cursor = 0;
-					curFileIndex++;
-					curOffset = 0;
-				} else { // Create the request
-					// Prepare loading
-					LoadingParam param;
-					param.url = request.url;
-					param.prevVersion = prevVersion; 
-					param.endVersion = self->files[curFileIndex].isRange ? self->files[curFileIndex].version : self->files[curFileIndex].endVersion;
-					prevVersion = param.endVersion;
-					param.isRangeFile = self->files[curFileIndex].isRange;
-					param.version = self->files[curFileIndex].version;
-					param.filename = self->files[curFileIndex].fileName;
-					param.offset = 0; //curOffset; //self->files[curFileIndex].cursor;
-					//param.length = std::min(self->files[curFileIndex].fileSize - curOffset, self->files[curFileIndex].blockSize);
-					param.length = self->files[curFileIndex].fileSize; // We load file by file, instead of data block by data block for now
-					param.blockSize = self->files[curFileIndex].blockSize;
-					param.restoreRange = request.range;
-					param.addPrefix = request.addPrefix;
-					param.removePrefix = request.removePrefix;
-					param.mutationLogPrefix = mutationLogPrefix;
-					ASSERT_WE_THINK( param.length > 0 );
-					ASSERT_WE_THINK( param.offset >= 0 );
-					ASSERT_WE_THINK( param.offset < self->files[curFileIndex].fileSize );
-					ASSERT_WE_THINK( param.prevVersion <= param.endVersion );
-
-					requests.push_back( std::make_pair(loader.first, RestoreLoadFileRequest(param)) );
-					// Log file to be loaded
-					TraceEvent("FastRestore").detail("LoadFileIndex", curFileIndex)
-						 .detail("LoadParam", param.toString())
-						 .detail("LoaderID", loaderID.toString());
-					curFileIndex++;
-				}
-				
-				if ( curFileIndex >= self->files.size() ) {
-					allLoadReqsSent = true;
-					break;
-				}
-			}
-
-			if (allLoadReqsSent) {
-				printf("[INFO] allLoadReqsSent has finished.\n");
-				break;
-			}
-		}
-		// Wait on the batch of load files or log files
-		wait( sendBatchRequests(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests) );
-
-		if ( processedFileType ==  RestoreFileType::RangeFileType ) {
-			break;
-		}
-		processedFileType = RestoreFileType::RangeFileType; // The second batch is RangeFile
-	}
-
-	printf("[Progress] distributeWorkloadPerVersionBatch loadFiles time:%.2f seconds\n", now() - startTime);
-	
-	// Notify the applier to applly mutation to DB
-	startTime = now();
-	wait( notifyApplierToApplyMutations(self) );
-	printf("[Progress] distributeWorkloadPerVersionBatch applyToDB time:%.2f seconds\n", now() - startTime);
-
-	state double endTime = now();
-
-	double runningTime = endTime - startTimeBeforeSampling;
-	printf("[Progress] Node:%s distributeWorkloadPerVersionBatch runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds\n",
-			self->describeNode().c_str(),
-			runningTime, endTime - startTimeAfterSampling);
-
-	return Void();
 }
 
 ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch, bool isRangeFile ) {

@@ -58,11 +58,7 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	// Temporary variables to hold files and data to restore
 	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
 	std::vector<RestoreFileFR> files; // Backup files to be parsed and applied: range and log files in 1 version batch
-	std::map<Version, Version> forbiddenVersions; // forbidden version range [first, second)
 
-	// In each version batch, we process the files in [curBackupFilesBeginIndex, curBackupFilesEndIndex] in RestoreMasterData.allFiles.
-	long curBackupFilesBeginIndex;
-	long curBackupFilesEndIndex;
 	double totalWorkloadSize;
 	double curWorkloadSize;
 	int batchIndex;
@@ -86,8 +82,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 
 		batchIndex = 0;
 		curWorkloadSize = 0;
-		curBackupFilesBeginIndex = 0;
-		curBackupFilesEndIndex = 0;
 		totalWorkloadSize = 0;
 		curWorkloadSize = 0;
 	}
@@ -185,64 +179,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
-	void buildForbiddenVersionRange() {
-		printf("[INFO] Build forbidden version ranges for all backup files: num:%ld\n", allFiles.size());
-		for (int i = 0; i < allFiles.size(); ++i) {
-			if (!allFiles[i].isRange) {
-				forbiddenVersions.insert(std::make_pair(allFiles[i].beginVersion, allFiles[i].endVersion));
-			}
-		}
-	}
-
-	bool isForbiddenVersionRangeOverlapped() {
-		printf("[INFO] Check if forbidden version ranges is overlapped: num of ranges:%ld\n", forbiddenVersions.size());
-		if (forbiddenVersions.empty()) {
-			return false;
-		}
-
-		std::map<Version, Version>::iterator prevRange = forbiddenVersions.begin();
-		std::map<Version, Version>::iterator curRange = forbiddenVersions.begin();
-		curRange++; // Assume forbiddenVersions has at least one element!
-
-		while ( curRange != forbiddenVersions.end() ) {
-			if ( curRange->first < prevRange->second ) {
-				return true; // overlapped
-			}
-			curRange++;
-		}
-
-		return false; //not overlapped
-	}
-
-
-	void printForbiddenVersionRange() {
-		printf("[INFO] Number of forbidden version ranges:%ld\n", forbiddenVersions.size());
-		int i = 0;
-		for (auto &range : forbiddenVersions) {
-			printf("\t[INFO][Range%d] [%ld, %ld)\n", i, range.first, range.second);
-			++i;
-		}
-	}
-
-	// endVersion is begin version for range file, because range file takes snapshot at the same version
-	// endVersion is the end version (excluded) for mutations recoselfed in log file
-	bool isVersionInForbiddenRange(Version endVersion, bool isRange) {
-		bool isForbidden = false;
-		for (auto &range : forbiddenVersions) {
-			if ( isRange ) { //the range file includes mutations at the endVersion
-				if (endVersion >= range.first && endVersion < range.second) {
-					isForbidden = true;
-					break;
-				}
-			} else { // the log file does NOT include mutations at the endVersion
-				continue; // Log file's endVersion is always a valid version batch boundary as long as the forbidden version ranges do not overlap
-			}
-		}
-
-		return isForbidden;
-	}
-
-
 	void printAppliersKeyRange() {
 		printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
 		// applier type: std::map<Standalone<KeyRef>, UID>
@@ -270,59 +206,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		bc = IBackupContainer::openContainer(url.toString());
 		//state BackupDescription desc = wait(self->bc->describeBackup());
 		//return Void();
-	}
-
-	// Collect the set of backup files to be used for a version batch
-	// Return true if there is still files to be restored; false otherwise.
-	// This function will change the process' RestoreMasterData
-	bool collectFilesForOneVersionBatch() {
-		files.clear();
-		curWorkloadSize = 0;
-		Version endVersion = -1;
-		bool isRange = false;
-		bool validVersion = false;
-		// Step: Find backup files in each version batch and restore them.
-		while ( curBackupFilesBeginIndex < allFiles.size() ) {
-			// Find the curBackupFilesEndIndex, such that the to-be-loaded files size (curWorkloadSize) is as close to loadBatchSizeThresholdB as possible,
-			// and curBackupFilesEndIndex must not belong to the forbidden version range!
-			if ( curBackupFilesEndIndex < allFiles.size() ) {
-				endVersion =  allFiles[curBackupFilesEndIndex].endVersion;
-				isRange = allFiles[curBackupFilesEndIndex].isRange;
-				validVersion = !isVersionInForbiddenRange(endVersion, isRange);
-				curWorkloadSize  += allFiles[curBackupFilesEndIndex].fileSize;
-				printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:%ld, files.size:%ld\n",
-					batchIndex, (long long) endVersion, isRange, validVersion, curWorkloadSize , curBackupFilesBeginIndex, curBackupFilesEndIndex, allFiles.size());
-			}
-			if ( (validVersion && curWorkloadSize  >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= allFiles.size() )  {
-				if ( curBackupFilesEndIndex >= allFiles.size() && curWorkloadSize <= 0 ) {
-					printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%ld, curWorkloadSize:%.2f\n",
-							curBackupFilesEndIndex, allFiles.size(), curWorkloadSize );
-					//break; // return result
-				}
-				// Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
-				//resetPerVersionBatch();
-				if ( curBackupFilesBeginIndex < allFiles.size()) {
-					for (int fileIndex = curBackupFilesBeginIndex; fileIndex <= curBackupFilesEndIndex && fileIndex < allFiles.size(); fileIndex++) {
-						files.push_back(allFiles[fileIndex]);
-					}
-				}
-				printBackupFilesInfo();
-				totalWorkloadSize += curWorkloadSize;
-				break;
-			} else if (validVersion && curWorkloadSize < loadBatchSizeThresholdB) {
-				curBackupFilesEndIndex++;
-			} else if (!validVersion && curWorkloadSize < loadBatchSizeThresholdB) {
-				curBackupFilesEndIndex++;
-			} else if (!validVersion && curWorkloadSize >= loadBatchSizeThresholdB) {
-				// Now: just move to the next file. We will eventually find a valid version but load more than loadBatchSizeThresholdB
-				printf("[WARNING] The loading batch size will be larger than expected! curBatchSize:%.2fB, expectedBatchSize:%2.fB, endVersion:%ld\n",
-						curWorkloadSize, loadBatchSizeThresholdB, endVersion);
-				curBackupFilesEndIndex++;
-				// TODO: Roll back to find a valid version
-			}
-		}
-
-		return (files.size() > 0);
 	}
 };
 
