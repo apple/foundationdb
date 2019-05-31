@@ -41,16 +41,6 @@ extern int numRoles;
 
 std::string getRoleStr(RestoreRole role);
 
- struct FastRestoreStatus {
-	double curWorkloadSize;
-	double curRunningTime;
-	double curSpeed;
-
-	double totalWorkloadSize;
-	double totalRunningTime;
-	double totalSpeed;
-};
-
 // Common restore request/response interface
 // Reply type
 struct RestoreCommonReply { 

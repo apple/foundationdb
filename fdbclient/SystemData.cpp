@@ -743,7 +743,7 @@ RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
 	return s;
 }
 
-// restoreStatus key
+// TODO: Register restore performance data to restoreStatus key
 const Key restoreStatusKeyFor ( StringRef statusType) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreStatusKey);

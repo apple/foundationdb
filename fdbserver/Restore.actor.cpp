@@ -68,12 +68,10 @@ int restoreStatusIndex = 0;
 class RestoreConfig;
 struct RestoreWorkerData; // Only declare the struct exist but we cannot use its field
 
-// Forwaself declaration
 void initRestoreWorkerConfig();
 
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf, Database cx);
 ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self);
-// ACTOR Future<Void> commitRestoreRoleInterfaces(Reference<RestoreWorkerData> self, Database cx);
 ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self, ActorCollection *actors, Database cx);
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers = 2);
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> self);
@@ -190,10 +188,6 @@ void initRestoreWorkerConfig() {
 	loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 	mutationVectorThreshold = g_network->isSimulated() ? 100 : mutationVectorThreshold; // Bytes // correctness passed when the value is 1
 	transactionBatchSizeThreshold = g_network->isSimulated() ? 512 : transactionBatchSizeThreshold; // Byte
-
-	// Debug
-	//loadBatchSizeThresholdB = 1;
-	//transactionBatchSizeThreshold = 1;
 
 	printf("Init RestoreWorkerConfig. min_num_workers:%d ratio_loader_to_applier:%d loadBatchSizeMB:%.2f loadBatchSizeThresholdB:%.2f transactionBatchSizeThreshold:%.2f\n",
 			MIN_NUM_WORKERS, ratio_loader_to_applier, loadBatchSizeMB, loadBatchSizeThresholdB, transactionBatchSizeThreshold);

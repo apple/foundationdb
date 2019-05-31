@@ -43,7 +43,6 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 ACTOR Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> distributeWorkloadPerVersionBatchV2(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch);
 ACTOR static Future<Void> _clearDB(Database cx);
-ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status);
 ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreMasterData> self, Database cx);
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 
@@ -395,37 +394,6 @@ ACTOR static Future<Void> finishRestore(Reference<RestoreMasterData> self, Datab
 	}
 
 	TraceEvent("FastRestore").detail("RestoreRequestsSize", restoreRequests.size());
-
-	return Void();
-}
-
-ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status) {
- 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
-		try {
-			printf("[Restore_Status][%d] curWorkload:%.2f curRunningtime:%.2f curSpeed:%.2f totalWorkload:%.2f totalRunningTime:%.2f totalSpeed:%.2f\n",
-					restoreStatusIndex, status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
-
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			tr->set(restoreStatusKeyFor(StringRef(std::string("curWorkload") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curWorkloadSize));
-			tr->set(restoreStatusKeyFor(StringRef(std::string("curRunningTime") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curRunningTime));
-			tr->set(restoreStatusKeyFor(StringRef(std::string("curSpeed") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curSpeed));
-
-			tr->set(restoreStatusKeyFor(StringRef(std::string("totalWorkload"))), restoreStatusValue(status.totalWorkloadSize));
-			tr->set(restoreStatusKeyFor(StringRef(std::string("totalRunningTime"))), restoreStatusValue(status.totalRunningTime));
-			tr->set(restoreStatusKeyFor(StringRef(std::string("totalSpeed"))), restoreStatusValue(status.totalSpeed));
-
-			wait( tr->commit() );
-			restoreStatusIndex++;
-
-			break;
-		} catch( Error &e ) {
-			wait(tr->onError(e));
-		}
-	 };
 
 	return Void();
 }
