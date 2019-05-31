@@ -157,7 +157,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		_parseSerializedMutation(&kvOps, &mutationMap);
 	}
 	
-	wait( registerMutationsToApplier(self, &kvOps, true, param.prevVersion, param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	wait( registerMutationsToApplier(self, &kvOps, param.isRangeFile, param.prevVersion, param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
 	
 	return Void();
 }
