@@ -42,7 +42,6 @@
 #include <sys/types.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
