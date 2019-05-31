@@ -178,8 +178,9 @@ ProcessData decodeWorkerListValue( ValueRef const& );
 extern const KeyRangeRef backupProgressKeys;
 extern const KeyRef backupProgressPrefix;
 const Key backupProgressKeyFor(UID workerID);
-const Value backupProgressValue(int64_t recoveryCount, Version version);
+const Value backupProgressValue(LogEpoch epoch, Version version);
 UID decodeBackupProgressKey(const KeyRef& key);
+void decodeBackupProgressValue(const ValueRef& value, LogEpoch& epoch, Version& version);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;

@@ -1230,6 +1230,33 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 	}
 }
 
+ACTOR Future<std::vector<std::tuple<UID, LogEpoch, Version>>> getBackupProgress(Reference<MasterData> self) {
+	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			state std::vector<std::tuple<UID, LogEpoch, Version>> progress;
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+			for (auto& it : results) {
+				UID workerID = decodeBackupProgressKey(it.key);
+				LogEpoch recoveryCount;
+				Version v;
+				decodeBackupProgressValue(it.value, recoveryCount, v);
+				progress.emplace_back(workerID, recoveryCount, v);
+				TraceEvent("GotBackupProgress", self->dbgid).detail("W", workerID).detail("Epoch", recoveryCount).detail("Version", v);
+			}
+			wait(tr.commit());
+			return progress;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	state TraceInterval recoveryInterval("MasterRecovery");
 	state double recoverStartTime = now();
@@ -1257,6 +1284,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, &self->forceRecovery);
+	state Future<std::vector<std::tuple<UID, LogEpoch, Version>>> backupProgress = getBackupProgress(self);
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
