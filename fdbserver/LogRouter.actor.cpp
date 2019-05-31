@@ -537,26 +537,11 @@ ACTOR Future<Void> logRouterCore(
 }
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface) {
-	loop{
-		bool isDisplaced = ( (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) || (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED) );
-		if(isDisplaced) {
-			for(auto& log : db->get().logSystemConfig.tLogs) {
-				if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
-					isDisplaced = false;
-					break;
-				}
-			}
-		}
-		if(isDisplaced) {
-			for(auto& old : db->get().logSystemConfig.oldTLogs) {
-				for(auto& log : old.tLogs) {
-					 if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-		}
+	loop {
+		bool isDisplaced =
+		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
+		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasLogRouter(myInterface.id());
 		if (isDisplaced) {
 			throw worker_removed();
 		}
