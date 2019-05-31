@@ -392,6 +392,7 @@ struct Peer : NonCopyable {
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 			state int64_t startingBytes = peer->bytesReceived;
+			state int timeouts = 0;
 			loop {
 				choose {
 					when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
@@ -399,7 +400,11 @@ struct Peer : NonCopyable {
 							TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
 							throw connection_failed();
 						}
+						if(timeouts > 1) {
+							TraceEvent(SevWarnAlways, "ConnectionSlowPing").suppressFor(1.0).detail("WithAddr", peer->destination).detail("Timeouts", timeouts);
+						}
 						startingBytes = peer->bytesReceived;
+						timeouts++;
 					}
 					when (wait( reply.getFuture() )) {
 						break;
