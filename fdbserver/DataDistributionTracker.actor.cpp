@@ -667,15 +667,10 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					break;
 				}
 
-				StatusObject storageMetricsObj;
-				storageMetricsObj["Bytes"] = stats->get().get().bytes;
-				storageMetricsObj["BytesPerKSecond"] = stats->get().get().bytesPerKSecond;
-				storageMetricsObj["IOsPerKSecond"] = stats->get().get().iosPerKSecond;
-
 				StatusObject shardStatsObj;
 				shardStatsObj["Begin"] = t.begin().toString();
 				shardStatsObj["End"] = t.end().toString();
-				shardStatsObj["Stats"] = storageMetricsObj;
+				shardStatsObj["ShardBytes"] = stats->get().get().bytes;
 
 				std::string shardStatsString = json_spirit::write_string(json_spirit::mValue(shardStatsObj),
 				                                                         json_spirit::Output_options::raw_utf8);
