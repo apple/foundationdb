@@ -47,15 +47,15 @@ struct OldLogData {
 	int32_t txsTags; // The number of txsTags, which may change across generations.
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
+	LogEpoch epoch;
 
-	OldLogData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
+	OldLogData() : epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
-	template<class T>
+	template <class T>
 	explicit OldLogData(const T& conf)
-		: logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochEnd(conf.epochEnd),
-		  pseudoLocalities(conf.pseudoLocalities)
-	{
+	  : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochEnd(conf.epochEnd),
+	    pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
 		tLogs.resize(conf.tLogs.size());
 		for (int j = 0; j < conf.tLogs.size(); j++) {
 			Reference<LogSet> logSet(new LogSet(conf.tLogs[j]));
@@ -102,8 +102,12 @@ LogSet::LogSet(const CoreTLogSet& coreSet) :
 	locality(coreSet.locality), startVersion(coreSet.startVersion),
 	satelliteTagLocations(coreSet.satelliteTagLocations)
 {
-	for(const auto& log : coreSet.tLogs) {
+	for (const auto& log : coreSet.tLogs) {
 		logServers.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(log)));
+	}
+	for (const auto& worker : coreSet.backupWorkers) {
+		backupWorkers.emplace_back(
+		    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(worker)));
 	}
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
@@ -128,10 +132,9 @@ TLogSet::TLogSet(const LogSet& rhs) :
 	}
 }
 
-OldTLogConf::OldTLogConf(const OldLogData& oldLogData) :
-	logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochEnd(oldLogData.epochEnd),
-	pseudoLocalities(oldLogData.pseudoLocalities)
-{
+OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
+  : logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochEnd(oldLogData.epochEnd),
+    pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}
@@ -149,12 +152,14 @@ CoreTLogSet::CoreTLogSet(const LogSet& logset) :
 	for (const auto &log : logset.logServers) {
 		tLogs.push_back(log->get().id());
 	}
+	for (const auto& worker : logset.backupWorkers) {
+		backupWorkers.push_back(worker->get().id());
+	}
 }
 
-OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData) :
-	logRouterTags(oldData.logRouterTags), txsTags(oldData.txsTags), epochEnd(oldData.epochEnd),
-	pseudoLocalities(oldData.pseudoLocalities)
-{
+OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
+  : logRouterTags(oldData.logRouterTags), txsTags(oldData.txsTags), epochEnd(oldData.epochEnd),
+    pseudoLocalities(oldData.pseudoLocalities), epoch(oldData.epoch) {
 	for (const Reference<LogSet>& logSet : oldData.tLogs) {
 		if (logSet->logServers.size()) {
 			tLogs.emplace_back(*logSet);
@@ -173,9 +178,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	int repopulateRegionAntiQuorum;
 	bool stopped;
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
-	std::map<int8_t, Version> pseudoLocalityPopVersion;
+	const LogEpoch epoch;
 
 	// new members
+	std::map<int8_t, Version> pseudoLocalityPopVersion;
 	Future<Void> rejoins;
 	Future<Void> recoveryComplete;
 	Future<Void> remoteRecovery;
@@ -195,7 +201,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
+	TagPartitionedLogSystem(UID dbgid, LocalityData locality, LogEpoch e,
+	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
+	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
+	    repopulateRegionAntiQuorum(0), epoch(e), recoveryCompleteWrittenToCoreState(false), locality(locality),
+	    remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false), addActor(addActor),
+	    popActors(false) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -272,7 +283,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf, bool excludeRemote, bool useRecoveredAt, Optional<PromiseStream<Future<Void>>> addActor ) {
 		ASSERT(lsConf.logSystemType == LogSystemType::tagPartitioned || (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()));
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
-		Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality, addActor) );
+		Reference<TagPartitionedLogSystem> logSystem(
+		    new TagPartitionedLogSystem(dbgid, locality, lsConf.epoch, addActor));
 
 		logSystem->tLogs.reserve(lsConf.tLogs.size());
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
@@ -301,7 +313,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	static Reference<ILogSystem> fromOldLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf ) {
 		ASSERT( lsConf.logSystemType == LogSystemType::tagPartitioned || (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()) );
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
-		Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
+		const LogEpoch e = lsConf.oldTLogs.size() > 0 ? lsConf.oldTLogs[0].epoch : 0;
+		Reference<TagPartitionedLogSystem> logSystem(new TagPartitionedLogSystem(dbgid, locality, e));
 
 		if (lsConf.oldTLogs.size()) {
 			for (const TLogSet& tLogSet : lsConf.oldTLogs[0].tLogs) {
@@ -333,6 +346,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		newState.logRouterTags = logRouterTags;
 		newState.txsTags = txsTags;
 		newState.pseudoLocalities = pseudoLocalities;
+		newState.epoch = epoch;
 		for (const auto &t : tLogs) {
 			if (t->logServers.size()) {
 				newState.tLogs.emplace_back(*t);
@@ -1204,7 +1218,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual LogSystemConfig getLogSystemConfig() {
-		LogSystemConfig logSystemConfig;
+		LogSystemConfig logSystemConfig(epoch);
 		logSystemConfig.logSystemType = logSystemType;
 		logSystemConfig.expectedLogSets = expectedLogSets;
 		logSystemConfig.logRouterTags = logRouterTags;
@@ -1417,7 +1431,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if (!prevState.tLogs.size()) {
 			// This is a brand new database
-			Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
+			Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality, 0) );
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->recoverAt = 0;
 			logSystem->knownCommittedVersion = 0;
@@ -1656,7 +1670,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
 				TEST( lastEnd.present() );  // Restarting recovery at an earlier point
 
-				Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
+				Reference<TagPartitionedLogSystem> logSystem(
+				    new TagPartitionedLogSystem(dbgid, locality, prevState.epoch));
 
 				lastEnd = minEnd;
 				logSystem->tLogs = logServers;
@@ -1853,6 +1868,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return localTags;
 	}
 
+	ACTOR static Future<Void> loadBackupProgress() {
+		// get a map of UID -> recoveryCount, savedVersion
+		// for each old epoch:
+		//    if savedVersion >= epochEnd - 1 = knownCommittedVersion
+		//        skip or remove this entry
+		//    else
+		//        recover/backup [savedVersion + 1, epochEnd - 1]
+		//        use the old recoveryCount and tag. Make sure old worker stopped.
+		return Void();
+	}
+
 	ACTOR static Future<Void> recruitBackupWorkers(Reference<TagPartitionedLogSystem> logSystem,
 	                                               RecruitFromConfigurationReply recruits, LogEpoch recoveryCount) {
 		if (recruits.backupWorkers.size() == 0) return Void();
@@ -1861,11 +1887,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (int i = 0; i < logSystem->logRouterTags; i++) {
 			const auto& worker = recruits.backupWorkers[i % recruits.backupWorkers.size()];
 			InitializeBackupRequest req(g_random->randomUniqueID());
-			req.recoveryCount = recoveryCount;
+			req.epoch = recoveryCount;
 			req.routerTag = Tag(tagLocalityLogRouter, i);
 			req.startVersion = logSystem->tLogs[0]->startVersion;
-			TraceEvent("BackupRecruitment").detail("WorkerID", worker.id()).detail("RecoveryCount", recoveryCount)
-			.detail("StartVersion", req.startVersion);
+			TraceEvent("BackupRecruitment")
+			    .detail("WorkerID", worker.id())
+			    .detail("Epoch", recoveryCount)
+			    .detail("StartVersion", req.startVersion);
 			initializationReplies.push_back(transformErrors(
 			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
 			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2032,7 +2060,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	ACTOR static Future<Reference<ILogSystem>> newEpoch( Reference<TagPartitionedLogSystem> oldLogSystem, RecruitFromConfigurationReply recr, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount,
 		int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> allTags, Reference<AsyncVar<bool>> recruitmentStalled ) {
 		state double startTime = now();
-		state Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality) );
+		state Reference<TagPartitionedLogSystem> logSystem(
+		    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));
 		logSystem->logSystemType = LogSystemType::tagPartitioned;
 		logSystem->expectedLogSets = 1;
 		logSystem->recoveredAt = oldLogSystem->recoverAt;

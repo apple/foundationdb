@@ -41,9 +41,9 @@ struct OldLogData;
 // At the moment, transaction logs are replicated but not partitioned, so the topology is as simple as a list of
 //   transaction log replicas and the write quorum that was used to commit to them.  The read quorum required to
 //   ensure durability of locking and recovery is therefore tLogWriteAntiQuorum + 1.
-
 struct CoreTLogSet {
-	std::vector< UID > tLogs;
+	std::vector<UID> tLogs;
+	std::vector<UID> backupWorkers;
 	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
 	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different from the current configuration
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
@@ -57,9 +57,13 @@ struct CoreTLogSet {
 	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
 	explicit CoreTLogSet(const LogSet& logset);
 
-	bool operator == (CoreTLogSet const& rhs) const { 
-		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
-			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
+	bool operator==(CoreTLogSet const& rhs) const {
+		return tLogs == rhs.tLogs && backupWorkers == rhs.backupWorkers &&
+		       tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor &&
+		       isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
+		       locality == rhs.locality && startVersion == rhs.startVersion &&
+		       ((!tLogPolicy && !rhs.tLogPolicy) ||
+		        (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
 	}
 
 	template <class Archive>
@@ -70,6 +74,9 @@ struct CoreTLogSet {
 		} else {
 			serializer(ar, tLogVersion);
 		}
+		if (ar.protocolVersion() > 0x0FDB00B061070001LL) {
+			serializer(ar, backupWorkers);
+		}
 	}
 };
 
@@ -79,12 +86,14 @@ struct OldTLogCoreData {
 	int32_t txsTags;
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
+	LogEpoch epoch;
 
-	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
+	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
-	bool operator == (OldTLogCoreData const& rhs) const { 
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
+	bool operator==(const OldTLogCoreData& rhs) const {
+		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+		       epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
 	}
 
 	template <class Archive>
@@ -103,6 +112,9 @@ struct OldTLogCoreData {
 		if (ar.protocolVersion().hasShardedTxsTags()) {
 			serializer(ar, txsTags);
 		}
+		if (ar.protocolVersion().hasBackupWorker()) {
+			serializer(ar, epoch);
+		}
 	}
 };
 
@@ -114,8 +126,9 @@ struct DBCoreState {
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
+	LogEpoch epoch;
 	
-	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
+	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty), epoch(0) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -134,10 +147,12 @@ struct DBCoreState {
 		return priorCommittedLogServers;
 	}
 
-	bool isEqual(DBCoreState const& r) const {
-		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags && pseudoLocalities == r.pseudoLocalities;
+	bool isEqual(const DBCoreState& r) const {
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
+		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
+		       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch;
 	}
-	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
+	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -155,6 +170,9 @@ struct DBCoreState {
 			}
 			if (ar.protocolVersion().hasShardedTxsTags()) {
 				serializer(ar, txsTags);
+			}
+			if (ar.protocolVersion().hasBackupWorker()) {
+				serializer(ar, epoch);  // TODO: serialize epoch in higher version?
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

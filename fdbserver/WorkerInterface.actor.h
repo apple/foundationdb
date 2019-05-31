@@ -124,7 +124,7 @@ struct InitializeTLogRequest {
 
 	ReplyPromise< struct TLogInterface > reply;
 
-	InitializeTLogRequest() {}
+	InitializeTLogRequest() : recoverFrom(0) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -151,9 +151,10 @@ struct InitializeLogRouterRequest {
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
-	uint64_t recoveryCount;
+	LogEpoch epoch;
 	Tag routerTag;
 	Version startVersion;
+	Optional<Version> endVersion;
 	ReplyPromise<struct BackupInterface> reply;
 
 	InitializeBackupRequest() = default;
@@ -161,7 +162,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recoveryCount, routerTag, startVersion, reply);
+		serializer(ar, reqId, epoch, routerTag, startVersion, endVersion, reply);
 	}
 };
 

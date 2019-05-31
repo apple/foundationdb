@@ -246,7 +246,7 @@ struct RegisterMasterRequest {
 
 	ReplyPromise<Void> reply;
 
-	RegisterMasterRequest() {}
+	RegisterMasterRequest() : logSystemConfig(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

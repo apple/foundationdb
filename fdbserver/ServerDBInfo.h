@@ -52,7 +52,7 @@ struct ServerDBInfo {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
 
-	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
+	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0) {}
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }

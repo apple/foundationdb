@@ -32,21 +32,25 @@ struct BackupData {
 	const UID myId;
 	const Tag tag;
 	const Version startVersion;
+	Version endVersion;  // mutable in a new epoch, i.e., end version for this epoch is known.
+	const LogEpoch epoch;
 	Version minKnownCommittedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<TagsAndMessage> messages;
 	std::vector<Version> versions;  // one for each of the "messages"
 	NotifiedVersion version;
+	AsyncTrigger backupDone;
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
-	  : myId(id), tag(req.routerTag), startVersion(req.startVersion), minKnownCommittedVersion(invalidVersion),
-	    version(invalidVersion) {
+	  : myId(id), tag(req.routerTag), startVersion(req.startVersion),
+	    endVersion(req.endVersion.present() ? req.endVersion.get() : std::numeric_limits<Version>::max()),
+	    epoch(req.epoch), minKnownCommittedVersion(invalidVersion), version(invalidVersion) {
 		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
 	}
 };
 
-ACTOR Future<Void> setProgress(BackupData* self, int64_t recoveryCount, Version backupVersion) {
+ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	state Transaction tr(self->cx);
 
 	loop {
@@ -55,7 +59,7 @@ ACTOR Future<Void> setProgress(BackupData* self, int64_t recoveryCount, Version 
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(recoveryCount, backupVersion));
+			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(self->epoch, backupVersion));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -77,15 +81,18 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			self->messages.erase(self->messages.begin());
 			self->versions.erase(self->versions.begin());
 		}
-		Future<Void> saveProgress = Void();
+		Future<Void> savedProgress = Void();
 		if (self->logSystem.get() && popVersion > lastPopVersion) {
 			const Tag popTag = self->logSystem.get()->getPseudoPopTag(self->tag, ProcessClass::BackupClass);
 			self->logSystem.get()->pop(popVersion, popTag);
 			lastPopVersion = popVersion;
 			TraceEvent("BackupWorkerPop", self->myId).detail("V", popVersion).detail("Tag", self->tag.toString());
-			saveProgress = setProgress(self, 0, popVersion);
+			savedProgress = saveProgress(self, popVersion);
 		}
-		wait(delay(30) && saveProgress);
+		if (lastPopVersion >= self->endVersion) {
+			self->backupDone.trigger();
+		}
+		wait(delay(30) && savedProgress);  // TODO: knobify the delay of 30s
 	}
 }
 
@@ -124,35 +131,34 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		tagAt = std::max(r->version().version, lastVersion);
 		TraceEvent("BackupWorkerGot", self->myId).detail("V", tagAt);
+		if (tagAt > self->endVersion) return Void();
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount,
-                                BackupInterface myInterface) {
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount,
+                                BackupData* self) {
+	state UID lastMasterID(0,0);
 	loop {
 		bool isDisplaced =
 		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
 		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasBackupWorker(self->myId);
 		if (isDisplaced) {
-			for (auto& log : db->get().logSystemConfig.tLogs) {
-				if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), myInterface.id())) {
-					isDisplaced = false;
-					break;
-				}
-			}
-		}
-		if (isDisplaced) {
-			for (auto& old : db->get().logSystemConfig.oldTLogs) {
-				for (auto& log : old.tLogs) {
-					if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), myInterface.id())) {
-						isDisplaced = false;
-						break;
-					}
-				}
-			}
-		}
-		if (isDisplaced) {
+			TraceEvent("BackupWorkerDisplaced", self->myId)
+			    .detail("RecoveryCount", recoveryCount)
+			    .detail("DBRecoveryCount", db->get().recoveryCount)
+				.detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
+		}
+		if (db->get().master.id() != lastMasterID) {
+			lastMasterID = db->get().master.id();
+			const Version endVersion = db->get().logSystemConfig.getEpochEndVersion(recoveryCount);
+			if (endVersion != invalidVersion) {
+				TraceEvent("BackupWorkerSet", self->myId)
+					.detail("Before", self->endVersion)
+					.detail("Now", endVersion - 1);
+				self->endVersion = endVersion - 1;
+			}
 		}
 		wait(db->onChange());
 	}
@@ -165,7 +171,10 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
 
-	TraceEvent("BackupWorkerStart", interf.id());
+	TraceEvent("BackupWorkerStart", interf.id())
+	    .detail("Tag", req.routerTag.toString())
+	    .detail("StartVersion", req.startVersion)
+	    .detail("LogEpoch", req.epoch);
 	try {
 		addActor.send(pullAsyncData(&self));
 		addActor.send(uploadData(&self));
@@ -181,16 +190,19 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				TraceEvent("BackupWorkerHalted", interf.id()).detail("ReqID", req.requesterID);
 				break;
 			}
-			when(wait(checkRemoved(db, req.recoveryCount, interf))) {
+			when(wait(checkRemoved(db, req.epoch, &self))) {
 				TraceEvent("BackupWorkerRemoved", interf.id());
+				break;
+			}
+			when(wait(self.backupDone.onTrigger())) {
+				TraceEvent("BackupWorkerDone", interf.id());
 				break;
 			}
 			when(wait(error)) {}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("BackupWorkerTerminated", interf.id()).error(e, true);
-		} else {
+		TraceEvent("BackupWorkerTerminated", interf.id()).error(e, true);
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_worker_removed) {
 			throw;
 		}
 	}

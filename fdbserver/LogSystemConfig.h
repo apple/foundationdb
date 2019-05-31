@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEMCONFIG_H
 #pragma once
 
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -175,8 +176,9 @@ struct OldTLogConf {
 	int32_t logRouterTags;
 	int32_t txsTags;
 	std::set<int8_t> pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
+	LogEpoch epoch;
 
-	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0) {}
+	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 	explicit OldTLogConf(const OldLogData&);
 
 	std::string toString() const {
@@ -184,7 +186,8 @@ struct OldTLogConf {
 	}
 
 	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities;
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags &&
+		       txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -201,7 +204,7 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities, txsTags);
+		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch);
 	}
 };
 
@@ -226,8 +229,10 @@ struct LogSystemConfig {
 	bool stopped;
 	Optional<Version> recoveredAt;
 	std::set<int8_t> pseudoLocalities;
+	LogEpoch epoch;
 
-	LogSystemConfig() : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false) {}
+	LogSystemConfig(LogEpoch e = 0)
+	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e) {}
 
 	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
@@ -365,7 +370,10 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags && recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs &&
+		       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags &&
+		       txsTags == r.txsTags && recruitmentID == r.recruitmentID && stopped == r.stopped &&
+		       recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities && epoch == r.epoch;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -442,9 +450,19 @@ struct LogSystemConfig {
 		return false;
 	}
 
+	Version getEpochEndVersion(LogEpoch epoch) const {
+		for (const auto& old : oldTLogs) {
+			if (old.epoch == epoch) {
+				return old.epochEnd;
+			}
+		}
+		return invalidVersion;
+	}
+
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt, pseudoLocalities, txsTags);
+	void serialize(Ar& ar) {
+		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped,
+		           recoveredAt, pseudoLocalities, txsTags, epoch);
 	}
 };
 
