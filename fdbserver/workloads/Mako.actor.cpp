@@ -18,7 +18,7 @@ struct MakoWorkload : KVWorkload {
 	std::vector<PerfIntCounter> opCounters;
 	std::vector<uint64_t> insertionCountsToMeasure;
 	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts;
-	std::string valueString, operationsSpec;
+	std::string operationsSpec;
 	//store operations to execute
 	int operations[MAX_OP][2];
 	// used for periodically tracing
@@ -67,8 +67,6 @@ struct MakoWorkload : KVWorkload {
 		ASSERT(seqNumLen + KEYPREFIXLEN <= keyBytes);
 		ASSERT(keyBytes <= MAXKEYVALUESIZE);
 		ASSERT(maxValueBytes <= MAXKEYVALUESIZE);
-		// used to store randomly generated value
-		valueString = std::string(maxValueBytes, '.');
 		// user input: a sequence of operations to be executed; e.g. "g10i5" means to do GET 10 times and Insert 5 times
 		// One operation type is defined as "<Type><Count>" or "<Type><Count>:<Range>".
 		// When Count is omitted, it's equivalent to setting it to 1.  (e.g. "g" is equivalent to "g1")
@@ -158,11 +156,12 @@ struct MakoWorkload : KVWorkload {
 			m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
 		}
 	}
-	static void randStr(std::string* str, int len) {
-		str->resize(len);
+	static std::string randStr(int len) {
+		std::string result(len, '.');
 		for (int i = 0; i < len; ++i) {
-			(*str)[i] = deterministicRandom()->randomAlphaNumeric();
+			result[i] = deterministicRandom()->randomAlphaNumeric();
 		}
+		return result;
 	}
 
 	static void randStr(char *str, int len){
@@ -173,7 +172,7 @@ struct MakoWorkload : KVWorkload {
 
 	Value randomValue() {
 		const int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
-		randStr(&valueString, length);
+		std::string valueString = randStr(length);
 		return StringRef(reinterpret_cast<const uint8_t*>(valueString.c_str()), length);
 	}
 
