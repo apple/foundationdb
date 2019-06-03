@@ -559,13 +559,43 @@ public:
 	}
 
 	std::string toString() const { return std::string( (const char*)data, length ); }
+	
 	std::string printable() const {
-		std::string s;
-		for (int i = 0; i<length; i++) {
-			uint8_t b = (*this)[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
+		constexpr char hex[] = "0123456789abcdef";
+
+		int additionalLength = 0;
+		for (int i = 0; i < length; i++) {
+			uint8_t b = data[i];
+			if (b == '\\') additionalLength += 1;
+			else if (b < 32 || b >= 127) additionalLength += 3;
+		}
+
+		if(additionalLength == 0) {
+			return std::string((const char*)data, length);
+		}
+		
+		std::string s(length + additionalLength, '\\');
+		int beginCopy = 0;
+		int resultPos = 0;
+		for (int i = 0; i < length; i++) {
+			uint8_t b = data[i];
+			if (b < 32 || b >= 127 || b == '\\') {
+				memcpy((char*)s.c_str() + resultPos,(const char*)data + beginCopy, i - beginCopy);
+				resultPos += i - beginCopy;
+				beginCopy = i + 1;
+				if (b == '\\') {
+					resultPos += 2;
+				} else {
+					++resultPos;
+					s[resultPos++] = 'x';
+					s[resultPos++] = hex[b >> 4];
+					s[resultPos++] = hex[b & 0xf];
+				}
+			}
+		}
+
+		if(beginCopy < length) {
+			memcpy((char*)s.c_str() + resultPos,(const char*)data + beginCopy, length - beginCopy);
 		}
 		return s;
 	}

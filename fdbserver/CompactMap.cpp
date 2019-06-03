@@ -355,17 +355,6 @@ struct CompactPreOrderTree {
 #endif
 };
 
-std::string printable(const StringRef& val) {
-	std::string s;
-	for (int i = 0; i<val.size(); i++) {
-		uint8_t b = val[i];
-		if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-		else if (b == '\\') s += "\\\\";
-		else s += format("\\x%02x", b);
-	}
-	return s;
-}
-
 void compactMapTests(std::vector<std::string> testData, std::vector<std::string> sampleQueries, std::string prefixTreeDOTFile = "") {
 	double t1, t2;
 	int r = 0;
