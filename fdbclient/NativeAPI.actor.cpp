@@ -1004,8 +1004,6 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if( g_network )
 		throw network_already_setup();
 
-	setThreadLocalDeterministicRandomSeed(platform::getRandomSeed());
-
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
@@ -1027,6 +1025,8 @@ void runNetwork() {
 	if(networkOptions.traceDirectory.present() && networkOptions.slowTaskProfilingEnabled) {
 		setupSlowTaskProfiler();
 	}
+
+	setThreadLocalDeterministicRandomSeed(platform::getRandomSeed());
 
 	g_network->run();
 
