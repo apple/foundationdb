@@ -10,8 +10,8 @@ enum {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_UPDATE, 
 enum {OP_COUNT, OP_RANGE};
 constexpr int MAXKEYVALUESIZE = 1000;
 constexpr int RANGELIMIT = 10000;
-struct MakoWorkload : KVWorkload {
-	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient;
+struct MakoWorkload : TestWorkload {
+	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval;
 	bool enableLogging, commitGet, populateData, runBenchmark, preserveData;
 	PerfIntCounter xacts, retries, conflicts, commits, totalOps;
@@ -30,7 +30,7 @@ struct MakoWorkload : KVWorkload {
 	static inline const int KEYPREFIXLEN = KEYPREFIX.size();
 	static inline const std::array<std::string, MAX_OP> opNames = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "INSERTRANGE", "CLEAR", "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE", "COMMIT"};
 	MakoWorkload(WorkloadContext const& wcx)
-	: KVWorkload(wcx),
+	: TestWorkload(wcx),
 	xacts("Transactions"), retries("Retries"), conflicts("Conflicts"), commits("Commits"), totalOps("Operations"),
 	loadTime(0.0)
 	{
@@ -57,8 +57,11 @@ struct MakoWorkload : KVWorkload {
 		// If true, record latency metrics per periodicLoggingInterval; For details, see tracePeriodically()
 		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
 		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
-		// Minimum key string length, overwrite the default value by KVWorkload
-		keyBytes = std::max(keyBytes, 16);
+		// Specified length of keys and length range of values
+		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16);
+		maxValueBytes = getOption( options, LiteralStringRef("valueBytes"), 16 );
+		minValueBytes = getOption( options, LiteralStringRef("minValueBytes"), maxValueBytes);
+		ASSERT(minValueBytes <= maxValueBytes);
 		// The inserted key is formatted as: fixed prefix('mako') + sequential number + padding('x')
 		// assume we want to insert 10000 rows with keyBytes set to 16, 
 		// then the key goes from 'mako00000xxxxxxx' to 'mako09999xxxxxxx'
@@ -176,7 +179,7 @@ struct MakoWorkload : KVWorkload {
 		return StringRef(reinterpret_cast<const uint8_t*>(valueString.c_str()), length);
 	}
 
-	Key getKeyForIndex(uint64_t ind) {
+	Key keyForIndex(uint64_t ind) {
 		Key result = makeString(keyBytes);
 		char* data = reinterpret_cast<char*>(mutateString(result));
 		format((KEYPREFIX + "%0*d").c_str(), seqNumLen, ind).copy(data, KEYPREFIXLEN + seqNumLen);
@@ -195,7 +198,7 @@ struct MakoWorkload : KVWorkload {
 		return digits;
 	}
 	Standalone<KeyValueRef> operator()(uint64_t n) {
-		return KeyValueRef(getKeyForIndex(n), randomValue());
+		return KeyValueRef(keyForIndex(n), randomValue());
 	}
 
 	ACTOR static Future<Void> tracePeriodically( MakoWorkload *self){
@@ -287,10 +290,10 @@ struct MakoWorkload : KVWorkload {
 						rangeLen = digits(range);
 						// generate random key-val pair for operation
 						indBegin = self->getRandomKey(self->rowCount);
-						rkey = self->getKeyForIndex(indBegin);
+						rkey = self->keyForIndex(indBegin);
 						rval = self->randomValue();
 						indEnd = std::min(indBegin + range, self->rowCount);
-						rkey2 = self->getKeyForIndex(indEnd);
+						rkey2 = self->keyForIndex(indEnd);
 						// KeyRangeRef(min, maxPlusOne)
 						rkeyRangeRef = KeyRangeRef(rkey, rkey2);
 
