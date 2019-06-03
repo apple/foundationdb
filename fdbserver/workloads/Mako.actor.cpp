@@ -25,10 +25,10 @@ struct MakoWorkload : TestWorkload {
 	std::vector<PerfMetric> periodicMetrics;
 	// store latency of each operation with sampling
 	std::vector<ContinuousSample<double>> opLatencies;
-
-	static inline const std::string KEYPREFIX = "mako";
-	static inline const int KEYPREFIXLEN = KEYPREFIX.size();
-	static inline const std::array<std::string, MAX_OP> opNames = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "INSERTRANGE", "CLEAR", "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE", "COMMIT"};
+	// prefix of keys populated, e.g. 'mako00000xxxxxxx'
+	const std::string KEYPREFIX = "mako";
+	const int KEYPREFIXLEN = KEYPREFIX.size();
+	const std::array<std::string, MAX_OP> opNames = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "INSERTRANGE", "CLEAR", "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE", "COMMIT"};
 	MakoWorkload(WorkloadContext const& wcx)
 	: TestWorkload(wcx),
 	xacts("Transactions"), retries("Retries"), conflicts("Conflicts"), commits("Commits"), totalOps("Operations"),
@@ -316,12 +316,12 @@ struct MakoWorkload : TestWorkload {
 							doCommit = true;
 						} else if (i == OP_INSERT){
 							// generate an (almost) unique key here, it starts with 'mako' and then comes with randomly generated characters
-							randStr(reinterpret_cast<char*>(mutateString(rkey)) + KEYPREFIXLEN, self->keyBytes-KEYPREFIXLEN);
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN, self->keyBytes-self->KEYPREFIXLEN);
 							tr.set(rkey, rval);
 							doCommit = true;
 						} else if (i == OP_INSERTRANGE){
 							char *rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-							randStr(rkeyPtr + KEYPREFIXLEN, self->keyBytes-KEYPREFIXLEN);
+							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes-self->KEYPREFIXLEN);
 							for (int range_i = 0; range_i < range; ++range_i){
 								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								tr.set(rkey, self->randomValue());
@@ -331,7 +331,7 @@ struct MakoWorkload : TestWorkload {
 							tr.clear(rkey);
 							doCommit = true;
 						} else if(i == OP_SETCLEAR){
-							randStr(reinterpret_cast<char*>(mutateString(rkey)) + KEYPREFIXLEN, self->keyBytes-KEYPREFIXLEN);
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN, self->keyBytes-self->KEYPREFIXLEN);
 							tr.set(rkey, rval);
 							// commit the change and update metrics
 							commitStart = now();
@@ -346,7 +346,7 @@ struct MakoWorkload : TestWorkload {
 							doCommit = true;
 						} else if (i == OP_SETCLEARRANGE){
 							char *rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-							randStr(rkeyPtr + KEYPREFIXLEN, self->keyBytes-KEYPREFIXLEN);
+							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes-self->KEYPREFIXLEN);
 							state std::string scr_start_key;
 							state std::string scr_end_key;
 							for (int range_i = 0; range_i < range; ++range_i){
@@ -398,7 +398,7 @@ struct MakoWorkload : TestWorkload {
 
 	ACTOR Future<Void> cleanup(Database cx, MakoWorkload* self){
 		// clear all data starts with 'mako' in the database
-		state std::string keyPrefix(KEYPREFIX);
+		state std::string keyPrefix(self->KEYPREFIX);
 		state ReadYourWritesTransaction tr(cx);
 
 		loop{
