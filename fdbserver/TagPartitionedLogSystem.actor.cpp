@@ -431,7 +431,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, debugID ), TaskTLogCommitReply ) );
+					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, data.getHasExecOp(), debugID ), TaskTLogCommitReply ) );
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);
@@ -1108,11 +1108,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) {
+	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations) {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
 			if(log->isLocal && log->logServers.size()) {
-				log->getPushLocations(tags, locations, locationOffset);
+				log->getPushLocations(tags, locations, locationOffset, allLocations);
 				locationOffset += log->logServers.size();
 			}
 		}

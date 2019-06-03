@@ -1474,6 +1474,29 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 	}
 }
 
+ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+	state int retryCount = 0;
+
+	loop {
+		state UID snapUID = deterministicRandom()->randomUniqueID();
+		try {
+			wait(snapCreate(cx, snapCmd, snapUID));
+			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
+			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
+			break;
+		} catch (Error& e) {
+			++retryCount;
+			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
+			if (retryCount > 3) {
+				fprintf(stderr, "Snapshot create failed, %d (%s)."
+						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+				throw;
+			}
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {

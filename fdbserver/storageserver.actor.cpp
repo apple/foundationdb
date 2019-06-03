@@ -49,6 +49,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1834,14 +1835,17 @@ void addMutation( Reference<T>& target, Version version, MutationRef const& muta
 }
 
 template <class T>
-void splitMutations( KeyRangeMap<T>& map, VerUpdateRef const& update ) {
-	for(auto& m : update.mutations) {
-		splitMutation(map, m, update.version);
+void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update, vector<int>& execIndex) {
+	for(int i = 0; i < update.mutations.size(); i++) {
+		splitMutation(data, map, update.mutations[i], update.version);
+		if (update.mutations[i].type == MutationRef::Exec) {
+			execIndex.push_back(i);
+		}
 	}
 }
 
 template <class T>
-void splitMutation( KeyRangeMap<T>& map, MutationRef const& m, Version ver ) {
+void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& m, Version ver) {
 	if(isSingleKeyMutation((MutationRef::Type) m.type)) {
 		if ( !SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(m.param1) )
 			addMutation( map.rangeContaining(m.param1)->value(), ver, m );
@@ -1855,9 +1859,51 @@ void splitMutation( KeyRangeMap<T>& map, MutationRef const& m, Version ver ) {
 				addMutation( i->value(), ver, MutationRef((MutationRef::Type)m.type, k.begin, k.end) );
 			}
 		}
-	}
-	else
+	} else if (m.type == MutationRef::Exec) {
+	} else
 		ASSERT(false);  // Unknown mutation type in splitMutations
+}
+
+ACTOR Future<Void>
+snapHelper(StorageServer* data, MutationRef m, Version ver)
+{
+	state std::string cmd = m.param1.toString();
+	if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
+		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
+		return Void();
+	}
+
+	state ExecCmdValueString execArg(m.param2);
+	state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
+	state int err = 0;
+	state Future<int> cmdErr;
+	state UID execUID = UID::fromString(uidStr.toString());
+	state bool skip = false;
+	if (cmd == execSnap && isTLogInSameNode()) {
+		skip = true;
+	}
+	// other storage has initiated the exec, so we can skip
+	if (!skip && isExecOpInProgress(execUID)) {
+		skip = true;
+	}
+
+	if (!skip) {
+		setExecOpInProgress(execUID);
+		int err = wait(execHelper(&execArg, data->folder, "role=storage"));
+		clearExecOpInProgress(execUID);
+	}
+	TraceEvent te = TraceEvent("ExecTraceStorage");
+	te.detail("Uid", uidStr.toString());
+	te.detail("Status", err);
+	te.detail("Role", "storage");
+	te.detail("Version", ver);
+	te.detail("Mutation", m.toString());
+	te.detail("Mid", data->thisServerID.toString());
+	te.detail("DurableVersion", data->durableVersion.get());
+	te.detail("DataVersion", data->version.get());
+	te.detail("Tag", data->tag.toString());
+	te.detail("SnapCreateSkipped", skip);
+	return Void();
 }
 
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
@@ -1967,21 +2013,29 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				if (this_block.more) {
 					Key nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
 					if (nfk != keys.end) {
-						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
+						state std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
 
 						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
 						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
-						auto otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+						state AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
 						// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
 						// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
-						for(auto u = updatesToSplit.begin(); u != updatesToSplit.end(); ++u)
-							splitMutations( data->shards, *u );
+						state vector<int> execIdxVec;
+						state std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
+						for(; u != updatesToSplit.end(); ++u) {
+							ASSERT(execIdxVec.size() == 0);
+							splitMutations(data, data->shards, *u, execIdxVec);
+							for (auto execIdx : execIdxVec) {
+								wait(snapHelper(data, u->mutations[execIdx], u->version));
+							}
+							execIdxVec.clear();
+						}
 
 						TEST( true );
 						TEST( shard->updates.size() );
@@ -2173,7 +2227,8 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 		adding->addMutation(version, mutation);
 	else if (readWrite)
 		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
-	else if (mutation.type != MutationRef::ClearRange) {
+	else if ((mutation.type != MutationRef::ClearRange)
+	         && (mutation.type != MutationRef::Exec)) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation.toString());
 		ASSERT(false);  // Mutation delivered to notAssigned shard!
 	}
@@ -2382,7 +2437,7 @@ public:
 			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
 			//}
 
-			splitMutation( data->shards, m, ver );
+			splitMutation(data, data->shards, m, ver);
 		}
 
 		if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
@@ -2588,6 +2643,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
+				if (pUpdate->mutations[mutationNum].type == MutationRef::Exec) {
+					wait(snapHelper(data, pUpdate->mutations[mutationNum], pUpdate->version));
+				}
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
 				if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
@@ -2659,6 +2717,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 						case MutationRef::CompareAndClear:
 							++data->counters.atomicMutations;
 							break;
+					}
+					if (msg.type == MutationRef::Exec) {
+						wait(snapHelper(data, msg, ver));
 					}
 				}
 				else

@@ -1964,7 +1964,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
+	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), numRetries(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
 }
@@ -1987,6 +1987,7 @@ void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	info = r.info;
 	backoff = r.backoff;
 	numErrors = r.numErrors;
+	numRetries = r.numRetries;
 	committedVersion = r.committedVersion;
 	versionstampPromise = std::move(r.versionstampPromise);
 	watches = r.watches;
@@ -2287,6 +2288,45 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	TEST(true); //NativeAPI atomic operation
 }
 
+ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayload, Optional<UID> debugID) {
+	try {
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
+		}
+
+		state ExecRequest req(execPayload, debugID);
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.Inside loop");
+		}
+		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::execReq, req, cx->taskID));
+		if (debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.After");
+		return Void();
+	} catch (Error& e) {
+		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
+		throw;
+	}
+}
+
+void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayload) {
+	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayload.toString());
+
+	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
+	if (cmdPayload.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
+
+	auto& req = tr;
+
+	// Helps with quickly finding the exec op in a tlog batch
+	setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+
+	auto& t = req.transaction;
+	auto r = singleKeyRange(cmdType, req.arena);
+	auto v = ValueRef(req.arena, cmdPayload);
+	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
+}
+
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 	auto &req = tr;
 	auto &t = req.transaction;
@@ -2364,6 +2404,10 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
 	}
+	maxRetries = cx->transactionMaxRetries;
+	if (maxRetries == -1) {
+		maxRetries = 10;
+	}
 }
 
 TransactionOptions::TransactionOptions() {
@@ -2373,9 +2417,17 @@ TransactionOptions::TransactionOptions() {
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
+	double oldMaxRetries = maxRetries;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
+}
+
+void Transaction::onErrorReset() {
+	int32_t oldNumRetires = numRetries;
+	reset();
+	numRetries = oldNumRetires;
 }
 
 void Transaction::reset() {
@@ -2654,7 +2706,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
+			if (e.code() != error_code_transaction_too_old
+				&& e.code() != error_code_not_committed
+				&& e.code() != error_code_database_locked
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_transaction_not_permitted
+				&& e.code() != error_code_cluster_not_fully_recovered
+				&& e.code() != error_code_txn_exec_log_anti_quorum)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2765,6 +2823,7 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
+			//self->onErrorReset();
 			self->reset();
 		}
 
@@ -3024,6 +3083,9 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 Future<Void> Transaction::onError( Error const& e ) {
+	if (numRetries < std::numeric_limits<int>::max()) {
+		numRetries++;
+	}
 	if (e.code() == error_code_success)
 	{
 		return client_invalid_operation();
@@ -3032,7 +3094,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind)
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_cluster_not_fully_recovered)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3042,9 +3105,15 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsResourceConstrained++;
 		if (e.code() == error_code_process_behind)
 			cx->transactionsProcessBehind++;
+		if (e.code() == error_code_cluster_not_fully_recovered) {
+			cx->transactionWaitsForFullRecovery++;
+			if (numRetries > options.maxRetries) {
+				return e;
+			}
+		}
 
 		double backoff = getBackoff(e.code());
-		reset();
+		onErrorReset();
 		return delay( backoff, info.taskID );
 	}
 	if (e.code() == error_code_transaction_too_old ||
@@ -3056,7 +3125,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsFutureVersions++;
 
 		double maxBackoff = options.maxBackoff;
-		reset();
+		onErrorReset();
 		return delay( std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID );
 	}
 
@@ -3259,4 +3328,103 @@ void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+}
+
+ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
+	state Transaction tr(inputCx);
+	state DatabaseContext* cx = inputCx.getPtr();
+	// remember the client ID before the snap operation
+	state UID preSnapClientUID = cx->clientInfo->get().id;
+
+	TraceEvent("SnapCreateEnter")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
+
+	StringRef snapCmdArgs = snapCmd;
+	StringRef snapCmdPart = snapCmdArgs.eat(":");
+	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+		.withSuffix(LiteralStringRef(":uid="))
+		.withSuffix(snapUIDRef)
+		.withSuffix(LiteralStringRef(","))
+		.withSuffix(snapCmdArgs);
+	state Standalone<StringRef>
+		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
+	// disable popping of TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
+			wait(timeoutError(tr.commit(), 10));
+			break;
+		} catch (Error& e) {
+			TraceEvent("DisableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
+
+	// snap the storage and Tlogs
+	// if we retry the below command in failure cases with the same snapUID
+	// then the snapCreate can end up creating multiple snapshots with
+	// the same name which needs additional handling, hence we fail in
+	// failure cases and let the caller retry with different snapUID
+	tr.reset();
+	try {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.execute(execSnap, snapPayloadRef);
+		wait(tr.commit());
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErroSnapTLogStorage").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
+
+	if (BUGGIFY) {
+		int32_t toDelay = deterministicRandom()->randomInt(1, 30);
+		wait(delay(toDelay));
+	}
+
+	// enable popping of the TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent("EnableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterUnlockingTLogs").detail("UID", snapUID);
+
+	// snap the coordinators
+	try {
+		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
+		wait(timeoutError(exec, 5.0));
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErrorSnapCoords").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingCoords").detail("UID", snapUID);
+
+	// if the client IDs did not change then we have a clean snapshot
+	UID postSnapClientUID = cx->clientInfo->get().id;
+	if (preSnapClientUID != postSnapClientUID) {
+		TraceEvent("UID mismatch")
+		    .detail("SnapPreSnapClientUID", preSnapClientUID)
+		    .detail("SnapPostSnapClientUID", postSnapClientUID);
+		throw coordinators_changed();
+	}
+
+	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
+	return Void();
 }

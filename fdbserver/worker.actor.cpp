@@ -35,6 +35,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
@@ -65,6 +66,7 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 # define KV_STORE(filename,uid) keyValueStoreMemory(filename,uid)
 #endif
+
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	loop {
@@ -228,6 +230,7 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 
 	UNREACHABLE();
 }
+
 
 struct TLogOptions {
 	TLogOptions() = default;
@@ -696,7 +699,8 @@ ACTOR Future<Void> workerServer(
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
 		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
 		std::string metricsConnFile, std::string metricsPrefix,
-		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold) {
+		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold,
+		std::string _coordFolder, std::string whitelistBinPaths) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -717,6 +721,7 @@ ACTOR Future<Void> workerServer(
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
 	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
 
@@ -832,7 +837,7 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, degraded );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded );
 				recoveries.push_back(recovery.getFuture());
 
 				tl = handleIOErrors( tl, kv, s.storeID );
@@ -989,7 +994,7 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), degraded );
+					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded );
 					logData.first = handleIOErrors( logData.first, data, logId );
 					logData.first = handleIOErrors( logData.first, queue, logId );
 					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
@@ -1053,7 +1058,7 @@ ACTOR Future<Void> workerServer(
 
 				//printf("Recruited as masterProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
-						masterProxyServer( recruited, req, dbInfo ) ) ) );
+						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1165,6 +1170,25 @@ ACTOR Future<Void> workerServer(
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+			}
+			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
+				state ExecCmdValueString execArg(req.execPayload);
+				try {
+					int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
+					StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
+					auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
+					auto te = TraceEvent("ExecTraceCoordinators");
+					te.detail("Uid", uidStr.toString());
+					te.detail("Status", err);
+					te.detail("Role", "coordinator");
+					te.detail("Value", coordFolder);
+					te.detail("ExecPayload", execArg.getCmdValueString().toString());
+					te.trackLatest(tokenStr.c_str());
+					req.reply.send(Void());
+				} catch (Error& e) {
+					TraceEvent("ExecHelperError").error(e);
+					req.reply.sendError(broken_promise());
+				}
 			}
 			when( wait( errorForwarders.getResult() ) ) {}
 			when( wait( handleErrors ) ) {}
@@ -1317,12 +1341,16 @@ ACTOR Future<Void> fdbd(
 	int64_t memoryLimit,
 	std::string metricsConnFile,
 	std::string metricsPrefix,
-	int64_t memoryProfileThreshold)
+	int64_t memoryProfileThreshold,
+	std::string whitelistBinPaths)
 {
 	try {
 
 		ServerCoordinators coordinators( connFile );
-		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+		if (g_network->isSimulated()) {
+			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
+		}
+		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		state vector<Future<Void>> v;
@@ -1344,7 +1372,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(v,1) );

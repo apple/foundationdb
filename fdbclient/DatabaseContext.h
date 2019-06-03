@@ -148,6 +148,7 @@ public:
 	int64_t transactionsMaybeCommitted;
 	int64_t transactionsResourceConstrained;
 	int64_t transactionsProcessBehind;
+	int64_t transactionWaitsForFullRecovery;
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;

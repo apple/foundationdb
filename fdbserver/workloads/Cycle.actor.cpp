@@ -102,13 +102,13 @@ struct CycleWorkload : TestWorkload {
 					try {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait( tr.get( self->key(r) ) );
-						if (!v.present()) self->badRead("r", r, tr);
+						if (!v.present()) self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait( tr.get( self->key(r2) ) );
-						if (!v2.present()) self->badRead("r2", r2, tr);
+						if (!v2.present()) self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
 						Optional<Value> v3 = wait( tr.get( self->key(r3) ) );
-						if (!v3.present()) self->badRead("r3", r3, tr);
+						if (!v3.present()) self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
 						tr.clear( self->key(r) );	//< Shouldn't have an effect, but will break with wrong ordering
