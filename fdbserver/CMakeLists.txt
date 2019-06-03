@@ -142,6 +142,7 @@ set(FDBSERVER_SRCS
   workloads/RandomSelector.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
+  workloads/RequestStats.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp

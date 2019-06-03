@@ -115,6 +115,7 @@
     <ActorCompiler Include="workloads\Storefront.actor.cpp" />
     <ActorCompiler Include="workloads\UnitPerf.actor.cpp" />
     <ActorCompiler Include="workloads\RandomSelector.actor.cpp" />
+    <ActorCompiler Include="workloads\RequestStats.actor.cpp" />
     <ActorCompiler Include="workloads\SelectorCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\KVStoreTest.actor.cpp" />
     <ActorCompiler Include="workloads\StreamingRead.actor.cpp" />

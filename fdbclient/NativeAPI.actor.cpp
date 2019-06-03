@@ -1353,9 +1353,9 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 			if (trLogInfo) {
-				trLogInfo->addLog(FdbClientLogEvents::EventGetValue {
-					startTimeD, trLogInfo->requestStats.getNextReadId(), latency, valueSize, key, trackedReply.address
-				});
+				trLogInfo->addLog(
+				    FdbClientLogEvents::EventGetValue{ startTimeD, trLogInfo->requestStats.getNextReadId(), latency,
+				                                       key.size() + valueSize, key, trackedReply.address });
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -2905,9 +2905,9 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			else {
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before tracking request stats");
-				throw client_invalid_operation;
-			}
-			break;
+			    throw client_invalid_operation();
+		    }
+		    break;
 
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);

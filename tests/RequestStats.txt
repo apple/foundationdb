@@ -1,0 +1,11 @@
+testTitle=RequestStatsTest
+testName=RequestStats
+testDuration=60.0
+keySize=16
+valueSize=64
+keysPopulated=1000
+pointReadsPerTransaction=10
+rangeReadsPerTransaction=1
+rangeReadSize=10
+samplingProbability=0.01
+readTransactions=100
