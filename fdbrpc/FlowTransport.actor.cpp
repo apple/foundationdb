@@ -294,16 +294,18 @@ struct Peer : NonCopyable {
 	ReliablePacketList reliable;
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
-	AsyncTrigger incompatibleDataRead;
+	AsyncTrigger resetPing;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
 	bool incompatibleProtocolVersionNewer;
+	int64_t bytesReceived;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1)
+		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), 
+		  compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0)
 	{
 		connect = connectionKeeper(this);
 	}
@@ -401,11 +403,23 @@ struct Peer : NonCopyable {
 
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
-
-			choose {
-				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination); throw connection_failed(); }
-				when (wait( reply.getFuture() )) {}
-				when (wait( peer->incompatibleDataRead.onTrigger())) {}
+			state int64_t startingBytes = peer->bytesReceived;
+			loop {
+				choose {
+					when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
+						if(startingBytes == peer->bytesReceived) {
+							TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
+							throw connection_failed();
+						}
+						startingBytes = peer->bytesReceived;
+					}
+					when (wait( reply.getFuture() )) {
+						break;
+					}
+					when (wait( peer->resetPing.onTrigger())) {
+						break;
+					}
+				}
 			}
 		}
 	}
@@ -619,16 +633,16 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");
-				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+				int flipBits = 32 - (int) floor(log2(deterministicRandom()->randomUInt32()));
 
-				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
+				int firstFlipBitLocation = deterministicRandom()->randomInt(0, 8);
 				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
 				flipBits--;
 
 				for (int i = 0; i < flipBits; i++) {
-					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-					int bitLocation = g_random->randomInt(0, 8);
+					uint32_t byteLocation = deterministicRandom()->randomUInt32() % packetLen;
+					int bitLocation = deterministicRandom()->randomInt(0, 8);
 					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
 						*(p + byteLocation) ^= 1 << bitLocation;
 					}
@@ -719,6 +733,9 @@ ACTOR static Future<Void> connectionReader(
 				}
 
 				int readBytes = conn->read( unprocessed_end, buffer_end );
+				if(peer) {
+					peer->bytesReceived += readBytes;
+				}
 				if (!readBytes) break;
 				state bool readWillBlock = readBytes != readAllBytes;
 				unprocessed_end += readBytes;
@@ -818,7 +835,7 @@ ACTOR static Future<Void> connectionReader(
 				}
 				else if(!expectConnectPacket) {
 					unprocessed_begin = unprocessed_end;
-					peer->incompatibleDataRead.trigger();
+					peer->resetPing.trigger();
 				}
 
 				if (readWillBlock)
@@ -985,13 +1002,13 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 				.detail("Token", endpoint.token);
 		}
 		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-			peer->incompatibleDataRead.trigger();
+			peer->resetPing.trigger();
 		}
 	}
 }
 
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.token = g_random->randomUniqueID();
+	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );

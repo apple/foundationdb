@@ -40,7 +40,7 @@ Promises and futures can be used within a single process, but their real strengt
 wait()
 ------
 
-At the point when a receiver holding a ``Future<T>`` needs the ``T`` to continue computation, it invokes the ``wait()`` statement with the ``Future<T>`` as its parameter. The ``wait()`` statement allows the calling actor to pause execution until the value of the future is set, returning a value of type ``T`` During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.
+At the point when a receiver holding a ``Future<T>`` needs the ``T`` to continue computation, it invokes the ``wait()`` statement with the ``Future<T>`` as its parameter. The ``wait()`` statement allows the calling actor to pause execution until the value of the future is set, returning a value of type ``T``. During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.
 
 ACTOR
 -----
@@ -154,5 +154,5 @@ Some preprocessor definitions will not fix all issues though. When programming f
                     foo([x]() { x->bar(); })
                 }
 
-- state variables in don't follow the normal scoping rules. So in flow a state variable can be defined in a inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.
+- state variables in flow don't follow the normal scoping rules. So in flow a state variable can be defined in a inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.
 

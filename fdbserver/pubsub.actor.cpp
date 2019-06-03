@@ -105,14 +105,14 @@ PubSub::PubSub(Database _cx)
 }
 
 ACTOR Future<uint64_t> _createFeed(Database cx, Standalone<StringRef> metadata) {
-	state uint64_t id(g_random->randomUniqueID().first());  // SOMEDAY: this should be an atomic increment
+	state uint64_t id(deterministicRandom()->randomUniqueID().first());  // SOMEDAY: this should be an atomic increment
 	TraceEvent("PubSubCreateFeed").detail("Feed", id);
 	state Transaction tr(cx);
 	loop {
 		try {
 			state Optional<Value> val = wait(tr.get(keyForFeed(id)));
 			while(val.present()) {
-				id = id + g_random->randomInt(1, 100);
+				id = id + deterministicRandom()->randomInt(1, 100);
 				Optional<Value> v = wait(tr.get(keyForFeed(id)));
 				val = v;
 			}
@@ -133,14 +133,14 @@ Future<uint64_t> PubSub::createFeed(Standalone<StringRef> metadata) {
 }
 
 ACTOR Future<uint64_t> _createInbox(Database cx, Standalone<StringRef> metadata) {
-	state uint64_t id = g_random->randomUniqueID().first();
+	state uint64_t id = deterministicRandom()->randomUniqueID().first();
 	TraceEvent("PubSubCreateInbox").detail("Inbox", id);
 	state Transaction tr(cx);
 	loop {
 		try {
 			state Optional<Value> val = wait(tr.get(keyForInbox(id)));
 			while(val.present()) {
-				id += g_random->randomInt(1, 100);
+				id += deterministicRandom()->randomInt(1, 100);
 				Optional<Value> v = wait(tr.get(keyForFeed(id)));
 				val = v;
 			}
@@ -429,12 +429,12 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 				//printf(" -> cached message %016llx from feed %016llx\n", messageId, feed);
 				if(messageId >= cursor) {
 					//printf(" -> entering message %016llx from feed %016llx\n", messageId, feed);
-					feedLatest.insert(pair<MessageId, Feed>(messageId, feed));
+					feedLatest.emplace(messageId, feed);
 				} else {
 					// replace this with the first message older than the cursor
 					MessageId mId = wait(getFeedLatestAtOrAfter(&tr, feed, cursor));
 					if(mId) {
-						feedLatest.insert(pair<MessageId, Feed>(mId, feed));
+						feedLatest.emplace(mId, feed);
 					}
 				}
 			}
@@ -465,7 +465,7 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 
 				MessageId nextMessage = wait(getFeedLatestAtOrAfter(&tr, f, id + 1));
 				if(nextMessage) {
-					feedLatest.insert(pair<MessageId, Feed>(nextMessage, f));
+					feedLatest.emplace(nextMessage, f);
 				}
 			}
 

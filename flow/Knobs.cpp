@@ -78,6 +78,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( BUGGIFY_SIM_PAGE_CACHE_4K,                           1e6 );
 	init( BUGGIFY_SIM_PAGE_CACHE_64K,                          1e6 );
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
+	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
 
 	//AsyncFileKAIO
@@ -117,8 +118,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_NETWORK_LATENCY,                              100e-6 );
 	init( FAST_NETWORK_LATENCY,                             800e-6 );
 	init( SLOW_NETWORK_LATENCY,                             100e-3 );
-	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * g_random->random01();
-	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * g_random->random01();
+	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
+	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );

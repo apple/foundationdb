@@ -23,6 +23,9 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -46,6 +49,7 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
+	RequestStream<struct ExecRequest> execReq;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 
@@ -59,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, execReq);
 	}
 
 	void initEndpoints() {
@@ -168,7 +172,7 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -213,7 +217,7 @@ struct GetStorageServerRejoinInfoReply {
 	Tag tag;
 	Optional<Tag> newTag;
 	bool newLocality;
-	vector<pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -292,6 +296,23 @@ struct GetHealthMetricsRequest
 	void serialize(Ar& ar)
 	{
 		serializer(ar, reply, detailed);
+	}
+};
+
+struct ExecRequest
+{
+	constexpr static FileIdentifier file_identifier = 22403900;
+	Arena arena;
+	StringRef execPayload;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, execPayload, reply, arena, debugID);
 	}
 };
 

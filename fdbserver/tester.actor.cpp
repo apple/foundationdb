@@ -80,19 +80,19 @@ Key KVWorkload::getRandomKey() {
 
 Key KVWorkload::getRandomKey(double absentFrac) {
 	if ( absentFrac > 0.0000001 ) {
-		return getRandomKey(g_random->random01() < absentFrac);
+		return getRandomKey(deterministicRandom()->random01() < absentFrac);
 	} else {
 		return getRandomKey(false);
 	}
 }
 
 Key KVWorkload::getRandomKey(bool absent) {
-	return keyForIndex(g_random->randomInt( 0, nodeCount ), absent);
+	return keyForIndex(deterministicRandom()->randomInt( 0, nodeCount ), absent);
 }
 
 Key KVWorkload::keyForIndex( uint64_t index ) {
 	if ( absentFrac > 0.0000001 ) {
-		return keyForIndex(index, g_random->random01() < absentFrac);
+		return keyForIndex(index, deterministicRandom()->random01() < absentFrac);
 	} else {
 		return keyForIndex(index, false);
 	}
@@ -122,7 +122,7 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix) {
 }
 
 ACTOR Future<Void> poisson( double *last, double meanInterval ) {
-	*last += meanInterval*-log( g_random->random01() );
+	*last += meanInterval*-log( deterministicRandom()->random01() );
 	wait( delayUntil( *last ) );
 	return Void();
 }
@@ -360,7 +360,7 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + g_random->randomUniqueID().toString() ) ) );
+			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
 			wait( tr.commit() );
 			return Void();
@@ -646,7 +646,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	state int i = 0;
 	state int success = 0;
 	state int failure = 0;
-	int64_t sharedRandom = g_random->randomInt64(0,10000000);
+	int64_t sharedRandom = deterministicRandom()->randomInt64(0,10000000);
 	for(; i < testers.size(); i++) {
 		WorkloadRequest req;
 		req.title = spec.title;

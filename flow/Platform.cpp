@@ -1672,8 +1672,8 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
-		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
-		f = textmode ? fopen( tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE ) : fopen( tempfilename.c_str(), "wb" FOPEN_CLOEXEC_MODE );
+		std::string tempfilename = joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
+		f = textmode ? fopen( tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 	#ifdef _WIN32
@@ -2485,6 +2485,7 @@ void outOfMemory() {
 	TRACEALLOCATOR(16);
 	TRACEALLOCATOR(32);
 	TRACEALLOCATOR(64);
+	TRACEALLOCATOR(96);
 	TRACEALLOCATOR(128);
 	TRACEALLOCATOR(256);
 	TRACEALLOCATOR(512);

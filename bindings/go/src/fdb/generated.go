@@ -46,6 +46,13 @@ func (o NetworkOptions) SetLocalAddress(param string) error {
 	return o.setOpt(10, []byte(param))
 }
 
+// enable the object serializer for network communication
+//
+// Parameter: 0 is false, every other value is true
+func (o NetworkOptions) SetUseObjectSerializer(param int64) error {
+	return o.setOpt(11, int64ToBytes(param))
+}
+
 // Deprecated
 //
 // Parameter: path to cluster file
@@ -444,7 +451,7 @@ const (
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
+	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -561,15 +568,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns ``true`` if the error indicates the operations in the
-	// transactions should be retried because of transient error.
+	// Returns “true“ if the error indicates the operations in the transactions
+	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns ``true`` if the error indicates the transaction may have
-	// succeeded, though not in a way the system can verify.
+	// Returns “true“ if the error indicates the transaction may have succeeded,
+	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns ``true`` if the error indicates the transaction has not
-	// committed, though in a way that can be retried.
+	// Returns “true“ if the error indicates the transaction has not committed,
+	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

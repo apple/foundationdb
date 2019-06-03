@@ -21,11 +21,14 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
-using std::vector;
-using std::pair;
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
@@ -761,7 +764,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {

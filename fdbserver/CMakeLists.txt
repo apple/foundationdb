@@ -17,6 +17,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
+  FDBExecHelper.actor.cpp
+  FDBExecHelper.actor.h
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
@@ -151,6 +153,7 @@ set(FDBSERVER_SRCS
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
+  workloads/SnapTest.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp

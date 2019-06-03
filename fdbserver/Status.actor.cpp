@@ -2277,27 +2277,27 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 
 JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level) {
 	JsonBuilderArray r;
-	int size = g_random->randomInt(0, 50);
+	int size = deterministicRandom()->randomInt(0, 50);
 
 	while(--size) {
 		if(--limit <= 0)
 			break;
 
-		if(level > 0 && g_random->coinflip()) {
-			if(g_random->coinflip())
+		if(level > 0 && deterministicRandom()->coinflip()) {
+			if(deterministicRandom()->coinflip())
 				r.push_back(randomDocument(strings, limit, level - 1));
 			else
 				r.push_back(randomArray(strings, limit, level - 1));
 		}
 		else {
-			switch(g_random->randomInt(0, 3)) {
+			switch(deterministicRandom()->randomInt(0, 3)) {
 				case 0:
-					r.push_back(g_random->randomInt(0, 10000000));
+					r.push_back(deterministicRandom()->randomInt(0, 10000000));
 				case 1:
-					r.push_back(strings[g_random->randomInt(0, strings.size())]);
+					r.push_back(strings[deterministicRandom()->randomInt(0, strings.size())]);
 				case 2:
 				default:
-					r.push_back(g_random->random01());
+					r.push_back(deterministicRandom()->random01());
 			}
 		}
 	}
@@ -2307,29 +2307,29 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 
 JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level) {
 	JsonBuilderObject r;
-	int size = g_random->randomInt(0, 300);
+	int size = deterministicRandom()->randomInt(0, 300);
 
 	while(--size) {
 		if(--limit <= 0)
 			break;
 
-		const std::string &key = strings[g_random->randomInt(0, strings.size())];
+		const std::string &key = strings[deterministicRandom()->randomInt(0, strings.size())];
 
-		if(level > 0 && g_random->coinflip()) {
-			if(g_random->coinflip())
+		if(level > 0 && deterministicRandom()->coinflip()) {
+			if(deterministicRandom()->coinflip())
 				r[key] = randomDocument(strings, limit, level - 1);
 			else
 				r[key] = randomArray(strings, limit, level - 1);
 		}
 		else {
-			switch(g_random->randomInt(0, 3)) {
+			switch(deterministicRandom()->randomInt(0, 3)) {
 				case 0:
-					r[key] = g_random->randomInt(0, 10000000);
+					r[key] = deterministicRandom()->randomInt(0, 10000000);
 				case 1:
-					r[key] = strings[g_random->randomInt(0, strings.size())];
+					r[key] = strings[deterministicRandom()->randomInt(0, strings.size())];
 				case 2:
 				default:
-					r[key] = g_random->random01();
+					r[key] = deterministicRandom()->random01();
 			}
 		}
 	}
@@ -2342,7 +2342,7 @@ TEST_CASE("/status/json/builderPerf") {
 	int c = 1000000;
 	printf("Generating random strings\n");
 	while(--c)
-		strings.push_back(g_random->randomAlphaNumeric(g_random->randomInt(0, 50)));
+		strings.push_back(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 50)));
 
 	int elements = 100000;
 	int level = 6;

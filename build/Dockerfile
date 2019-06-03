@@ -1,14 +1,16 @@
 FROM centos:6
-LABEL version=0.1.2
+LABEL version=0.1.4
+ENV DOCKER_IMAGEVER=0.1.4
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
 RUN yum install -y yum-utils &&\
 	yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
 	yum -y install centos-release-scl epel-release &&\
-	yum -y install devtoolset-7 mono-core java-1.8.0-openjdk-devel \
-		rh-python36-python-devel rh-ruby24 golang python27 \
-		rpm-build debbuild python-pip npm ccache distcc &&\
+	yum -y install devtoolset-8 java-1.8.0-openjdk-devel \
+		rh-python36-python-devel devtoolset-8-valgrind-devel \
+		mono-core rh-ruby24 golang python27 rpm-build debbuild \
+		python-pip npm dos2unix valgrind-devel &&\
 	pip install boto3==1.1.1
 
 USER root
@@ -35,8 +37,9 @@ RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.1
 RUN curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz > /tmp/libressl.tar.gz &&\
     cd /tmp && echo "b8cb31e59f1294557bfc80f2a662969bc064e83006ceef0574e2553a1c254fd5  libressl.tar.gz" > libressl-sha.txt &&\
     sha256sum -c libressl-sha.txt && tar xf libressl.tar.gz &&\
-    cd libressl-2.8.2 && cd /tmp/libressl-2.8.2 && scl enable devtoolset-7 -- ./configure --prefix=/usr/local/stow/libressl CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
-    cd /tmp/libressl-2.8.2 && scl enable devtoolset-7 -- make -j`nproc` install &&\
+    cd libressl-2.8.2 && cd /tmp/libressl-2.8.2 && scl enable devtoolset-8 -- ./configure --prefix=/usr/local/stow/libressl CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
+    cd /tmp/libressl-2.8.2 && scl enable devtoolset-8 -- make -j`nproc` install &&\
     rm -rf /tmp/libressl-2.8.2 /tmp/libressl.tar.gz
 
-CMD scl enable devtoolset-7 python27 rh-python36 rh-ruby24 -- bash
+ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
+CMD scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash

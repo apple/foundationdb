@@ -224,7 +224,7 @@ struct Profiler {
 		tv.it_interval.tv_sec = 0;
 		tv.it_interval.tv_nsec = period_ns;
 		tv.it_value.tv_sec = 0;
-		tv.it_value.tv_nsec = g_nondeterministic_random->randomInt(period_ns/2,period_ns+1);
+		tv.it_value.tv_nsec = nondeterministicRandom()->randomInt(period_ns/2,period_ns+1);
 
 		sigevent sev;
 		sev.sigev_notify = SIGEV_THREAD_ID;
