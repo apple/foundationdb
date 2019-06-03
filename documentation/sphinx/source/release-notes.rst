@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.9
+=====
+
+Fixes
+-----
+
+* Sometimes a minority of coordinators would not converge to the leader. `(PR #1649) <https://github.com/apple/foundationdb/pull/1649>`_
+
 6.1.8
 =====
 

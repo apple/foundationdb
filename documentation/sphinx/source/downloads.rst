@@ -17,8 +17,8 @@ Ubuntu
 
 The Ubuntu packages are supported on 64-bit Ubuntu 12.04+, but beware of the Linux kernel bug in Ubuntu 12.x.
 
-* `foundationdb-clients-6.1.8-1_amd64.deb <https://www.foundationdb.org/downloads/6.1.8/ubuntu/installers/foundationdb-clients_6.1.7-1_amd64.deb>`_
-* `foundationdb-server-6.1.8-1_amd64.deb <https://www.foundationdb.org/downloads/6.1.8/ubuntu/installers/foundationdb-server_6.1.7-1_amd64.deb>`_ (depends on the clients package)
+* `foundationdb-clients-6.1.8-1_amd64.deb <https://www.foundationdb.org/downloads/6.1.8/ubuntu/installers/foundationdb-clients_6.1.8-1_amd64.deb>`_
+* `foundationdb-server-6.1.8-1_amd64.deb <https://www.foundationdb.org/downloads/6.1.8/ubuntu/installers/foundationdb-server_6.1.8-1_amd64.deb>`_ (depends on the clients package)
 
 RHEL/CentOS EL6
 ---------------
