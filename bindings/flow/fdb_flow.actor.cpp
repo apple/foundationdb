@@ -426,16 +426,4 @@ namespace FDB {
 	void TransactionImpl::reset() {
 		fdb_transaction_reset( tr );
 	}
-
-	std::string printable( const StringRef& val ) {
-		std::string s;
-		for(int i=0; i<val.size(); i++) {
-			uint8_t b = val[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
-		}
-		return s;
-	}
-
 }

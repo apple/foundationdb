@@ -97,7 +97,7 @@ std::string tupleToString(Tuple const& tuple) {
 			if(type == Tuple::UTF8) {
 				str += "u";
 			}
-			str += "\'" + printable(tuple.getString(i)) + "\'";
+			str += "\'" + tuple.getString(i).printable() + "\'";
 		}
 		else if(type == Tuple::INT) {
 			str += format("%ld", tuple.getInt(i));
@@ -1791,7 +1791,7 @@ ACTOR void _test_versionstamp() {
 
 		ASSERT(trVersion.compare(dbVersion) == 0);
 
-		fprintf(stderr, "%s\n", printable(trVersion).c_str());
+		fprintf(stderr, "%s\n", trVersion.printable().c_str());
 
 		g_network->stop();
 	}
