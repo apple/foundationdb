@@ -37,7 +37,7 @@ void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
 
 Reference<IRandom> deterministicRandom() {
 	if(!seededRandom) {
-		seededRandom = Reference<IRandom>(new DeterministicRandom(1, true));
+		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
 	}
 	return seededRandom;
 }
