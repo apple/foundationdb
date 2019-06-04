@@ -1026,8 +1026,6 @@ void runNetwork() {
 		setupSlowTaskProfiler();
 	}
 
-	setThreadLocalDeterministicRandomSeed(platform::getRandomSeed());
-
 	g_network->run();
 
 	if(networkOptions.traceDirectory.present())
