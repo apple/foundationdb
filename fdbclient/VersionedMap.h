@@ -58,7 +58,7 @@ namespace PTreeImpl {
 		Reference<PTree> right(Version at) const { return child(true, at); }
 
 		PTree(const T& data, Version ver) : data(data), lastUpdateVersion(ver), updated(false) {
-			priority = g_random->randomUInt32();
+			priority = deterministicRandom()->randomUInt32();
 		}
 		PTree( uint32_t pri, T const& data, Reference<PTree> const& left, Reference<PTree> const& right, Version ver ) : priority(pri), data(data), lastUpdateVersion(ver), updated(false) {
 			pointer[0] = left; pointer[1] = right;

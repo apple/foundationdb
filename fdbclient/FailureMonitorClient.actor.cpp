@@ -143,7 +143,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					double slowThreshold = .200 + waitfor + FLOW_KNOBS->MAX_BUGGIFIED_DELAY;
 					double warnAlwaysThreshold = CLIENT_KNOBS->FAILURE_MIN_DELAY/2;
 
-					if (elapsed > slowThreshold && g_random->random01() < elapsed / warnAlwaysThreshold) {
+					if (elapsed > slowThreshold && deterministicRandom()->random01() < elapsed / warnAlwaysThreshold) {
 						TraceEvent(elapsed > warnAlwaysThreshold ? SevWarnAlways : SevWarn, "FailureMonitorClientSlow").detail("Elapsed", elapsed).detail("Expected", waitfor);
 					}
 

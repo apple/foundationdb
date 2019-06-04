@@ -58,7 +58,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }

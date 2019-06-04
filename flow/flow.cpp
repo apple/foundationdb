@@ -19,17 +19,36 @@
  */
 
 #include "flow/flow.h"
+#include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
 #include <stdarg.h>
 #include <cinttypes>
 
 INetwork *g_network = 0;
-IRandom *g_random = 0;
-IRandom *g_nondeterministic_random = 0;
-IRandom *g_debug_random = 0;
+
 FILE* randLog = 0;
+thread_local Reference<IRandom> seededRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
+
+void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
+	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
+}
+
+Reference<IRandom> deterministicRandom() {
+	if(!seededRandom) {
+		seededRandom = Reference<IRandom>(new DeterministicRandom(1, true));
+	}
+	return seededRandom;
+}
+
+Reference<IRandom> nondeterministicRandom() {
+	static thread_local Reference<IRandom> random;
+	if(!random) {
+		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
+	}
+	return random;
+}
 
 std::string UID::toString() const {
 	return format("%016llx%016llx", part[0], part[1]);
@@ -200,7 +219,7 @@ int getSBVar(std::string file, int line){
 
 	const auto &flPair = std::make_pair(file, line);
 	if (!SBVars.count(flPair)){
-		SBVars[flPair] = g_random->random01() < P_BUGGIFIED_SECTION_ACTIVATED;
+		SBVars[flPair] = deterministicRandom()->random01() < P_BUGGIFIED_SECTION_ACTIVATED;
 		g_traceBatch.addBuggify( SBVars[flPair], line, file );
 		if( g_network ) g_traceBatch.dump();
 	}
@@ -229,7 +248,7 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 		ASSERT(out.getError().code() == in.getError().code());
 	}
 	{
-		ErrorOr<uint32_t> in(g_random->randomUInt32());
+		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
 		ErrorOr<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);
@@ -254,7 +273,7 @@ TEST_CASE("/flow/FlatBuffers/Optional") {
 		ASSERT(!out.present());
 	}
 	{
-		Optional<uint32_t> in(g_random->randomUInt32());
+		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
 		Optional<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);

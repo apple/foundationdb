@@ -114,7 +114,6 @@ struct SuppressionMap {
 
 TraceBatch g_traceBatch;
 trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
-IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -296,7 +295,7 @@ public:
 		this->logGroup = logGroup;
 		this->localAddress = na;
 
-		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), g_random->randomAlphaNumeric(6).c_str());
+		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), deterministicRandom()->randomAlphaNumeric(6).c_str());
 		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
 
 		if ( g_network->isSimulated() )
@@ -849,12 +848,7 @@ TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
 			return *this;
 		}
 
-		if(!g_random) {
-			sampleRate = 1.0;
-		}
-		else {
-			enabled = enabled && g_random->random01() < sampleRate;
-		}
+		enabled = enabled && deterministicRandom()->random01() < sampleRate;
 
 		if(enabled && logSampleRate) {
 			detail("SampleRate", sampleRate);
@@ -959,7 +953,7 @@ bool TraceEvent::isNetworkThread() {
 }
 
 TraceInterval& TraceInterval::begin() {
-	pairID = trace_random->randomUniqueID();
+	pairID = nondeterministicRandom()->randomUniqueID();
 	count = 0;
 	return *this;
 }

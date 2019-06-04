@@ -231,7 +231,8 @@ public:
 		return resultEntries.size() == 0;
 	}
 
-	void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset ) {
+	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset,
+	                      bool allLocations = false) {
 		if(locality == tagLocalitySatellite) {
 			for(auto& t : tags) {
 				if(t == txsTag || t.locality == tagLocalityLogRouter) {
@@ -248,9 +249,17 @@ public:
 		alsoServers.clear();
 		resultEntries.clear();
 
-		for(auto& t : tags) {
-			if(locality == tagLocalitySpecial || t.locality == locality || t.locality < 0) {
-				newLocations.push_back(bestLocationFor(t));
+		if (allLocations) {
+			// special handling for allLocations
+			TraceEvent("AllLocationsSet");
+			for (int i = 0; i < logServers.size(); i++) {
+				newLocations.push_back(i);
+			}
+		} else {
+			for (auto& t : tags) {
+				if (locality == tagLocalitySpecial || t.locality == locality || t.locality < 0) {
+					newLocations.push_back(bestLocationFor(t));
+				}
 			}
 		}
 
@@ -690,7 +699,7 @@ struct ILogSystem {
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 		// Returns when the log system configuration has changed due to a tlog rejoin.
 
-	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) = 0;
+	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) = 0;
 
 	virtual bool hasRemoteLogs() = 0;
 
@@ -733,7 +742,7 @@ struct CompareFirst {
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
+	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1), hasExecOp(false) {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
@@ -776,7 +785,7 @@ struct LogPushData : NonCopyable {
 	}
 
 	template <class T>
-	void addTypedMessage( T const& item ) {
+	void addTypedMessage(T const& item, bool allLocations = false) {
 		prev_tags.clear();
 		if(logSystem->hasRemoteLogs()) {
 			prev_tags.push_back( logSystem->getRandomRouterTag() );
@@ -785,8 +794,8 @@ struct LogPushData : NonCopyable {
 			prev_tags.push_back(tag);
 		}
 		msg_locations.clear();
-		logSystem->getPushLocations( prev_tags, msg_locations );
-		
+		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
 			// FIXME: memcpy after the first time
@@ -805,6 +814,10 @@ struct LogPushData : NonCopyable {
 		return messagesWriter[loc].toValue();
 	}
 
+	void setHasExecOp() { hasExecOp = true; }
+
+	bool getHasExecOp() { return hasExecOp; }
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
@@ -812,6 +825,7 @@ private:
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
 	uint32_t subsequence;
+	bool hasExecOp;
 };
 
 #endif

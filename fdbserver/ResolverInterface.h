@@ -37,7 +37,7 @@ struct ResolverInterface {
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	ResolverInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }

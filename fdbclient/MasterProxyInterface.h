@@ -49,6 +49,7 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
+	RequestStream<struct ExecRequest> execReq;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 
@@ -62,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, execReq);
 	}
 
 	void initEndpoints() {
@@ -295,6 +296,23 @@ struct GetHealthMetricsRequest
 	void serialize(Ar& ar)
 	{
 		serializer(ar, reply, detailed);
+	}
+};
+
+struct ExecRequest
+{
+	constexpr static FileIdentifier file_identifier = 22403900;
+	Arena arena;
+	StringRef execPayload;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, execPayload, reply, arena, debugID);
 	}
 };
 

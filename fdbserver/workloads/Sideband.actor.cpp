@@ -140,7 +140,7 @@ struct SidebandWorkload : TestWorkload {
 		loop {
 			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
 			state Transaction tr(cx);
-			state uint64_t key = g_random->randomUniqueID().hash();
+			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
 			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
 			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {

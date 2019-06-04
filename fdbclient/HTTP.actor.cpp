@@ -323,7 +323,7 @@ namespace HTTP {
 		try {
 			state std::string requestID;
 			if(!requestIDHeader.empty()) {
-				requestID = g_random->randomUniqueID().toString();
+				requestID = deterministicRandom()->randomUniqueID().toString();
 				requestID = requestID.insert(20, "-");
 				requestID = requestID.insert(16, "-");
 				requestID = requestID.insert(12, "-");

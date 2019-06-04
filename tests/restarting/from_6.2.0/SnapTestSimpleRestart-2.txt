@@ -1,0 +1,6 @@
+; verify all keys are even numbered
+testTitle=SnapSimpleVerify
+testName=SnapTest
+numSnaps=1
+maxSnapDelay=3.0
+testID=3

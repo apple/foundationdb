@@ -164,11 +164,11 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
-		g_random->randomUniqueID());
+		deterministicRandom()->randomUniqueID());
 	state Future<Void> actor = localGenerationReg(reg, &store);
-	state Key the_key(g_random->randomAlphaNumeric( g_random->randomInt(0, 10)));
+	state Key the_key(deterministicRandom()->randomAlphaNumeric( deterministicRandom()->randomInt(0, 10)));
 
-	state UniqueGeneration firstGen(0, g_random->randomUniqueID());
+	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
 
 	{
 		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, firstGen)));
@@ -450,7 +450,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 }
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder) {
-	state UID myID = g_random->randomUniqueID();
+	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface( g_network );
 	state GenerationRegInterface myInterface( g_network );
 	state OnDemandStore store( dataFolder, myID );

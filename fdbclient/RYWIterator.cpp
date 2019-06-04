@@ -569,7 +569,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 	KeyRangeMap<bool> unreadableMap;
 
 	for (int i = 0; i < 100; i++) {
-		int r = g_random->randomInt(0, 10);
+		int r = deterministicRandom()->randomInt(0, 10);
 		if (r == 0) {
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.addConflictRange(range);
@@ -586,7 +586,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_AddUnmodifiedAndUnreadableRange").detail("Range", range);
 		}
 		else if (r == 2) {
-			bool addConflict = g_random->random01() < 0.5;
+			bool addConflict = deterministicRandom()->random01() < 0.5;
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.clear(range, addConflict);
 			setMap.erase(setMap.lower_bound(range.begin), setMap.lower_bound(range.end));
@@ -597,7 +597,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_Clear").detail("Range", range).detail("AddConflict", addConflict);
 		}
 		else if (r == 3) {
-			bool addConflict = g_random->random01() < 0.5;
+			bool addConflict = deterministicRandom()->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedValue, value, addConflict);
@@ -609,7 +609,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_SetVersionstampedValue").detail("Key", key).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else if (r == 4) {
-			bool addConflict = g_random->random01() < 0.5;
+			bool addConflict = deterministicRandom()->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedKey, value, addConflict);
@@ -621,7 +621,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_SetVersionstampedKey").detail("Key", key).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else if (r == 5) {
-			bool addConflict = g_random->random01() < 0.5;
+			bool addConflict = deterministicRandom()->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::And, value, addConflict);
@@ -641,7 +641,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_And").detail("Key", key).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else {
-			bool addConflict = g_random->random01() < 0.5;
+			bool addConflict = deterministicRandom()->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetValue, value, addConflict);

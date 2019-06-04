@@ -490,9 +490,9 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
 	Standalone<VectorRef<StringRef>> vecIn;
-	auto numElements = g_random->randomInt(1, 20);
+	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {
-		auto str = g_random->randomAlphaNumeric(g_random->randomInt(0, 30));
+		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
 		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
 	}
 	Standalone<StringRef> value = ObjectWriter::toValue(vecIn);

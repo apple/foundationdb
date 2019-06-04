@@ -38,7 +38,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
 		nodes = getOption( options, LiteralStringRef("nodes"), 100 );
-		defaultValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 ) ));
+		defaultValue = StringRef(format( "%010d", deterministicRandom()->randomInt( 0, 1000 ) ));
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
 	}
 
@@ -75,7 +75,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	ACTOR Future<Version> setter( Database cx, Key key, Optional<Value> value ) {
 		state ReadYourWritesTransaction tr( cx );
-		wait( delay( g_random->random01() ) );
+		wait( delay( deterministicRandom()->random01() ) );
 		loop {
 			try {
 				if( value.present() )
@@ -101,12 +101,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				state double getDuration = 0;
 				state double watchEnd = 0;
 				state bool first = true;
-				state Key setKey = self->keyForIndex(g_random->randomInt(0,self->nodes));
+				state Key setKey = self->keyForIndex(deterministicRandom()->randomInt(0,self->nodes));
 				state Optional<Value> setValue;
-				if( g_random->random01() > 0.5 )
-					setValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 )));
+				if( deterministicRandom()->random01() > 0.5 )
+					setValue = StringRef(format( "%010d", deterministicRandom()->randomInt( 0, 1000 )));
 				state Future<Version> setFuture = self->setter( cx, setKey, setValue );
-				wait( delay( g_random->random01() ) );
+				wait( delay( deterministicRandom()->random01() ) );
 				loop {
 					state ReadYourWritesTransaction tr( cx );
 
