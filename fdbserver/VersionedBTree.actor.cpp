@@ -1265,6 +1265,7 @@ private:
 			if(!modified) {
 				if(cursor.valid()) {
 					if(!rec.identical(cursor.get())) {
+						debug_printf("InternalPageBuilder: Found internal page difference.  new: %s  old: %s\n", rec.toString().c_str(), cursor.get().toString().c_str());
 						modified = true;
 					}
 					else {
@@ -1272,6 +1273,7 @@ private:
 					}
 				}
 				else {
+					debug_printf("InternalPageBuilder: Found internal page difference.  new: %s  old: <end>\n", rec.toString().c_str());
 					modified = true;
 				}
 			}
@@ -1287,14 +1289,17 @@ private:
 			if(!entries.empty() && entries.back().value.present()
 				&& (newSet.children.empty() || newSet.children.front() != lastUpperBound))
 			{
+				debug_printf("InternalPageBuilder: Added placeholder %s\n", lastUpperBound.withoutValue().toString().c_str());
 				addEntry(lastUpperBound.withoutValue());
 			}
 
 			for(auto &child : newSet.children) {
+				debug_printf("InternalPageBuilder: Adding child entry %s\n", child.toString().c_str());
 				addEntry(child);
 			}
 
 			lastUpperBound = newSet.upperBound;
+			debug_printf("InternalPageBuilder: New upper bound: %s\n", lastUpperBound.toString().c_str());
 		}
 
 		// Finish comparison to existing data if necesary.
@@ -1313,11 +1318,15 @@ private:
 				}
 			}
 
+			debug_printf("InternalPageBuilder: finalizing.  modified=%d  newUpperBound=%s\n", modified, newUpperBound.toString().c_str());
 			if(modified) {
 				if(!entries.empty() && entries.back().value.present() && lastUpperBound != newUpperBound) {
+					debug_printf("InternalPageBuilder: Added placeholder %s\n", lastUpperBound.withoutValue().toString().c_str());
 					addEntry(lastUpperBound.withoutValue());
 				}
+
 				lastUpperBound = newUpperBound;
+				debug_printf("InternalPageBuilder: New upper bound: %s\n", lastUpperBound.toString().c_str());
 			}
 		}
 
@@ -1977,7 +1986,7 @@ private:
 				LogicalPageID pageID = cursor.get().getPageID();
 				ASSERT(pageID != 0);
 
-				const RedwoodRecordRef &decodeChildUpperBound = cursor.moveNext() ? cursor.get() : *upperBound;
+				const RedwoodRecordRef &decodeChildUpperBound = cursor.moveNext() ? cursor.get() : *decodeUpperBound;
 
 				// Skip over any next-children which do not actually link to child pages
 				while(cursor.valid() && !cursor.get().value.present()) {
@@ -1986,8 +1995,8 @@ private:
 
 				const RedwoodRecordRef &childUpperBound = cursor.valid() ? cursor.get() : *upperBound;
 
-				debug_printf("%s internal page id=%d child page id=%u lower=%s upper=%s decodeLower=%s decodeUpper=%s\n",
-					context.c_str(), root, pageID, childLowerBound.toString().c_str(), childUpperBound.toString().c_str(), decodeChildLowerBound.toString().c_str(), decodeChildUpperBound.toString().c_str());
+				debug_printf("%s recursing to page id=%u lower=%s upper=%s decodeLower=%s decodeUpper=%s\n",
+					context.c_str(), pageID, childLowerBound.toString().c_str(), childUpperBound.toString().c_str(), decodeChildLowerBound.toString().c_str(), decodeChildUpperBound.toString().c_str());
 
 				/*
 				// TODO: If lower bound and upper bound have the same key, do something intelligent if possible
