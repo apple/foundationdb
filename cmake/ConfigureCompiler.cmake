@@ -50,6 +50,8 @@ if(USE_CCACHE)
 	if(CCACHE_FOUND)
 		set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
 		set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+	else()
+		message(SEND_ERROR "CCACHE is ON, but ccache was not found")
 	endif()
 endif()
 
