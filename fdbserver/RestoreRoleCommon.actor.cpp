@@ -43,11 +43,14 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx) {
+ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self, Database cx) {
 	if ( self->versionBatchStart ) {
 		self->versionBatchStart = false;
 	}
-	
+
+	TraceEvent("FastRestore").detail("FinishRestoreRequest", req.batchID)
+			.detail("Role", getRoleStr(self->role)).detail("Node", self->id());
+
 	req.reply.send( RestoreCommonReply(self->id()) );
 
 	return Void();
@@ -57,6 +60,13 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	if ( !self->versionBatchStart ) {
 		self->versionBatchStart = true;
 		self->resetPerVersionBatch();
+		// if ( self->role == RestoreRole::Applier) {
+		// 	RestoreApplierData* applier = (RestoreApplierData*) self.getPtr();
+		// 	applier->dbApplier = Optional<Future<Void>>(); // reset dbApplier for next version batch
+		// 	// if ( applier->dbApplier.present() ) {
+		// 	// 	applier->dbApplier.~Optional(); // reset dbApplier for next version batch
+		// 	// }
+		// }
 	}
 	TraceEvent("FastRestore").detail("InitVersionBatch", req.batchID)
 			.detail("Role", getRoleStr(self->role)).detail("Node", self->id());
@@ -183,11 +193,3 @@ void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
 	}
 }
 
-
-void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers) {
-	printf("[INFO] appliers num:%ld\n", appliers.size());
-	int index = 0;
-	for(auto &applier : appliers) {
-		printf("\t[INFO][Applier:%d] ID:%s --> KeyRange:%s\n", index, applier.first.toString().c_str(), applier.second.toString().c_str());
-	}
-}

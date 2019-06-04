@@ -78,6 +78,12 @@ struct RestoreSimpleRequest : TimedRequest {
 	void serialize( Ar& ar ) {
 		serializer(ar, reply);
 	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "RestoreSimpleRequest";
+		return ss.str();
+	}
 };
 
 #endif //FDBSERVER_RESTOREUTIL_ACTOR_H

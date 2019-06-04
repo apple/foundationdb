@@ -3759,9 +3759,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				wait( tr.commit() );
 			}
 			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
-			if ( !restoreRequestDone ) {
-				wait(watch4RestoreRequestDone);
-			}
+			if ( restoreRequestDone ) break;
 		} catch( Error &e ) {
 			wait( tr.onError(e) );
 		}

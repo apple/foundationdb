@@ -55,7 +55,7 @@ typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutations
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-ACTOR Future<Void> handlerFinishRestoreRequest(RestoreSimpleRequest req, Reference<RestoreRoleData> self, Database cx);
+ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self, Database cx);
 
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
@@ -186,7 +186,6 @@ public:
 };
 
 void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds);
-void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers);
 
 #include "flow/unactorcompiler.h"
 #endif

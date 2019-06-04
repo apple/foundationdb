@@ -46,6 +46,10 @@ struct VersionBatch {
 	Version endVersion; // Exclusive
 	std::vector<RestoreFileFR> logFiles;
 	std::vector<RestoreFileFR> rangeFiles;
+
+	bool isEmpty() {
+		return logFiles.empty() && rangeFiles.empty();
+	}
 };
 
 struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
@@ -178,11 +182,10 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
-	void printAppliersKeyRange() {
-		printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
-		// applier type: std::map<Standalone<KeyRef>, UID>
+	void logApplierKeyRange() {
+		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", range2Applier.size());
 		for (auto &applier : range2Applier) {
-			printf("\t[INFO]%s -> %s\n", getHexString(applier.first).c_str(), applier.second.toString().c_str());
+			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
 		}
 	}
 
