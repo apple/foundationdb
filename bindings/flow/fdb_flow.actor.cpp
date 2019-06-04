@@ -81,10 +81,6 @@ void fdb_flow_test() {
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
-	int randomSeed = platform::getRandomSeed();
-
-	setThreadLocalDeterministicRandomSeed(randomSeed);
-
 	g_network = newNet2( false );
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
