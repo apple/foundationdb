@@ -9,7 +9,7 @@ Fixes
 -----
 
 * Sometimes a minority of coordinators would not converge to the leader. `(PR #1649) <https://github.com/apple/foundationdb/pull/1649>`_
-* HTTP responses indicating server-side error are no longer expected to contain a ResponseID header. `(PR #1649) <https://github.com/apple/foundationdb/pull/1651>`_
+* HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. `(PR #1651) <https://github.com/apple/foundationdb/pull/1651>`_
 
 6.1.8
 =====
