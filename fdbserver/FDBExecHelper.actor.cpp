@@ -1,6 +1,7 @@
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#define BOOST_FILESYSTEM_NO_LIB
 #include <boost/process.hpp>
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
