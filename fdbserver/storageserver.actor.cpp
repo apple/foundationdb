@@ -640,7 +640,7 @@ public:
 	template<class Request, class HandleFunction>
 	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
 		auto rate = currentRate();
-		if (rate < 0.999 && g_random->random01() > rate) {
+		if (rate < 0.8 && g_random->random01() > rate) {
 			//request.error = future_version();
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			return Void();
