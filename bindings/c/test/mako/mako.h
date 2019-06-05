@@ -2,8 +2,9 @@
 #define MAKO_H
 #pragma once
 
-//#define FDB_API_VERSION 307
-//#define FDB_API_VERSION 610
+#ifndef FDB_API_VERSION
+#define FDB_API_VERSION 610
+#endif
 
 #include <foundationdb/fdb_c.h>
 #include <pthread.h>

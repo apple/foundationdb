@@ -144,7 +144,6 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
   int end = insert_end(args->rows, worker_id, thread_id, args->num_processes,
                        args->num_threads);
   int xacts = 0;
-  uint64_t latencyus;
 
   keystr = (char *)malloc(sizeof(char) * args->key_length + 1);
   if (!keystr)
@@ -246,8 +245,8 @@ FDB_FAIL:
 
 int64_t run_op_getreadversion(FDBTransaction *transaction) {
   int64_t rv = 0;
-  FDBFuture *f, *ferr;
-  fdb_error_t err, err2;
+  FDBFuture *f;
+  fdb_error_t err;
 
 FDB_RETRY:
   f = fdb_transaction_get_read_version(transaction);
@@ -262,11 +261,11 @@ FDB_RETRY:
 
 int run_op_get(FDBTransaction *transaction, char *keystr, char *valstr,
                int snapshot) {
-  FDBFuture *f, *ferr;
+  FDBFuture *f;
   int out_present;
   char *val;
   int vallen;
-  fdb_error_t err, err2;
+  fdb_error_t err;
 
 FDB_RETRY:
   f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
@@ -295,7 +294,6 @@ int run_op_getrange(FDBTransaction *transaction, char *keystr, char *keystr2,
   FDBKeyValue const *out_kv;
   int out_count;
   int out_more;
-  int i;
 
 FDB_RETRY:
   f = fdb_transaction_get_range(
@@ -735,7 +733,6 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
 #if FDB_API_VERSION < 610
   FDBCluster *cluster;
 #endif
-  FDBFuture *f;
   process_info_t process;
   thread_args_t *thread_args;
   int rc;
@@ -958,8 +955,6 @@ int init_args(mako_args_t *args) {
 /* parse transaction specification */
 int parse_transaction(mako_args_t *args, char *optarg) {
   char *ptr = optarg;
-  int len = strlen(optarg);
-  int i = 0;
   int op = 0;
   int rangeop = 0;
   int num;
