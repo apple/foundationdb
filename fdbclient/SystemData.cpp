@@ -648,18 +648,6 @@ const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
 }
 
 // restoreRequestDone key
-const Value restoreRequestDoneValue (int const numRequests) {
-	BinaryWriter wr(IncludeVersion());
-	wr << numRequests;
-	return wr.toValue();
-}
-const int decodeRestoreRequestDoneValue( ValueRef const& value ) {
-	int s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
-}
-
 const Value restoreRequestDoneVersionValue (Version readVersion) {
 	BinaryWriter wr(IncludeVersion());
 	wr << readVersion;
@@ -671,7 +659,6 @@ Version decodeRestoreRequestDoneVersionValue( ValueRef const& value ) {
 	reader >> v;
 	return v;
 }
-
 
 const Key restoreRequestKeyFor( int const& index ) {
 	BinaryWriter wr(Unversioned());

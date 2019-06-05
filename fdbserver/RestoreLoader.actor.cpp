@@ -82,7 +82,7 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				}
 				when ( RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture()) ) {
 					requestTypeStr = "finishRestore";
-					exitRole = handleFinishRestoreRequest(req, self, cx);
+					exitRole = handleFinishRestoreRequest(req, self);
 				}
 				when ( wait(exitRole) ) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());

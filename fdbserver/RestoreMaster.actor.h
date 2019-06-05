@@ -55,15 +55,12 @@ struct VersionBatch {
 struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	// Temporary variables to hold files and data to restore
 	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
 	std::vector<RestoreFileFR> files; // Backup files to be parsed and applied: range and log files in 1 version batch
 
-	double totalWorkloadSize;
-	double curWorkloadSize;
 	int batchIndex;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
@@ -72,21 +69,10 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
 
-	void printAllBackupFilesInfo() {
-		printf("[INFO] All backup files: num:%ld\n", allFiles.size());
-		for (int i = 0; i < allFiles.size(); ++i) {
-			printf("\t[INFO][File %d] %s\n", i, allFiles[i].toString().c_str());
-		}
-	}
-
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-
 		batchIndex = 0;
-		curWorkloadSize = 0;
-		totalWorkloadSize = 0;
-		curWorkloadSize = 0;
 	}
 
 	std::string describeNode() {
@@ -151,7 +137,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		printf("[INFO] constructFilesWithVersionRange for num_files:%ld\n", files.size());
 		allFiles.clear();
 		for (int i = 0; i <  files.size(); i++) {
-			printf("\t[File:%d] Start %s\n", i,  files[i].toString().c_str());
 			Version beginVersion = 0;
 			Version endVersion = 0;
 			if ( files[i].isRange) {
@@ -163,22 +148,14 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 				long blockSize, len;
 				int pos =  files[i].fileName.find_last_of("/");
 				std::string fileName =  files[i].fileName.substr(pos);
-				printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
+				//printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
 				sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%ln", &beginVersion, &endVersion, &blockSize, &len);
-				printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
+				//printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
 			}
 			files[i].beginVersion = beginVersion;
 			files[i].endVersion = endVersion;
-			printf("\t[File:%d] End %s\n", i,  files[i].toString().c_str());
 			ASSERT(beginVersion <= endVersion);
 			allFiles.push_back( files[i]);
-		}
-	}
-
-	void printBackupFilesInfo() {
-		printf("[INFO] The backup files for current batch to load and apply: num:%ld\n", files.size());
-		for (int i = 0; i < files.size(); ++i) {
-			printf("\t[INFO][File %d] %s\n", i, files[i].toString().c_str());
 		}
 	}
 
@@ -189,16 +166,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
-	bool isBackupEmpty() {
-		for (int i = 0; i < files.size(); ++i) {
-			if (files[i].fileSize > 0) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-
 	void initBackupContainer(Key url) {
 		if ( bcUrl == url && bc.isValid() ) {
 			return;
@@ -206,11 +173,8 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		printf("initBackupContainer, url:%s\n", url.toString().c_str());
 		bcUrl = url;
 		bc = IBackupContainer::openContainer(url.toString());
-		//state BackupDescription desc = wait(self->bc->describeBackup());
-		//return Void();
 	}
 };
-
 
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx);
 

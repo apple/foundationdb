@@ -100,7 +100,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 		wait( distributeWorkloadPerVersionBatch(self, cx, request, versionBatch->second) );
 	}
 
-	TraceEvent("FastRestore").detail("RestoreCompleted", request.randomUid);
+	TraceEvent("FastRestore").detail("RestoreToVersion",  request.targetVersion);
 	return request.targetVersion;
 }
 
@@ -335,13 +335,16 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 	for ( auto &loader : self->loadersInterf ) {
 		requests.push_back( std::make_pair(loader.first, RestoreVersionBatchRequest(self->batchIndex)) );
 	}
-	wait( sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests) );
+	// A loader exits immediately after it receives the request. Master may not receive acks.
+	Future<Void> endLoaders = sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests);
 
-	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
+	requests.clear();
 	for ( auto &applier : self->appliersInterf ) {
 		requests.push_back( std::make_pair(applier.first, RestoreVersionBatchRequest(self->batchIndex)) );
 	}
-	wait( sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests) );
+	Future<Void> endApplier =  sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
+
+	wait( delay(5.0) ); // Give some time for loaders and appliers to exit
 
 	// Notify tester that the restore has finished
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));

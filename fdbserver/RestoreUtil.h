@@ -36,7 +36,6 @@
 enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
 BINARY_SERIALIZABLE( RestoreRole );
 std::string getRoleStr(RestoreRole role);
-
 extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
 
@@ -49,7 +48,6 @@ struct FastRestoreOpConfig {
 	double transactionBatchSizeThreshold = 512; //512 in Bytes
 };
 extern FastRestoreOpConfig opConfig;
-
 
 struct RestoreCommonReply { 
 	UID id; // unique ID of the server who sends the reply

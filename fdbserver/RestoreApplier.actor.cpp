@@ -27,7 +27,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
-
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -35,8 +34,8 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
-ACTOR Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx);
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
+ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx);
 
 ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, RestoreApplierInterface applierInterf, Database cx) {
 	state ActorCollection actors(false);
@@ -72,7 +71,7 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 				}
 				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture()) ) {
 					requestTypeStr = "finishRestore";
-					exitRole =  handleFinishRestoreRequest(req, self, cx);
+					exitRole =  handleFinishRestoreRequest(req, self);
 				}
 				when ( wait(exitRole) ) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
@@ -91,17 +90,12 @@ ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, Restor
 // The actor may be invovked multiple times and executed async.
 // No race condition as long as we do not wait or yield when operate the shared data, it should be fine,
 // because all actors run on 1 thread.
-ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
 	TraceEvent("FastRestore").detail("ApplierNode", self->id())
 			.detail("LogVersion", self->logVersion.get()).detail("RangeVersion", self->rangeVersion.get())
 			.detail("Request", req.toString());
-	if ( debug_verbose ) {
-		// NOTE: Print out the current version and received req is helpful in debugging
-		printf("[VERBOSE_DEBUG] handleSendMutationVectorRequest Node:%s at rangeVersion:%ld logVersion:%ld receive mutation number:%d, req:%s\n",
-			self->describeNode().c_str(), self->rangeVersion.get(), self->logVersion.get(), req.mutations.size(), req.toString().c_str());
-	}
 
 	if ( req.isRangeFile ) {
 		wait( self->rangeVersion.whenAtLeast(req.prevVersion) );
@@ -114,7 +108,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 		state Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
-		// printf("[DEBUG] Node:%s receive %d mutations at version:%ld\n", self->describeNode().c_str(), mutations.size(), commitVersion);
 		if ( self->kvOps.find(commitVersion) == self->kvOps.end() ) {
 			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
 		}
@@ -123,10 +116,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 			MutationRef mutation = mutations[mIndex];
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 			numMutations++;
-			//if ( numMutations % 100000 == 1 ) { // Should be different value in simulation and in real mode
-				// printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
-				// 		self->describeNode().c_str(), numMutations, mutation.toString().c_str());
-			//}
 		}
 
 		// Notify the same actor and unblock the request at the next version
@@ -142,12 +131,10 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 }
 
  ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
- 	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
-		printf("Node:%s kvOps is empty. No-op for apply to DB\n", self->describeNode().c_str());
 		TraceEvent("FastRestore").detail("ApplierApplyToDBEmpty", self->id());
 		return Void();
 	}
@@ -159,10 +146,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 	
 	self->sanityCheckMutationOps();
 
- 	if ( debug_verbose ) {
-		TraceEvent("ApplyKVOPsToDB").detail("MapSize", self->kvOps.size());
-		printf("ApplyKVOPsToDB num_of_version:%ld\n", self->kvOps.size());
- 	}
  	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = self->kvOps.begin();
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator prevIt = it;
 	state int index = 0;
@@ -181,27 +164,13 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 			for ( ; it != self->kvOps.end(); ++it ) {
 				numVersion++;
 				//TraceEvent("FastRestore").detail("Applier", self->id()).detail("ApplyKVsToDBVersion", it->first);
-				if ( debug_verbose ) {
-					TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
-				}
-				//printf("ApplyKVOPsToDB numVersion:%d Version:%08lx num_of_ops:%d, \n", numVersion, it->first, it->second.size());
-
 				state MutationRef m;
 				for ( ; index < it->second.size(); ++index ) {
 					m = it->second[index];
 					if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
 						typeStr = typeString[m.type];
 					else {
-						printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
-					}
-
-					if ( debug_verbose && count % 1000 == 0 ) {
-						printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops to apply:%d\n",
-								self->describeNode().c_str(), count, it->first, it->second.size());
-					}
-
-					if ( debug_verbose ) {
-						printf("[VERBOSE_DEBUG] Node:%s apply mutation:%s\n", self->describeNode().c_str(), m.toString().c_str());
+						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
 					if ( m.type == MutationRef::SetValue ) {
@@ -212,7 +181,7 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
 						tr->atomicOp(m.param1, m.param2, m.type);
 					} else {
-						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
+						TraceEvent(SevError, "FastRestore").detail("UnhandledMutationType", m.type).detail("TypeName", typeStr);
 					}
 					++count;
 					transactionSize += m.expectedSize();
@@ -225,17 +194,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 						prevIt = it;
 						prevIndex = index;
 						transactionSize = 0;
-					}
-
-					if ( isPrint ) {
-						printf("\tApplyKVOPsToDB Version:%016lx MType:%s K:%s, V:%s K_size:%d V_size:%d\n", it->first, typeStr.c_str(),
-							getHexString(m.param1).c_str(), getHexString(m.param2).c_str(), m.param1.size(), m.param2.size());
-
-						TraceEvent("ApplyKVOPsToDB\t\t").detail("Version", it->first)
-								.detail("MType", m.type).detail("MTypeStr", typeStr)
-								.detail("MKey", getHexString(m.param1))
-								.detail("MValueSize", m.param2.size())
-								.detail("MValue", getHexString(m.param2));
 					}
 				}
 
@@ -256,7 +214,6 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 			}
 			break;
 		} catch(Error &e) {
-			printf("ApplyKVOPsToDB transaction error:%s.\n", e.what());
 			wait(tr->onError(e));
 			it = prevIt;
 			index = prevIndex;
@@ -265,15 +222,13 @@ ACTOR Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVers
 	}
 
  	self->kvOps.clear();
- 	printf("Node:%s ApplyKVOPsToDB number of kv mutations:%d\n", self->describeNode().c_str(), count);
 
  	return Void();
  }
 
- ACTOR Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx) {
+ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx) {
 	TraceEvent("FastRestore").detail("ApplierApplyToDB", self->id()).detail("DBApplierPresent", self->dbApplier.present());
 	if ( !self->dbApplier.present() ) {
-		//self->dbApplier = Never();
 		self->dbApplier = applyToDB(self, cx);
 	}
 

@@ -34,7 +34,6 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -53,9 +52,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
-
-    // Performance statistics
-    double curWorkloadSize;
 
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
@@ -76,26 +72,15 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 
     void resetPerVersionBatch() {
-		printf("[INFO]Node:%s resetPerVersionBatch\n", nodeID.toString().c_str());
+		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		RestoreRoleData::resetPerVersionBatch();
-
 		range2Applier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;
-		
 		processedFileParams.clear();
-
-		curWorkloadSize = 0;
 	}
 
-	vector<UID> getBusyAppliers() {
-		vector<UID> busyAppliers;
-		for (auto &app : range2Applier) {
-			busyAppliers.push_back(app.second);
-		}
-		return busyAppliers;
-	}
-
+	// Only get the appliers that are responsible for a range
     std::vector<UID> getWorkingApplierIDs() {
         std::vector<UID> applierIDs;
         for ( auto &applier : range2Applier ) {
@@ -110,7 +95,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		if ( bcUrl == url && bc.isValid() ) {
 			return;
 		}
-		printf("initBackupContainer, url:%s\n", url.toString().c_str());
 		bcUrl = url;
 		bc = IBackupContainer::openContainer(url.toString());
 	}

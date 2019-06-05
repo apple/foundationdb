@@ -55,7 +55,7 @@ typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutations
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self, Database cx);
+ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
@@ -134,58 +134,8 @@ public:
 		appliersInterf.clear();
 	}
 
-	std::string describeNode() {
-		std::stringstream ss;
-		ss << "RestoreRoleData role:" << getRoleStr(role) << " nodeID:%s" << nodeID.toString();
-		return ss.str();
-	}
-
-	void printRestoreRoleInterfaces() {
-		printf("Dump restore loaders and appliers info:\n");
-		for (auto &loader : loadersInterf) {
-			printf("Loader:%s\n", loader.first.toString().c_str());
-		}
-
-		for (auto &applier : appliersInterf) {
-			printf("Applier:%s\n", applier.first.toString().c_str());
-		}
-	}
-
-	// TODO: To remove this function
-	std::vector<UID> getApplierIDs() {
-		std::vector<UID> applierIDs;
-		for (auto &applier : appliersInterf) {
-			applierIDs.push_back(applier.first);
-		}
-		return applierIDs;
-	}
-
-	// TODO: To remove this function
-	std::vector<UID> getLoaderIDs() {
-		std::vector<UID> loaderIDs;
-		for (auto &loader : loadersInterf) {
-			loaderIDs.push_back(loader.first);
-		}
-
-		return loaderIDs;
-	}
-
-	// TODO: To remove this function
-	std::vector<UID> getWorkerIDs() {
-		std::vector<UID> workerIDs;
-		for (auto &loader : loadersInterf) {
-			workerIDs.push_back(loader.first);
-		}
-		for (auto &applier : appliersInterf) {
-			workerIDs.push_back(applier.first);
-		}
-
-		return workerIDs;
-	}
-
+	virtual std::string describeNode() = 0;
 };
-
-void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -276,31 +276,23 @@ extern const KeyRef mustContainSystemMutationsKey;
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 
+// Fast restore
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
-
-extern const KeyRef restoreStatusKey;
-
+extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
 extern const KeyRef restoreRequestTriggerKey;
 extern const KeyRef restoreRequestDoneKey;
 extern const KeyRangeRef restoreRequestKeys;
-
 const Key restoreWorkerKeyFor( UID const& workerID );
-
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server );
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value );
-
-// Fast restore
 const Value restoreRequestTriggerValue (int const numRequests);
 const int decodeRestoreRequestTriggerValue( ValueRef const& value );
-const Value restoreRequestDoneValue (int const numRequests);
-const int decodeRestoreRequestDoneValue( ValueRef const& value );
 const Value restoreRequestDoneVersionValue (Version readVersion);
 Version decodeRestoreRequestDoneVersionValue( ValueRef const& value );
 const Key restoreRequestKeyFor( int const& index );
 const Value restoreRequestValue( RestoreRequest const& server );
 RestoreRequest decodeRestoreRequestValue( ValueRef const& value );
-
 const  Key restoreStatusKeyFor( StringRef statusType);
 const Value restoreStatusValue( double const& val );
 

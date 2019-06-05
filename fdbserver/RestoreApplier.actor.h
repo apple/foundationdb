@@ -49,7 +49,6 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
-	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	// For master applier to hold the lower bound of key ranges for each appliers
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
@@ -93,17 +92,8 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		if (kvOps.empty())
 			return;
 
-		if ( isKVOpsSorted() ) {
-			printf("[CORRECT] KVOps is sorted by version\n");
-		} else {
-			printf("[ERROR]!!! KVOps is NOT sorted by version\n");
-		}
-
-		if ( allOpsAreKnown() ) {
-			printf("[CORRECT] KVOps all operations are known.\n");
-		} else {
-			printf("[ERROR]!!! KVOps has unknown mutation op. Exit...\n");
-		}
+		ASSERT_WE_THINK( isKVOpsSorted() );
+		ASSERT_WE_THINK( allOpsAreKnown() );
 	}
 
 	bool isKVOpsSorted() {
@@ -127,60 +117,12 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 					|| isAtomicOp((MutationRef::Type) m->type) )
 					continue;
 				else {
-					printf("[ERROR] Unknown mutation type:%d\n", m->type);
+					TraceEvent(SevError, "FastRestore").detail("UnknownMutationType", m->type);
 					ret = false;
 				}
 			}
-
 		}
-
 		return ret;
-	}
-
-
-	std::vector<Standalone<KeyRef>> calculateAppliersKeyRanges(int numAppliers) {
-		ASSERT(numAppliers > 0);
-		std::vector<Standalone<KeyRef>> lowerBounds;
-		int numSampledMutations = 0;
-		for (auto &count : keyOpsCount) {
-			numSampledMutations += count.second;
-		}
-
-		//intervalLength = (numSampledMutations - remainder) / (numApplier - 1)
-		int intervalLength = std::max(numSampledMutations / numAppliers, 1); // minimal length is 1
-		int curCount = 0;
-		int curInterval = 0;
-
-		printf("[INFO] Node:%s calculateAppliersKeyRanges(): numSampledMutations:%d numAppliers:%d intervalLength:%d\n",
-				describeNode().c_str(),
-				numSampledMutations, numAppliers, intervalLength);
-		for (auto &count : keyOpsCount) {
-			if (curCount >= curInterval * intervalLength) {
-				printf("[INFO] Node:%s calculateAppliersKeyRanges(): Add a new key range  [%d]:%s: curCount:%d\n",
-						describeNode().c_str(), curInterval, count.first.toString().c_str(), curCount);
-				lowerBounds.push_back(count.first); // The lower bound of the current key range
-				curInterval++;
-			}
-			curCount += count.second;
-		}
-
-		if ( lowerBounds.size() != numAppliers ) {
-			printf("[WARNING] calculateAppliersKeyRanges() WE MAY NOT USE ALL APPLIERS efficiently! num_keyRanges:%ld numAppliers:%d\n",
-					lowerBounds.size(), numAppliers);
-			printLowerBounds(lowerBounds);
-		}
-
-		//ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
-		if ( lowerBounds.size() > numAppliers ) {
-			printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
-		}
-
-		while ( lowerBounds.size() > numAppliers ) {
-			printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
-			lowerBounds.pop_back();
-		}
-
-		return lowerBounds;
 	}
 };
 

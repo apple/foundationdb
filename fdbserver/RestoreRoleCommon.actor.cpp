@@ -43,7 +43,7 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self, Database cx) {
+ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	if ( self->versionBatchStart ) {
 		self->versionBatchStart = false;
 	}
@@ -180,16 +180,4 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 			   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
 
 	}
-	printf("----------------------------------------------------------\n");
 }
-
-void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
-	if ( debug_verbose == false )
-		return;
-
-	printf("[INFO] Print out %ld keys in the lowerbounds\n", lowerBounds.size());
-	for (int i = 0; i < lowerBounds.size(); i++) {
-		printf("\t[INFO][%d] %s\n", i, getHexString(lowerBounds[i]).c_str());
-	}
-}
-
