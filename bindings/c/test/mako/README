@@ -1,17 +1,7 @@
 * How to Build
 
-- Use system-wide FDB installation
-cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
-make
-
-- Use a production package installed somewhere else
-cmake -G "Unix Makefiles" -DFDB_DIR=<fdbdir> -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
-make
-
-- Use the development source/build directories
-cmake -G "Unix Makefiles" -DFDB_BUILD_DIR=<fdb_builddir> -DFDB_SOURCE_DIR=<fdb_srcdir> -DCMAKE_BUILD_TYPE=Release <mako_srcdir>
-make
-
+In the FDB build directory, build "mako" target.
+e.g. make mako
 
 
 * How to Run
