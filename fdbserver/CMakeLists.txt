@@ -131,6 +131,7 @@ set(FDBSERVER_SRCS
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
