@@ -40,29 +40,56 @@
     }                                                                          \
   } while (0)
 
-#define fdb_transaction_wait(_f)                                               \
-  do {                                                                         \
-    FDBFuture *ferr;                                                           \
-    fdb_error_t err, err2;                                                     \
-    err = fdb_future_block_until_ready(_f);                                    \
-    if (err) {                                                                 \
-      ferr = fdb_transaction_on_error(transaction, err);                       \
-      err2 = fdb_future_block_until_ready(ferr);                               \
-      if (err2) {                                                              \
-        fdb_future_destroy(_f);                                                \
-        fdb_future_destroy(ferr);                                              \
-        fprintf(stderr,                                                        \
-                "ERROR: fdb_future_block_until_ready failed at %s:%d\n",       \
-                __FILE__, __LINE__);                                           \
-        return -1;                                                             \
-      } else {                                                                 \
-        /* should retry */                                                     \
-        fdb_future_destroy(_f);                                                \
-        fdb_future_destroy(ferr);                                              \
-        goto FDB_RETRY;                                                        \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
+fdb_error_t wait_future(FDBFuture *f) {
+  fdb_error_t err;
+
+  err = fdb_future_block_until_ready(f);
+  if (err) {
+    return err; /* error from fdb_future_block_until_ready() */
+  }
+  return fdb_future_get_error(f);
+}
+
+
+int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
+  FDBFuture *f;
+  fdb_error_t err = 0;
+  int retry = 3;
+
+  do {
+    f = fdb_transaction_commit(transaction);
+    err = wait_future(f);
+    fdb_future_destroy(f);
+    if (stats) {
+      if (err == 1020 /* not_committed */)
+	stats->conflicts++;
+      else {
+	stats->errors[OP_COMMIT]++;
+      }
+    }
+    
+    if (err) {
+      fprintf(stderr, "ERROR: Error %d occured at fdb_transaction_commit\n",
+	      err);
+      f = fdb_transaction_on_error(transaction, err);
+      err = wait_future(f);
+      fdb_future_destroy(f);
+      if (err) {
+	/* not retryable */
+	fprintf(stderr,
+		"ERROR: fdb_transaction_on_error returned %d at %s:%d\n",
+		err, __FILE__, __LINE__);
+	break;
+      }
+    } else {
+      if (stats)
+	stats->ops[OP_COMMIT]++;
+      break;
+    }
+  } while (retry--);
+  
+  return err;
+}
 
 void update_op_stats(struct timespec *start, struct timespec *end, int op,
                      mako_stats_t *stats) {
@@ -102,7 +129,6 @@ int cleanup(FDBTransaction *transaction, mako_args_t *args) {
   struct timespec timer_start, timer_end;
   char beginstr[7];
   char endstr[7];
-  FDBFuture *f;
 
   strncpy(beginstr, "mako", 4);
   beginstr[4] = 0x00;
@@ -111,9 +137,9 @@ int cleanup(FDBTransaction *transaction, mako_args_t *args) {
   clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
   fdb_transaction_clear_range(transaction, (uint8_t *)beginstr, 5,
                               (uint8_t *)endstr, 5);
-  f = fdb_transaction_commit(transaction);
-  fdb_block_wait(f);
-  fdb_future_destroy(f);
+  if (commit_transaction(transaction, NULL))
+    goto FDB_FAIL;
+
   fdb_transaction_reset(transaction);
   clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_end);
   if (args->verbose >= VERBOSE_DEFAULT) {
@@ -138,7 +164,7 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
   struct timespec timer_per_xact_start, timer_per_xact_end;
   char *keystr;
   char *valstr;
-  FDBFuture *f;
+
   int begin = insert_begin(args->rows, worker_id, thread_id,
                            args->num_processes, args->num_threads);
   int end = insert_end(args->rows, worker_id, thread_id, args->num_processes,
@@ -194,8 +220,8 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
     /* commit every 100 inserts (default) */
     if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
 
-      f = fdb_transaction_commit(transaction);
-      fdb_block_wait(f);
+      if (commit_transaction(transaction, NULL))
+	goto FDB_FAIL;
 
       /* xact latency stats */
       clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
@@ -204,21 +230,19 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
       stats->ops[OP_COMMIT]++;
       clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
 
-      fdb_future_destroy(f);
       fdb_transaction_reset(transaction);
       stats->xacts++;
       xacts++; /* for throttling */
     }
   }
 
-  f = fdb_transaction_commit(transaction);
-  fdb_block_wait(f);
+  if (commit_transaction(transaction, NULL))
+    goto FDB_FAIL;
 
   /* xact latency stats */
   clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
   update_op_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT, stats);
 
-  fdb_future_destroy(f);
   clock_gettime(CLOCK_MONOTONIC, &timer_end);
   stats->xacts++;
 
@@ -247,10 +271,29 @@ int64_t run_op_getreadversion(FDBTransaction *transaction) {
   int64_t rv = 0;
   FDBFuture *f;
   fdb_error_t err;
+  int retry = 3;
 
-FDB_RETRY:
-  f = fdb_transaction_get_read_version(transaction);
-  fdb_transaction_wait(f);
+  do {
+    f = fdb_transaction_get_read_version(transaction);
+    err = wait_future(f);
+
+    if (err) {
+      fdb_future_destroy(f);
+      f = fdb_transaction_on_error(transaction, err);
+      err = wait_future(f);
+      fdb_future_destroy(f);
+      if (err) {
+	/* not retryable */
+	break;
+      }
+    }
+  } while (retry--);
+
+  if (err) {
+    fprintf(stderr, "ERROR: fdb_transaction_get_version: %s\n", fdb_get_error(err));
+    return -1;
+  }
+
   err = fdb_future_get_version(f, &rv);
   if (err) {
     fprintf(stderr, "ERROR: fdb_future_get_version: %s\n", fdb_get_error(err));
@@ -266,24 +309,38 @@ int run_op_get(FDBTransaction *transaction, char *keystr, char *valstr,
   char *val;
   int vallen;
   fdb_error_t err;
+  int retry = 3;
 
-FDB_RETRY:
-  f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
-                          snapshot);
-  fdb_transaction_wait(f);
-  err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
+  do {
+    f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
+			    snapshot);
+    err = wait_future(f);
+
+    if (err) {
+      fdb_future_destroy(f);
+      f = fdb_transaction_on_error(transaction, err);
+      err = wait_future(f);
+      fdb_future_destroy(f);
+      if (err) {
+	/* not retryable */
+	break;
+      }
+    }
+  } while (retry--);
+
   if (err) {
-    /* likely past_version */
-    /*
-      fprintf(stderr, "\nERROR: fdb_future_get_value: %s\n",
-      fdb_get_error(err));
-    */
-    fdb_future_destroy(f);
+    fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));
+    return -1;
+  }
+
+  err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
+  fdb_future_destroy(f);
+  if (err || !out_present) {
+    /* error or value not present */
     return -1;
   }
   strncpy(valstr, val, vallen);
   valstr[vallen] = '\0';
-  fdb_future_destroy(f);
   return 0;
 }
 
@@ -294,16 +351,35 @@ int run_op_getrange(FDBTransaction *transaction, char *keystr, char *keystr2,
   FDBKeyValue const *out_kv;
   int out_count;
   int out_more;
+  int retry = 3;
 
-FDB_RETRY:
-  f = fdb_transaction_get_range(
-      transaction,
-      FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t *)keystr, strlen(keystr)),
-      FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t *)keystr2, strlen(keystr2)) + 1,
-      0 /* limit */, 0 /* target_bytes */,
-      FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */, 0 /* iteration */,
-      snapshot, reverse /* reverse */);
-  fdb_transaction_wait(f);
+  do {
+    f = fdb_transaction_get_range(
+          transaction,
+          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t *)keystr, strlen(keystr)),
+          FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t *)keystr2, strlen(keystr2)) + 1,
+          0 /* limit */, 0 /* target_bytes */,
+          FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */, 0 /* iteration */,
+          snapshot, reverse /* reverse */);
+    err = wait_future(f);
+
+    if (err) {
+      fdb_future_destroy(f);
+      f = fdb_transaction_on_error(transaction, err);
+      err = wait_future(f);
+      fdb_future_destroy(f);
+      if (err) {
+	/* not retryable */
+	break;
+      }
+    }
+  } while (retry--);
+
+  if (err) {
+    fprintf(stderr, "ERROR: fdb_transaction_get_range: %s\n", fdb_get_error(err));
+    return -1;
+  }
+
   err = fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more);
   if (err) {
     fprintf(stderr, "ERROR: fdb_future_get_keyvalue_array: %s\n",
@@ -321,20 +397,34 @@ int run_op_update(FDBTransaction *transaction, char *keystr, char *valstr) {
   char *val;
   int vallen;
   fdb_error_t err;
+  int retry = 3;
 
   /* GET first */
-FDB_RETRY:
-  f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr), 0);
-  fdb_transaction_wait(f);
-  err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
-  /*
+  do {
+    f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr), 0);
+    err = wait_future(f);
+
     if (err) {
-    fprintf(stderr, "\nERROR: fdb_future_get_value: %s\n", fdb_get_error(err));
+      fdb_future_destroy(f);
+      f = fdb_transaction_on_error(transaction, err);
+      err = wait_future(f);
+      fdb_future_destroy(f);
+      if (err) {
+	/* not retryable */
+	break;
+      }
     }
-  */
-  fdb_future_destroy(f);
+  } while (retry--);
+
   if (err) {
-    /* likely past_version */
+    fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));
+    return -1;
+  }
+
+  err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
+  fdb_future_destroy(f);
+  if (err || !out_present) {
+    /* error or value not present */
     return -1;
   }
 
@@ -360,31 +450,6 @@ int run_op_clearrange(FDBTransaction *transaction, char *keystr,
   fdb_transaction_clear_range(transaction, (uint8_t *)keystr, strlen(keystr),
                               (uint8_t *)keystr2, strlen(keystr2));
   return 0;
-}
-
-int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
-  FDBFuture *f;
-  fdb_error_t err = 0;
-  f = fdb_transaction_commit(transaction);
-  err = fdb_future_block_until_ready(f);
-  if (err) {
-    fprintf(stderr, "ERROR: fdb_future_block_until_ready failed after "
-                    "fdb_transaction_commit\n");
-  }
-  err = fdb_future_get_error(f);
-  if (err) {
-    if (err == 1020 /* not_committed */) {
-      stats->conflicts++;
-    } else {
-      fprintf(stderr, "ERROR: Error %d occured at fdb_transaction_commit\n",
-              err);
-      stats->errors[OP_COMMIT]++;
-    }
-  } else {
-    stats->ops[OP_COMMIT]++;
-  }
-  fdb_future_destroy(f);
-  return err;
 }
 
 /* run one transaction */
@@ -1532,7 +1597,8 @@ int stats_process_main(mako_args_t *args, mako_stats_t *stats,
     usleep(10000); /* 10ms */
   }
 
-  print_stats_header(args);
+  if (args->verbose >= VERBOSE_DEFAULT)
+    print_stats_header(args);
 
   clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
   timer_prev.tv_sec = timer_start.tv_sec;
@@ -1548,6 +1614,7 @@ int stats_process_main(mako_args_t *args, mako_stats_t *stats,
       timer_prev.tv_nsec = timer_now.tv_nsec;
     }
   }
+
   /* print report */
   if (args->verbose >= VERBOSE_DEFAULT) {
     clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
