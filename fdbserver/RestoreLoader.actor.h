@@ -62,7 +62,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		role = RestoreRole::Loader;
 	}
 
-	~RestoreLoaderData() {}
+	~RestoreLoaderData() {} = default;
 
 	std::string describeNode() {
 		std::stringstream ss;

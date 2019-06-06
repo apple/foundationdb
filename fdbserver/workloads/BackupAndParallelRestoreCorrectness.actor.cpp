@@ -26,7 +26,6 @@
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-
 //A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;

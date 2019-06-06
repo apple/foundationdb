@@ -184,6 +184,4 @@ typedef Standalone<MutationListRef> MutationList;
 template <class Ar> void load( Ar& ar, MutationListRef& r ) { r.serialize_load(ar); }
 template <class Ar> void save( Ar& ar, MutationListRef const& r ) { r.serialize_save(ar); }
 
-void printMutationListRefHex(MutationListRef m, std::string prefix);
-
 #endif

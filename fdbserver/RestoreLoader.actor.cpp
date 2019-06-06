@@ -256,7 +256,6 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	// key range [m->param1, m->param2)
-	// printf("SPLITMUTATION: orignal mutation:%s\n", m.toString().c_str());
 	std::map<Standalone<KeyRef>, UID>::iterator itlow, itup; //we will return [itlow, itup)
 	itlow = self->range2Applier.lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
 	if ( itlow->first > m.param1 ) {
@@ -266,7 +265,6 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 	}
 
 	itup = self->range2Applier.upper_bound(m.param2); // upper_bound returns the iterator that is > m.param2; return rmap::end if no keys are considered to go after m.param2.
-	// printf("SPLITMUTATION: itlow_key:%s itup_key:%s\n", itlow->first.toString().c_str(), itup == self->range2Applier.end() ? "[end]" : itup->first.toString().c_str());
 	ASSERT( itup == self->range2Applier.end() || itup->first > m.param2 );
 
 	std::map<Standalone<KeyRef>, UID>::iterator itApplier;
@@ -290,13 +288,10 @@ void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mve
 		} else {
 			curm.param2 = itlow->first;
 		}
-		// printf("SPLITMUTATION: mvector.push_back:%s\n", curm.toString().c_str());
 		ASSERT( curm.param1 <= curm.param2 );
 		mvector.push_back_deep(mvector_arena, curm);
 		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
 	}
-
-	// printf("SPLITMUTATION: mvector.size:%d\n", mvector.size());
 
 	return;
 }

@@ -60,13 +60,6 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	if ( !self->versionBatchStart ) {
 		self->versionBatchStart = true;
 		self->resetPerVersionBatch();
-		// if ( self->role == RestoreRole::Applier) {
-		// 	RestoreApplierData* applier = (RestoreApplierData*) self.getPtr();
-		// 	applier->dbApplier = Optional<Future<Void>>(); // reset dbApplier for next version batch
-		// 	// if ( applier->dbApplier.present() ) {
-		// 	// 	applier->dbApplier.~Optional(); // reset dbApplier for next version batch
-		// 	// }
-		// }
 	}
 	TraceEvent("FastRestore").detail("InitVersionBatch", req.batchID)
 			.detail("Role", getRoleStr(self->role)).detail("Node", self->id());
@@ -92,92 +85,4 @@ std::string getHexString(StringRef input) {
 		ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[i]; // [] operator moves the pointer in step of unit8
 	}
 	return ss.str();
-}
-
-std::string getHexKey(StringRef input, int skip) {
-	std::stringstream ss;
-	for (int i = 0; i<skip; i++) {
-		if ( i % 4 == 0 )
-			ss << " ";
-		ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[i]; // [] operator moves the pointer in step of unit8
-	}
-	ss << "||";
-
-	//hashvalue
-	ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[skip]; // [] operator moves the pointer in step of unit8
-	ss << "|";
-
-	// commitversion in 64bit
-	int count = 0;
-	for (int i = skip+1; i<input.size() && i < skip+1+8; i++) {
-		if ( count++ % 4 == 0 )
-			ss << " ";
-		ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[i]; // [] operator moves the pointer in step of unit8
-	}
-	// part value
-	count = 0;
-	for (int i = skip+1+8; i<input.size(); i++) {
-		if ( count++ % 4 == 0 )
-			ss << " ";
-		ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[i]; // [] operator moves the pointer in step of unit8
-	}
-	return ss.str();
-}
-
-
-void printMutationListRefHex(MutationListRef m, std::string prefix) {
-	MutationListRef::Iterator iter = m.begin();
-	for ( ;iter != m.end(); ++iter) {
-		printf("%s mType:%04x param1:%s param2:%s param1_size:%d, param2_size:%d\n", prefix.c_str(), iter->type,
-			   getHexString(iter->param1).c_str(), getHexString(iter->param2).c_str(), iter->param1.size(), iter->param2.size());
-	}
-	return;
-}
-
-void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
-	std::stringstream ss;
-	// const int version_size = 12;
-	// const int header_size = 12;
-	StringRef val = key_input.contents();
-	StringRefReaderMX reader(val, restore_corrupted_data());
-
-	int count_size = 0;
-	// Get the version
-	uint64_t version = reader.consume<uint64_t>();
-	count_size += 8;
-	uint32_t val_length_decode = reader.consume<uint32_t>();
-	count_size += 4;
-
-	printf("----------------------------------------------------------\n");
-	printf("To decode value:%s at version:%ld\n", getHexString(val).c_str(), version);
-	if ( val_length_decode != (val.size() - 12) ) {
-		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
-	} else {
-		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
-	}
-
-	// Get the mutation header
-	while (1) {
-		// stop when reach the end of the string
-		if(reader.eof() ) { //|| *reader.rptr == 0xFF
-			//printf("Finish decode the value\n");
-			break;
-		}
-
-
-		uint32_t type = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
-		uint32_t kLen = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
-		uint32_t vLen = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
-		const uint8_t *k = reader.consume(kLen);
-		const uint8_t *v = reader.consume(vLen);
-		count_size += 4 * 3 + kLen + vLen;
-
-		if ( kLen < 0 || kLen > val.size() || vLen < 0 || vLen > val.size() ) {
-			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
-		}
-
-		printf("%s---DedoceBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
-			   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
-
-	}
 }
