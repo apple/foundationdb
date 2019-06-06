@@ -2,7 +2,8 @@
 mako Benchmark
 ##############
 
-| mako (named after a small, but very fast shark) is a micro-benchmark for FoundationDB which is designed to be very light and flexible
+| mako (named after a small, but very fast shark) is a micro-benchmark for FoundationDB
+| which is designed to be very light and flexible
 | so that you can stress a particular part of an FoundationDB cluster without introducing unnecessary overhead.
 
 
@@ -30,72 +31,72 @@ Data Specification
 
 Arguments
 =========
-- ``--mode <mode>``
-  One of the following modes must be specified.  (Required)
-  - ``clean``:  Clean up existing data
-  - ``build``:  Populate data
-  - ``run``:  Run the benchmark
+- | ``--mode <mode>``
+  | One of the following modes must be specified.  (Required)
+  | - ``clean``:  Clean up existing data
+  | - ``build``:  Populate data
+  | - ``run``:  Run the benchmark
 
-- ``-c | --cluster <cluster file>``
-  FDB cluster file (Required)
+- | ``-c | --cluster <cluster file>``
+  | FDB cluster file (Required)
 
-- ``-p | --procs <procs>``
-  Number of worker processes (Default: 1)
+- | ``-p | --procs <procs>``
+  | Number of worker processes (Default: 1)
 
-- ``-t | --threads <threads>``
-  Number of threads per worker process (Default: 1)
+- | ``-t | --threads <threads>``
+  | Number of threads per worker process (Default: 1)
 
-- ``-r | --rows <rows>``
-  Number of rows populated (Default: 10000)
+- | ``-r | --rows <rows>``
+  | Number of rows populated (Default: 10000)
 
-- ``-s | --seconds <seconds>``
-  Test duration in seconds (Default: 30)
-  This option cannot be set with ``--iteration``.
+- | ``-s | --seconds <seconds>``
+  | Test duration in seconds (Default: 30)
+  | This option cannot be set with ``--iteration``.
 
-- ``-i | --iteration <iters>``
-  Specify the number of operations to be executed.
-  This option cannot be set with ``--seconds``.
+- | ``-i | --iteration <iters>``
+  | Specify the number of operations to be executed.
+  | This option cannot be set with ``--seconds``.
 
-- ``--tps <tps>``
-  Target total transaction-per-second (TPS) of all worker processes/threads
-  (Default: Unset / Unthrottled)
+- | ``--tps <tps>``
+  | Target total transaction-per-second (TPS) of all worker processes/threads
+  | (Default: Unset / Unthrottled)
 
-- ``--keylen <num>``
-  Key string length in bytes (Default and Minimum: 16)
+- | ``--keylen <num>``
+  | Key string length in bytes (Default and Minimum: 16)
 
-- ``--vallen <num>``
-  Value string length in bytes (Default and Minimum: 16)
+- | ``--vallen <num>``
+  | Value string length in bytes (Default and Minimum: 16)
 
-- ``-x | --transaction <string>``
-  Transaction specification described in details in the following section.  (Default: ``g10``)
+- | ``-x | --transaction <string>``
+  | Transaction specification described in details in the following section.  (Default: ``g10``)
 
-- ``-z | --zipf``
-  Generate a skewed workload based on Zipf distribution (Default: Unset = Uniform)
+- | ``-z | --zipf``
+  | Generate a skewed workload based on Zipf distribution (Default: Unset = Uniform)
 
-- ``--sampling <num>``
-  Sampling rate (1 sample / <num> ops) for latency stats
+- | ``--sampling <num>``
+  | Sampling rate (1 sample / <num> ops) for latency stats
 
-- ``--trace``
-  Enable tracing.  The trace file will be created in the current directory.
+- | ``--trace``
+  | Enable tracing.  The trace file will be created in the current directory.
 
-- ``--tracepath <path>``
-  Enable tracing and set the trace file path.
+- | ``--tracepath <path>``
+  | Enable tracing and set the trace file path.
 
-- ``--knobs <knobs>``
-  Set client knobs
+- | ``--knobs <knobs>``
+  | Set client knobs
 
-- ``--flatbuffers``
-  Enable flatbuffers
+- | ``--flatbuffers``
+  | Enable flatbuffers
 
-- ``--commitget``
-  Force commit for read-only transactions
+- | ``--commitget``
+  | Force commit for read-only transactions
 
-- ``-v | --verbose <level>``
-  Set verbose level (Default: 1)
-  - 0 – Minimal
-  - 1 – Default
-  - 2 – Annoying
-  - 3 – Very Annoying (a.k.a. DEBUG)
+- | ``-v | --verbose <level>``
+  | Set verbose level (Default: 1)
+  | - 0 – Minimal
+  | - 1 – Default
+  | - 2 – Annoying
+  | - 3 – Very Annoying (a.k.a. DEBUG)
 
 
 Transaction Specification
@@ -126,19 +127,19 @@ Format
 | When Count is omitted, it's equivalent to setting it to 1.  (e.g. ``g`` is equivalent to ``g1``)
 | Multiple operation types can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
 
-Examples
---------
-- 100 GETs (No Commit)
-  ``g100``
+Transaction Specification Examples
+----------------------------------
+- | 100 GETs (No Commit)
+  | ``g100``
 
-- 10 GET RANGE with Range of 50 (No Commit)
-  ``gr10:50``
+- | 10 GET RANGE with Range of 50 (No Commit)
+  | ``gr10:50``
 
-- 90 GETs and 10 Updates (Committed)
-  ``g90u10``
+- | 90 GETs and 10 Updates (Committed)
+  | ``g90u10``
 
-- 80 GETs, 10 Updates and 10 Inserts (Committed)
-  ``g90u10i10``
+- | 80 GETs, 10 Updates and 10 Inserts (Committed)
+  | ``g90u10i10``
 
 
 Execution Examples
