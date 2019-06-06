@@ -581,7 +581,7 @@ struct RedwoodRecordRef {
 		return compare(rhs) >= 0;
 	}
 
-	int deltaSize(const RedwoodRecordRef &base) const {
+	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true) const {
 		int size = sizeof(Delta);
 
 		if(value.present()) {
@@ -590,19 +590,22 @@ struct RedwoodRecordRef {
 		}
 
 		int prefixLen = getCommonPrefixLen(base, 0);
-		size += (prefixLen >= 128) ? 2 : 1;
+		size += (worstCase || prefixLen >= 128) ? 2 : 1;
 
 		int intFieldPrefixLen;
 
 		// Currently using a worst-guess guess where int fields in suffix are stored in their entirety if nonzero.
 		if(prefixLen < key.size()) {
 			int keySuffixLen = key.size() - prefixLen;
-			size += (keySuffixLen >= 128) ? 2 : 1;
+			size += (worstCase || keySuffixLen >= 128) ? 2 : 1;
 			size += keySuffixLen;
 			intFieldPrefixLen = 0;
 		}
 		else {
 			intFieldPrefixLen = prefixLen - key.size();
+			if(worstCase) {
+				size += 2;
+			}
 		}
 
 		if(version == 0 && chunk.total == 0 && chunk.start == 0) {
@@ -705,11 +708,11 @@ struct RedwoodRecordRef {
 	std::string toString(int hexLimit = 15) const {
 		std::string r;
 		r += format("'%s'@%" PRId64, kvformat(key, hexLimit).c_str(), version);
-		r += format("[%d/%d]->", chunk.start, chunk.total);
+		r += format("[%u/%u]->", chunk.start, chunk.total);
 		if(value.present()) {
 			// Assume that values the size of a page ID are page IDs.  It's not perfect but it's just for debugging.
 			if(value.get().size() == sizeof(LogicalPageID)) {
-				r += format("[Page id=%u]", getPageID());
+				r += format("[PageID=%u]", getPageID());
 			}
 			else {
 				r += format("'%s'", kvformat(value.get(), hexLimit).c_str());
@@ -773,14 +776,26 @@ struct BTreePage {
 				c.moveFirst();
 				ASSERT(c.valid());
 
+				bool anyOutOfRange = false;
 				do {
 					r += "  ";
 					r += c.get().toString();
+
+					bool tooLow = c.get().key < lowerBound->key;
+					bool tooHigh = c.get().key > upperBound->key;
+					if(tooLow || tooHigh) {
+						anyOutOfRange = true;
+						if(tooLow) {
+							r += " (too low)";
+						}
+						if(tooHigh) {
+							r += " (too high)";
+						}
+					}
 					r += "\n";
 
-					ASSERT(c.get().key >= lowerBound->key && c.get().key <= upperBound->key);
-
 				} while(c.moveNext());
+				ASSERT(!anyOutOfRange);
 			}
 		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
@@ -1310,24 +1325,32 @@ private:
 		// This is only done if modified is set to avoid rewriting this page for this purpose only.
 		//
 		// After this call, lastUpperBound is internal page's upper bound.
-		void finalize(const RedwoodRecordRef &newUpperBound) {
-			if(!modified) {
-				// If the original set has any more entries then the page content has been modified.
-				if(cursor.valid()) {
+		void finalize(const RedwoodRecordRef &upperBound, const RedwoodRecordRef &decodeUpperBound) {
+			debug_printf("InternalPageBuilder::end  modified=%d  upperBound=%s  decodeUpperBound=%s  lastUpperBound=%s\n", modified, upperBound.toString().c_str(), decodeUpperBound.toString().c_str(), lastUpperBound.toString().c_str());
+			modified = modified || cursor.valid();
+			debug_printf("InternalPageBuilder::end  modified=%d after cursor check\n", modified);
+
+			// If there are boundary key entries and the last one has a child page then the 
+			// upper bound for this internal page must match the required upper bound for
+			// the last child entry.
+			if(!entries.empty() && entries.back().value.present()) {
+				debug_printf("InternalPageBuilder::end  last entry is not null\n");
+
+				// If the page contents were not modified so far and the upper bound required
+				// for the last child page (lastUpperBound) does not match what the page
+				// was encoded with then the page must be modified.
+				if(!modified && lastUpperBound != decodeUpperBound) {
+					debug_printf("InternalPageBuilder::end  modified set true because lastUpperBound does not match decodeUpperBound\n");
 					modified = true;
 				}
-			}
 
-			debug_printf("InternalPageBuilder: finalizing.  modified=%d  newUpperBound=%s\n", modified, newUpperBound.toString().c_str());
-			if(modified) {
-				if(!entries.empty() && entries.back().value.present() && lastUpperBound != newUpperBound) {
-					debug_printf("InternalPageBuilder: Added placeholder %s\n", lastUpperBound.withoutValue().toString().c_str());
+				if(modified && lastUpperBound != upperBound) {
+					debug_printf("InternalPageBuilder::end  Modified is true but lastUpperBound does not match upperBound so adding placeholder\n");
 					addEntry(lastUpperBound.withoutValue());
+					lastUpperBound = upperBound;
 				}
-
-				lastUpperBound = newUpperBound;
-				debug_printf("InternalPageBuilder: New upper bound: %s\n", lastUpperBound.toString().c_str());
 			}
+			debug_printf("InternalPageBuilder::end  exit.  modified=%d  upperBound=%s  decodeUpperBound=%s  lastUpperBound=%s\n", modified, upperBound.toString().c_str(), decodeUpperBound.toString().c_str(), lastUpperBound.toString().c_str());
 		}
 
 		BTreePage::BinaryTree::Cursor cursor;
@@ -1344,8 +1367,7 @@ private:
 		return o.toString();
 	}
 
-	template<>
-	std::string toString(const VersionedChildPageSet &c) {
+	static std::string toString(const VersionedChildPageSet &c) {
 		return format("Version=%" PRId64 " children=%s upperBound=%s", c.version, toString(c.children).c_str(), c.upperBound.toString().c_str());
 	}
 
@@ -1581,7 +1603,7 @@ private:
 
 				for(int e = 0, eEnd = extPages.size(); e < eEnd; ++e) {
 					LogicalPageID eid = m_pager->allocateLogicalPage();
-					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%" PRId64 " (%d of %lu) referencePage=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
+					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%" PRId64 " (%d of %lu) referencePageID=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
 					newPage->extensionPages[e] = bigEndian32(eid);
 					// If replacing the primary page below (version == 0) then pass the primary page's ID as the reference page ID
 					m_pager->writePage(eid, extPages[e], version, (version == 0) ? id : invalidLogicalPageID);
@@ -1674,7 +1696,7 @@ private:
 		}
 
 		if(result->userData == nullptr) {
-			debug_printf("readPage() Creating Reader for page id=%u @%" PRId64 " lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
+			debug_printf("readPage() Creating Reader for PageID=%u @%" PRId64 " lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
 			result->userData = new BTreePage::BinaryTree::Reader(&pTreePage->tree(), lowerBound, upperBound);
 			result->userDataDestructor = [](void *ptr) { delete (BTreePage::BinaryTree::Reader *)ptr; };
 		}
@@ -1995,7 +2017,7 @@ private:
 
 				const RedwoodRecordRef &childUpperBound = cursor.valid() ? cursor.get() : *upperBound;
 
-				debug_printf("%s recursing to page id=%u lower=%s upper=%s decodeLower=%s decodeUpper=%s\n",
+				debug_printf("%s recursing to PageID=%u lower=%s upper=%s decodeLower=%s decodeUpper=%s\n",
 					context.c_str(), pageID, childLowerBound.toString().c_str(), childUpperBound.toString().c_str(), decodeChildLowerBound.toString().c_str(), decodeChildUpperBound.toString().c_str());
 
 				/*
@@ -2039,10 +2061,10 @@ private:
 			}
 
 			if(REDWOOD_DEBUG) {
- 				debug_printf("%s Subtree update results for root Page id=%u\n", context.c_str(), root);
+ 				debug_printf("%s Subtree update results for root PageID=%u\n", context.c_str(), root);
 				for(int i = 0; i < futureChildren.size(); ++i) {
 					const VersionedChildrenT &vc = futureChildren[i].get();
-					debug_printf("%s subtree result parent=%u %s\n", context.c_str(), root, toString(vc).c_str());
+					debug_printf("%s subtree result %s\n", context.c_str(), toString(vc).c_str());
 				}
 			}
 
@@ -2060,7 +2082,7 @@ private:
 				}
 			}
 
-			pageBuilder.finalize(*upperBound);
+			pageBuilder.finalize(*upperBound, *decodeUpperBound);
 
 			// If page contents have changed
 			if(pageBuilder.modified) {
@@ -2083,7 +2105,7 @@ private:
 					}
 				}
 				else {
-					debug_printf("%s Internal page id=%u modified, creating replacements.\n", context.c_str(), root);
+					debug_printf("%s Internal PageID=%u modified, creating replacements.\n", context.c_str(), root);
 					debug_printf("%s newChildren=%s  lastUpperBound=%s  upperBound=%s\n", context.c_str(), toString(pageBuilder.entries).c_str(), pageBuilder.lastUpperBound.toString().c_str(), upperBound->toString().c_str());
 
 					ASSERT(pageBuilder.lastUpperBound == *upperBound);
@@ -2114,13 +2136,13 @@ private:
 						c.children.push_back(pages[i].lowerBound.withPageID(newPageIDs[i]));
 					}
 
-					debug_printf("%s Internal Page id=%u modified, returning %s\n", context.c_str(), root, toString(c).c_str());
+					debug_printf("%s Internal PageID=%u modified, returning %s\n", context.c_str(), root, toString(c).c_str());
 					return vc;
 				}
 			}
 			else {
 				VersionedChildrenT c( { {0, {*decodeLowerBound}, *decodeUpperBound} });
-				debug_printf("%s Page id=%u has no changes, returning %s\n", context.c_str(), root, toString(c).c_str());
+				debug_printf("%s PageID=%u has no changes, returning %s\n", context.c_str(), root, toString(c).c_str());
 				return c;
 			}
 		}
@@ -2223,7 +2245,7 @@ printf("\nCommitted: %s\n", self->counts.toString(true).c_str());
 			}
 
 			std::string toString() const {
-				return format("Page %lu, %s", pageID, cursor.valid() ? cursor.get().toString().c_str() : "<invalid>");
+				return format("PageID=%u, %s", pageID, cursor.valid() ? cursor.get().toString().c_str() : "<invalid>");
 			}
 		};
 
@@ -3251,7 +3273,7 @@ void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	RedwoodRecordRef::Delta &d = *(RedwoodRecordRef::Delta *)buf;
 
 	Arena mem;
-	int expectedSize = rec.deltaSize(base);
+	int expectedSize = rec.deltaSize(base, false);
 	int deltaSize = rec.writeDelta(d, base);
 	RedwoodRecordRef decoded = d.apply(base, mem);
 
@@ -3677,7 +3699,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int maxValueSize = g_random->randomInt(0, pageSize * 4);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(10e6);
 	state int mutationBytesTarget = shortTest ? 5000 : randomSize(50e6);
-	state double clearChance = g_random->random01() * .01;  // at most 1 in 100
+	state double clearChance = g_random->random01() * .1;
 
 	printf("Using page size %d, max key size %d, max value size %d, clearchance %f, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
 
