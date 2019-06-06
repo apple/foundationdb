@@ -49,26 +49,22 @@ endif()
 
 # The tests don't build on windows
 if(NOT WIN32)
+  set(MAKO_SRCS
+    test/mako/mako.c
+    test/mako/mako.h
+    test/mako/utils.c
+    test/mako/utils.h
+    test/mako/zipf.c
+    test/mako/zipf.h)
+
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
-    add_library(mako OBJECT
-                test/mako/mako.c
-                test/mako/mako.h
-                test/mako/utils.c
-                test/mako/utils.h
-                test/mako/zipf.c
-                test/mako/zipf.h)
+    add_library(mako OBJECT ${MAKO_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
-    add_executable(mako
-                test/mako/mako.c
-                test/mako/mako.h
-                test/mako/utils.c
-                test/mako/utils.h
-                test/mako/zipf.c
-                test/mako/zipf.h)
+    add_executable(mako ${MAKO_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
   endif()
