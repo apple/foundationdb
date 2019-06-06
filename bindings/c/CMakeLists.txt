@@ -52,7 +52,7 @@ if(NOT WIN32)
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
-    add_library(mako OBJECT EXCLUDE_FROM_ALL
+    add_library(mako OBJECT
                 test/mako/mako.c
                 test/mako/mako.h
                 test/mako/utils.c
@@ -62,7 +62,7 @@ if(NOT WIN32)
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
-    add_executable(mako EXCLUDE_FROM_ALL
+    add_executable(mako
                 test/mako/mako.c
                 test/mako/mako.h
                 test/mako/utils.c
@@ -71,10 +71,11 @@ if(NOT WIN32)
                 test/mako/zipf.h)
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
-    strip_debug_symbols(mako)
   endif()
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
+  # do not set RPATH for mako
+  set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
 endif()
 

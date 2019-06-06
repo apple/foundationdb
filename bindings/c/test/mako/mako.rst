@@ -9,7 +9,8 @@ mako Benchmark
 
 How to Build
 ============
-| In the FoundationDB build directory, simply build ``mako`` target.
+| ``mako`` gets build automatically when you build FoundationDB.
+| To build ``mako`` manually, simply build ``mako`` target in the FoundationDB build directory.
 | e.g. If you're using Unix Makefiles
 | ``make mako``
 
