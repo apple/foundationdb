@@ -21,10 +21,18 @@
 #pragma once
 #ifndef CLIENT_WORKLOAD_H
 #define CLIENT_WORKLOAD_H
-#include "foundationdb/fdb_c.h"
 #include <string>
 #include <vector>
 #include <functional>
+#include <memory>
+
+#ifndef DLLEXPORT
+#define DLLEXPORT
+#endif
+
+typedef struct FDB_future FDBFuture;
+typedef struct FDB_database FDBDatabase;
+typedef struct FDB_transaction FDBTransaction;
 
 enum class FDBSeverity { Debug, Info, Warn, WarnAlways, Error };
 

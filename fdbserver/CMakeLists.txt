@@ -203,6 +203,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
+  ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)

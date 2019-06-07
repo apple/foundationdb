@@ -1,5 +1,5 @@
 /*
- * ExternalWorkload.actor.cpp
+ * workloads.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,4 +18,29 @@
  * limitations under the License.
  */
 
+#pragma once
 #include "foundationdb/ClientWorkload.h"
+
+#include <map>
+
+struct IFDBWorkloadFactory {
+	virtual std::shared_ptr<FDBWorkload> create() = 0;
+};
+
+struct FDBWorkloadFactoryImpl : FDBWorkloadFactory {
+	static std::map<std::string, IFDBWorkloadFactory*> factories();
+	std::shared_ptr<FDBWorkload> create(const std::string& name);
+};
+
+template<class WorkloadType>
+struct FDBWorkloadFactoryT : IFDBWorkloadFactory {
+	explicit FDBWorkloadFactoryT(const std::string& name) {
+		FDBWorkloadFactoryImpl::factories()[name] = this;
+	}
+
+	std::shared_ptr<FDBWorkload> create() override {
+		return std::make_shared<WorkloadType>();
+	}
+};
+
+extern "C" FDBWorkloadFactoryImpl workloadFactory;

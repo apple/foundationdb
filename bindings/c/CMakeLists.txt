@@ -77,7 +77,8 @@ endif()
 
 set(c_workloads_srcs
   test/workloads/workloads.cpp
-  test/workloads/workloads.h)
+  test/workloads/workloads.h
+  test/workloads/SimpleWorkload.cpp)
 
 if(OPEN_FOR_IDE)
   add_library(c_workloads OBJECT ${c_workloads_srcs})
@@ -86,7 +87,7 @@ else()
 endif()
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
-target_link_libraries(c_workloads SHARED fdb_c)
+target_link_libraries(c_workloads PUBLIC fdb_c)
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
