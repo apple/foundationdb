@@ -3756,7 +3756,7 @@ void versionedMapTest() {
 	printf("SS Ptree node is %zu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
 
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
-	const int ASIZE = NSIZE<=64 ? 64 : NextFastAllocatedSize<NSIZE>::Result;
+	const int ASIZE = NSIZE <= 64 ? 64 : nextFastAllocatedSize(NSIZE);
 
 	auto before = FastAllocator< ASIZE >::getTotalMemory();
 
