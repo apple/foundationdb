@@ -132,7 +132,6 @@ private:
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<ClusterConnectionFile> connectionFile;
 
-	Future<Void> leaderMon;
 	Future<Void> failMon;
 	Future<Void> connected;
 };
