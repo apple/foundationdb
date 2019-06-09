@@ -207,6 +207,53 @@ namespace actorcompiler
         }
     };
 
+    class ActorMap {
+        public ActorMap(string actorMap) {
+            var actors = actorMap.Split(';');
+            uint counter = 0;
+            foreach (var actor in actors) {
+                dict.Add(actor, counter);
+                ++counter;
+            }
+        }
+
+        public string generateCArray(string targetName) {
+            var actors = this.Actors;
+            for (int i = 0; i < actors.Length; ++i) {
+                actors[i] = String.Format("\"{0}\"", actors[i]);
+            }
+            return String.Format("const char* {0}ActorMap = {{ {1} }};", targetName, String.Join(",", actors));
+        }
+
+        public string[] Actors {
+            get {
+                string[] actors = new string[dict.Count];
+                foreach (var actor in dict.Keys) {
+                    actors[dict[actor]] = actor;
+                }
+                return actors;
+            }
+        }
+
+        public override string ToString() {
+            
+            return String.Join(";", this.Actors);
+        }
+        Dictionary<string, uint> dict;
+
+        public uint this[string key] {
+            get {
+                if (dict.ContainsKey(key)) {
+                    return dict[key];
+                } else {
+                    var res = Convert.ToUInt32(dict.Count);
+                    dict.Add(key, res);
+                    return res;
+                }
+            }
+        }
+    };
+
     class ActorParser
     {
         public bool LineNumbersEnabled = true;
@@ -215,12 +262,14 @@ namespace actorcompiler
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
         public bool generateProbes;
+        public ActorMap actorMap;
 
-        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
+        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes, ActorMap actorMap)
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
             this.generateProbes = generateProbes;
+            this.actorMap = actorMap;
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
