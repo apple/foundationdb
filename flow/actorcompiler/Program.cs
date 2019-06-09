@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -40,18 +40,30 @@ namespace actorcompiler
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
             string input = args[0], output = args[1], outputtmp = args[1] + ".tmp";
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
-            if (args.Contains("--disable-actor-without-wait-warning"))
-            {
-                errorMessagePolicy.DisableActorWithoutWaitWarning = true;
-            }
-            if (args.Contains("--generate-probes")) {
-                generateProbes = true;
+            string actorMapArg = "--actor-map=";
+            string actorMapFile = null;
+            foreach (var arg in args) {
+                if (arg.StartsWith("--")) {
+                    if (arg.Equals("--disable-actor-without-wait-warning")) {
+                        errorMessagePolicy.DisableActorWithoutWaitWarning = true;
+                    } else if (arg.StartsWith(actorMapArg)) {
+                        actorMapFile = arg.Substring(actorMapArg.Length);
+                    } else if (arg.Equals("--generate-probes")) {
+                        generateProbes = true;
+                    }
+                }
             }
             try
             {
+                ActorMap actorMap;
+                if (!actorMapFile.Equals("") && File.Exists(actorMapFile)) {
+                    actorMap = new ActorMap(File.ReadAllText(actorMapFile));
+                } else {
+                    actorMap = new ActorMap("");
+                }
                 var inputData = File.ReadAllText(input);
                 using (var outputStream = new StreamWriter(outputtmp))
-                    new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy, generateProbes).Write(outputStream, output.Replace('\\', '/'));
+                    new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy, generateProbes, actorMap).Write(outputStream, output.Replace('\\', '/'));
                 if (File.Exists(output))
                 {
                     File.SetAttributes(output, FileAttributes.Normal);
@@ -59,6 +71,9 @@ namespace actorcompiler
                 }
                 File.Move(outputtmp, output);
                 File.SetAttributes(output, FileAttributes.ReadOnly);
+                if (!actorMapFile.Equals("")) {
+                    File.WriteAllText(actorMapFile, actorMap.ToString());
+                }
                 return 0;
             }
             catch (actorcompiler.Error e)
