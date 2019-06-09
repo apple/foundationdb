@@ -69,6 +69,7 @@ then
        successOr "Loading python bindings failed"
 
        # Test cmake and pkg-config integration: https://github.com/apple/foundationdb/issues/1483
+       install_build_tools
        rm -rf build-fdb_c_app
        mkdir build-fdb_c_app
        pushd build-fdb_c_app
