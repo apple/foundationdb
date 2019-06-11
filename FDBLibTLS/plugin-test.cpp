@@ -31,7 +31,6 @@
 #include <boost/circular_buffer.hpp>
 
 #include "fdbrpc/ITLSPlugin.h"
-#include "ReferenceCounted.h"
 
 #include "FDBLibTLS/FDBLibTLSPlugin.h"
 

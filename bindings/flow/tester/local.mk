@@ -35,8 +35,7 @@ _fdb_flow_tester_clean:
 	@rm -rf bindings/flow/bin
 
 ifeq ($(PLATFORM),linux)
-  fdb_flow_tester_LIBS += -ldl -lpthread -lrt
-  fdb_flow_tester_LDFLAGS += -static-libstdc++ -static-libgcc
+  fdb_flow_tester_LDFLAGS += -static-libstdc++ -static-libgcc -ldl -lpthread -lrt -lm
 else ifeq ($(PLATFORM),osx)
   fdb_flow_tester_LDFLAGS += -lc++
 endif

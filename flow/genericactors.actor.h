@@ -736,11 +736,18 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output ) {
+ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
 	loop {
-		if (input->get().size())
-			output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-		else
+		if (input->get().size()) {
+			if (useObjSerializer) {
+				ObjectReader reader(input->get().begin());
+				T res;
+				reader.deserialize(res);
+				output->set(res);
+			} else {
+				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
+			}
+		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
 	}
@@ -1304,7 +1311,7 @@ private:
 			throw;
 		}
 		try {
-			double duration = BUGGIFY_WITH_PROB(.001) ? g_random->random01()*FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY : 0.0;
+			double duration = BUGGIFY_WITH_PROB(.001) ? deterministicRandom()->random01()*FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY : 0.0;
 			choose{ when(wait(delay(duration, taskID))) {}  // So release()ing the lock doesn't cause arbitrary code to run on the stack
 					when(wait(lock->broken_on_destruct.getFuture())) {} }
 			return Void();

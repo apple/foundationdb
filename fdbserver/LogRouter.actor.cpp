@@ -86,6 +86,9 @@ struct LogRouterData {
 	LogSet logSet;
 	bool foundEpochEnd;
 
+	CounterCollection cc;
+	Future<Void> logger;
+
 	std::vector<Reference<TagData>> tag_data; //we only store data for the remote tag locality
 
 	Reference<TagData> getTagData(Tag tag) {
@@ -103,7 +106,9 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false) {
+	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
+	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
+		cc("LogRouter", dbgid.toString()) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -117,6 +122,12 @@ struct LogRouterData {
 				tagData = createTagData(tag, 0, 0);
 			}
 		}
+
+		specialCounter(cc, "Version", [this](){return this->version.get(); });
+		specialCounter(cc, "MinPopped", [this](){return this->minPopped.get(); });
+		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
+		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
+		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
 	}
 };
 

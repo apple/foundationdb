@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
@@ -296,14 +298,14 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
 	if (creating) {
-		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
+		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
 	}
 
-	state Future<Void> tooLong = delay(4.5);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	state Future<Void> tooLong = delay(60);
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state bool oldReplicationUsesDcId = false;
 	loop {
 		try {
@@ -761,7 +763,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 
 ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 
 	if(!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; //FIXME: correct return type
@@ -788,7 +790,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			}
 
 			if(conf.address_class.size())
-				tr.set(processClassChangeKey, g_random->randomUniqueID().toString());
+				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			if(conf.auto_logs != conf.old_logs)
 				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
@@ -948,7 +950,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if ( old.coordinators() == desiredCoordinators && old.clusterKeyName() == newName)
 				return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
-			state ClusterConnectionString conn( desiredCoordinators, StringRef( newName + ':' + g_random->randomAlphaNumeric( 32 ) ) );
+			state ClusterConnectionString conn( desiredCoordinators, StringRef( newName + ':' + deterministicRandom()->randomAlphaNumeric( 32 ) ) );
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
@@ -1122,7 +1124,7 @@ struct AutoQuorumChange : IQuorumChange {
 
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
-		g_random->randomShuffle(remainingWorkers);
+		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
 
@@ -1195,8 +1197,8 @@ Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuo
 
 ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
+	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
 
 	loop {
 		try {
@@ -1225,8 +1227,8 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
 	state bool includeAll = false;
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
+	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
 
 	loop {
 		try {
@@ -1299,7 +1301,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 			}
 
 			if(foundChange)
-				tr.set(processClassChangeKey, g_random->randomUniqueID().toString());
+				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			wait( tr.commit() );
 			return Void();
@@ -1347,7 +1349,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %d seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch( Error &e ) {
@@ -1470,6 +1472,29 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			wait( tr.onError(e) );
 		}
 	}
+}
+
+ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+	state int retryCount = 0;
+
+	loop {
+		state UID snapUID = deterministicRandom()->randomUniqueID();
+		try {
+			wait(snapCreate(cx, snapCmd, snapUID));
+			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
+			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
+			break;
+		} catch (Error& e) {
+			++retryCount;
+			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
+			if (retryCount > 3) {
+				fprintf(stderr, "Snapshot create failed, %d (%s)."
+						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+				throw;
+			}
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
@@ -1849,7 +1874,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		workers.push_back(data);
 	}
 
-	auto noAssignIndex = g_random->randomInt(0, workers.size());
+	auto noAssignIndex = deterministicRandom()->randomInt(0, workers.size());
 	workers[noAssignIndex].processClass._class = ProcessClass::CoordinatorClass;
 
 	change.addDesiredWorkers(chosen, workers, 5, excluded);

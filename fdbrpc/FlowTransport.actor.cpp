@@ -25,6 +25,7 @@
 #include "flow/Net2Packet.h"
 #include "flow/ActorCollection.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/ObjectSerializer.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/crc32c.h"
 #include "fdbrpc/simulator.h"
@@ -126,6 +127,12 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 		Endpoint e; reader >> e;
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
+
+	virtual void receive(ArenaObjectReader& reader) {
+		Endpoint e;
+		reader.deserialize(e);
+		IFailureMonitor::failureMonitor().endpointNotFound(e);
+	}
 };
 
 struct PingReceiver : NetworkMessageReceiver {
@@ -136,6 +143,11 @@ struct PingReceiver : NetworkMessageReceiver {
 	}
 	virtual void receive( ArenaReader& reader ) {
 		ReplyPromise<Void> reply; reader >> reply;
+		reply.send(Void());
+	}
+	virtual void receive(ArenaObjectReader& reader) {
+		ReplyPromise<Void> reply;
+		reader.deserialize(reply);
 		reply.send(Void());
 	}
 };
@@ -282,16 +294,18 @@ struct Peer : NonCopyable {
 	ReliablePacketList reliable;
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
-	AsyncTrigger incompatibleDataRead;
+	AsyncTrigger resetPing;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
 	bool incompatibleProtocolVersionNewer;
+	int64_t bytesReceived;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1)
+		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), 
+		  compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0)
 	{
 		connect = connectionKeeper(this);
 	}
@@ -317,7 +331,8 @@ struct Peer : NonCopyable {
 		}
 
 		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-		pkt.protocolVersion = currentProtocolVersion;
+		pkt.protocolVersion =
+		    g_network->useObjectSerializer() ? addObjectSerializerFlag(currentProtocolVersion) : currentProtocolVersion;
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
@@ -371,7 +386,6 @@ struct Peer : NonCopyable {
 
 			// Send an (ignored) packet to make sure that, if our outgoing connection died before the peer made this connection attempt,
 			// we eventually find out that our connection is dead, close it, and then respond to the next connection reattempt from peer.
-			//sendPacket( self, SerializeSourceRaw(StringRef()), Endpoint(peer->address(), TOKEN_IGNORE_PACKET), false );
 		}
 	}
 
@@ -389,11 +403,28 @@ struct Peer : NonCopyable {
 
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
-
-			choose {
-				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination); throw connection_failed(); }
-				when (wait( reply.getFuture() )) {}
-				when (wait( peer->incompatibleDataRead.onTrigger())) {}
+			state int64_t startingBytes = peer->bytesReceived;
+			state int timeouts = 0;
+			loop {
+				choose {
+					when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
+						if(startingBytes == peer->bytesReceived) {
+							TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
+							throw connection_failed();
+						}
+						if(timeouts > 1) {
+							TraceEvent(SevWarnAlways, "ConnectionSlowPing").suppressFor(1.0).detail("WithAddr", peer->destination).detail("Timeouts", timeouts);
+						}
+						startingBytes = peer->bytesReceived;
+						timeouts++;
+					}
+					when (wait( reply.getFuture() )) {
+						break;
+					}
+					when (wait( peer->resetPing.onTrigger())) {
+						break;
+					}
+				}
 			}
 		}
 	}
@@ -529,7 +560,7 @@ TransportData::~TransportData() {
 	}
 }
 
-ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
+ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
 	int priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskReadSocket || !inReadSocket) {
 		wait( delay(0, priority) );
@@ -541,8 +572,15 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			receiver->receive( reader );
-			g_currentDeliveryPeerAddress = {NetworkAddress()};
+			if (g_network->useObjectSerializer()) {
+				StringRef data = reader.arenaReadAll();
+				ASSERT(data.size() > 8);
+				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
+				receiver->receive(objReader);
+			} else {
+				receiver->receive(reader);
+			}
+			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
 			TraceEvent(SevError, "ReceiverError").error(e).detail("Token", destination.token.toString()).detail("Peer", destination.getPrimaryAddress());
@@ -561,7 +599,8 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 		g_network->setCurrentTask( TaskReadSocket );
 }
 
-static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena, NetworkAddress const& peerAddress, uint64_t peerProtocolVersion ) {
+static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
+                        NetworkAddress const& peerAddress, uint64_t peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -599,16 +638,16 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");
-				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+				int flipBits = 32 - (int) floor(log2(deterministicRandom()->randomUInt32()));
 
-				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
+				int firstFlipBitLocation = deterministicRandom()->randomInt(0, 8);
 				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
 				flipBits--;
 
 				for (int i = 0; i < flipBits; i++) {
-					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-					int bitLocation = g_random->randomInt(0, 8);
+					uint32_t byteLocation = deterministicRandom()->randomUInt32() % packetLen;
+					int bitLocation = deterministicRandom()->randomInt(0, 8);
 					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
 						*(p + byteLocation) ^= 1 << bitLocation;
 					}
@@ -633,8 +672,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		ArenaReader reader( arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion) );
-		UID token; reader >> token;
+		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(currentProtocolVersion));
+		UID token;
+		reader >> token;
 
 		++transport->countPacketsReceived;
 
@@ -649,7 +689,8 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 				transport->warnAlwaysForLargePacket = false;
 		}
 
-		deliver( transport, Endpoint( {peerAddress}, token ), std::move(reader), true );
+		ASSERT(!reader.empty());
+		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true);
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -673,7 +714,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool incompatiblePeerCounted = false;
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
-	state uint64_t peerProtocolVersion = 0;
+	state uint64_t peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
 	if (peer == nullptr) {
@@ -697,6 +738,9 @@ ACTOR static Future<Void> connectionReader(
 				}
 
 				int readBytes = conn->read( unprocessed_end, buffer_end );
+				if(peer) {
+					peer->bytesReceived += readBytes;
+				}
 				if (!readBytes) break;
 				state bool readWillBlock = readBytes != readAllBytes;
 				unprocessed_end += readBytes;
@@ -711,7 +755,8 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if( (pkt.protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
+						if(g_network->useObjectSerializer() != hasObjectSerializerFlag(pkt.protocolVersion) ||
+						   (removeFlags(pkt.protocolVersion) & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -748,7 +793,8 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId);
+								.detail("ConnectionId", connectionId)
+								.detail("UseObjectSerializer", false);
 						}
 
 						if(connectionId > 1) {
@@ -757,8 +803,8 @@ ACTOR static Future<Void> connectionReader(
 						unprocessed_begin += connectPacketSize;
 						expectConnectPacket = false;
 
-						peerProtocolVersion = protocolVersion;
 						if (peer != nullptr) {
+							peerProtocolVersion = protocolVersion;
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing")
 							    .suppressFor(1.0)
@@ -770,7 +816,9 @@ ACTOR static Future<Void> connectionReader(
 								incompatiblePeerCounted = true;
 							}
 							ASSERT( pkt.canonicalRemotePort == peerAddress.port );
+							onConnected.send(peer);
 						} else {
+							peerProtocolVersion = protocolVersion;
 							if (pkt.canonicalRemotePort) {
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
@@ -792,7 +840,7 @@ ACTOR static Future<Void> connectionReader(
 				}
 				else if(!expectConnectPacket) {
 					unprocessed_begin = unprocessed_end;
-					peer->incompatibleDataRead.trigger();
+					peer->resetPing.trigger();
 				}
 
 				if (readWillBlock)
@@ -959,13 +1007,13 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 				.detail("Token", endpoint.token);
 		}
 		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-			peer->incompatibleDataRead.trigger();
+			peer->resetPing.trigger();
 		}
 	}
 }
 
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.token = g_random->randomUniqueID();
+	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
@@ -993,14 +1041,22 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		TEST(true); // "Loopback" delivery
 		// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
-		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
-		what.serializeBinaryWriter(wr);
-		Standalone<StringRef> copy = wr.toValue();
+		Standalone<StringRef> copy;
+		if (g_network->useObjectSerializer()) {
+			ObjectWriter wr;
+			what.serializeObjectWriter(wr);
+			copy = wr.toStringRef();
+		} else {
+			BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
+			what.serializeBinaryWriter(wr);
+			copy = wr.toValue();
+		}
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
 
-		deliver( self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false );
+		ASSERT(copy.size() > 0);
+		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
 
 		return (PacketID)NULL;
 	} else {
@@ -1039,7 +1095,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 		wr << destination.token;
-		what.serializePacketWriter(wr);
+		what.serializePacketWriter(wr, g_network->useObjectSerializer());
 		pb = wr.finish();
 		len = wr.size() - packetInfoSize;
 

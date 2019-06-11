@@ -26,6 +26,8 @@
 #include "flow/FastRef.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
+#include "flow/ObjectSerializerTraits.h"
+#include "flow/FileIdentifier.h"
 #include <algorithm>
 #include <stdint.h>
 #include <string>
@@ -106,6 +108,18 @@ public:
 	friend void* operator new[] ( size_t size, Arena& p );
 //private:
 	Reference<struct ArenaBlock> impl;
+};
+
+template<>
+struct scalar_traits<Arena> : std::true_type {
+	constexpr static size_t size = 0;
+	static void save(uint8_t*, const Arena&) {}
+	// Context is an arbitrary type that is plumbed by reference throughout
+	// the load call tree.
+	template <class Context>
+	static void load(const uint8_t*, Arena& arena, Context& context) {
+		context.addArena(arena);
+	}
 };
 
 struct ArenaBlockRef {
@@ -241,7 +255,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				b->bigSize = reqSize;
 				b->bigUsed = sizeof(ArenaBlock);
 
-				if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
+				if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 					hugeArenaSample(reqSize);
 				}
 				g_hugeArenaMemory += reqSize;
@@ -333,7 +347,7 @@ inline void save( Archive& ar, const Arena& p ) {
 }
 
 template <class T>
-class Optional {
+class Optional : public ComposedIdentifier<T, 0x10> {
 public:
 	Optional() : valid(false) {}
 	Optional(const Optional<T>& o) : valid(o.valid) {
@@ -429,6 +443,25 @@ struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_
 	}
 };
 
+template<class T>
+struct union_like_traits<Optional<T>> : std::true_type {
+	using Member = Optional<T>;
+	using alternatives = pack<T>;
+	static uint8_t index(const Member& variant) { return 0; }
+	static bool empty(const Member& variant) { return !variant.present(); }
+
+	template <int i>
+	static const T& get(const Member& variant) {
+		static_assert(i == 0);
+		return variant.get();
+	}
+
+	template <size_t i>
+	static const void assign(Member& member, const T& t) {
+		member = t;
+	}
+};
+
 //#define STANDALONE_ALWAYS_COPY
 
 template <class T>
@@ -499,6 +532,7 @@ extern std::string format(const char* form, ...);
 #pragma pack( push, 4 )
 class StringRef {
 public:
+	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
 	StringRef( Arena& p, const StringRef& toCopy ) : data( new (p) uint8_t[toCopy.size()] ), length( toCopy.size() ) {
 		memcpy( (void*)data, toCopy.data, length );
@@ -723,6 +757,17 @@ inline void save( Archive& ar, const StringRef& value ) {
 	ar << (uint32_t)value.size();
 	ar.serializeBytes( value.begin(), value.size() );
 }
+
+template<>
+struct dynamic_size_traits<StringRef> : std::true_type {
+	static WriteRawMemory save(const StringRef& str) { return { { unownedPtr(str.begin()), str.size() } }; }
+
+	template <class Context>
+	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {
+		str = StringRef(context.tryReadZeroCopy(ptr, sz), sz);
+	}
+};
+
 inline bool operator == (const StringRef& lhs, const StringRef& rhs ) {
 	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
 }
@@ -751,8 +796,10 @@ template <>
 struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 
 template <class T>
-class VectorRef {
+class VectorRef : public ComposedIdentifier<T, 0x8> {
 public:
+	using value_type = T;
+
 	// T must be trivially destructible (and copyable)!
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
@@ -927,6 +974,23 @@ inline void save( Archive& ar, const VectorRef<T>& value ) {
 	for(uint32_t i=0; i<length; i++)
 		ar << value[i];
 }
+
+template <class T>
+struct vector_like_traits<VectorRef<T>> : std::true_type {
+	using Vec = VectorRef<T>;
+	using value_type = typename Vec::value_type;
+	using iterator = const T*;
+	using insert_iterator = T*;
+
+	static size_t num_entries(const VectorRef<T>& v) { return v.size(); }
+	template <class Context>
+	static void reserve(VectorRef<T>& v, size_t s, Context& context) {
+		v.resize(context.arena(), s);
+	}
+
+	static insert_iterator insert(Vec& v) { return v.begin(); }
+	static iterator begin(const Vec& v) { return v.begin(); }
+};
 
  void ArenaBlock::destroy() {
 	// If the stack never contains more than one item, nothing will be allocated from stackArena.

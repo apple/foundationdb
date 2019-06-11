@@ -42,6 +42,8 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
+extern int g_trace_depth;
+
 enum Severity {
 	SevSample=1,
 	SevDebug=5,
@@ -55,6 +57,7 @@ enum Severity {
 
 class TraceEventFields {
 public:
+	constexpr static FileIdentifier file_identifier = 11262274;
 	typedef std::pair<std::string, std::string> Field;
 	typedef std::vector<Field> FieldContainer;
 	typedef FieldContainer::const_iterator FieldIterator;
@@ -78,6 +81,11 @@ public:
 
 	std::string toString() const;
 	void validateFormat() const;
+	template<class Archiver>
+	void serialize(Archiver& ar) {
+		static_assert(is_fb_function<Archiver>, "Streaming serializer has to use load/save");
+		serializer(ar, fields);
+	}
 
 private:
 	FieldContainer fields;
@@ -323,10 +331,11 @@ struct TraceableStringImpl : std::true_type {
 				result.push_back('\\');
 				result.push_back('\\');
 			} else {
+				const uint8_t byte = *iter;
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char(*iter / 16));
-				result.push_back(base16Char(*iter));
+				result.push_back(base16Char(byte / 16));
+				result.push_back(base16Char(byte));
 			}
 		}
 		return result;

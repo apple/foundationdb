@@ -35,7 +35,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 			state MoveKeysLock lock;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
-				UID id(g_random->randomUniqueID());
+				UID id(deterministicRandom()->randomUniqueID());
 				TraceEvent("TakeMoveKeysLockTransaction", masterId)
 					.detail("TransactionUID", id);
 				tr.debugTransaction( id );
@@ -48,7 +48,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 				Optional<Value> readVal = wait( tr.get( moveKeysLockWriteKey ) );
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
-			lock.myOwner = g_random->randomUniqueID();
+			lock.myOwner = deterministicRandom()->randomUniqueID();
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
@@ -74,7 +74,7 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		if(isWrite) {
 			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
 			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
+			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << deterministicRandom()->randomUniqueID();
 			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 		}
 
@@ -82,7 +82,7 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 	} else if (currentOwner == lock.myOwner) {
 		if(isWrite) {
 			// Touch the lock, preventing overlapping attempts to take it
-			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
+			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << deterministicRandom()->randomUniqueID();
 			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
 			tr->makeSelfConflicting();
@@ -727,7 +727,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				tr.set( tagLocalityListKeyFor(server.locality.dcId()), tagLocalityListValue(locality) );
 			}
 
-			int skipTags = g_random->randomInt(0, maxSkipTags);
+			int skipTags = deterministicRandom()->randomInt(0, maxSkipTags);
 
 			state uint16_t tagId = 0;
 			std::vector<uint16_t> usedTags;

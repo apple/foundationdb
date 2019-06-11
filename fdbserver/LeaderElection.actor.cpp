@@ -48,7 +48,7 @@ ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, L
 ACTOR template <class T> Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out ) {
 	try {
 		loop {
-			wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+			wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01() ) );
 			out->set( in->get() );
 			wait( in->onChange() );
 		}
@@ -75,8 +75,10 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
-	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
+ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Value proposedSerializedInterface,
+                                           Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected,
+                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees(new AsyncVar<vector<Optional<LeaderInfo>>>());
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
@@ -99,7 +101,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	while (!iAmLeader) {
 		state Future<Void> badCandidateTimeout;
 
-		myInfo.changeID = g_random->randomUniqueID();
+		myInfo.changeID = deterministicRandom()->randomUniqueID();
 		prevChangeID = myInfo.changeID;
 		myInfo.updateChangeID( asyncPriorityInfo->get() );
 
@@ -214,7 +216,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		wait( rate );
 	}
 
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01() ) );
 
 	return Void(); // We are no longer leader
 }

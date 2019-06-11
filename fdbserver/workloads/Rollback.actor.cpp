@@ -64,9 +64,9 @@ struct RollbackWorkload : TestWorkload {
 			return Void();
 		}
 
-		state MasterProxyInterface proxy = g_random->randomChoice( system.client.proxies );
+		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
 
-		int utIndex = g_random->randomInt(0, tlogs.size());
+		int utIndex = deterministicRandom()->randomInt(0, tlogs.size());
 		state NetworkAddress uncloggedTLog = tlogs[utIndex].address();
 
 		for(int t=0; t<tlogs.size(); t++)
@@ -112,7 +112,7 @@ struct RollbackWorkload : TestWorkload {
 				wait( self->simulateFailure( cx, self ) );
 			}
 		} else {
-			wait( ::delay( g_random->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
+			wait( ::delay( deterministicRandom()->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
 			wait( self->simulateFailure(cx, self) );
 		}
 		return Void();

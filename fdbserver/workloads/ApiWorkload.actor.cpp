@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -114,7 +115,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<Key
 		for(int j = 0; j < storeResults.size(); j++)
 			printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-		printf("Read Version: %lld\n", readVersion);
+		printf("Read Version: %" PRId64 "\n", readVersion);
 
 		TraceEvent(SevError, format("%s_CompareSizeMismatch", description().c_str()).c_str()).detail("ReadVer", readVersion).detail("ResultSize", dbResults.size()).detail("StoreResultSize", storeResults.size());
 
@@ -134,7 +135,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults, VectorRef<Key
 			for(int j = 0; j < storeResults.size(); j++)
 				printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-			printf("Read Version: %lld\n", readVersion);
+			printf("Read Version: %" PRId64 "\n", readVersion);
 
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str()).detail("ReadVer", readVersion).detail("ResultSize", dbResults.size()).detail("DifferAt", i);
 
@@ -210,22 +211,22 @@ Standalone<VectorRef<KeyValueRef>> ApiWorkload::generateData(int numKeys, int mi
 
 //Generates a random key
 Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLength, int maxKeyLength, std::string prefix) {
-	int keyLength = g_random->randomInt(minKeyLength, maxKeyLength + 1);
+	int keyLength = deterministicRandom()->randomInt(minKeyLength, maxKeyLength + 1);
 	char *keyBuffer = new char[keyLength + 1];
 
 	if(onlyLowerCase) {
 		for(int i = 0; i < keyLength; i++)
-			keyBuffer[i] = g_random->randomInt('a', 'z' + 1);
+			keyBuffer[i] = deterministicRandom()->randomInt('a', 'z' + 1);
 	}
 	else {
 		for(int i = 0; i < keyLength; i+= sizeof(uint32_t)) {
-			uint32_t val = g_random->randomUInt32();
+			uint32_t val = deterministicRandom()->randomUInt32();
 			memcpy(&keyBuffer[i], &val, std::min(keyLength - i, (int)sizeof(uint32_t)));
 		}
 
 		//Don't allow the first character of the key to be 0xff
 		if(keyBuffer[0] == '\xff')
-			keyBuffer[0] = g_random->randomInt(0, 255);
+			keyBuffer[0] = deterministicRandom()->randomInt(0, 255);
 	}
 
 	keyBuffer[keyLength] = '\0';
@@ -239,21 +240,21 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLengt
 //Generates a random key selector with a specified maximum offset
 KeySelector ApiWorkload::generateKeySelector(VectorRef<KeyValueRef> const& data, int maxOffset) {
 	Key key = selectRandomKey(data, 0.5);
-	return KeySelector(KeySelectorRef(key, g_random->randomInt(0, 2) == 1, g_random->randomInt(-maxOffset, maxOffset + 1)));
+	return KeySelector(KeySelectorRef(key, deterministicRandom()->randomInt(0, 2) == 1, deterministicRandom()->randomInt(-maxOffset, maxOffset + 1)));
 }
 
 //Selects a random key.  There is a <probabilityKeyExists> probability that the key will be chosen from the keyset in data, otherwise the key will
 //be a randomly generated key
 Key ApiWorkload::selectRandomKey(VectorRef<KeyValueRef> const& data, double probabilityKeyExists) {
-	if(g_random->random01() < probabilityKeyExists)
-		return data[g_random->randomInt(0, data.size())].key;
+	if(deterministicRandom()->random01() < probabilityKeyExists)
+		return data[deterministicRandom()->randomInt(0, data.size())].key;
 	else
 		return generateKey(data, minLongKeyLength, maxLongKeyLength, clientPrefix);
 }
 
 //Generates a random value
 Value ApiWorkload::generateValue(int minValueLength, int maxValueLength) {
-	int valueLength = g_random->randomInt(minValueLength, maxValueLength + 1);
+	int valueLength = deterministicRandom()->randomInt(minValueLength, maxValueLength + 1);
 	return Value(std::string(valueLength, 'x'));
 }
 
@@ -264,7 +265,7 @@ Value ApiWorkload::generateValue() {
 
 //Creates a random transaction factory to produce transaction of one of the TransactionType choices
 ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> choices, ApiWorkload *self) {
-	TransactionType transactionType = g_random->randomChoice(choices);
+	TransactionType transactionType = deterministicRandom()->randomChoice(choices);
 
 	if(transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);

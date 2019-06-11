@@ -31,6 +31,7 @@
 #include "fdbserver/LatencyBandConfig.h"
 
 struct ServerDBInfo {
+	constexpr static FileIdentifier file_identifier = 13838807;
 	// This structure contains transient information which is broadcast to all workers for a database,
 	// permitting them to communicate with each other.  It is not available to the client.  This mechanism
 	// (see GetServerDBInfoRequest) is closely parallel to OpenDatabaseRequest for the client.
@@ -59,6 +60,19 @@ struct ServerDBInfo {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches);
+	}
+};
+
+struct GetServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	UID knownServerInfoID;
+	Standalone<VectorRef<StringRef>> issues;
+	std::vector<NetworkAddress> incompatiblePeers;
+	ReplyPromise< struct ServerDBInfo > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
 	}
 };
 

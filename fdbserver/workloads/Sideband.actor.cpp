@@ -24,6 +24,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SidebandMessage {
+	constexpr static FileIdentifier file_identifier = 11862046;
 	uint64_t key;
 	Version commitVersion;
 
@@ -37,6 +38,7 @@ struct SidebandMessage {
 };
 
 struct SidebandInterface {
+	constexpr static FileIdentifier file_identifier = 15950544;
 	RequestStream<SidebandMessage> updates;
 
 	UID id() const { return updates.getEndpoint().token; }
@@ -138,7 +140,7 @@ struct SidebandWorkload : TestWorkload {
 		loop {
 			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
 			state Transaction tr(cx);
-			state uint64_t key = g_random->randomUniqueID().hash();
+			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
 			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
 			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {

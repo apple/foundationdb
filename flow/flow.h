@@ -44,6 +44,7 @@
 #include "flow/Deque.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
+#include "flow/FileIdentifier.h"
 
 #include <boost/version.hpp>
 
@@ -72,9 +73,9 @@ int getSBVar(std::string file, int line);
 void enableBuggify(bool enabled);   // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled();
 
-#define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__) && g_random->random01() < (x))
+#define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__) && deterministicRandom()->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES)
-#define EXPENSIVE_VALIDATION (validationIsEnabled() && g_random->random01() < P_EXPENSIVE_VALIDATION)
+#define EXPENSIVE_VALIDATION (validationIsEnabled() && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
@@ -114,6 +115,7 @@ Standalone<StringRef> concatenate( Iter b, Iter const& e ) {
 
 class Void {
 public:
+	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
 	void serialize(Ar&) {}
 };
@@ -121,7 +123,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr {
+class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
@@ -188,11 +190,39 @@ public:
 
 	bool isError() const { return error.code() != invalid_error_code; }
 	bool isError(int code) const { return error.code() == code; }
-	Error getError() const { ASSERT(isError()); return error; }
+	const Error& getError() const { ASSERT(isError()); return error; }
 
 private:
 	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
 	Error error;
+};
+
+template <class T>
+struct union_like_traits<ErrorOr<T>> : std::true_type {
+	using Member = ErrorOr<T>;
+	using alternatives = pack<Error, T>;
+	static uint8_t index(const Member& variant) { return variant.present() ? 1 : 0; }
+	static bool empty(const Member& variant) { return false; }
+
+	template <int i>
+	static const index_t<i, alternatives>& get(const Member& m) {
+		if constexpr (i == 0) {
+			return m.getError();
+		} else {
+			static_assert(i == 1, "ErrorOr only has two members");
+			return m.get();
+		}
+	}
+
+	template <int i, class Alternative>
+	static const void assign(Member& m, const Alternative& a) {
+		if constexpr (i == 0) {
+			m = a;
+		} else {
+			static_assert(i == 1);
+			m = a;
+		}
+	}
 };
 
 template <class T>
@@ -874,8 +904,9 @@ struct ActorSingleCallback : SingleCallback<ValueType> {
 inline double now() { return g_network->now(); }
 inline Future<Void> delay(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds, taskID); }
 inline Future<Void> delayUntil(double time, int taskID = TaskDefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
-inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*g_random->random01()), taskID); }
+inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
 inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
 inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
+
 #include "flow/genericactors.actor.h"
 #endif

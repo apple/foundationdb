@@ -75,8 +75,11 @@ public:
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
+	int64_t TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK;
+	int64_t TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
+	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
 	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
 	int64_t MAX_CACHE_VERSIONS;
@@ -267,6 +270,8 @@ public:
 	int64_t MAX_VERSION_DIFFERENCE;
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double REPLACE_INTERFACE_DELAY;
+	double REPLACE_INTERFACE_CHECK_DELAY;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -314,6 +319,7 @@ public:
 	int64_t TLOG_SPILL_THRESHOLD;
 	int64_t TLOG_HARD_LIMIT_BYTES;
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
+	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

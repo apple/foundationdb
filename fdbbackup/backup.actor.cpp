@@ -42,6 +42,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <cinttypes>
 #include <algorithm>	// std::transform
 #include <string>
 #include <iostream>
@@ -1449,7 +1450,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 }
 
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
-										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
+										std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1490,7 +1491,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				}
 			}
 
-			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * deterministicRandom()->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
 			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
@@ -1505,7 +1506,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	std::string id = nondeterministicRandom()->randomUniqueID().toString();
 	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
 	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
@@ -1982,7 +1983,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
+		printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
 		targetVersion = v;
 	}
 
@@ -2007,7 +2008,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
-				printf("Using target restore version %lld\n", targetVersion);
+				printf("Using target restore version %" PRId64 "\n", targetVersion);
 		}
 
 		if (performRestore) {
@@ -2015,18 +2016,18 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
-				printf("Restored to version %lld\n", restoredVersion);
+				printf("Restored to version %" PRId64 "\n", restoredVersion);
 			}
 		}
 		else {
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
 
 			if(!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld.  Describe backup for more information.\n", targetVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 ".  Describe backup for more information.\n", targetVersion);
 				throw restore_invalid_version();
 			}
 
-			printf("Backup can be used to restore to version %lld\n", targetVersion);
+			printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
 		}
 
 	}
@@ -2060,7 +2061,7 @@ ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationConta
 		}
 	}
 
-	printf("Scanning version range %lld to %lld\n", beginVersion, endVersion);
+	printf("Scanning version range %" PRId64 " to %" PRId64 "\n", beginVersion, endVersion);
 	BackupFileList files = wait(c->dumpFileList(beginVersion, endVersion));
 	files.toStream(stdout);
 
@@ -2112,9 +2113,9 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : "") );
 
 		if(endVersion < 0)
-			printf("All data before %lld versions (%lld days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			printf("All data before %" PRId64 " versions (%" PRId64 " days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
-			printf("All data before version %lld has been deleted.\n", endVersion);
+			printf("All data before version %" PRId64 " has been deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2452,7 +2453,7 @@ Version parseVersion(const char *str) {
 	}
 
 	Version ver;
-	if(sscanf(str, "%lld", &ver) != 1) {
+	if(sscanf(str, "%" SCNd64, &ver) != 1) {
 		fprintf(stderr, "Could not parse version: %s\n", str);
 		flushAndExit(FDB_EXIT_ERROR);
 	}

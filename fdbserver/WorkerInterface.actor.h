@@ -41,6 +41,7 @@
 #define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 struct WorkerInterface {
+	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
@@ -59,6 +60,7 @@ struct WorkerInterface {
 	RequestStream< struct EventLogRequest > eventLogRequest;
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
+	RequestStream<struct ExecuteRequest> execReq;
 
 	TesterInterface testerInterface;
 
@@ -70,11 +72,12 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq);
 	}
 };
 
 struct WorkerDetails {
+	constexpr static FileIdentifier file_identifier = 9973980;
 	WorkerInterface interf;
 	ProcessClass processClass;
 	bool degraded;
@@ -89,6 +92,7 @@ struct WorkerDetails {
 };
 
 struct InitializeTLogRequest {
+	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
@@ -116,6 +120,7 @@ struct InitializeTLogRequest {
 };
 
 struct InitializeLogRouterRequest {
+	constexpr static FileIdentifier file_identifier = 2976228;
 	uint64_t recoveryCount;
 	Tag routerTag;
 	Version startVersion;
@@ -132,6 +137,7 @@ struct InitializeLogRouterRequest {
 
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
+	constexpr static FileIdentifier file_identifier = 12684574;
 	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
@@ -139,12 +145,15 @@ struct RecruitMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
 		serializer(ar, lifetime, forceRecovery, reply, arena);
 	}
 };
 
 struct InitializeMasterProxyRequest {
+	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
@@ -158,6 +167,7 @@ struct InitializeMasterProxyRequest {
 };
 
 struct InitializeDataDistributorRequest {
+	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
@@ -170,6 +180,7 @@ struct InitializeDataDistributorRequest {
 };
 
 struct InitializeRatekeeperRequest {
+	constexpr static FileIdentifier file_identifier = 6416816;
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 
@@ -182,6 +193,7 @@ struct InitializeRatekeeperRequest {
 };
 
 struct InitializeResolverRequest {
+	constexpr static FileIdentifier file_identifier = 7413317;
 	uint64_t recoveryCount;
 	int proxyCount;
 	int resolverCount;
@@ -194,6 +206,7 @@ struct InitializeResolverRequest {
 };
 
 struct InitializeStorageReply {
+	constexpr static FileIdentifier file_identifier = 10390645;
 	StorageServerInterface interf;
 	Version addedVersion;
 
@@ -204,6 +217,7 @@ struct InitializeStorageReply {
 };
 
 struct InitializeStorageRequest {
+	constexpr static FileIdentifier file_identifier = 16665642;
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
@@ -217,6 +231,7 @@ struct InitializeStorageRequest {
 };
 
 struct TraceBatchDumpRequest {
+	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
@@ -225,7 +240,25 @@ struct TraceBatchDumpRequest {
 	}
 };
 
+struct ExecuteRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
+	ReplyPromise<Void> reply;
+
+	Arena arena;
+	StringRef execPayload;
+
+	ExecuteRequest(StringRef execPayload) : execPayload(execPayload) {}
+
+	ExecuteRequest() : execPayload() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, execPayload, arena);
+	}
+};
+
 struct LoadedReply {
+	constexpr static FileIdentifier file_identifier = 9956350;
 	Standalone<StringRef> payload;
 	UID id;
 
@@ -236,6 +269,7 @@ struct LoadedReply {
 };
 
 struct LoadedPingRequest {
+	constexpr static FileIdentifier file_identifier = 4590979;
 	UID id;
 	bool loadReply;
 	Standalone<StringRef> payload;
@@ -248,6 +282,7 @@ struct LoadedPingRequest {
 };
 
 struct CoordinationPingMessage {
+	constexpr static FileIdentifier file_identifier = 9982747;
 	UID clusterControllerId;
 	int64_t timeStep;
 
@@ -261,6 +296,7 @@ struct CoordinationPingMessage {
 };
 
 struct SetMetricsLogRateRequest {
+	constexpr static FileIdentifier file_identifier = 4245995;
 	uint32_t metricsLogsPerSecond;
 
 	SetMetricsLogRateRequest() : metricsLogsPerSecond( 1 ) {}
@@ -273,6 +309,7 @@ struct SetMetricsLogRateRequest {
 };
 
 struct EventLogRequest {
+	constexpr static FileIdentifier file_identifier = 122319;
 	bool getLastError;
 	Standalone<StringRef> eventName;
 	ReplyPromise< TraceEventFields > reply;
@@ -307,6 +344,7 @@ struct DebugEntryRef {
 };
 
 struct DiskStoreRequest {
+	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
 	ReplyPromise<Standalone<VectorRef<UID>>> reply;
 
@@ -361,7 +399,9 @@ ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct Cl
 
 ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
                         std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
-                        std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold);
+                        std::string metricsConnFile, std::string metricsPrefix, int64_t memoryProfilingThreshold,
+                        std::string whitelistBinPaths);
+
 ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
@@ -380,11 +420,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db);
+                                     Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -407,7 +447,7 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded);
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
 }
 
 typedef decltype(&tLog) TLogFn;

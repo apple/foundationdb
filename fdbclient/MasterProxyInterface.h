@@ -23,6 +23,9 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -30,6 +33,7 @@
 #include "flow/Stats.h"
 
 struct MasterProxyInterface {
+	constexpr static FileIdentifier file_identifier = 8954922;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -45,6 +49,7 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
+	RequestStream<struct ExecRequest> execReq;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 
@@ -58,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, execReq);
 	}
 
 	void initEndpoints() {
@@ -71,6 +76,7 @@ struct MasterProxyInterface {
 };
 
 struct CommitID {
+	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
@@ -85,6 +91,7 @@ struct CommitID {
 };
 
 struct CommitTransactionRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 93948;
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
 		FLAG_FIRST_IN_BATCH = 0x2
@@ -121,6 +128,7 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 }
 
 struct GetReadVersionReply {
+	constexpr static FileIdentifier file_identifier = 15709388;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -132,6 +140,7 @@ struct GetReadVersionReply {
 };
 
 struct GetReadVersionRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 838566;
 	enum { 
 		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,
@@ -161,8 +170,9 @@ struct GetReadVersionRequest : TimedRequest {
 };
 
 struct GetKeyServerLocationsReply {
+	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -171,6 +181,7 @@ struct GetKeyServerLocationsReply {
 };
 
 struct GetKeyServerLocationsRequest {
+	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	KeyRef begin;
 	Optional<KeyRef> end;
@@ -188,6 +199,7 @@ struct GetKeyServerLocationsRequest {
 };
 
 struct GetRawCommittedVersionRequest {
+	constexpr static FileIdentifier file_identifier = 12954034;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
@@ -200,11 +212,12 @@ struct GetRawCommittedVersionRequest {
 };
 
 struct GetStorageServerRejoinInfoReply {
+	constexpr static FileIdentifier file_identifier = 9469225;
 	Version version;
 	Tag tag;
 	Optional<Tag> newTag;
 	bool newLocality;
-	vector<pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -213,6 +226,7 @@ struct GetStorageServerRejoinInfoReply {
 };
 
 struct GetStorageServerRejoinInfoRequest {
+	constexpr static FileIdentifier file_identifier = 994279;
 	UID id;
 	Optional<Value> dcId;
 	ReplyPromise< GetStorageServerRejoinInfoReply > reply;
@@ -227,6 +241,7 @@ struct GetStorageServerRejoinInfoRequest {
 };
 
 struct TxnStateRequest {
+	constexpr static FileIdentifier file_identifier = 15250781;
 	Arena arena;
 	VectorRef<KeyValueRef> data;
 	Sequence sequence;
@@ -239,22 +254,9 @@ struct TxnStateRequest {
 	}
 };
 
-struct GetHealthMetricsRequest
-{
-	ReplyPromise<struct GetHealthMetricsReply> reply;
-	bool detailed;
-
-	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
-
-	template <class Ar>
-	void serialize(Ar& ar)
-	{
-		serializer(ar, reply, detailed);
-	}
-};
-
 struct GetHealthMetricsReply
 {
+	constexpr static FileIdentifier file_identifier = 11544290;
 	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 
@@ -279,6 +281,38 @@ struct GetHealthMetricsReply
 			BinaryReader br(serialized, IncludeVersion());
 			br >> healthMetrics;
 		}
+	}
+};
+
+struct GetHealthMetricsRequest
+{
+	constexpr static FileIdentifier file_identifier = 11403900;
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply, detailed);
+	}
+};
+
+struct ExecRequest
+{
+	constexpr static FileIdentifier file_identifier = 22403900;
+	Arena arena;
+	StringRef execPayload;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, execPayload, reply, arena, debugID);
 	}
 };
 

@@ -56,12 +56,13 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
+	bool useObjectSerializer;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(false) {}
 };
 
 class Database {
@@ -140,6 +141,7 @@ struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
+	uint32_t maxRetries;
 	uint32_t getReadVersionFlags;
 	uint32_t customTransactionSizeLimit;
 	bool checkWritesEnabled : 1;
@@ -258,6 +260,14 @@ public:
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
+	// execute operation is similar to set, but the command will reach
+	// one of the proxies, all the TLogs and all the storage nodes.
+	// instead of setting a key and value on the DB, it executes the command
+	// that is passed in the value field.
+	// - cmdType can be used for logging purposes
+	// - cmdPayload contains the details of the command to be executed:
+	// format of the cmdPayload : <binary-path>:<arg1=val1>,<arg2=val2>...
+	void execute(const KeyRef& cmdType, const ValueRef& cmdPayload);
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
@@ -277,6 +287,7 @@ public:
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
+	void onErrorReset();
 	void fullReset();
 	double getBackoff(int errCode);
 	void debugTransaction(UID dID) { info.debugID = dID; }
@@ -287,6 +298,7 @@ public:
 
 	TransactionInfo info;
 	int numErrors;
+	int numRetries;
 
 	std::vector<Reference<Watch>> watches;
 
@@ -322,6 +334,10 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
 std::string unprintable( const std::string& );
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
+
+// Takes a snapshot of the cluster, specifically the following persistent
+// states: coordinator, TLog and storage state
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif

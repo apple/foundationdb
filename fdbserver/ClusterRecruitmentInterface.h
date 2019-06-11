@@ -35,6 +35,8 @@
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
 struct ClusterControllerFullInterface {
+    constexpr static FileIdentifier file_identifier =
+        ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
 	RequestStream< struct RecruitFromConfigurationRequest > recruitFromConfiguration;
 	RequestStream< struct RecruitRemoteFromConfigurationRequest > recruitRemoteFromConfiguration;
@@ -48,6 +50,17 @@ struct ClusterControllerFullInterface {
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
+	bool hasMessage() {
+		return clientInterface.hasMessage() ||
+				recruitFromConfiguration.getFuture().isReady() ||
+				recruitRemoteFromConfiguration.getFuture().isReady() ||
+				recruitStorage.getFuture().isReady() ||
+				registerWorker.getFuture().isReady() || 
+				getWorkers.getFuture().isReady() || 
+				registerMaster.getFuture().isReady() ||
+				getServerDBInfo.getFuture().isReady();
+	}
+
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		recruitFromConfiguration.getEndpoint( TaskClusterController );
@@ -60,29 +73,17 @@ struct ClusterControllerFullInterface {
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
-	}
-};
-
-struct RecruitFromConfigurationRequest {
-	DatabaseConfiguration configuration;
-	bool recruitSeedServers;
-	int maxOldLogRouters;
-	ReplyPromise< struct RecruitFromConfigurationReply > reply;
-
-	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
-		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
-
-	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
+		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
+		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 
 struct RecruitFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 2224085;
 	vector<WorkerInterface> tLogs;
 	vector<WorkerInterface> satelliteTLogs;
 	vector<WorkerInterface> proxies;
@@ -100,7 +101,36 @@ struct RecruitFromConfigurationReply {
 	}
 };
 
+struct RecruitFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 2023046;
+	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
+	int maxOldLogRouters;
+	ReplyPromise< struct RecruitFromConfigurationReply > reply;
+
+	RecruitFromConfigurationRequest() {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
+		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
+	}
+};
+
+struct RecruitRemoteFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 9091392;
+	vector<WorkerInterface> remoteTLogs;
+	vector<WorkerInterface> logRouters;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, remoteTLogs, logRouters);
+	}
+};
+
 struct RecruitRemoteFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 3235995;
 	DatabaseConfiguration configuration;
 	Optional<Key> dcId;
 	int logRouterCount;
@@ -116,17 +146,8 @@ struct RecruitRemoteFromConfigurationRequest {
 	}
 };
 
-struct RecruitRemoteFromConfigurationReply {
-	vector<WorkerInterface> remoteTLogs;
-	vector<WorkerInterface> logRouters;
-
-	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, remoteTLogs, logRouters);
-	}
-};
-
 struct RecruitStorageReply {
+	constexpr static FileIdentifier file_identifier = 15877089;
 	WorkerInterface worker;
 	ProcessClass processClass;
 
@@ -137,6 +158,7 @@ struct RecruitStorageReply {
 };
 
 struct RecruitStorageRequest {
+	constexpr static FileIdentifier file_identifier = 905920;
 	std::vector<Optional<Standalone<StringRef>>> excludeMachines;	//< Don't recruit any of these machines
 	std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
 	std::vector<Optional<Standalone<StringRef>>> includeDCs;
@@ -150,6 +172,7 @@ struct RecruitStorageRequest {
 };
 
 struct RegisterWorkerReply {
+	constexpr static FileIdentifier file_identifier = 16475696;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	Optional<uint16_t> storageCache;
@@ -164,6 +187,7 @@ struct RegisterWorkerReply {
 };
 
 struct RegisterWorkerRequest {
+	constexpr static FileIdentifier file_identifier = 14332605;
 	WorkerInterface wi;
 	ProcessClass initialClass;
 	ProcessClass processClass;
@@ -186,6 +210,7 @@ struct RegisterWorkerRequest {
 };
 
 struct GetWorkersRequest {
+	constexpr static FileIdentifier file_identifier = 1254174;
 	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
@@ -201,6 +226,7 @@ struct GetWorkersRequest {
 };
 
 struct RegisterMasterRequest {
+	constexpr static FileIdentifier file_identifier = 10773445;
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
@@ -218,21 +244,12 @@ struct RegisterMasterRequest {
 	RegisterMasterRequest() {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
-	}
-};
-
-struct GetServerDBInfoRequest {
-	UID knownServerInfoID;
-	Standalone<VectorRef<StringRef>> issues;
-	std::vector<NetworkAddress> incompatiblePeers;
-	ReplyPromise< struct ServerDBInfo > reply;
-
-	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
+		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
+		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 

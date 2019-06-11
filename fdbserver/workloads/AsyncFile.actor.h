@@ -99,7 +99,7 @@ struct AsyncFileWorkload : TestWorkload
 		state bool fileCreated = self->path.length() == 0;
 		if(fileCreated)
 		{
-			self->path = "asyncfile." + g_random->randomUniqueID().toString();
+			self->path = "asyncfile." + deterministicRandom()->randomUniqueID().toString();
 			flags &= ~IAsyncFile::OPEN_READONLY;
 			flags |= IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
 		}

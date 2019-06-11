@@ -77,13 +77,22 @@ function(assert_no_version_h target)
 
   message(STATUS "Check versions.h on ${target}")
   set(target_name "${target}_versions_h_check")
-  add_custom_target("${target_name}"
-    COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+
+  if (DEFINED ENV{VERBOSE})
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
                                -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-    COMMAND echo
-    "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-                               -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-    COMMENT "Check old build system wasn't used in source dir")
+      COMMAND echo
+      "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+                                 -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+      COMMENT "Check old build system wasn't used in source dir")
+  else()
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+      COMMENT "Check old build system wasn't used in source dir")
+  endif()
+
   add_dependencies(${target} ${target_name})
 endfunction()
 

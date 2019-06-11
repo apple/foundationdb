@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
@@ -107,26 +108,26 @@ struct DiskDurabilityTest : TestWorkload {
 
 		if (failed) throw operation_failed();
 
-		printf("Verified %d/%lld pages\n", verifyPages, size/4096);
+		printf("Verified %d/%" PRId64 " pages\n", verifyPages, size/4096);
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size/4096);
 
 		// Run
 		state bool first = true;
 		loop {
 			state vector<int64_t> targetPages;
-			for(int i=g_random->randomInt(1, 100); i>0 && targetPages.size() < size/4096; i--) {
-				auto p = g_random->randomInt(0, size/4096);
+			for(int i=deterministicRandom()->randomInt(1, 100); i>0 && targetPages.size() < size/4096; i--) {
+				auto p = deterministicRandom()->randomInt(0, size/4096);
 				if (!std::count(targetPages.begin(), targetPages.end(), p))
 					targetPages.push_back( p );
 			}
-			for(int i=g_random->randomInt(1,4); i>0; i--) {
+			for(int i=deterministicRandom()->randomInt(1,4); i>0; i--) {
 				targetPages.push_back( size/4096 );
 				size += 4096;
 			}
 
 			state vector<int64_t> targetValues(targetPages.size());
 			for(auto& v : targetValues)
-				v = g_random->randomUniqueID().first();
+				v = deterministicRandom()->randomUniqueID().first();
 
 			tr.reset();
 			loop {

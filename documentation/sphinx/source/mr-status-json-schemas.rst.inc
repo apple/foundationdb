@@ -1,6 +1,7 @@
 .. -*- mode: rst; -*-
 
-.. |json-status-format| replace::
+.. code-block:: javascript
+
    "cluster":{
       "layers":{
          "_valid":true,
@@ -65,7 +66,8 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "storage_cache"
+                        "storage_cache",
+                        "router"
                      ]
                   },
                   "data_version":12341234,

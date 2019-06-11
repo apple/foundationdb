@@ -24,6 +24,7 @@
 #include "flow/SystemMonitor.h"
 
 #include <stdio.h>
+#include <cinttypes>
 
 using namespace FDB;
 
@@ -40,7 +41,7 @@ ACTOR Future<Void> _test() {
 	// tr->setVersion(1);
 
 	Version ver = wait( tr->getReadVersion() );
-	printf("%lld\n", ver);
+	printf("%" PRId64 "\n", ver);
 
 	state std::vector< Future<Version> > versions;
 
@@ -79,12 +80,6 @@ void fdb_flow_test() {
 	API *fdb = FDB::API::selectAPIVersion(610);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
-
-	int randomSeed = platform::getRandomSeed();
-
-	g_random = new DeterministicRandom(randomSeed);
-	g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-	g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
 	g_network = newNet2( false );
 
@@ -427,16 +422,4 @@ namespace FDB {
 	void TransactionImpl::reset() {
 		fdb_transaction_reset( tr );
 	}
-
-	std::string printable( const StringRef& val ) {
-		std::string s;
-		for(int i=0; i<val.size(); i++) {
-			uint8_t b = val[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
-		}
-		return s;
-	}
-
 }

@@ -34,6 +34,7 @@
 #include "fdbserver/PrefixTree.h"
 #include <string.h>
 #include "flow/actorcompiler.h"
+#include <cinttypes>
 
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
 template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
@@ -1957,7 +1958,7 @@ IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) 
 }
 
 int randomSize(int max) {
-	return g_random->randomInt(0, max);
+	return deterministicRandom()->randomInt(0, max);
 }
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
@@ -1967,9 +1968,9 @@ KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	kv.key = makeString(kLen, kv.arena());
 	kv.value = makeString(vLen, kv.arena());
 	for(int i = 0; i < kLen; ++i)
-		mutateString(kv.key)[i] = (uint8_t)g_random->randomInt('a', 'm');
+		mutateString(kv.key)[i] = (uint8_t)deterministicRandom()->randomInt('a', 'm');
 	for(int i = 0; i < vLen; ++i)
-		mutateString(kv.value)[i] = (uint8_t)g_random->randomInt('n', 'z');
+		mutateString(kv.value)[i] = (uint8_t)deterministicRandom()->randomInt('n', 'z');
 	return kv;
 }
 
@@ -1988,10 +1989,10 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
 
 	// Randomly use the cursor for something else first.
-	if(g_random->coinflip()) {
+	if(deterministicRandom()->coinflip()) {
 		debug_printf("VerifyRange: Dummy seek\n");
 		state Key randomKey = randomKV().key;
-		wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
+		wait(deterministicRandom()->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
 
 	debug_printf("VerifyRange: Actual seek\n");
@@ -2019,18 +2020,18 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 		if(iLast == iEnd) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
 
@@ -2057,12 +2058,12 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	if(iLast != iEnd) {
 		errors += 1;
-		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
-	debug_printf("VerifyRangeReverse '%s' to '%s' @%lld\n", printable(start).c_str(), printable(end).c_str(), v);
+	debug_printf("VerifyRangeReverse '%s' to '%s' @%" PRId64 "\n", printable(start).c_str(), printable(end).c_str(), v);
 	// Randomly use a new cursor for the revere range read
-	if(g_random->coinflip()) {
+	if(deterministicRandom()->coinflip()) {
 		cur = btree->readAtVersion(v);
 	}
 
@@ -2076,18 +2077,18 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	while(cur->isValid() && cur->getKey() >= start) {
 		if(r == results.rend()) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != r->key) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
 			break;
 		}
 		if(cur->getValue() != r->value) {
 			errors += 1;
-			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
 
@@ -2097,7 +2098,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	if(r != results.rend()) {
 		errors += 1;
-		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
+		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
@@ -2124,16 +2125,16 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
 					++errors;
 					if(!cur->isValid())
-						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(), val.get().c_str(), ver);
 					else if(cur->getKey() != key)
-						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), key.c_str(), ver);
 					else if(cur->getValue() != val.get())
-						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%" PRId64 "\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
 				}
 			} else {
 				if(cur->isValid() && cur->getKey() == key) {
 					++errors;
-					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(), cur->getValue().toString().c_str(), ver);
 				}
 			}
 		}
@@ -2149,7 +2150,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 
 			debug_printf("Verifying through version %lld\n", v);
 			state Future<int> vall = verifyAll(btree, v, written);
-			state Future<int> vrange = verifyRandomRange(btree, g_random->randomInt(1, v + 1), written);
+			state Future<int> vrange = verifyRandomRange(btree, deterministicRandom()->randomInt(1, v + 1), written);
 			wait(success(vall) && success(vrange));
 
 			int errors = vall.get() + vrange.get();
@@ -2173,13 +2174,13 @@ ACTOR Future<Void> randomReader(VersionedBTree *btree) {
 	state Reference<IStoreCursor> cur;
 	loop {
 		wait(yield());
-		if(!cur || g_random->random01() > .1) {
-			Version v = g_random->randomInt(1, btree->getLastCommittedVersion() + 1);
+		if(!cur || deterministicRandom()->random01() > .1) {
+			Version v = deterministicRandom()->randomInt(1, btree->getLastCommittedVersion() + 1);
 			cur = btree->readAtVersion(v);
 		}
 
 		wait(cur->findFirstEqualOrGreater(randomKV(10, 0).key, true, 0));
-		state int c = g_random->randomInt(0, 100);
+		state int c = deterministicRandom()->randomInt(0, 100);
 		while(cur->isValid() && c-- > 0) {
 			wait(success(cur->next(true)));
 			wait(yield());
@@ -2202,11 +2203,11 @@ TEST_CASE("!/redwood/correctness") {
 	else
 		pager = createMemoryPager();
 
-	state int pageSize = g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
+	state int pageSize = deterministicRandom()->coinflip() ? pager->getUsablePageSize() : deterministicRandom()->randomInt(200, 400);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	wait(btree->init());
 
-	state int mutationBytesTarget = g_random->randomInt(100, 20e6);
+	state int mutationBytesTarget = deterministicRandom()->randomInt(100, 20e6);
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
@@ -2221,7 +2222,7 @@ TEST_CASE("!/redwood/correctness") {
 	state std::set<Key> keys;
 
 	state Version lastVer = wait(btree->getLatestVersion());
-	printf("Starting from version: %lld\n", lastVer);
+	printf("Starting from version: %" PRId64 "\n", lastVer);
 
 	state Version version = lastVer + 1;
 	state int mutationBytes = 0;
@@ -2240,23 +2241,23 @@ TEST_CASE("!/redwood/correctness") {
 
 	while(mutationBytes < mutationBytesTarget) {
 		// Sometimes advance the version
-		if(g_random->random01() < 0.10) {
+		if(deterministicRandom()->random01() < 0.10) {
 			++version;
 			btree->setWriteVersion(version);
 		}
 
 		// Sometimes do a clear range
-		if(g_random->random01() < .10) {
+		if(deterministicRandom()->random01() < .10) {
 			Key start = randomKV(maxKeySize, 1).key;
-			Key end = (g_random->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
+			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
 
 			// Sometimes replace start and/or end with a close actual (previously used) value
-			if(g_random->random01() < .10) {
+			if(deterministicRandom()->random01() < .10) {
 				auto i = keys.upper_bound(start);
 				if(i != keys.end())
 					start = *i;
 			}
-			if(g_random->random01() < .10) {
+			if(deterministicRandom()->random01() < .10) {
 				auto i = keys.upper_bound(end);
 				if(i != keys.end())
 					end = *i;
@@ -2299,7 +2300,7 @@ TEST_CASE("!/redwood/correctness") {
 			// Set a key
 			KeyValue kv = randomKV(maxKeySize, maxValueSize);
 			// Sometimes change key to a close previously used key
-			if(g_random->random01() < .01) {
+			if(deterministicRandom()->random01() < .01) {
 				auto i = keys.upper_bound(kv.key);
 				if(i != keys.end())
 					kv.key = StringRef(kv.arena(), *i);
@@ -2314,7 +2315,7 @@ TEST_CASE("!/redwood/correctness") {
 		}
 
 		// Sometimes (and at end) commit then check all results
-		if(mutationBytes >= std::min(mutationBytesTarget, (int)20e6) || g_random->random01() < .002) {
+		if(mutationBytes >= std::min(mutationBytesTarget, (int)20e6) || deterministicRandom()->random01() < .002) {
 			// Wait for btree commit and send the new version to committedVersions.
 			// Avoid capture of version as a member of *this
 			Version v = version;
@@ -2324,10 +2325,10 @@ TEST_CASE("!/redwood/correctness") {
 				return Void();
 			});
 
-			printf("Cumulative: %d total mutation bytes, %lu key changes, %lld key bytes, %lld value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
+			printf("Cumulative: %d total mutation bytes, %lu key changes, %" PRId64 " key bytes, %" PRId64 " value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
 
 			// Recover from disk at random
-			if(useDisk && g_random->random01() < .1) {
+			if(useDisk && deterministicRandom()->random01() < .1) {
 				printf("Recovering from disk.\n");
 
 				// Wait for outstanding commit
@@ -2350,7 +2351,7 @@ TEST_CASE("!/redwood/correctness") {
 
 				Version v = wait(btree->getLatestVersion());
 				ASSERT(v == version);
-				printf("Recovered from disk.  Latest version %lld\n", v);
+				printf("Recovered from disk.  Latest version %" PRId64 "\n", v);
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
@@ -2406,23 +2407,23 @@ TEST_CASE("!/redwood/performance/set") {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
 		btree->setWriteVersion(version);
-		int changes = g_random->randomInt(0, maxChangesPerVersion);
+		int changes = deterministicRandom()->randomInt(0, maxChangesPerVersion);
 		while(changes--) {
 			KeyValue kv;
 			// Change first 4 bytes of key to an int
-			*(uint32_t *)key.data() = g_random->randomInt(0, nodeCount);
-			kv.key = StringRef((uint8_t *)key.data(), g_random->randomInt(10, key.size()));
-			kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
+			*(uint32_t *)key.data() = deterministicRandom()->randomInt(0, nodeCount);
+			kv.key = StringRef((uint8_t *)key.data(), deterministicRandom()->randomInt(10, key.size()));
+			kv.value = StringRef((uint8_t *)value.data(), deterministicRandom()->randomInt(0, value.size()));
 			btree->set(kv);
 			kvBytes += kv.key.size() + kv.value.size();
 			++records;
 		}
 
-		if(g_random->random01() < (1.0 / 300)) {
+		if(deterministicRandom()->random01() < (1.0 / 300)) {
 			wait(commit);
 			commit = btree->commit();
 			double elapsed = now() - startTime;
-			printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+			printf("Committed (cumulative) %" PRId64 " bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 
@@ -2433,7 +2434,7 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(closedFuture);
 
 	double elapsed = now() - startTime;
-	printf("Wrote (final) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+	printf("Wrote (final) %" PRId64 " bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 
 	return Void();
 }

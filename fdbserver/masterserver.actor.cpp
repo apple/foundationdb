@@ -353,8 +353,8 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 		InitializeStorageRequest isr;
 		isr.seedTag = dcId_tags.count(recruits.storageServers[idx].locality.dcId()) ? dcId_tags[recruits.storageServers[idx].locality.dcId()] : Tag(nextLocality, 0);
 		isr.storeType = self->configuration.storageServerStoreType;
-		isr.reqId = g_random->randomUniqueID();
-		isr.interfaceId = g_random->randomUniqueID();
+		isr.reqId = deterministicRandom()->randomUniqueID();
+		isr.interfaceId = deterministicRandom()->randomUniqueID();
 
 		ErrorOr<InitializeStorageReply> newServer = wait( recruits.storageServers[idx].storage.tryGetReply( isr ) );
 
@@ -654,7 +654,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		}
 
 		if(BUGGIFY) {
-			self->recoveryTransactionVersion += g_random->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
+			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 		}
 		if ( self->recoveryTransactionVersion < minRequiredCommitVersion ) self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
@@ -1312,7 +1312,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 		if(self->forceRecovery) {
 			tr.set(recoveryCommitRequest.arena, rebootWhenDurableKey, StringRef());
-			tr.set(recoveryCommitRequest.arena, moveKeysLockOwnerKey, BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned()));
+			tr.set(recoveryCommitRequest.arena, moveKeysLockOwnerKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 		}
 	} else {
 		// Recruit and seed initial shard servers
