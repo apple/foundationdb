@@ -6,3 +6,8 @@ testTitle=DifferentClustersSameRV
    keyToWatch=anotherKey
    extraDB=2
    clearAfterTest=false
+
+   testName=Cycle
+   transactionsPerSecond=100
+   testDuration=100
+   expectedRate=0
