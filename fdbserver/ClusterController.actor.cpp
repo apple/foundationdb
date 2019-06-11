@@ -138,7 +138,7 @@ public:
 			for(auto& it : newInfo.storageCaches) {
 				if(it.first == id) {
 					if(it.second != interf) {
-						newInfo.id = g_random->randomUniqueID();
+						newInfo.id = deterministicRandom()->randomUniqueID();
 						it.second = interf;
 					}
 					found = true;
@@ -146,7 +146,7 @@ public:
 				}
 			}
 			if(!found) {
-				newInfo.id = g_random->randomUniqueID();
+				newInfo.id = deterministicRandom()->randomUniqueID();
 				newInfo.storageCaches.push_back(std::make_pair(id, interf));
 			}
 			serverInfo->set( newInfo );
@@ -167,7 +167,7 @@ public:
 			ServerDBInfo newInfo = serverInfo->get();
 			for(auto it = newInfo.storageCaches.begin(); it != newInfo.storageCaches.end(); ++it) {
 				if(it->first == id) {
-					newInfo.id = g_random->randomUniqueID();
+					newInfo.id = deterministicRandom()->randomUniqueID();
 					newInfo.storageCaches.erase(it);
 					break;
 				}
