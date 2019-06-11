@@ -3255,11 +3255,8 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 	return ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit );
 }
 
-ACTOR Future< Standalone<RangeResultRef> > waitDataDistributionMetricsList(
-	Database cx,
-	KeyRange keys,
-	int shardLimit )
-{
+ACTOR Future<Standalone<VectorRef<DDMetrics>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit) {
 	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
@@ -3275,10 +3272,6 @@ ACTOR Future< Standalone<RangeResultRef> > waitDataDistributionMetricsList(
 			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
-}
-
-Future<Standalone<RangeResultRef>> Transaction::getDataDistributionMetricsList(KeyRange const& keys, int shardLimit) {
-	return ::waitDataDistributionMetricsList(cx, keys, shardLimit);
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )

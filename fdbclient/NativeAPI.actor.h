@@ -256,7 +256,6 @@ public:
 	Future< StorageMetrics > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit );
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
-	Future<Standalone<RangeResultRef>> getDataDistributionMetricsList(KeyRange const& keys, int shardLimit);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
@@ -331,6 +330,8 @@ private:
 };
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Standalone<VectorRef<DDMetrics>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit);
 
 std::string unprintable( const std::string& );
 

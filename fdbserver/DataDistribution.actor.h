@@ -124,7 +124,7 @@ struct GetMetricsRequest {
 struct GetMetricsListRequest {
 	KeyRange keys;
 	int shardLimit;
-	Promise< Standalone<RangeResultRef> > reply;
+	Promise<Standalone<VectorRef<DDMetrics>>> reply;
 
 	GetMetricsListRequest() {}
 	GetMetricsListRequest( KeyRange const& keys, const int shardLimit ) : keys(keys), shardLimit(shardLimit) {}

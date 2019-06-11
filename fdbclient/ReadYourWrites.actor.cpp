@@ -1184,6 +1184,32 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 	}
 }
 
+ACTOR Future<Standalone<RangeResultRef>> getDataDistributionMetricsList(Database cx,
+                                                                        Reference<ClusterConnectionFile> clusterFile,
+                                                                        StringRef stats_prefix, KeySelector begin,
+                                                                        KeySelector end) {
+	auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
+	try {
+		Standalone<VectorRef<DDMetrics>> intermediateResult =
+		    wait(waitDataDistributionMetricsList(cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
+		Standalone<RangeResultRef> result;
+		for (auto& i : intermediateResult) {
+			json_spirit::mObject jsonObj;
+			jsonObj["Begin"] = i.beginKey.toString();
+			jsonObj["End"] = i.endKey.toString();
+			jsonObj["ShardBytes"] = i.shardBytes;
+
+			std::string jsonStr =
+			    json_spirit::write_string(json_spirit::mValue(jsonObj), json_spirit::Output_options::raw_utf8);
+			KeyValueRef kv(KeyRef(stats_prefix.toString() + i.beginKey.toString()), ValueRef(jsonStr));
+			result.push_back_deep(result.arena(), kv);
+		}
+		return result;
+	} catch (Error& e) {
+		throw;
+	}
+}
+
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
 	
@@ -1274,13 +1300,13 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	auto stats_prefix = LiteralStringRef("\xff\xff/dd_stats/");
+	StringRef stats_prefix = LiteralStringRef("\xff\xff/dd_stats/");
 	if (begin.getKey().startsWith(stats_prefix) &&
 		end.getKey().startsWith(stats_prefix)) {
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
 			try {
-				return tr.getDataDistributionMetricsList(keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT);
+				return getDataDistributionMetricsList(tr.getDatabase(), tr.getDatabase()->getConnectionFile(),
+				                                      stats_prefix, begin, end);
 			} catch( Error &e ) {
 				return e;
 			}

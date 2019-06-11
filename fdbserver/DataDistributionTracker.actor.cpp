@@ -654,11 +654,10 @@ ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsR
 ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, GetMetricsListRequest req ) {
 	try {
 		loop {
-			// no shard identifier as of yet, use simple numbering system
-			// also used to control shard limit
-			int shardNum = 1;
+			// used to control shard limit
+			int shardNum = 0;
 			// list of metrics, regenerate on loop when full range unsuccessful
-			Standalone<RangeResultRef> result;
+			Standalone<VectorRef<DDMetrics>> result;
 			Future<Void> onChange;
 			for( auto t : self->shards.intersectingRanges( req.keys ) ) {
 				auto &stats = t.value().stats;
@@ -666,19 +665,10 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					onChange = stats->onChange();
 					break;
 				}
-
-				StatusObject shardStatsObj;
-				shardStatsObj["Begin"] = t.begin().toString();
-				shardStatsObj["End"] = t.end().toString();
-				shardStatsObj["ShardBytes"] = stats->get().get().bytes;
-
-				std::string shardStatsString = json_spirit::write_string(json_spirit::mValue(shardStatsObj),
-				                                                         json_spirit::Output_options::raw_utf8);
-
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(KeyRef(std::to_string(shardNum)), ValueRef(shardStatsString)));
+				result.push_back_deep(result.arena(), DDMetrics(stats->get().get().bytes, KeyRef(t.begin().toString()),
+				                                                KeyRef(t.end().toString())));
 				++shardNum;
-				if ( shardNum > req.shardLimit ) {
+				if (shardNum >= req.shardLimit) {
 					break;
 				}
 			}

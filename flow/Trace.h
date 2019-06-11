@@ -333,7 +333,8 @@ struct TraceableStringImpl : std::true_type {
 			} else {
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char(*iter / 16));
+				// In order to handle negative values properly, wrap around the top (256)
+				result.push_back(base16Char((*iter < 0 ? *iter + 256 : *iter) / 16));
 				result.push_back(base16Char(*iter));
 			}
 		}

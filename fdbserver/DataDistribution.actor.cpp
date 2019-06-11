@@ -3734,7 +3734,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
-				ErrorOr<Standalone<RangeResultRef>> result = wait(errorOr(brokenPromiseToNever(getShardMetricsList.getReply( GetMetricsListRequest(req.keys, req.shardLimit)))));
+				ErrorOr<Standalone<VectorRef<DDMetrics>>> result = wait(errorOr(brokenPromiseToNever(
+				    getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
 				if ( result.isError() ) {
 					req.reply.sendError(result.getError());
 				} else {
