@@ -2856,11 +2856,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 }
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
-	state std::string waitDescription = format("%s/updateStorage", data->thisServerID.toString().c_str());
 	loop {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
 		if (g_network->isSimulated()) {
-			wait(g_pSimulator->checkDisabled(waitDescription));
+			wait(g_pSimulator->checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str())));
 		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		wait( delay(0, TaskUpdateStorage) );
