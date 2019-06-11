@@ -28,7 +28,8 @@
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
@@ -63,7 +64,8 @@
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "storage_cache"
                      ]
                   },
                   "data_version":12341234,

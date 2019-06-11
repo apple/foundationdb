@@ -357,23 +357,59 @@ ACTOR Future<Void> registrationClient(
 		ProcessClass initialClass,
 		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
 		Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-		Reference<AsyncVar<bool>> degraded) {
+		Reference<AsyncVar<bool>> degraded,
+		PromiseStream< ErrorInfo > errors,
+		LocalityData locality,
+		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	// The registration request piggybacks optional distributor interface if it exists.
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
+	state Reference<AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>> scInterf( new AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>() );
+	state Future<Void> cacheProcessFuture;
+	state Future<Void> cacheErrorsFuture;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;	
 				asyncPriorityInfo->set( reply.priorityInfo );
+
+				if(!reply.storageCache.present()) {
+					cacheProcessFuture.cancel();
+					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
+				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
+					StorageServerInterface recruited;
+					recruited.locality = locality;
+					recruited.initEndpoints();
+					
+					std::map<std::string, std::string> details;
+					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
+
+					DUMPTOKEN(recruited.getVersion);
+					DUMPTOKEN(recruited.getValue);
+					DUMPTOKEN(recruited.getKey);
+					DUMPTOKEN(recruited.getKeyValues);
+					DUMPTOKEN(recruited.getShardState);
+					DUMPTOKEN(recruited.waitMetrics);
+					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getPhysicalMetrics);
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.getQueuingMetrics);
+					DUMPTOKEN(recruited.getKeyValueStoreType);
+					DUMPTOKEN(recruited.watchValue);
+
+					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
+					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
+					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
+				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
+			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 		}
 	}
@@ -853,7 +889,7 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -1368,3 +1404,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::STORAGE_CACHE("StorageCache", "SC");

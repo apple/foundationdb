@@ -70,10 +70,7 @@ struct StorageServerInterface {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
 		serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-
-		if( ar.protocolVersion() >= 0x0FDB00A200090001LL )
-			serializer(ar, watchValue);
+			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType, watchValue );
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }

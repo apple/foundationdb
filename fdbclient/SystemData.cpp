@@ -95,7 +95,6 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 	return std::make_pair(logs, oldLogs);
 }
 
-
 const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
 const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
 			   serverKeysFalse;
@@ -123,6 +122,49 @@ UID serverKeysDecodeServer( const KeyRef& key ) {
 }
 bool serverHasKey( ValueRef storedValue ) {
 	return storedValue == serverKeysTrue;
+}
+
+const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	wr.serializeBytes( key );
+	return wr.toValue();
+}
+const Key cacheKeysPrefixFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	return wr.toValue();
+}
+uint16_t cacheKeysDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheKeysPrefix), Unversioned() );
+	rd >> idx;
+	return idx;
+}
+KeyRef cacheKeysDecodeKey( const KeyRef& key ) {
+	return key.substr( cacheKeysPrefix.size() + sizeof(uint16_t) + 1);
+}
+
+const KeyRef cacheChangeKey = LiteralStringRef("\xff\x02/cacheChangeKey");
+const KeyRangeRef cacheChangeKeys( LiteralStringRef("\xff\x02/cacheChangeKeys/"), LiteralStringRef("\xff\x02/cacheChangeKeys0") );
+const KeyRef cacheChangePrefix = cacheChangeKeys.begin;
+const Key cacheChangeKeyFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheChangePrefix );
+	wr << idx;
+	return wr.toValue();
+}
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheChangePrefix), Unversioned() );
+	rd >> idx;
+	return idx;
 }
 
 const KeyRangeRef serverTagKeys(

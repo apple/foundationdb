@@ -59,6 +59,19 @@ const Key serverKeysPrefixFor( UID serverID );
 UID serverKeysDecodeServer( const KeyRef& key );
 bool serverHasKey( ValueRef storedValue );
 
+extern const KeyRef cacheKeysPrefix;
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key );
+const Key cacheKeysPrefixFor( uint16_t idx );
+uint16_t cacheKeysDecodeIndex( const KeyRef& key );
+KeyRef cacheKeysDecodeKey( const KeyRef& key );
+
+extern const KeyRef cacheChangeKey;
+extern const KeyRangeRef cacheChangeKeys;
+extern const KeyRef cacheChangePrefix;
+const Key cacheChangeKeyFor( uint16_t idx );
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
+
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
 extern const KeyRangeRef serverTagMaxKeys;

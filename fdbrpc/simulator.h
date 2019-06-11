@@ -97,6 +97,7 @@ public:
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
+				case ProcessClass::StorageCacheClass: return false;
 				default: return false;
 			}
 		}

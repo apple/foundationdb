@@ -1245,6 +1245,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
 		ASSERT( dcCoordinators <= machines );
+		
+		//FIXME: temporarily code to test storage cache
+		if(dc==0) {
+			machines++;
+		}
+
 		int useSeedForMachine = g_random->randomInt(0, machines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -1266,6 +1272,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
 				if (processClass == ProcessClass::ResolutionClass)  // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
+			}
+
+			//FIXME: temporarily code to test storage cache
+			if(machine==machines-1 && dc==0) {
+				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+				nonVersatileMachines++;
 			}
 
 			std::vector<IPAddress> ips;

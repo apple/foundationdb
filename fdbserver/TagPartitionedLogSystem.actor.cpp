@@ -481,7 +481,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
-					if(tag == txsTag) {
+					if(tag == txsTag || tag == cacheTag) {
 						break;
 					}
 					TraceEvent("TLogPeekAllDead", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size());
