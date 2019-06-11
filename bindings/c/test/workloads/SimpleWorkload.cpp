@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <functional>
 #include <random>
+#include <iostream>
 
 namespace {
 
@@ -48,18 +49,10 @@ struct SimpleWorkload : FDBWorkload {
 		SimpleWorkload& self;
 		FDBDatabase* db;
 		fdb_error_t error = 0;
-		FDBTransaction* tx = nullptr;
 		FDBFuture* currentFuture = nullptr;
+		int numWaiters = 0;
 
-		ActorBase(const Callback& done, SimpleWorkload& self, FDBDatabase* db) : done(done), self(self), db(db) {
-			error = fdb_database_create_transaction(db, &tx);
-		}
-
-		~ActorBase() {
-			if (tx) {
-				fdb_transaction_destroy(tx);
-			}
-		}
+		ActorBase(const Callback& done, SimpleWorkload& self, FDBDatabase* db) : done(done), self(self), db(db) {}
 
 		Actor* super() { return static_cast<Actor*>(this); }
 
@@ -67,17 +60,27 @@ struct SimpleWorkload : FDBWorkload {
 
 		template <class State>
 		void wait(FDBFuture* future, State state) {
+			if (++numWaiters != 1) {
+				std::cerr << "More than one wait in one actor" << std::endl;
+				std::terminate();
+			}
 			super()->state = state;
 			currentFuture = future;
 			if (fdb_future_is_ready(future)) {
 				callback(future, this);
 			} else {
-				fdb_future_set_callback(future, &ActorBase<Actor>::callback, this);
+				auto err = fdb_future_set_callback(future, &ActorBase<Actor>::callback, this);
+				if (err) {
+					auto self = static_cast<Actor*>(this);
+					self->callbacks[self->state].onError(err);
+					fdb_future_destroy(future);
+				}
 			}
 		}
 
 		static void callback(FDBFuture* future, void* data) {
 			auto self = reinterpret_cast<Actor*>(data);
+			--self->numWaiters;
 			auto err = fdb_future_get_error(future);
 			if (err) {
 				self->callbacks[self->state].onError(fdb_future_get_error(future));
@@ -96,21 +99,29 @@ struct SimpleWorkload : FDBWorkload {
 	struct PopulateActor : ActorBase<PopulateActor> {
 		enum class State { Commit, Retry };
 		State state;
+		FDBTransaction* tx = nullptr;
 
 		unsigned long from, to, lastTx = 0;
 		std::unordered_map<State, ActorCallback> callbacks;
 
 		PopulateActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db, unsigned long from,
 		              unsigned long to)
-		  : ActorBase(promise, self, db) {
+		  : ActorBase(promise, self, db), from(from), to(to) {
+			error = fdb_database_create_transaction(db, &tx);
 			if (error) {
 				done(this);
 			}
 			setCallbacks();
 		}
 
+		~PopulateActor() {
+			if (tx) {
+				fdb_transaction_destroy(tx);
+			}
+		}
+
 		void run() {
-			if (error || from == to) {
+			if (error || from >= to) {
 				done(this);
 				return;
 			}
@@ -119,6 +130,8 @@ struct SimpleWorkload : FDBWorkload {
 			for (; from < to && ops < self.insertsPerTx; ++ops, ++from) {
 				std::string value = std::to_string(from);
 				std::string key = KEY_PREFIX + value;
+				fdb_transaction_set(tx, reinterpret_cast<const uint8_t*>(key.c_str()), key.size(),
+				                    reinterpret_cast<const uint8_t*>(value.c_str()), value.size());
 			}
 			lastTx = ops;
 			auto commit_future = fdb_transaction_commit(tx);
@@ -126,10 +139,15 @@ struct SimpleWorkload : FDBWorkload {
 		}
 
 		void setCallbacks() {
-			callbacks[State::Commit] = { [this](FDBFuture* future) { run(); },
-				                         [this](fdb_error_t error) {
-				                             wait(fdb_transaction_on_error(tx, error), State::Retry);
-				                         } };
+			callbacks[State::Commit] = {
+				[this](FDBFuture* future) {
+				    fdb_transaction_reset(tx);
+				    self.context->trace(FDBSeverity::Debug, "TXComplete", { { "NumInserts", std::to_string(lastTx) } });
+				    lastTx = 0;
+				    run();
+				},
+				[this](fdb_error_t error) { wait(fdb_transaction_on_error(tx, error), State::Retry); }
+			};
 			callbacks[State::Retry] = { [this](FDBFuture* future) {
 				                           from -= lastTx;
 				                           fdb_transaction_reset(tx);
@@ -151,6 +169,7 @@ struct SimpleWorkload : FDBWorkload {
 		std::unordered_map<State, ActorCallback> callbacks;
 		unsigned long ops = 0;
 		std::uniform_int_distribution<decltype(SimpleWorkload::numTuples)> random;
+		FDBTransaction* tx = nullptr;
 
 		unsigned numCommits = 0;
 		unsigned numRetries = 0;
@@ -159,10 +178,17 @@ struct SimpleWorkload : FDBWorkload {
 
 		ClientActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db)
 		  : ActorBase(promise, self, db), random(0, self.numTuples - 1), startTime(self.context->now()) {
+			error = fdb_database_create_transaction(db, &tx);
 			if (error) {
 				done(this);
 			}
 			setCallbacks();
+		}
+
+		~ClientActor() {
+			if (tx) {
+				fdb_transaction_destroy(tx);
+			}
 		}
 
 		void run() { get(); }
@@ -275,6 +301,7 @@ struct SimpleWorkload : FDBWorkload {
 			}
 			auto actor = new PopulateActor([p](PopulateActor* self) { (*p)(self); }, *this, db, from, to);
 			p->actors.emplace_back(actor);
+			from = to;
 		}
 		for (auto actor : p->actors) {
 			actor->run();
@@ -301,7 +328,7 @@ struct SimpleWorkload : FDBWorkload {
 				if (s > 0.01) {
 					self->gets.emplace_back(double(actor->numGets) / s);
 					self->txs.emplace_back(double(actor->numCommits) / s);
-					self->txs.emplace_back(double(actor->numRetries) / s);
+					self->retries.emplace_back(double(actor->numRetries) / s);
 				}
 				delete actor;
 				if (actors.empty()) {
@@ -320,11 +347,16 @@ struct SimpleWorkload : FDBWorkload {
 		}
 	}
 	void check(FDBDatabase* db, GenericPromise<bool> done) override { done.send(success); }
+
+	template <class Vec>
+	double accumulateMetric(const Vec& v) const {
+		return std::accumulate(v.begin(), v.end(), 0.0) / double(v.size());
+	}
+
 	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
-		out.emplace_back(FDBPerfMetric{ "Get/s", std::accumulate(gets.begin(), gets.end(), 0.0) / gets.size(), true });
-		out.emplace_back(FDBPerfMetric{ "Tx/s", std::accumulate(txs.begin(), gets.end(), 0.0) / gets.size(), true });
-		out.emplace_back(
-		    FDBPerfMetric{ "Retries/s", std::accumulate(retries.begin(), gets.end(), 0.0) / gets.size(), true });
+		out.emplace_back(FDBPerfMetric{ "Get/s", accumulateMetric(gets), true });
+		out.emplace_back(FDBPerfMetric{ "Tx/s", accumulateMetric(txs), true });
+		out.emplace_back(FDBPerfMetric{ "Retries/s", accumulateMetric(retries), true });
 	}
 };
 
