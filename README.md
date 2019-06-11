@@ -225,6 +225,7 @@ If you installed WIX before running `cmake` you should find the
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest
     ```
 
+1. Run `$ scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash` within the running container.  This enables a more modern compiler, which is required to build FoundationDB.
 1. Navigate to the container's mounted directory which contains the foundationdb repo.
 
     ```shell
