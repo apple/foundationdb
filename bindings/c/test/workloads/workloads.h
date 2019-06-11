@@ -28,8 +28,9 @@ struct IFDBWorkloadFactory {
 };
 
 struct FDBWorkloadFactoryImpl : FDBWorkloadFactory {
-	static std::map<std::string, IFDBWorkloadFactory*> factories();
-	std::shared_ptr<FDBWorkload> create(const std::string& name);
+	~FDBWorkloadFactoryImpl();
+	static std::map<std::string, IFDBWorkloadFactory*>& factories();
+	std::shared_ptr<FDBWorkload> create(const std::string& name) override;
 };
 
 template<class WorkloadType>
@@ -43,4 +44,4 @@ struct FDBWorkloadFactoryT : IFDBWorkloadFactory {
 	}
 };
 
-extern "C" FDBWorkloadFactoryImpl workloadFactory;
+extern "C" DLLEXPORT FDBWorkloadFactory* workloadFactory();

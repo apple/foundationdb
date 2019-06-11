@@ -152,6 +152,9 @@ public:
 	virtual int getCurrentTask() { return currentTaskID; }
 	virtual void setCurrentTask(int taskID ) { priorityMetric = currentTaskID = taskID; }
 	virtual void onMainThread( Promise<Void>&& signal, int taskID );
+	bool isOnMainThread() const override {
+		return thread_network == this;
+	}
 	virtual void stop() {
 		if ( thread_network == this )
 			stopImmediately();

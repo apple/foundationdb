@@ -20,7 +20,9 @@
 
 #include "workloads.h"
 
-std::map<std::string, IFDBWorkloadFactory*> FDBWorkloadFactoryImpl::factories() {
+FDBWorkloadFactoryImpl::~FDBWorkloadFactoryImpl() {}
+
+std::map<std::string, IFDBWorkloadFactory*>& FDBWorkloadFactoryImpl::factories() {
     static std::map<std::string, IFDBWorkloadFactory*> _factories;
     return _factories;
 }
@@ -33,4 +35,7 @@ std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(const std::string &n
     return res->second->create();
 }
 
-FDBWorkloadFactoryImpl workloadFactory;
+FDBWorkloadFactory* workloadFactory() {
+    static FDBWorkloadFactoryImpl impl;
+    return &impl;
+}

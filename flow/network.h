@@ -396,6 +396,9 @@ public:
 	virtual bool isSimulated() const = 0;
 	// Returns true if this network is a local simulation
 
+	virtual bool isOnMainThread() const = 0;
+	// Returns true if the current thread is the main thread
+
 	virtual void onMainThread( Promise<Void>&& signal, int taskID ) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network
 

@@ -18,67 +18,318 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
 #define FDB_API_VERSION 610
 #include "foundationdb/fdb_c.h"
+#undef DLLEXPORT
+#include "workloads.h"
+
+#include <unordered_map>
+#include <functional>
+#include <random>
 
 namespace {
 
 struct SimpleWorkload : FDBWorkload {
 	static const std::string name;
+	static const std::string KEY_PREFIX;
+	std::mt19937 random;
+	bool success = true;
 	FDBWorkloadContext* context = nullptr;
-	unsigned long numTuples;
-	unsigned long numActors;
-	unsigned long insertsPerTx;
+	unsigned long numTuples, numActors, insertsPerTx, opsPerTx;
+	double runFor;
 
-	struct PopulateActor {
-		enum class State {};
+	// stats
+	std::vector<double> gets, txs, retries;
 
+	template <class Actor>
+	struct ActorBase {
+		using Callback = std::function<void(Actor*)>;
+		Callback done;
 		SimpleWorkload& self;
 		FDBDatabase* db;
-		unsigned long from, to;
-		FDBTransaction* tx = nullptr;
 		fdb_error_t error = 0;
-		State state;
+		FDBTransaction* tx = nullptr;
+		FDBFuture* currentFuture = nullptr;
 
-		PopulateActor(SimpleWorkload& self, FDBDatabase* db, unsigned long from, unsigned long to)
-		  : self(self), db(db) {
+		ActorBase(const Callback& done, SimpleWorkload& self, FDBDatabase* db) : done(done), self(self), db(db) {
 			error = fdb_database_create_transaction(db, &tx);
-			if (error) {
-				return;
-			}
-			body();
 		}
 
-		~PopulateActor() {
+		~ActorBase() {
 			if (tx) {
 				fdb_transaction_destroy(tx);
 			}
 		}
 
-		void body() {
+		Actor* super() { return static_cast<Actor*>(this); }
+
+		const Actor* super() const { return static_cast<const Actor*>(this); }
+
+		template <class State>
+		void wait(FDBFuture* future, State state) {
+			super()->state = state;
+			currentFuture = future;
+			if (fdb_future_is_ready(future)) {
+				callback(future, this);
+			} else {
+				fdb_future_set_callback(future, &ActorBase<Actor>::callback, this);
+			}
 		}
 
-		static void callback(FDBFuture* future, void* cb) {
-			// auto self = reinterpret_cast<PopulateActor*>(cb);
+		static void callback(FDBFuture* future, void* data) {
+			auto self = reinterpret_cast<Actor*>(data);
+			auto err = fdb_future_get_error(future);
+			if (err) {
+				self->callbacks[self->state].onError(fdb_future_get_error(future));
+			} else {
+				self->callbacks[self->state].onSuccess(future);
+			}
+			fdb_future_destroy(future);
+		}
+	};
+
+	struct ActorCallback {
+		std::function<void(FDBFuture*)> onSuccess;
+		std::function<void(fdb_error_t)> onError;
+	};
+
+	struct PopulateActor : ActorBase<PopulateActor> {
+		enum class State { Commit, Retry };
+		State state;
+
+		unsigned long from, to, lastTx = 0;
+		std::unordered_map<State, ActorCallback> callbacks;
+
+		PopulateActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db, unsigned long from,
+		              unsigned long to)
+		  : ActorBase(promise, self, db) {
+			if (error) {
+				done(this);
+			}
+			setCallbacks();
+		}
+
+		void run() {
+			if (error || from == to) {
+				done(this);
+				return;
+			}
+			lastTx = 0;
+			unsigned ops = 0;
+			for (; from < to && ops < self.insertsPerTx; ++ops, ++from) {
+				std::string value = std::to_string(from);
+				std::string key = KEY_PREFIX + value;
+			}
+			lastTx = ops;
+			auto commit_future = fdb_transaction_commit(tx);
+			wait(commit_future, State::Commit);
+		}
+
+		void setCallbacks() {
+			callbacks[State::Commit] = { [this](FDBFuture* future) { run(); },
+				                         [this](fdb_error_t error) {
+				                             wait(fdb_transaction_on_error(tx, error), State::Retry);
+				                         } };
+			callbacks[State::Retry] = { [this](FDBFuture* future) {
+				                           from -= lastTx;
+				                           fdb_transaction_reset(tx);
+				                           run();
+				                       },
+				                        [this](fdb_error_t error) {
+				                            self.context->trace(FDBSeverity::Error, "AssertionFailure",
+				                                                { { "Reason", "tx.onError failed" },
+				                                                  { "Error", std::string(fdb_get_error(error)) } });
+				                            self.success = false;
+				                            done(this);
+				                        } };
+		}
+	};
+
+	struct ClientActor : ActorBase<ClientActor> {
+		enum class State { Get, Commit, Retry };
+		State state;
+		std::unordered_map<State, ActorCallback> callbacks;
+		unsigned long ops = 0;
+		std::uniform_int_distribution<decltype(SimpleWorkload::numTuples)> random;
+
+		unsigned numCommits = 0;
+		unsigned numRetries = 0;
+		unsigned numGets = 0;
+		double startTime;
+
+		ClientActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db)
+		  : ActorBase(promise, self, db), random(0, self.numTuples - 1), startTime(self.context->now()) {
+			if (error) {
+				done(this);
+			}
+			setCallbacks();
+		}
+
+		void run() { get(); }
+
+		void get() {
+			if (self.context->now() > startTime + self.runFor) {
+				done(this);
+				return;
+			}
+			auto key = KEY_PREFIX + std::to_string(random(self.random));
+			auto f = fdb_transaction_get(tx, reinterpret_cast<const uint8_t*>(key.c_str()), key.size(), false);
+			wait(f, State::Get);
+		}
+
+		void commit() {
+			if (self.context->now() > startTime + self.runFor) {
+				done(this);
+				return;
+			}
+			wait(fdb_transaction_commit(tx), State::Commit);
+		}
+
+		void setCallbacks() {
+			callbacks[State::Get] = { [this](FDBFuture* future) {
+				                         ++numGets;
+				                         if (++ops >= self.opsPerTx) {
+					                         commit();
+				                         } else {
+					                         get();
+				                         }
+				                     },
+				                      [this](fdb_error_t error) {
+				                          wait(fdb_transaction_on_error(tx, error), State::Retry);
+				                      } };
+			callbacks[State::Retry] = { [this](FDBFuture* future) {
+				                           ops = 0;
+				                           fdb_transaction_reset(tx);
+				                           ++numRetries;
+				                           get();
+				                       },
+				                        [this](fdb_error_t) {
+				                            self.context->trace(FDBSeverity::Error, "AssertionFailure",
+				                                                { { "Reason", "tx.onError failed" },
+				                                                  { "Error", std::string(fdb_get_error(error)) } });
+				                            self.success = false;
+				                            done(this);
+				                        } };
+			callbacks[State::Commit] = { [this](FDBFuture* future) {
+				                            ++numCommits;
+				                            ops = 0;
+				                            fdb_transaction_reset(tx);
+				                            get();
+				                        },
+				                         [this](fdb_error_t) {
+				                             wait(fdb_transaction_on_error(tx, error), State::Retry);
+				                         } };
 		}
 	};
 
 	std::string description() const override { return name; }
 	bool init(FDBWorkloadContext* context) override {
 		this->context = context;
+		context->trace(FDBSeverity::Info, "SimpleWorkloadInit", {});
+		random = decltype(random)(context->rnd());
 		numTuples = context->getOption("numTuples", 100000ul);
 		numActors = context->getOption("numActors", 100ul);
 		insertsPerTx = context->getOption("insertsPerTx", 100ul);
+		opsPerTx = context->getOption("opsPerTx", 100ul);
+		runFor = context->getOption("runFor", 10.0);
+		auto err = fdb_select_api_version(610);
+		if (err) {
+			context->trace(FDBSeverity::Info, "SelectAPIVersionFailed",
+			               { { "Error", std::string(fdb_get_error(err)) } });
+		}
 		return true;
 	}
-	void setup(FDBDatabase* db, GenericPromise<bool> done) override {}
-	void start(FDBDatabase* db, GenericPromise<bool> done) override {}
-	void check(FDBDatabase* db, GenericPromise<bool> done) override {}
-	void getMetrics(std::vector<FDBPerfMetric>& out) const override {}
+	void setup(FDBDatabase* db, GenericPromise<bool> done) override {
+		if (this->context->clientId() == 0) {
+			done.send(true);
+			return;
+		}
+		struct Populator {
+			std::vector<PopulateActor*> actors;
+			GenericPromise<bool> promise;
+			bool success = true;
+
+			void operator()(PopulateActor* done) {
+				if (done->error) {
+					success = false;
+				}
+				for (int i = 0; i < actors.size(); ++i) {
+					if (actors[i] == done) {
+						actors[i] = actors.back();
+						delete done;
+						actors.pop_back();
+					}
+				}
+				if (actors.empty()) {
+					promise.send(success);
+					delete this;
+				}
+			}
+		};
+		decltype(numTuples) from = 0;
+		auto p = new Populator{ {}, std::move(done) };
+		for (decltype(numActors) i = 0; i < numActors; ++i) {
+			decltype(from) to = from + (numTuples / numActors);
+			if (i == numActors - 1) {
+				to = numTuples;
+			}
+			auto actor = new PopulateActor([p](PopulateActor* self) { (*p)(self); }, *this, db, from, to);
+			p->actors.emplace_back(actor);
+		}
+		for (auto actor : p->actors) {
+			actor->run();
+		}
+	}
+	void start(FDBDatabase* db, GenericPromise<bool> done) override {
+		if (!success) {
+			done.send(false);
+		}
+		struct ClientRunner {
+			std::vector<ClientActor*> actors;
+			GenericPromise<bool> done;
+			SimpleWorkload* self;
+
+			void operator()(ClientActor* actor) {
+				double now = self->context->now();
+				for (int i = 0; i < actors.size(); ++i) {
+					if (actors[i] == actor) {
+						actors[i] = actors.back();
+						actors.pop_back();
+					}
+				}
+				double s = now - actor->startTime;
+				if (s > 0.01) {
+					self->gets.emplace_back(double(actor->numGets) / s);
+					self->txs.emplace_back(double(actor->numCommits) / s);
+					self->txs.emplace_back(double(actor->numRetries) / s);
+				}
+				delete actor;
+				if (actors.empty()) {
+					done.send(self->success);
+					delete this;
+				}
+			}
+		};
+		auto runner = new ClientRunner{ {}, std::move(done), this };
+		for (decltype(numActors) i = 0; i < numActors; ++i) {
+			auto actor = new ClientActor([runner](ClientActor* self) { (*runner)(self); }, *this, db);
+			runner->actors.push_back(actor);
+		}
+		for (auto actor : runner->actors) {
+			actor->run();
+		}
+	}
+	void check(FDBDatabase* db, GenericPromise<bool> done) override { done.send(success); }
+	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
+		out.emplace_back(FDBPerfMetric{ "Get/s", std::accumulate(gets.begin(), gets.end(), 0.0) / gets.size(), true });
+		out.emplace_back(FDBPerfMetric{ "Tx/s", std::accumulate(txs.begin(), gets.end(), 0.0) / gets.size(), true });
+		out.emplace_back(
+		    FDBPerfMetric{ "Retries/s", std::accumulate(retries.begin(), gets.end(), 0.0) / gets.size(), true });
+	}
 };
 
 const std::string SimpleWorkload::name = "SimpleWorkload";
+const std::string SimpleWorkload::KEY_PREFIX = "csimple/";
 
 } // namespace
 

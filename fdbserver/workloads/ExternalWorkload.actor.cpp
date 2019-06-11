@@ -35,11 +35,19 @@ struct FDBPromiseImpl : FDBPromise {
 	void send(void* value) override { impl.send(*reinterpret_cast<T*>(value)); }
 };
 
+ACTOR template <class F, class T>
+void keepAlive(F until, T db) {
+	try {
+		wait(success(until));
+	} catch (...) {
+	}
+}
+
 struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	std::string libraryName, libraryPath;
 	bool success = true;
 	void* library = nullptr;
-	FDBWorkloadFactory* workloadFactory;
+	FDBWorkloadFactory* (*workloadFactory)(void);
 	std::shared_ptr<FDBWorkload> workloadImpl;
 
 	constexpr static const char* NAME = "External";
@@ -64,11 +72,16 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 
 	explicit ExternalWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		libraryName = ::getOption(options, LiteralStringRef("libraryName"), LiteralStringRef("")).toString();
-		libraryPath = ::getOption(options, LiteralStringRef("LibraryPath"), Value(getDefaultLibraryPath())).toString();
+		libraryPath = ::getOption(options, LiteralStringRef("libraryPath"), Value(getDefaultLibraryPath())).toString();
 		auto wName = ::getOption(options, LiteralStringRef("workloadName"), LiteralStringRef(""));
 		auto fullPath = joinPath(libraryPath, toLibName(libraryName));
+		TraceEvent("ExternalWorkloadLoad")
+			.detail("LibraryName", libraryName)
+			.detail("LibraryPath", fullPath)
+			.detail("WorkloadName", wName);
 		library = loadLibrary(fullPath.c_str());
 		if (library == nullptr) {
+			TraceEvent(SevError, "ExternalWorkloadLoadError");
 			success = false;
 			return;
 		}
@@ -78,7 +91,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 			success = false;
 			return;
 		}
-		workloadImpl = workloadFactory->create(wName.toString());
+		workloadImpl = (*workloadFactory)()->create(wName.toString());
 		if (!workloadImpl) {
 			TraceEvent(SevError, "WorkloadNotFound");
 			success = false;
@@ -112,8 +125,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		Reference<IDatabase> database(new ThreadSafeDatabase(db));
 		Promise<bool> promise;
 		auto f = promise.getFuture();
-		workloadImpl->setup(reinterpret_cast<FDBDatabase*>(database.extractPtr()),
-							GenericPromise<bool>(new FDBPromiseImpl(promise)));
+		keepAlive(f, database);
+		workloadImpl->setup(reinterpret_cast<FDBDatabase*>(database.getPtr()),
+		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return assertTrue(LiteralStringRef("setup"), f);
 	}
 
@@ -126,8 +140,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		Reference<IDatabase> database(new ThreadSafeDatabase(db));
 		Promise<bool> promise;
 		auto f = promise.getFuture();
-		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.extractPtr()),
-							GenericPromise<bool>(new FDBPromiseImpl(promise)));
+		keepAlive(f, database);
+		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.getPtr()),
+		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return assertTrue(LiteralStringRef("start"), f);
 	}
 	Future<bool> check(Database const& cx) override {
@@ -139,8 +154,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		Reference<IDatabase> database(new ThreadSafeDatabase(db));
 		Promise<bool> promise;
 		auto f = promise.getFuture();
-		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.extractPtr()),
-							GenericPromise<bool>(new FDBPromiseImpl(promise)));
+		keepAlive(f, database);
+		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.getPtr()),
+		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return f;
 	}
 	void getMetrics(vector<PerfMetric>& out) override {
@@ -162,18 +178,46 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 
 	// context implementation
-	FDBFuture* trace(FDBSeverity sev, const std::string& name,
-					 const std::vector<std::pair<std::string, std::string>>& details) override {
-		auto res = onMainThread([=]() -> Future<Void> {
-			Severity sev;
-			TraceEvent evt(sev, name.c_str());
+	void trace(FDBSeverity sev, const std::string& name,
+	           const std::vector<std::pair<std::string, std::string>>& details) override {
+		auto traceFun = [=]() -> Future<Void> {
+			Severity severity;
+			switch (sev) {
+			case FDBSeverity::Debug:
+				severity = SevDebug;
+				break;
+			case FDBSeverity::Info:
+				severity = SevInfo;
+				break;
+			case FDBSeverity::Warn:
+				severity = SevWarn;
+				break;
+			case FDBSeverity::WarnAlways:
+				severity = SevWarnAlways;
+				break;
+			case FDBSeverity::Error:
+				severity = SevError;
+				break;
+			}
+			TraceEvent evt(severity, name.c_str());
 			for (const auto& p : details) {
 				evt.detail(p.first.c_str(), p.second);
 			}
 			return Void();
-		});
-		return reinterpret_cast<FDBFuture*>(res.extractPtr());
+		};
+		if (g_network->isOnMainThread()) {
+			traceFun();
+		} else {
+			onMainThreadVoid(
+			    [traceFun]() -> Future<Void> {
+				    traceFun();
+				    return Void();
+			    },
+			    nullptr);
+		}
 	}
+	double now() const override { return g_network->now(); }
+	uint32_t rnd() const override { return deterministicRandom()->randomUInt32(); }
 	bool getOption(const std::string& name, bool defaultValue) override {
 		return ::getOption(options, Value(name), defaultValue);
 	}
@@ -189,6 +233,12 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	std::string getOption(const std::string& name, std::string defaultValue) {
 		return ::getOption(options, Value(name), Value(defaultValue)).toString();
 	}
+
+	int clientId() const override { return WorkloadContext::clientId; }
+
+	int clientCount() const override { return WorkloadContext::clientCount; }
+
+	int64_t sharedRandomNumber() const override { return WorkloadContext::sharedRandomNumber; }
 };
 } // namespace
 

@@ -1652,6 +1652,9 @@ public:
 		tasks.push( Task( time, taskID, taskCount++, getCurrentProcess(), std::move(signal) ) );
 		mutex.leave();
 	}
+	bool isOnMainThread() const override {
+		return net2->isOnMainThread();
+	}
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID ) {
 		return delay( 0, taskID, process );
 	}

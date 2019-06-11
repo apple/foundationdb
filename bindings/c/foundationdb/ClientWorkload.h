@@ -26,8 +26,12 @@
 #include <functional>
 #include <memory>
 
-#ifndef DLLEXPORT
-#define DLLEXPORT
+#if defined(_MSC_VER)
+#define DLLEXPORT __declspec(dllexport)
+#elif defined(__GNUG__)
+#define DLLEXPORT __attribute__ ((visibility ("default")))
+#else
+#error Missing symbol export
 #endif
 
 typedef struct FDB_future FDBFuture;
@@ -38,13 +42,18 @@ enum class FDBSeverity { Debug, Info, Warn, WarnAlways, Error };
 
 class FDBWorkloadContext {
 public:
-	virtual FDBFuture* trace(FDBSeverity sev, const std::string& name,
+	virtual void trace(FDBSeverity sev, const std::string& name,
 	                         const std::vector<std::pair<std::string, std::string>>& details) = 0;
+	virtual double now() const = 0;
+	virtual uint32_t rnd() const = 0;
 	virtual bool getOption(const std::string& name, bool defaultValue) = 0;
 	virtual long getOption(const std::string& name, long defaultValue) = 0;
 	virtual unsigned long getOption(const std::string& name, unsigned long defaultValue) = 0;
 	virtual double getOption(const std::string& name, double defaultValue) = 0;
 	virtual std::string getOption(const std::string& name, std::string defaultValue) = 0;
+	virtual int clientId() const = 0;
+	virtual int clientCount() const = 0;
+	virtual int64_t sharedRandomNumber() const = 0;
 };
 
 struct FDBPromise {
