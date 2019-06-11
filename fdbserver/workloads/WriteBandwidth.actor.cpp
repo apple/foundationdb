@@ -33,7 +33,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 	double testDuration, warmingDelay, loadTime, maxInsertRate;
 	std::string valueString;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
@@ -56,32 +56,32 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	virtual Future<bool> check( Database const& cx ) { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics( std::vector<PerfMetric>& m ) {
 		double duration = testDuration;
 		int writes = transactions.getValue() * keysPerTransaction;
-		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
-		m.push_back( PerfMetric( "Transactions/sec", transactions.getValue() / duration, false ) );
-		m.push_back( PerfMetric( "Operations/sec", writes / duration, false ) );
-		m.push_back( transactions.getMetric() );
-		m.push_back( retries.getMetric() );
-		m.push_back( PerfMetric( "Mean load time (seconds)", loadTime, true ) );
-		m.push_back( PerfMetric( "Write rows", writes, false ) );
+		m.emplace_back("Measured Duration", duration, true);
+		m.emplace_back("Transactions/sec", transactions.getValue() / duration, false);
+		m.emplace_back("Operations/sec", writes / duration, false);
+		m.push_back(transactions.getMetric());
+		m.push_back(retries.getMetric());
+		m.emplace_back("Mean load time (seconds)", loadTime, true);
+		m.emplace_back("Write rows", writes, false);
 
-		m.push_back( PerfMetric( "Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true ) );
+		m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
+		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
+		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true);
+		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true);
 
-		m.push_back( PerfMetric( "Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true ) );
+		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
+		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
+		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true);
+		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true);
 
-		m.push_back( PerfMetric( "Write rows/sec", writes / duration, false ) );
-		m.push_back( PerfMetric( "Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false ) );
+		m.emplace_back("Write rows/sec", writes / duration, false);
+		m.emplace_back("Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false);
 	}
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
 
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
@@ -89,7 +89,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	ACTOR Future<Void> _setup( Database cx, WriteBandwidthWorkload *self ) {
 		state Promise<double> loadTime;
-		state Promise<vector<pair<uint64_t, double> > > ratesAtKeyCounts;
+		state Promise<std::vector<std::pair<uint64_t, double> > > ratesAtKeyCounts;
 
 		wait( bulkSetup( cx, self, self->nodeCount, loadTime, true, self->warmingDelay, self->maxInsertRate ) );
 		self->loadTime = loadTime.getFuture().get();
@@ -109,11 +109,11 @@ struct WriteBandwidthWorkload : KVWorkload {
 	ACTOR Future<Void> writeClient( Database cx, WriteBandwidthWorkload *self ) {
 		loop {
 			state Transaction tr( cx );
-			state uint64_t startIdx = g_random->random01() * (self->nodeCount - self->keysPerTransaction);
+			state uint64_t startIdx = deterministicRandom()->random01() * (self->nodeCount - self->keysPerTransaction);
 			loop {
 				try {
 					state double start = now();
-					Version v = wait( tr.getReadVersion() );
+					wait(success(tr.getReadVersion()));
 					self->GRVLatencies.addSample( now() - start );
 
 					// Predefine a single large write conflict range over the whole key space

@@ -20,11 +20,17 @@
 
 #ifndef FDBSERVER_DBCORESTATE_H
 #define FDBSERVER_DBCORESTATE_H
-#pragma once
+
+#include <set>
+#include <vector>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
+
+class LogSet;
+struct OldLogData;
 
 // This structure is stored persistently in CoordinatedState and must be versioned carefully!
 // It records a synchronous replication topology which can be used in the absence of faults (or under a limited
@@ -49,15 +55,16 @@ struct CoreTLogSet {
 	TLogVersion tLogVersion;
 
 	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
+	explicit CoreTLogSet(const LogSet& logset);
 
 	bool operator == (CoreTLogSet const& rhs) const { 
 		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
-			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info()))); 
+			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-			serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
 			tLogVersion = TLogVersion::V2;
 		} else {
@@ -70,11 +77,13 @@ struct OldTLogCoreData {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
 	Version epochEnd;
+	std::set<int8_t> pseudoLocalities;
 
 	OldTLogCoreData() : epochEnd(0), logRouterTags(0) {}
+	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator == (OldTLogCoreData const& rhs) const { 
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && epochEnd == rhs.epochEnd;
+		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	template <class Archive>
@@ -87,6 +96,9 @@ struct OldTLogCoreData {
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
+		if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+			serializer(ar, pseudoLocalities);
+		}
 	}
 };
 
@@ -95,9 +107,10 @@ struct DBCoreState {
 	int32_t logRouterTags;
 	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
-	int logSystemType;
+	LogSystemType logSystemType;
+	std::set<int8_t> pseudoLocalities;
 	
-	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(0) {}
+	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -117,7 +130,7 @@ struct DBCoreState {
 	}
 
 	bool isEqual(DBCoreState const& r) const {
-		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags;
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
 
@@ -132,6 +145,9 @@ struct DBCoreState {
 		ASSERT(ar.protocolVersion() >= 0x0FDB00A460010001LL);
 		if(ar.protocolVersion() >= 0x0FDB00A560010001LL) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
+			if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+				serializer(ar, pseudoLocalities);
+			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, recoveryCount, tLogs[0].tLogReplicationFactor, logSystemType);

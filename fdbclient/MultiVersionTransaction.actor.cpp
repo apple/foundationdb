@@ -763,7 +763,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", option.second).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();
@@ -1246,7 +1246,6 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if(platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
-					size_t index = 0;
 					for(auto value : parseOptionValues(valueStr)) {
 						Standalone<StringRef> currentValue = StringRef(value);
 						{ // lock scope
@@ -1365,11 +1364,11 @@ private:
 
 struct FutureInfo {
 	FutureInfo() {
-		if(g_random->coinflip()) {
-			expectedValue = Error(g_random->randomInt(1, 100));
+		if(deterministicRandom()->coinflip()) {
+			expectedValue = Error(deterministicRandom()->randomInt(1, 100));
 		}
 		else {
-			expectedValue = g_random->randomInt(0, 100);
+			expectedValue = deterministicRandom()->randomInt(0, 100);
 		}
 	}
 
@@ -1389,14 +1388,14 @@ struct FutureInfo {
 FutureInfo createVarOnMainThread(bool canBeNever=true) {
 	FutureInfo f;
 	
-	if(g_random->coinflip()) {
+	if(deterministicRandom()->coinflip()) {
 		f.future = onMainThread([f, canBeNever]() {
 			Future<Void> sleep ;
-			if(canBeNever && g_random->coinflip()) {
+			if(canBeNever && deterministicRandom()->coinflip()) {
 				sleep = Never();
 			}
 			else {
-				sleep = delay(0.1 * g_random->random01());
+				sleep = delay(0.1 * deterministicRandom()->random01());
 			}
 
 			if(f.expectedValue.isError()) {
@@ -1418,7 +1417,7 @@ FutureInfo createVarOnMainThread(bool canBeNever=true) {
 }
 
 THREAD_FUNC setAbort(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<Void>*)arg)->send(Void());
 		((ThreadSingleAssignmentVar<Void>*)arg)->delref();
@@ -1431,7 +1430,7 @@ THREAD_FUNC setAbort(void *arg) {
 }
 
 THREAD_FUNC releaseMem(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		// Must get for releaseMemory to work
 		((ThreadSingleAssignmentVar<int>*)arg)->get();
@@ -1450,7 +1449,7 @@ THREAD_FUNC releaseMem(void *arg) {
 }
 
 THREAD_FUNC destroy(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<int>*)arg)->cancel();
 	}
@@ -1462,7 +1461,7 @@ THREAD_FUNC destroy(void *arg) {
 }
 
 THREAD_FUNC cancel(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<int>*)arg)->addref();
 		destroy(arg);
@@ -1534,8 +1533,8 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 
 				auto tfp = tf.future.extractPtr();
 
-				if(g_random->coinflip()) {
-					if(g_random->coinflip()) {
+				if(deterministicRandom()->coinflip()) {
+					if(deterministicRandom()->coinflip()) {
 						threads.push_back(g_network->startThread(releaseMem, tfp));
 					}
 					threads.push_back(g_network->startThread(cancel, tfp));
@@ -1577,7 +1576,7 @@ struct AbortableTest {
 
 		auto newFuture = FutureInfo(abortableFuture(f.future, ThreadFuture<Void>(abort)), f.expectedValue, f.legalErrors);
 
-		if(!abort->isReady() && g_random->coinflip()) {
+		if(!abort->isReady() && deterministicRandom()->coinflip()) {
 			ASSERT(abort->status == ThreadSingleAssignmentVarBase::Unset);
 			newFuture.threads.push_back(g_network->startThread(setAbort, abort));
 		}
@@ -1719,7 +1718,7 @@ struct FlatMapTest {
 				ASSERT(!f.expectedValue.isError() && f.expectedValue.get() == v.get());
 			}
 
-			if(mapFuture.expectedValue.isError() && g_random->coinflip()) {
+			if(mapFuture.expectedValue.isError() && deterministicRandom()->coinflip()) {
 				return ErrorOr<ThreadFuture<int>>(mapFuture.expectedValue.getError());
 			}
 			else {

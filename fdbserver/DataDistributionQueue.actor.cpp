@@ -46,12 +46,13 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData() : startTime(-1), priority(-1), workFactor(0), wantsNewServers(false), interval("QueuedRelocation") {}
-	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(g_random->randomUniqueID()), workFactor(0),
+	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
 		wantsNewServers(
 			rs.priority == PRIORITY_REBALANCE_SHARD ||
 			rs.priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-			rs.priority == PRIORITY_SPLIT_SHARD ), interval("QueuedRelocation") {}
+			rs.priority == PRIORITY_SPLIT_SHARD ||
+			rs.priority == PRIORITY_TEAM_REDUNDANT ), interval("QueuedRelocation") {}
 
 	bool operator> (const RelocateData& rhs) const {
 		return priority != rhs.priority ? priority > rhs.priority : ( startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId );
@@ -426,10 +427,10 @@ struct DDQueueData {
 					auto range = queueMap.rangeContaining( rdit->keys.begin );
 					if( range.value() != *rdit || range.range() != rdit->keys )
 						TraceEvent(SevError, "DDQueueValidateError4").detail("Problem", "relocates in the queue are in the queueMap exactly")
-						.detail("RangeBegin", printable(range.range().begin))
-						.detail("RangeEnd", printable(range.range().end))
-						.detail("RelocateBegin2", printable(range.value().keys.begin))
-						.detail("RelocateEnd2", printable(range.value().keys.end))
+						.detail("RangeBegin", range.range().begin)
+						.detail("RangeEnd", range.range().end)
+						.detail("RelocateBegin2", range.value().keys.begin)
+						.detail("RelocateEnd2", range.value().keys.end)
 						.detail("RelocateStart", range.value().startTime)
 						.detail("MapStart", rdit->startTime)
 						.detail("RelocateWork", range.value().workFactor)
@@ -570,7 +571,7 @@ struct DDQueueData {
 
 	//This function cannot handle relocation requests which split a shard into three pieces
 	void queueRelocation( RelocateData rd, std::set<UID> &serversToLaunchFrom ) {
-		//TraceEvent("QueueRelocationBegin").detail("Begin", printable(rd.keys.begin)).detail("End", printable(rd.keys.end));
+		//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
 
 		// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
 		auto ranges = queueMap.intersectingRanges( rd.keys );
@@ -637,7 +638,7 @@ struct DDQueueData {
 
 				rrs.interval = TraceInterval("QueuedRelocation");
 				/*TraceEvent(rrs.interval.begin(), distributorId);
-					.detail("KeyBegin", printable(rrs.keys.begin)).detail("KeyEnd", printable(rrs.keys.end))
+				  .detail("KeyBegin", rrs.keys.begin).detail("KeyEnd", rrs.keys.end)
 					.detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
 				queuedRelocations++;
 				startRelocation(rrs.priority);
@@ -657,7 +658,7 @@ struct DDQueueData {
 						if( !foundActiveRelocation ) {
 							newData.interval = TraceInterval("QueuedRelocation");
 							/*TraceEvent(newData.interval.begin(), distributorId);
-								.detail("KeyBegin", printable(newData.keys.begin)).detail("KeyEnd", printable(newData.keys.end))
+							  .detail("KeyBegin", newData.keys.begin).detail("KeyEnd", newData.keys.end)
 								.detail("Priority", newData.priority).detail("WantsNewServers", newData.wantsNewServers);*/
 							queuedRelocations++;
 							startRelocation(newData.priority);
@@ -677,8 +678,8 @@ struct DDQueueData {
 		}
 
 		/*TraceEvent("ReceivedRelocateShard", distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin))
-			.detail("KeyEnd", printable(rd.keys.end))
+		  .detail("KeyBegin", rd.keys.begin)
+		  .detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority)
 			.detail("AffectedRanges", affectedQueuedItems.size()); */
 	}
@@ -701,8 +702,8 @@ struct DDQueueData {
 			busyString += describe(rd.src[i]) + " - (" + busymap[ rd.src[i] ].toString() + "); ";
 
 		TraceEvent(title, distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin))
-			.detail("KeyEnd", printable(rd.keys.end))
+			.detail("KeyBegin", rd.keys.begin)
+			.detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority)
 			.detail("WorkFactor", rd.workFactor)
 			.detail("SourceServerCount", rd.src.size())
@@ -759,9 +760,9 @@ struct DDQueueData {
 						it->value().priority >= rd.priority &&
 						rd.priority < PRIORITY_TEAM_REDUNDANT ) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
-						.detail("KeyBegin", printable(it->value().keys.begin))
-						.detail("KeyEnd", printable(it->value().keys.end))
-						.detail("Priority", it->value().priority); */
+						.detail("KeyBegin", it->value().keys.begin)
+						.detail("KeyEnd", it->value().keys.end)
+						.detail("Priority", it->value().priority);*/
 					overlappingInFlight = true;
 					break;
 				}
@@ -827,7 +828,7 @@ struct DDQueueData {
 
 			//logRelocation( rd, "LaunchedRelocation" );
 		}
-		if( now() - startTime > .001 && g_random->random01()<0.001 )
+		if( now() - startTime > .001 && deterministicRandom()->random01()<0.001 )
 			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime );
 
 		/*if( startedHere > 0 ) {
@@ -867,7 +868,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 		}
 
 		TraceEvent(relocateShardInterval.begin(), distributorId)
-			.detail("KeyBegin", printable(rd.keys.begin)).detail("KeyEnd", printable(rd.keys.end))
+			.detail("KeyBegin", rd.keys.begin).detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority).detail("RelocationID", relocateShardInterval.pairID).detail("SuppressedEventCount", self->suppressIntervals);
 
 		if(relocateShardInterval.severity != SevDebug) {
@@ -949,7 +950,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					// We randomly choose a server in bestTeams[i] as the shard's destination and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
-					int idx = g_random->randomInt(0, serverIds.size());
+					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
 					for(int j = 0; j < serverIds.size(); j++) {
@@ -1091,7 +1092,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	if( !shards.size() )
 		return false;
 
-	state KeyRange moveShard = g_random->randomChoice( shards );
+	state KeyRange moveShard = deterministicRandom()->randomChoice( shards );
 	StorageMetrics metrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(moveShard)) ) );
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);

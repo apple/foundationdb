@@ -50,7 +50,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 		nodesPerActor = nodes/(actorsPerClient*clientCount);
 
-		currentbin = g_random->randomInt(0,binCount);
+		currentbin = deterministicRandom()->randomInt(0,binCount);
 	}
 
 	virtual std::string description() { return "DDBalance"; }
@@ -130,7 +130,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 		for(int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++) order.push_back(o*10);
 
-		g_random->randomShuffle(order);
+		deterministicRandom()->randomShuffle(order);
 		for(i=0; i<order.size(); ) {
 			vector<Future<Void>> fs;
 			for(int j=0; j<100 && i<order.size(); j++) {
@@ -213,19 +213,17 @@ struct DDBalanceWorkload : TestWorkload {
 	ACTOR Future<Void> ddBalanceMover( Database cx, DDBalanceWorkload *self, int moverId ) {
 		state int currentBin = self->currentbin;
 		state int nextBin = 0;
-		state int i;
-		state int j;
 		state int key_space_drift = 0;
 
 		state double clientBegin = now();
 		state double lastTime = now();
 
 		loop {
-			nextBin = g_random->randomInt(key_space_drift,self->binCount+key_space_drift);
-			while(nextBin == currentBin) nextBin = g_random->randomInt(key_space_drift,self->binCount+key_space_drift);
+			nextBin = deterministicRandom()->randomInt(key_space_drift,self->binCount+key_space_drift);
+			while(nextBin == currentBin) nextBin = deterministicRandom()->randomInt(key_space_drift,self->binCount+key_space_drift);
 
 			vector<Future<Void>> fs;
-			for(i=0; i < self->actorsPerClient / self->moversPerClient; i++)
+			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
 				fs.push_back( self->ddBalanceWorker(cx, self, moverId, currentBin, nextBin, i*self->nodesPerActor, (i+1)*self->nodesPerActor, clientBegin, &lastTime, 1.0 / self->transactionsPerSecond));
 			wait( waitForAll(fs) );
 

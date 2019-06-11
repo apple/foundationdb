@@ -126,7 +126,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw future_version();
+		throw result.getError();
 	}
 
 	return false;
@@ -195,8 +195,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 	ASSERT( alternatives->size() );
 
-	state int bestAlt = g_random->randomInt(0, alternatives->countBest());
-	state int nextAlt = g_random->randomInt(0, std::max(alternatives->size() - 1,1));
+	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
+	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1,1));
 	if( nextAlt >= bestAlt )
 		nextAlt++;
 
@@ -305,7 +305,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
 
 				// Making this SevWarn means a lot of clutter
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
 					TraceEvent("AllAlternativesFailed")
 						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
 						.detail("Alternatives", alternatives->description())

@@ -233,21 +233,24 @@ long long FastAllocator<Size>::getActiveThreads() {
 	return globalData()->activeThreads;
 }
 
+#if FAST_ALLOCATOR_DEBUG
 static int64_t getSizeCode(int i) {
 	switch (i) {
 		case 16: return 1;
 		case 32: return 2;
 		case 64: return 3;
-		case 128: return 4;
-		case 256: return 5;
-		case 512: return 6;
-		case 1024: return 7;
-		case 2048: return 8;
-		case 4096: return 9;
-		case 8192: return 10;
-		default: return 11;
+		case 96: return 4;
+		case 128: return 5;
+		case 256: return 6;
+		case 512: return 7;
+		case 1024: return 8;
+		case 2048: return 9;
+		case 4096: return 10;
+		case 8192: return 11;
+		default: return 12;
 	}
 }
+#endif
 
 template<int Size>
 void *FastAllocator<Size>::allocate() {
@@ -440,7 +443,7 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
-	if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+	if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
 		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
 	}
 	block = (void **)::allocate(magazine_size * Size, false);
@@ -494,6 +497,7 @@ void releaseAllThreadMagazines() {
 	FastAllocator<16>::releaseThreadMagazines();
 	FastAllocator<32>::releaseThreadMagazines();
 	FastAllocator<64>::releaseThreadMagazines();
+	FastAllocator<96>::releaseThreadMagazines();
 	FastAllocator<128>::releaseThreadMagazines();
 	FastAllocator<256>::releaseThreadMagazines();
 	FastAllocator<512>::releaseThreadMagazines();
@@ -509,6 +513,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 	unusedMemory += FastAllocator<16>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<32>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<64>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<96>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<128>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<256>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<512>::getApproximateMemoryUnused();
@@ -523,6 +528,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 template class FastAllocator<16>;
 template class FastAllocator<32>;
 template class FastAllocator<64>;
+template class FastAllocator<96>;
 template class FastAllocator<128>;
 template class FastAllocator<256>;
 template class FastAllocator<512>;

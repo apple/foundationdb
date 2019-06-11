@@ -113,21 +113,21 @@ public:
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			ServerDBInfo newInfo = serverInfo->get();
-			newInfo.id = g_random->randomUniqueID();
+			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.distributor = interf;
 			serverInfo->set( newInfo );
 		}
 
 		void setRatekeeper(const RatekeeperInterface& interf) {
 			ServerDBInfo newInfo = serverInfo->get();
-			newInfo.id = g_random->randomUniqueID();
+			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.ratekeeper = interf;
 			serverInfo->set( newInfo );
 		}
 
 		void clearInterf(ProcessClass::ClassType t) {
 			ServerDBInfo newInfo = serverInfo->get();
-			newInfo.id = g_random->randomUniqueID();
+			newInfo.id = deterministicRandom()->randomUniqueID();
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
@@ -457,7 +457,7 @@ public:
 		for( auto& it : fitness_workers ) {
 			for( int j=0; j < 2; j++ ) {
 				auto& w = j==0 ? it.second.first : it.second.second;
-				g_random->randomShuffle(w);
+				deterministicRandom()->randomShuffle(w);
 				for( int i=0; i < w.size(); i++ ) {
 					id_used[w[i].interf.locality.processId()]++;
 					return WorkerFitnessInfo(w[i], it.first.first, it.first.second);
@@ -490,7 +490,7 @@ public:
 		for( auto& it : fitness_workers ) {
 			for( int j=0; j < 2; j++ ) {
 				auto& w = j==0 ? it.second.first : it.second.second;
-				g_random->randomShuffle(w);
+				deterministicRandom()->randomShuffle(w);
 				for( int i=0; i < w.size(); i++ ) {
 					results.push_back(w[i]);
 					id_used[w[i].interf.locality.processId()]++;
@@ -811,7 +811,7 @@ public:
 							bestFitness = fitness;
 							numEquivalent = 1;
 							bestDC = dcId;
-						} else if( fitness == bestFitness && g_random->random01() < 1.0/++numEquivalent ) {
+						} else if( fitness == bestFitness && deterministicRandom()->random01() < 1.0/++numEquivalent ) {
 							bestDC = dcId;
 						}
 					}
@@ -1166,7 +1166,7 @@ public:
 			versionDifferenceUpdated(false), recruitingDistributor(false), recruitRatekeeper(false)
 	{
 		auto serverInfo = db.serverInfo->get();
-		serverInfo.id = g_random->randomUniqueID();
+		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
@@ -1227,7 +1227,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 
 				auto dbInfo = ServerDBInfo();
 				dbInfo.master = iMaster;
-				dbInfo.id = g_random->randomUniqueID();
+				dbInfo.id = deterministicRandom()->randomUniqueID();
 				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
@@ -1274,7 +1274,7 @@ void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef
 	if (issues.size()) {
 		auto& e = issueMap[addr];
 		e.first = issues;
-		e.second = g_random->randomUniqueID();
+		e.second = deterministicRandom()->randomUniqueID();
 		issueID = e.second;
 	} else {
 		issueMap.erase(addr);
@@ -1413,7 +1413,6 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		return;
 	}
 
-	auto& masterWorker = self->id_worker[self->masterProcessId.get()];
 	const ServerDBInfo& db = self->db.serverInfo->get();
 	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
@@ -1804,7 +1803,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	if (db->clientInfo->get().proxies != req.proxies) {
 		isChanged = true;
 		ClientDBInfo clientInfo;
-		clientInfo.id = g_random->randomUniqueID();
+		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.proxies = req.proxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
@@ -1828,7 +1827,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	if( isChanged ) {
-		dbInfo.id = g_random->randomUniqueID();
+		dbInfo.id = deterministicRandom()->randomUniqueID();
 		self->db.serverInfo->set( dbInfo );
 	}
 
@@ -1843,9 +1842,9 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 
 	if(info == self->id_worker.end()) {
-		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 	} else {
-		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 	}
 	if ( w.address() == g_network->getLocalAddress() ) {
 		if(self->changingDcIds.get().first) {
@@ -1986,7 +1985,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 					// FIXME: replace or augment this with logging on the proxy which tracks
 					//       how long it is taking to hear responses from each other component.
 
-					UID debugID = g_random->randomUniqueID();
+					UID debugID = deterministicRandom()->randomUniqueID();
 					TraceEvent("TimeKeeperCommit", debugID);
 					tr->debugTransaction(debugID);
 				}
@@ -2203,7 +2202,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				ServerDBInfo serverInfo = db->serverInfo->get();
 				if(config != serverInfo.latencyBandConfig) {
 					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
-					serverInfo.id = g_random->randomUniqueID();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
 					serverInfo.latencyBandConfig = config;
 					db->serverInfo->set(serverInfo);
 				}
@@ -2235,7 +2234,7 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 				double sampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
 				int64_t sizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
 				if (sampleRate != clientInfo.clientTxnInfoSampleRate || sizeLimit != clientInfo.clientTxnInfoSampleRate) {
-					clientInfo.id = g_random->randomUniqueID();
+					clientInfo.id = deterministicRandom()->randomUniqueID();
 					clientInfo.clientTxnInfoSampleRate = sampleRate;
 					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
@@ -2449,7 +2448,7 @@ ACTOR Future<Void> doEmptyCommit(Database cx) {
 ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterControllerFullInterface interf ) {
 	loop {
 		state ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() );
-		TraceEvent("ForcedRecoveryStart", self->id).detail("ClusterControllerDcId", printable(self->clusterControllerDcId)).detail("DcId", req.dcId.printable());
+		TraceEvent("ForcedRecoveryStart", self->id).detail("ClusterControllerDcId", self->clusterControllerDcId).detail("DcId", req.dcId.printable());
 		state Future<Void> fCommit = doEmptyCommit(self->cx);
 		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
 		if(!fCommit.isReady() || fCommit.isError()) {
@@ -2491,7 +2490,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 			
-			InitializeDataDistributorRequest req(g_random->randomUniqueID());
+			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
 			TraceEvent("CC_DataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
 			ErrorOr<DataDistributorInterface> distributor = wait( worker.interf.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
@@ -2547,7 +2546,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Ratekeeper, ProcessClass::NeverAssign, self->db.config, id_used);
-			InitializeRatekeeperRequest req(g_random->randomUniqueID());
+			InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
 			state WorkerDetails worker = rkWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2706,6 +2705,16 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
+ACTOR Future<Void> replaceInterface( ClusterControllerFullInterface interf ) {
+	loop {
+		if( interf.hasMessage() ) {
+			wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_DELAY));
+			return Void();
+		}
+		wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_CHECK_DELAY));
+	}
+}
+
 ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, LocalityData locality ) {
 	loop {
 		state ClusterControllerFullInterface cci;
@@ -2714,19 +2723,23 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 		try {
 			//Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncPriorityInfo );
+			state Future<Void> shouldReplace = replaceInterface( cci );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
 				choose {
 					when( wait(currentCC->onChange()) ) {}
 					when( wait(leaderFail) ) { ASSERT(false); throw internal_error(); }
+					when( wait(shouldReplace) ) { break; }
 				}
 			}
+			if(!shouldReplace.isReady()) {
+				shouldReplace = Future<Void>();
+				hasConnected = true;
+				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
+				inRole = true;
 
-			hasConnected = true;
-			startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
-			inRole = true;
-
-			wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
+				wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
+			}
 		} catch(Error& e) {
 			if (inRole)
 				endRole(Role::CLUSTER_CONTROLLER, cci.id(), "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);

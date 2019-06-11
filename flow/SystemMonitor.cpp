@@ -45,7 +45,7 @@ SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	return getSystemStatistics(
-		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState);
+		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
@@ -54,7 +54,7 @@ SystemStatistics getSystemStatistics() {
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
-	                                                    &ipAddr, &statState->systemState);
+	                                                    &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
@@ -89,8 +89,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("CachePageReadsMerged", netData.countFileCachePageReadsMerged - statState->networkState.countFileCachePageReadsMerged)
 				.detail("CacheWrites", netData.countFileCacheWrites - statState->networkState.countFileCacheWrites)
 				.detail("CacheReads", netData.countFileCacheReads - statState->networkState.countFileCacheReads)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("CacheHits", netData.countFilePageCacheHits - statState->networkState.countFilePageCacheHits)
+				.detail("CacheMisses", netData.countFilePageCacheMisses - statState->networkState.countFilePageCacheMisses)
+				.detail("CacheEvictions", netData.countFilePageCacheEvictions - statState->networkState.countFilePageCacheEvictions)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 				.detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 				.detail("AIOSubmitLag", (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
@@ -105,6 +108,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(16)
 				.DETAILALLOCATORMEMUSAGE(32)
 				.DETAILALLOCATORMEMUSAGE(64)
+				.DETAILALLOCATORMEMUSAGE(96)
 				.DETAILALLOCATORMEMUSAGE(128)
 				.DETAILALLOCATORMEMUSAGE(256)
 				.DETAILALLOCATORMEMUSAGE(512)
@@ -153,8 +157,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("TotalMemory", currentStats.machineTotalRAM)
 				.detail("CommittedMemory", currentStats.machineCommittedRAM)
 				.detail("AvailableMemory", currentStats.machineAvailableRAM)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.trackLatest("MachineMetrics");
 		}
 	}
@@ -256,6 +260,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			TRACEALLOCATOR(16);
 			TRACEALLOCATOR(32);
 			TRACEALLOCATOR(64);
+			TRACEALLOCATOR(96);
 			TRACEALLOCATOR(128);
 			TRACEALLOCATOR(256);
 			TRACEALLOCATOR(512);

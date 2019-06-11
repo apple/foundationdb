@@ -1,6 +1,7 @@
 .. -*- mode: rst; -*-
 
-.. |json-status-format| replace::
+.. code-block:: javascript
+
    "cluster":{
       "layers":{
          "_valid":true,
@@ -63,7 +64,8 @@
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "router"
                      ]
                   },
                   "data_version":12341234,
@@ -434,7 +436,8 @@
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{

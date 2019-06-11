@@ -83,7 +83,7 @@ Optional<LatencyBandConfig> LatencyBandConfig::parse(ValueRef configurationStrin
 
 	json_spirit::mValue parsedConfig;
 	if(!json_spirit::read_string(configurationString.toString(), parsedConfig)) {
-		TraceEvent(SevWarnAlways, "InvalidLatencyBandConfiguration").detail("Reason", "InvalidJSON").detail("Configuration", printable(configurationString));
+		TraceEvent(SevWarnAlways, "InvalidLatencyBandConfiguration").detail("Reason", "InvalidJSON").detail("Configuration", configurationString);
 		return config;
 	}
 
@@ -96,7 +96,7 @@ Optional<LatencyBandConfig> LatencyBandConfig::parse(ValueRef configurationStrin
 
 	std::string errorStr;
 	if(!schemaMatch(schema.get_obj(), configJson, errorStr)) {
-		TraceEvent(SevWarnAlways, "InvalidLatencyBandConfiguration").detail("Reason", "SchemaMismatch").detail("Configuration", printable(configurationString)).detail("Error", errorStr);
+		TraceEvent(SevWarnAlways, "InvalidLatencyBandConfiguration").detail("Reason", "SchemaMismatch").detail("Configuration", configurationString).detail("Error", errorStr);
 		return config;
 	}
 

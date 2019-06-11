@@ -162,9 +162,9 @@ For RPM simply replace `DEB` with `RPM`.
 ### MacOS
 
 The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
-can use [Hombrew](https://brew.sh/). LibreSSL will not be installed in
+can use [Homebrew](https://brew.sh/). LibreSSL will not be installed in
 `/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
-will look somethink like this:
+will look something like this:
 
 ```sh
 cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>

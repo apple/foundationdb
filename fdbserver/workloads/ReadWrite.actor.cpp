@@ -19,6 +19,8 @@
  */
 
 #include <boost/lexical_cast.hpp>
+#include <utility>
+#include <vector>
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -106,15 +108,15 @@ struct ReadWriteWorkload : KVWorkload {
 	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
 	EventMetricHandle<ReadMetric> readMetric;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter aTransactions, bTransactions, retries;
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal; int readLatencyCount;
 
-	vector<uint64_t> insertionCountsToMeasure;
-	vector<pair<uint64_t, double> > ratesAtKeyCounts;
+	std::vector<uint64_t> insertionCountsToMeasure;
+	std::vector<std::pair<uint64_t, double> > ratesAtKeyCounts;
 
-	vector<PerfMetric> periodicMetrics;
+	std::vector<PerfMetric> periodicMetrics;
 
 	bool doSetup;
 
@@ -184,8 +186,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 		// Validate that keyForIndex() is monotonic
 		for (int i = 0; i < 30; i++) {
-			int64_t a = g_random->randomInt64(0, nodeCount);
-			int64_t b = g_random->randomInt64(0, nodeCount);
+			int64_t a = deterministicRandom()->randomInt64(0, nodeCount);
+			int64_t b = deterministicRandom()->randomInt64(0, nodeCount);
 			if ( a > b ) {
 				std::swap(a, b);
 			}
@@ -193,9 +195,9 @@ struct ReadWriteWorkload : KVWorkload {
 			ASSERT((keyForIndex(a, false) <= keyForIndex(b, false)));
 		}
 
-		vector<std::string> insertionCountsToMeasureString = getOption(options, LiteralStringRef("insertionCountsToMeasure"), vector<std::string>());
-		for(int i = 0; i < insertionCountsToMeasureString.size(); i++)
-		{
+		std::vector<std::string> insertionCountsToMeasureString =
+		    getOption(options, LiteralStringRef("insertionCountsToMeasure"), std::vector<std::string>());
+		for (int i = 0; i < insertionCountsToMeasureString.size(); i++) {
 			try
 			{
 				uint64_t count = boost::lexical_cast<uint64_t>(insertionCountsToMeasureString[i]);
@@ -225,7 +227,7 @@ struct ReadWriteWorkload : KVWorkload {
 	ACTOR static Future<bool> traceDumpWorkers( Reference<AsyncVar<ServerDBInfo>> db ) {
 		try {
 			loop {
-				ErrorOr<vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
+				ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
 				if( workerList.present() ) {
 					std::vector<Future<ErrorOr<Void>>> dumpRequests;
 					for( int i = 0; i < workerList.get().size(); i++)
@@ -254,56 +256,56 @@ struct ReadWriteWorkload : KVWorkload {
 			return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics(std::vector<PerfMetric>& m) {
 		double duration = metricsDuration;
 		int reads = (aTransactions.getValue() * readsPerTransactionA) + (bTransactions.getValue() * readsPerTransactionB);
 		int writes = (aTransactions.getValue() * writesPerTransactionA) + (bTransactions.getValue() * writesPerTransactionB);
-		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
-		m.push_back( PerfMetric( "Transactions/sec", (aTransactions.getValue() + bTransactions.getValue()) / duration, false ) );
-		m.push_back( PerfMetric( "Operations/sec", ( ( reads + writes ) / duration ), false ) );
+		m.emplace_back("Measured Duration", duration, true);
+		m.emplace_back("Transactions/sec", (aTransactions.getValue() + bTransactions.getValue()) / duration, false);
+		m.emplace_back("Operations/sec", ( ( reads + writes ) / duration ), false);
 		m.push_back( aTransactions.getMetric() );
 		m.push_back( bTransactions.getMetric() );
 		m.push_back( retries.getMetric() );
-		m.push_back( PerfMetric( "Mean load time (seconds)", loadTime, true ) );
-		m.push_back( PerfMetric( "Read rows", reads, false ) );
-		m.push_back( PerfMetric( "Write rows", writes, false ) );
+		m.emplace_back("Mean load time (seconds)", loadTime, true);
+		m.emplace_back("Read rows", reads, false);
+		m.emplace_back("Write rows", writes, false);
 
 		if(!rampUpLoad) {
-			m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-			m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-			m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-			m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
-			m.push_back(PerfMetric("Max Latency (ms, averaged)", 1000 * latencies.max(), true));
+			m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), true);
+			m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), true);
+			m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true);
+			m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true);
+			m.emplace_back("Max Latency (ms, averaged)", 1000 * latencies.max(), true);
 
-			m.push_back(PerfMetric("Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), true));
-			m.push_back(PerfMetric("Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), true));
-			m.push_back(PerfMetric("Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), true));
+			m.emplace_back("Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), true);
+			m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), true);
+			m.emplace_back("Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), true);
 
-			m.push_back(PerfMetric("Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), true));
-			m.push_back(PerfMetric("Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), true));
-			m.push_back(PerfMetric("Max Total Latency (ms, averaged)", 1000 * fullReadLatencies.max(), true));
+			m.emplace_back("Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), true);
+			m.emplace_back("Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), true);
+			m.emplace_back("Max Total Latency (ms, averaged)", 1000 * fullReadLatencies.max(), true);
 
-			m.push_back(PerfMetric("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true));
-			m.push_back(PerfMetric("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true));
-			m.push_back(PerfMetric("Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), true));
+			m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
+			m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
+			m.emplace_back("Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), true);
 
-			m.push_back(PerfMetric("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true));
-			m.push_back(PerfMetric("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true));
-			m.push_back(PerfMetric("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), true));
+			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
+			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
+			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), true);
 		}
 
-		m.push_back( PerfMetric( "Read rows/sec", reads / duration, false ) );
-		m.push_back( PerfMetric( "Write rows/sec", writes / duration, false ) );
-		m.push_back( PerfMetric( "Bytes read/sec", (reads * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false ) );
-		m.push_back( PerfMetric( "Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false ) );
+		m.emplace_back("Read rows/sec", reads / duration, false);
+		m.emplace_back("Write rows/sec", writes / duration, false);
+		m.emplace_back("Bytes read/sec", (reads * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false);
+		m.emplace_back("Bytes written/sec", (writes * (keyBytes + (minValueBytes+maxValueBytes)*0.5)) / duration, false);
 		m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
 
-		vector<pair<uint64_t, double> >::iterator ratesItr = ratesAtKeyCounts.begin();
+		std::vector<std::pair<uint64_t, double> >::iterator ratesItr = ratesAtKeyCounts.begin();
 		for(; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
-			m.push_back(PerfMetric(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false));
+			m.emplace_back(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, false);
 	}
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
 
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
@@ -336,40 +338,40 @@ struct ReadWriteWorkload : KVWorkload {
 			bool recordEnd   = self->shouldRecord( now() );
 			if( recordBegin && recordEnd ) {
 				std::string ts = format("T=%04.0fs:", elapsed);
-				self->periodicMetrics.push_back( PerfMetric( ts + "Operations/sec", (ops-last_ops)/self->periodicLoggingInterval, false ) );
+				self->periodicMetrics.emplace_back(ts + "Operations/sec", (ops-last_ops)/self->periodicLoggingInterval, false);
 
 				//if(self->rampUpLoad) {
-					self->periodicMetrics.push_back(PerfMetric(ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), true));
+					self->periodicMetrics.emplace_back(ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), true);
+					self->periodicMetrics.emplace_back(ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), true);
+					self->periodicMetrics.emplace_back(ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), true);
+					self->periodicMetrics.emplace_back(ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), true);
 
-					self->periodicMetrics.push_back(PerfMetric(ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "5% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.05), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "95% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.95), true));
+					self->periodicMetrics.emplace_back(ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), true);
+					self->periodicMetrics.emplace_back(ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), true);
+					self->periodicMetrics.emplace_back(ts + "5% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.05), true);
+					self->periodicMetrics.emplace_back(ts + "95% Row Read Latency (ms, averaged)", 1000 * self->readLatencies.percentile(.95), true);
 
-					self->periodicMetrics.push_back(PerfMetric(ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "Median Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.median(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "5% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.05), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "95% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.95), true));
+					self->periodicMetrics.emplace_back(ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), true);
+					self->periodicMetrics.emplace_back(ts + "Median Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.median(), true);
+					self->periodicMetrics.emplace_back(ts + "5% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.05), true);
+					self->periodicMetrics.emplace_back(ts + "95% Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.percentile(.95), true);
 
-					self->periodicMetrics.push_back(PerfMetric(ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), true));
+					self->periodicMetrics.emplace_back(ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), true);
+					self->periodicMetrics.emplace_back(ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), true);
+					self->periodicMetrics.emplace_back(ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), true);
+					self->periodicMetrics.emplace_back(ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), true);
 
-					self->periodicMetrics.push_back(PerfMetric(ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "5% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.05), true));
-					self->periodicMetrics.push_back(PerfMetric(ts + "95% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.95), true));
+					self->periodicMetrics.emplace_back(ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), true);
+					self->periodicMetrics.emplace_back(ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), true);
+					self->periodicMetrics.emplace_back(ts + "5% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.05), true);
+					self->periodicMetrics.emplace_back(ts + "95% Commit Latency (ms, averaged)", 1000 * self->commitLatencies.percentile(.95), true);
 				//}
 
-				self->periodicMetrics.push_back(PerfMetric(ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), true));
-				self->periodicMetrics.push_back(PerfMetric(ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), true));
-				self->periodicMetrics.push_back(PerfMetric(ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), true));
-				self->periodicMetrics.push_back(PerfMetric(ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), true));
-				self->periodicMetrics.push_back(PerfMetric(ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), true));
+				self->periodicMetrics.emplace_back(ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), true);
+				self->periodicMetrics.emplace_back(ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), true);
+				self->periodicMetrics.emplace_back(ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), true);
+				self->periodicMetrics.emplace_back(ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), true);
+				self->periodicMetrics.emplace_back(ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), true);
 			}
 			last_ops = ops;
 
@@ -450,7 +452,7 @@ struct ReadWriteWorkload : KVWorkload {
 			return Void();
 
 		state Promise<double> loadTime;
-		state Promise<vector<pair<uint64_t, double> > > ratesAtKeyCounts;
+		state Promise<std::vector<std::pair<uint64_t, double> > > ratesAtKeyCounts;
 
 		wait( bulkSetup( cx, self, self->nodeCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay, self->maxInsertRate, 
 								  self->insertionCountsToMeasure, ratesAtKeyCounts ) );
@@ -464,7 +466,7 @@ struct ReadWriteWorkload : KVWorkload {
 	ACTOR Future<Void> _start( Database cx, ReadWriteWorkload *self ) {
 		// Read one record from the database to warm the cache of keyServers 
 		state std::vector<int64_t> keys;
-		keys.push_back( g_random->randomInt64(0, self->nodeCount) );
+		keys.push_back( deterministicRandom()->randomInt64(0, self->nodeCount) );
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
@@ -481,7 +483,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 		wait( delay( std::max(0.1, 1.0 - (now() - startTime) ) ) );
 
-		vector<Future<Void>> clients;
+		std::vector<Future<Void>> clients;
 		if(self->enableReadLatencyLogging)
 			clients.push_back(tracePeriodically(self));
 
@@ -511,10 +513,10 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount){
-		if (forceHotProbability && g_random->random01() < forceHotProbability)
-			return g_random->randomInt64( 0, nodeCount*hotKeyFraction) / hotKeyFraction; // spread hot keys over keyspace
+		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
+			return deterministicRandom()->randomInt64( 0, nodeCount*hotKeyFraction) / hotKeyFraction; // spread hot keys over keyspace
 		else
-			return g_random->randomInt64( 0, nodeCount );
+			return deterministicRandom()->randomInt64( 0, nodeCount );
 	}
 
 	double sweepAlpha(double startTime) {
@@ -549,14 +551,14 @@ struct ReadWriteWorkload : KVWorkload {
 				}
 			}
 
-			if(!self->rampUpLoad || g_random->random01() < self->sweepAlpha(startTime))
+			if(!self->rampUpLoad || deterministicRandom()->random01() < self->sweepAlpha(startTime))
 			{
 				state double tstart = now();
-				state bool aTransaction = g_random->random01() > (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
+				state bool aTransaction = deterministicRandom()->random01() > (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
 
-				state vector<int64_t> keys;
-				state vector<Value> values;
-				state vector<KeyRange> extra_ranges;
+				state std::vector<int64_t> keys;
+				state std::vector<Value> values;
+				state std::vector<KeyRange> extra_ranges;
 				int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
 				state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
@@ -575,12 +577,12 @@ struct ReadWriteWorkload : KVWorkload {
 					values.push_back(self->randomValue());
 
 				for (int op = 0; op<extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
-					extra_ranges.push_back(singleKeyRange( g_random->randomUniqueID().toString() ));
+					extra_ranges.push_back(singleKeyRange( deterministicRandom()->randomUniqueID().toString() ));
 
 				state Trans tr(cx);
 
 				if(tstart - self->clientBegin > self->debugTime && tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
-					debugID = g_random->randomUniqueID();
+					debugID = deterministicRandom()->randomUniqueID();
 					tr.debugTransaction(debugID);
 					g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
 				}

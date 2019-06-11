@@ -42,8 +42,8 @@ bool testFuzzActor( Future<int>(*actor)(FutureStream<int> const&, PromiseStream<
 	for(int trial=0; trial<5; trial++) {
 		PromiseStream<int> in, out;
 		Promise<Void> err;
-		int before = g_random->randomInt(0, 4);
-		int errorBefore = before + g_random->randomInt(0, 4);
+		int before = deterministicRandom()->randomInt(0, 4);
+		int errorBefore = before + deterministicRandom()->randomInt(0, 4);
 		//printf("\t\tTrial #%d: %d, %d\n", trial, before, errorBefore);
 		if (errorBefore <= before) err.sendError( operation_failed() );
 		for(i=0; i<before; i++) {
@@ -107,10 +107,10 @@ void memoryTest2() {
 	char** random = new char*[ Reads * MaxThreads ];
 	random[0] = block;
 	for(int i=1; i<Reads*MaxThreads; ) {
-		char *s = &block[ g_random->randomInt(0, Size) ];
+		char *s = &block[ deterministicRandom()->randomInt(0, Size) ];
 		random[i++] = s;
 		/*for(int j=0; j<10 && i<Reads*MaxThreads; j++,i++) {
-			random[i] = s + g_random->randomInt(0, 4096);
+			random[i] = s + deterministicRandom()->randomInt(0, 4096);
 			if (random[i] >= block+Size) random[i] -= Size;
 		}*/
 	}
@@ -175,7 +175,7 @@ void memoryTest() {
 			x[i] = &x[i];
 		// Sattolo's algorithm
 		for(int n = N-1; n >= 1; n--) {
-			int k = g_random->randomInt(0, n);  //random.IRandomX(0, n-1);
+			int k = deterministicRandom()->randomInt(0, n);  //random.IRandomX(0, n-1);
 			std::swap( x[k], x[n] );
 		}
 	} else {
@@ -201,7 +201,7 @@ void memoryTest() {
 		void **starts[MT*MaxTraversalsPerThread];
 		for(int t=0; t<PseudoThreads; t++) {
 			starts[t] = &x[ N/PseudoThreads * t ];
-			//starts[t] = &x[ g_random->randomInt(0,N) ];
+			//starts[t] = &x[ deterministicRandom()->randomInt(0,N) ];
 		}
 		for(int T=1; T<=MT; T+=T) {
 			double start = timer();
@@ -315,7 +315,7 @@ void fastAllocTest() {
 	std::vector<void*> d;
 	for(int i=0; i<1000000;i++) {
 		d.push_back( FastAllocator<64>::allocate() );
-		int r = g_random->randomInt(0,1000000);
+		int r = deterministicRandom()->randomInt(0,1000000);
 		if (r < d.size()) {
 			FastAllocator<64>::release(d[r]);
 			d[r] = d.back();
@@ -523,7 +523,7 @@ void threadSafetyTest2() {
 		vector<int> counts( streams.size() );
 		v.clear();
 		for(int k=0; k<V; k++) {
-			int i = g_random->randomInt(0, (int)streams.size());
+			int i = deterministicRandom()->randomInt(0, (int)streams.size());
 			counts[i]++;
 			v.push_back( streams[i] );
 		}
@@ -1135,7 +1135,7 @@ extern void net2_test();
 void dsltest() {
 	double startt, endt;
 
-	g_random = new DeterministicRandom(40);
+	setThreadLocalDeterministicRandomSeed(40);
 
 	asyncMapTest();
 
@@ -1174,7 +1174,7 @@ void dsltest() {
 	printf("Actor fuzz tests: %d/%d passed\n", afResults.first, afResults.second);
 	startt = timer();
 	for(int i=0; i<1000000; i++)
-		g_random->random01();
+		deterministicRandom()->random01();
 	endt = timer();
 	printf("Random01: %0.2f M/sec\n", 1.0/(endt-startt));
 
@@ -1396,8 +1396,10 @@ void copyTest() {
 
 	{
 		start = timer();
-		for(int i=0; i<100; i++)
+		for (int i = 0; i < 100; i++) {
 			StringRef k = s;
+			(void)k;
+		}
 		elapsed = timer() - start;
 
 		printf("StringRef->StringRef: %fs/GB\n", elapsed);

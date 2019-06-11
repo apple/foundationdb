@@ -97,7 +97,7 @@ std::string tupleToString(Tuple const& tuple) {
 			if(type == Tuple::UTF8) {
 				str += "u";
 			}
-			str += "\'" + printable(tuple.getString(i)) + "\'";
+			str += "\'" + tuple.getString(i).printable() + "\'";
 		}
 		else if(type == Tuple::INT) {
 			str += format("%ld", tuple.getInt(i));
@@ -219,9 +219,10 @@ ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string
 		return Void();
 
 	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
-	// printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(), printable(subspace).c_str(), results.size());
+	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
+	       StringRef(subspace).printable().c_str(), results.size());
 	for (auto & s : results) {
-		// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
 	}
 
 	return Void();
@@ -1029,7 +1030,7 @@ struct TuplePackFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1118,7 +1119,7 @@ struct TupleRangeFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1790,7 +1791,7 @@ ACTOR void _test_versionstamp() {
 
 		ASSERT(trVersion.compare(dbVersion) == 0);
 
-		fprintf(stderr, "%s\n", printable(trVersion).c_str());
+		fprintf(stderr, "%s\n", trVersion.printable().c_str());
 
 		g_network->stop();
 	}
@@ -1808,8 +1809,7 @@ int main( int argc, char** argv ) {
 	try {
 		platformInit();
 		registerCrashHandler();
-		g_random = new DeterministicRandom(1);
-		g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(1);
 
 		// Get arguments
 		if (argc < 3) {

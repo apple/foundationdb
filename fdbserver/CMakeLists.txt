@@ -17,6 +17,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
+  FDBExecHelper.actor.cpp
+  FDBExecHelper.actor.h
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
@@ -66,13 +68,6 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
-  sqlite/btree.h
-  sqlite/hash.h
-  sqlite/sqlite3.h
-  sqlite/sqlite3ext.h
-  sqlite/sqliteInt.h
-  sqlite/sqliteLimit.h
-  sqlite/sqlite3.amalgamation.c
   Status.actor.cpp
   Status.h
   StorageMetrics.actor.h
@@ -111,6 +106,7 @@ set(FDBSERVER_SRCS
   workloads/BulkSetup.actor.h
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/TriggerRecovery.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
@@ -136,6 +132,7 @@ set(FDBSERVER_SRCS
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
@@ -158,6 +155,7 @@ set(FDBSERVER_SRCS
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
+  workloads/SnapTest.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
@@ -178,14 +176,23 @@ set(FDBSERVER_SRCS
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 
-set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
-if(FDB_RELEASE)
-  set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
-elseif(WITH_JAVA)
-  set(WITH_JAVA_WORKLOAD ON CACHE BOOL "${java_workload_docstring}")
-else()
-  set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
+add_library(fdb_sqlite STATIC
+  sqlite/btree.h
+  sqlite/hash.h
+  sqlite/sqlite3.h
+  sqlite/sqlite3ext.h
+  sqlite/sqliteInt.h
+  sqlite/sqliteLimit.h
+  sqlite/sqlite3.amalgamation.c)
+
+# Suppress warnings in sqlite since it's third party
+if(NOT WIN32)
+  target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
+  target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
+
+set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
+set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
 if(WITH_JAVA_WORKLOAD)
   list(APPEND FDBSERVER_SRCS workloads/JavaWorkload.actor.cpp)
 endif()
@@ -196,7 +203,7 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient)
+target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 if(WITH_JAVA_WORKLOAD)
   if(NOT JNI_FOUND)
     message(SEND_ERROR "Trying to build Java workload but couldn't find JNI")

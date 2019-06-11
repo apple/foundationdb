@@ -64,7 +64,7 @@ struct VersionStampWorkload : TestWorkload {
 	virtual Future<Void> start(Database const& cx) {
 		// Versionstamp behavior changed starting with API version 520, so
 		// choose a version to check compatibility.
-		double choice = g_random->random01();
+		double choice = deterministicRandom()->random01();
 		if (choice < 0.1) {
 			apiVersion = 500;
 		}
@@ -165,7 +165,7 @@ struct VersionStampWorkload : TestWorkload {
 		state Version readVersion = wait(tr.getReadVersion());
 
 		if(BUGGIFY) {
-			if(g_random->random01() < 0.5) {
+			if(deterministicRandom()->random01() < 0.5) {
 				loop {
 					try {
 						tr.makeSelfConflicting();
@@ -229,7 +229,7 @@ struct VersionStampWorkload : TestWorkload {
 							auto last_element_iter = all_values.cend();  last_element_iter--;
 							ASSERT(value_pair_iter == last_element_iter);
 						}
-						Version commitVersion = value_pair_iter->first;
+						// Version commitVersion = value_pair_iter->first;
 						Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
 
 						//TraceEvent("VST_Check0b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
@@ -267,7 +267,7 @@ struct VersionStampWorkload : TestWorkload {
 						ASSERT(value_pair_iter == last_element_iter);
 					}
 
-					Version commitVersion = value_pair_iter->first;
+					// Version commitVersion = value_pair_iter->first;
 					Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
 					//TraceEvent("VST_Check1b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
 					ASSERT(parsedVersion <= readVersion);
@@ -301,9 +301,9 @@ struct VersionStampWorkload : TestWorkload {
 
 			state bool cx_is_primary = true;
 			state ReadYourWritesTransaction tr(cx);
-			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
-			state Value value(std::string(g_random->randomInt(10, 100), 'x'));
-			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount), oldVSFormat);
+			state Key key = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount));
+			state Value value(std::string(deterministicRandom()->randomInt(10, 100), 'x'));
+			state Key versionStampKey = self->versionStampKeyForIndex(deterministicRandom()->randomInt(0, self->nodeCount), oldVSFormat);
 			state StringRef prefix = versionStampKey.substr(0, 20+self->vsKeyPrefix.size());
 			state Key endOfRange = self->endOfRange(prefix);
 			state KeyRangeRef range(prefix, endOfRange);
@@ -329,7 +329,7 @@ struct VersionStampWorkload : TestWorkload {
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
 					if(key == metadataVersionKey) {
-						testKey = "testKey" + g_random->randomUniqueID().toString();
+						testKey = "testKey" + deterministicRandom()->randomUniqueID().toString();
 						tr.atomicOp(testKey, versionStampValue, MutationRef::SetVersionstampedValue);
 					}
 					tr.clear(range);

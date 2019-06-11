@@ -232,7 +232,7 @@ The procedures for adding and removing machines can be combined into a recipe fo
 Converting an existing cluster to use TLS
 =========================================
 
-A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster>`.
+A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster-after-6.1>`.
 
 .. _administration-monitoring-cluster-status:
 
@@ -660,6 +660,11 @@ You can now remove old client library versions from your clients. This is only t
 
 Version-specific notes on upgrading
 ===================================
+
+Upgrading from 6.1.x
+--------------------
+
+Upgrades from 6.1.x will keep all your old data and configuration settings. 
 
 Upgrading from 6.0.x
 --------------------

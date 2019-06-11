@@ -615,7 +615,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 	snmp_stream >> retransSegs;
 }
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	INJECT_FAULT( platform_error, "getMachineLoad" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	std::ifstream stat_stream("/proc/stat", std::ifstream::in);
 
@@ -628,7 +628,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 	totalTime = t_user+t_nice+t_system+t_idle+t_iowait+t_irq+t_softirq+t_steal+t_guest;
 	idleTime = t_idle+t_iowait;
 
-	if( !DEBUG_DETERMINISM )
+	if( !DEBUG_DETERMINISM && logDetails )
 		TraceEvent("MachineLoadDetail").detail("User", t_user).detail("Nice", t_nice).detail("System", t_system).detail("Idle", t_idle).detail("IOWait", t_iowait).detail("IRQ", t_irq).detail("SoftIRQ", t_softirq).detail("Steal", t_steal).detail("Guest", t_guest);
 }
 
@@ -818,7 +818,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 	free(buf);
 }
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	INJECT_FAULT( platform_error, "getMachineLoad" );
 	mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
 	host_cpu_load_info_data_t r_load;
@@ -838,8 +838,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	busyTicks = 0;
 	writeSectors = 0;
 	readSectors = 0;
-
-	const int kMaxDiskNameSize = 64;
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
@@ -1103,7 +1101,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState) {
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState, bool logDetails) {
 	if( (*statState) == NULL )
 		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
@@ -1238,7 +1236,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 	uint64_t clockIdleTime = (*statState)->lastClockIdleTime;
 	uint64_t clockTotalTime = (*statState)->lastClockTotalTime;
 
-	getMachineLoad(clockIdleTime, clockTotalTime);
+	getMachineLoad(clockIdleTime, clockTotalTime, logDetails);
 	returnStats.machineCPUSeconds = clockTotalTime - (*statState)->lastClockTotalTime != 0 ? ( 1 - ((clockIdleTime - (*statState)->lastClockIdleTime) / ((double)(clockTotalTime - (*statState)->lastClockTotalTime)))) * returnStats.elapsed : 0;
 	(*statState)->lastClockIdleTime = clockIdleTime;
 	(*statState)->lastClockTotalTime = clockTotalTime;
@@ -1499,7 +1497,6 @@ static void enableLargePages() {
 }
 
 static void *allocateInternal(size_t length, bool largePages) {
-	void *block = NULL;
 
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT|MEM_RESERVE;
@@ -1626,7 +1623,7 @@ int getRandomSeed() {
 	}
 	return randomSeed;
 }
-}; // namespace platform
+} // namespace platform
 
 std::string joinPath( std::string const& directory, std::string const& filename ) {
 	auto d = directory;
@@ -1667,7 +1664,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
-		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
+		std::string tempfilename = joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
@@ -1834,7 +1831,7 @@ bool createDirectory( std::string const& directory ) {
 #endif
 }
 
-}; // namespace platform
+} // namespace platform
 
 const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
@@ -2134,9 +2131,9 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 		if(dir != "." && dir != "..")
 			findFilesRecursively(joinPath(path, dir), out);
 	}
-};
+}
 
-}; // namespace platform
+} // namespace platform
 
 
 void threadSleep( double seconds ) {
@@ -2174,7 +2171,7 @@ void makeTemporary( const char* filename ) {
 	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
 #endif
 }
-}; // namespace platform
+} // namespace platform
 
 #ifdef _WIN32
 THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
@@ -2358,7 +2355,7 @@ std::string getWorkingDirectory() {
 	return result;
 }
 
-}; // namespace platform
+} // namespace platform
 
 extern std::string format( const char *form, ... );
 
@@ -2382,7 +2379,7 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 	#error Port me!
 #endif
 }
-}; // namespace platform
+} // namespace platform
 
 #ifdef ALLOC_INSTRUMENTATION
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
@@ -2480,6 +2477,7 @@ void outOfMemory() {
 	TRACEALLOCATOR(16);
 	TRACEALLOCATOR(32);
 	TRACEALLOCATOR(64);
+	TRACEALLOCATOR(96);
 	TRACEALLOCATOR(128);
 	TRACEALLOCATOR(256);
 	TRACEALLOCATOR(512);
@@ -2492,7 +2490,7 @@ void outOfMemory() {
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
-}; // namespace platform
+} // namespace platform
 
 extern "C" void criticalError(int exitCode, const char *type, const char *message) {
 	// Be careful!  This function may be called asynchronously from a thread or in other weird conditions
@@ -2618,14 +2616,14 @@ std::string get_backtrace() {
 	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
-}; // namespace platform
+} // namespace platform
 #else
 
 namespace platform {
 std::string get_backtrace() { return std::string(); }
 std::string format_backtrace(void **addresses, int numAddresses) { return std::string(); }
 void* getImageOffset() { return NULL; }
-}; // namespace platform
+} // namespace platform
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {
@@ -2745,7 +2743,7 @@ extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
-extern volatile double net2liveness;
+extern std::atomic<int64_t> net2liveness;
 extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
@@ -2792,12 +2790,13 @@ void* checkThread(void *arg) {
 	pthread_t mainThread = *(pthread_t*)arg;
 	free(arg);
 
-	double lastValue = net2liveness;
+	int64_t lastValue = net2liveness.load();
 	double lastSignal = 0;
 	double logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
 	while(true) {
 		threadSleep(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
-		if(lastValue == net2liveness) {
+		int64_t currentLiveness = net2liveness.load();
+		if(lastValue == currentLiveness) {
 			double t = timer();
 			if(lastSignal == 0 || t - lastSignal >= logInterval) {
 				if(lastSignal > 0) {
@@ -2809,10 +2808,10 @@ void* checkThread(void *arg) {
 			}
 		}
 		else {
+			lastValue = currentLiveness;
 			lastSignal = 0;
 			logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
 		}
-		lastValue = net2liveness;
 	}
 	return NULL;
 #else

@@ -12,7 +12,7 @@ ACTOR Future<StorageServerInterface> getRandomStorage(Database cx) {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Standalone<RangeResultRef> range = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			if (range.size() > 0) {
-				auto idx = g_random->randomInt(0, range.size());
+				auto idx = deterministicRandom()->randomInt(0, range.size());
 				return decodeServerListValue(range[idx].value);
 			} else {
 				wait(delay(1.0));

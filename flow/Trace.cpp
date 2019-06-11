@@ -43,6 +43,8 @@
 #undef min
 #endif
 
+int g_trace_depth = 0;
+
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
@@ -112,7 +114,6 @@ struct SuppressionMap {
 
 TraceBatch g_traceBatch;
 trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
-IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -294,7 +295,7 @@ public:
 		this->logGroup = logGroup;
 		this->localAddress = na;
 
-		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), g_random->randomAlphaNumeric(6).c_str());
+		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), deterministicRandom()->randomAlphaNumeric(6).c_str());
 		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
 
 		if ( g_network->isSimulated() )
@@ -653,12 +654,28 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id), type(type), severity(severity), initialized(false), enabled(true) {}
-TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(interval.severity), initialized(false), enabled(true) {
+TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {
+	g_trace_depth++;
+}
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
+	: id(id), type(type), severity(severity), initialized(false),
+	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+	g_trace_depth++;
+}
+TraceEvent::TraceEvent( TraceInterval& interval, UID id )
+	: id(id), type(interval.type)
+	, severity(interval.severity)
+	, initialized(false)
+	, enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
+	g_trace_depth++;
 	init(interval);
 }
-TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(severity), initialized(false), enabled(true) {
+TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
+	: id(id), type(interval.type),
+	  severity(severity),
+	  initialized(false),
+	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+	g_trace_depth++;
 	init(interval);
 }
 
@@ -713,7 +730,7 @@ bool TraceEvent::init() {
 			severity = SevWarnAlways;
 		}
 
-		detail("Severity", severity);
+		detail("Severity", int(severity));
 		detailf("Time", "%.6f", time);
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
@@ -736,25 +753,23 @@ bool TraceEvent::init() {
 	return enabled;
 }
 
-TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
-	if(enabled) {
-		if (error.code() != error_code_actor_cancelled || includeCancelled) {
-			err = error;
-			if (initialized) {
-				if (error.isInjectedFault()) {
-					detail("ErrorIsInjectedFault", true);
-					if(severity == SevError) severity = SevWarnAlways;
-				}
-				detail("Error", error.name());
-				detail("ErrorDescription", error.what());
-				detail("ErrorCode", error.code());
+TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelled) {
+	if (error.code() != error_code_actor_cancelled || includeCancelled) {
+		err = error;
+		if (initialized) {
+			if (error.isInjectedFault()) {
+				detail("ErrorIsInjectedFault", true);
+				if(severity == SevError) severity = SevWarnAlways;
 			}
+			detail("Error", error.name());
+			detail("ErrorDescription", error.what());
+			detail("ErrorCode", error.code());
+		}
+	} else {
+		if (initialized) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
 		} else {
-			if (initialized) {
-				TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
-			} else {
-				enabled = false;
-			}
+			enabled = false;
 		}
 	}
 	return *this;
@@ -781,66 +796,18 @@ TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool
 	return *this;
 }
 
-TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
-	return detailImpl(std::move(key), std::move(value));
+void TraceEvent::setField(const char* key, int64_t value) {
+	tmpEventMetric->setField(key, value);
 }
-TraceEvent& TraceEvent::detail( std::string key, double value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), value);
-	return detailfNoMetric( std::move(key), "%g", value );
+
+void TraceEvent::setField(const char* key, double value) {
+	tmpEventMetric->setField(key, value);
 }
-TraceEvent& TraceEvent::detail( std::string key, int value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%d", value );
+
+void TraceEvent::setField(const char* key, const std::string& value) {
+	tmpEventMetric->setField(key, Standalone<StringRef>(value));
 }
-TraceEvent& TraceEvent::detail( std::string key, unsigned value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%u", value );
-}
-TraceEvent& TraceEvent::detail( std::string key, long int value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%ld", value );
-}
-TraceEvent& TraceEvent::detail( std::string key, long unsigned int value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%lu", value );
-}
-TraceEvent& TraceEvent::detail( std::string key, long long int value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%lld", value );
-}
-TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) {
-	init();
-	if(enabled)
-		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( std::move(key), "%llu", value );
-}
-TraceEvent& TraceEvent::detail( std::string key, const NetworkAddress& value ) {
-	return detailImpl( std::move(key), value.toString() );
-}
-TraceEvent& TraceEvent::detail( std::string key, const IPAddress& value ) {
-	return detailImpl( std::move(key), value.toString() );
-}
-TraceEvent& TraceEvent::detail( std::string key, const UID& value ) {
-	return detailf( std::move(key), "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
-}
-TraceEvent& TraceEvent::detailext( std::string key, StringRef const& value ) {
-	return detailImpl(std::move(key), value.printable());
-}
-TraceEvent& TraceEvent::detailext( std::string key, const Optional<Standalone<StringRef>>& value ) {
-	return detailImpl(std::move(key), (value.present()) ? value.get().printable() : "[not set]");
-}
+
 TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
@@ -881,12 +848,7 @@ TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
 			return *this;
 		}
 
-		if(!g_random) {
-			sampleRate = 1.0;
-		}
-		else {
-			enabled = enabled && g_random->random01() < sampleRate;
-		}
+		enabled = enabled && deterministicRandom()->random01() < sampleRate;
 
 		if(enabled && logSampleRate) {
 			detail("SampleRate", sampleRate);
@@ -953,7 +915,10 @@ TraceEvent::~TraceEvent() {
 				severity = SevError;
 			}
 
-			TraceEvent::eventCounts[severity/10]++;
+			if(isNetworkThread()) {
+				TraceEvent::eventCounts[severity/10]++;
+			}
+
 			g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
 
 			if (g_traceLog.isOpen()) {
@@ -973,6 +938,7 @@ TraceEvent::~TraceEvent() {
 		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
 	}
 	delete tmpEventMetric;
+	g_trace_depth--;
 }
 
 thread_local bool TraceEvent::networkThread = false;
@@ -987,7 +953,7 @@ bool TraceEvent::isNetworkThread() {
 }
 
 TraceInterval& TraceInterval::begin() {
-	pairID = trace_random->randomUniqueID();
+	pairID = nondeterministicRandom()->randomUniqueID();
 	count = 0;
 	return *this;
 }
@@ -1126,6 +1092,7 @@ std::string TraceEventFields::getValue(std::string key) const {
 	}
 	else {
 		TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
+		ev.suppressFor(1.0);
 		if(tryGetValue("Type", value)) {
 			ev.detail("Event", value);
 		}
@@ -1257,4 +1224,9 @@ void TraceEventFields::validateFormat() const {
 			}
 		}
 	}
+}
+
+std::string traceableStringToString(const char* value, size_t S) {
+	ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
+	return std::string(value, S - 1); // Exclude trailing \0 byte
 }

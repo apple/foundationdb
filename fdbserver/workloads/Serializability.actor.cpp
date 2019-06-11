@@ -70,11 +70,11 @@ struct SerializabilityWorkload : TestWorkload {
 		numOps = getOption( options, LiteralStringRef("numOps"), 21 );
 		nodes = getOption( options, LiteralStringRef("nodes"), 1000 );
 
-		adjacentKeys = false; //g_random->random01() < 0.5;
+		adjacentKeys = false; //deterministicRandom()->random01() < 0.5;
 		valueSizeRange = std::make_pair( 0, 100 );
 		//keyPrefix = "\x02";
 
-		maxClearSize = g_random->randomInt(10, 2*nodes);
+		maxClearSize = deterministicRandom()->randomInt(10, 2*nodes);
 		if( clientId == 0 )
 			TraceEvent("SerializabilityConfiguration").detail("Nodes", nodes).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
 	}
@@ -99,11 +99,11 @@ struct SerializabilityWorkload : TestWorkload {
 	}
 
 	Value getRandomValue() {
-		return Value( std::string( g_random->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
+		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
 	Key getRandomKey() {
-		return getKeyForIndex( g_random->randomInt(0, nodes ) );
+		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
 	}
 
 	Key getKeyForIndex( int idx ) {
@@ -115,42 +115,42 @@ struct SerializabilityWorkload : TestWorkload {
 	}
 
 	KeySelector getRandomKeySelector() {
-		int scale = 1 << g_random->randomInt(0,14);
-		return KeySelectorRef( getRandomKey(), g_random->random01() < 0.5, g_random->randomInt(-scale, scale) );
+		int scale = 1 << deterministicRandom()->randomInt(0,14);
+		return KeySelectorRef( getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-scale, scale) );
 	}
 
 	KeyRange getRandomRange(int sizeLimit) {
-		int startLocation = g_random->randomInt(0, nodes);
-		int scale = g_random->randomInt(0, g_random->randomInt(2, 5) * g_random->randomInt(2, 5));
-		int endLocation = startLocation + g_random->randomInt(0, 1+std::min(sizeLimit, std::min(nodes-startLocation, 1<<scale)));
+		int startLocation = deterministicRandom()->randomInt(0, nodes);
+		int scale = deterministicRandom()->randomInt(0, deterministicRandom()->randomInt(2, 5) * deterministicRandom()->randomInt(2, 5));
+		int endLocation = startLocation + deterministicRandom()->randomInt(0, 1+std::min(sizeLimit, std::min(nodes-startLocation, 1<<scale)));
 
 		return KeyRangeRef( getKeyForIndex( startLocation ), getKeyForIndex( endLocation ) );
 	}
 
 	std::vector<TransactionOperation> randomTransaction() { 
-		int maxOps = g_random->randomInt( 1, numOps );
+		int maxOps = deterministicRandom()->randomInt( 1, numOps );
 		std::vector<TransactionOperation> result;
 		bool hasMutation = false;
 		for(int j = 0; j < maxOps; j++ ) {
-			int operationType = g_random->randomInt(0, 20);
+			int operationType = deterministicRandom()->randomInt(0, 20);
 			TransactionOperation op;
 			if( operationType == 0 ) {
 				GetKeyOperation getKey;
 				getKey.key = getRandomKeySelector();
-				getKey.snapshot =  g_random->random01() < 0.5;
+				getKey.snapshot =  deterministicRandom()->random01() < 0.5;
 				op.getKeyOp = getKey;
 			} else if( operationType == 1 ) {
 				GetRangeOperation getRange;
 				getRange.begin = getRandomKeySelector();
 				getRange.end = getRandomKeySelector();
-				getRange.limit = g_random->randomInt(0, 1<<g_random->randomInt(1, 10));
-				getRange.reverse = g_random->random01() < 0.5;
-				getRange.snapshot = g_random->random01() < 0.5;
+				getRange.limit = deterministicRandom()->randomInt(0, 1<<deterministicRandom()->randomInt(1, 10));
+				getRange.reverse = deterministicRandom()->random01() < 0.5;
+				getRange.snapshot = deterministicRandom()->random01() < 0.5;
 				op.getRangeOp = getRange;
 			} else if( operationType == 2 ) {
 				GetOperation getOp;
 				getOp.key = getRandomKey();
-				getOp.snapshot = g_random->random01() < 0.5;
+				getOp.snapshot = deterministicRandom()->random01() < 0.5;
 				op.getOp = getOp;
 			} else if( operationType == 3 ) {
 				KeyRange range = getRandomRange( maxClearSize );
@@ -171,7 +171,7 @@ struct SerializabilityWorkload : TestWorkload {
 				Key key = getRandomKey();
 				Value value = getRandomValue();
 				MutationRef::Type opType;
-				switch( g_random->randomInt(0,8) ) {
+				switch( deterministicRandom()->randomInt(0,8) ) {
 					case 0:
 						opType = MutationRef::AddValue;
 						break;
@@ -282,20 +282,20 @@ struct SerializabilityWorkload : TestWorkload {
 			}
 
 			//sometimes wait for a random operation
-			if( g_random->random01() < 0.2 ) {
-				state int waitType = g_random->randomInt(0, 4);
+			if( deterministicRandom()->random01() < 0.2 ) {
+				state int waitType = deterministicRandom()->randomInt(0, 4);
 				loop {
 					if(waitType == 0 && getFutures->size()) {
-						wait( ::success( g_random->randomChoice(*getFutures) ) );
+						wait( ::success( deterministicRandom()->randomChoice(*getFutures) ) );
 						break;
 					} else if(waitType == 1 && getKeyFutures->size()) {
-						wait( ::success( g_random->randomChoice(*getKeyFutures) ) );
+						wait( ::success( deterministicRandom()->randomChoice(*getKeyFutures) ) );
 						break;
 					} else if(waitType == 2 && getRangeFutures->size()) {
-						wait( ::success( g_random->randomChoice(*getRangeFutures) ) );
+						wait( ::success( deterministicRandom()->randomChoice(*getRangeFutures) ) );
 						break;
 					} else if(waitType == 3) {
-						wait( delay(0.001*g_random->random01()));
+						wait( delay(0.001*deterministicRandom()->random01()));
 						break;
 					}
 					waitType = (waitType + 1) % 4;
@@ -349,7 +349,7 @@ struct SerializabilityWorkload : TestWorkload {
 				
 				//Generate initial data
 				state Standalone<VectorRef<KeyValueRef>> initialData;
-				int initialAmount = g_random->randomInt(0, 100);
+				int initialAmount = deterministicRandom()->randomInt(0, 100);
 				for(int i = 0; i < initialAmount; i++) {
 					Key key = self->getRandomKey();
 					Value value = self->getRandomValue();

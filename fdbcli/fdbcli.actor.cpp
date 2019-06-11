@@ -40,6 +40,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 
+#include <cinttypes>
 #include <type_traits>
 #include <signal.h>
 
@@ -469,6 +470,10 @@ void initHelp() {
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
+	helpMap["snapshot"] = CommandHelp(
+		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
+		"snapshot the database",
+		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",
@@ -540,7 +545,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
 }
 
 void printHelpOverview() {
@@ -964,9 +969,6 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
-			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message
-			//     which would be the same error message if the catch block was hit
-			bool success = false;
 			try {
 				outputString += "\n  FoundationDB processes - ";
 				if (statusObjCluster.get("processes", processesMap)) {
@@ -1668,32 +1670,42 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
@@ -1782,32 +1794,42 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
@@ -2103,6 +2125,11 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 	return false;
 }
 
+ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
+	wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
+	return false;
+}
+
 ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 	if( tokens.size() == 1 ) {
 		vector<ProcessData> _workers = wait( makeInterruptable(getWorkers(db)) );
@@ -2292,7 +2319,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("Error", errMsg);
 }
 
 struct CLIOptions {
@@ -2522,8 +2549,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
 
 		try {
-			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line)));
+			state UID randomID = deterministicRandom()->randomUniqueID();
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
@@ -2697,6 +2724,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						bool err = wait( include(db,tokens) );
+						if (err) is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "snapshot")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						bool err = wait(createSnapshot(db, tokens[1]));
 						if (err) is_error = true;
 					}
 					continue;
@@ -3345,7 +3383,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						catch(Error &e) {
 							//options->setOption() prints error message
-							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", printable(tokens[2]));
+							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", tokens[2]);
 							is_error = true;
 						}
 					}
@@ -3357,7 +3395,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("IsError", is_error);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)

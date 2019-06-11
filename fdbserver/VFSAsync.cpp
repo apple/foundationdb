@@ -57,8 +57,6 @@
 #define PENDING_LOCK    3
 #define EXCLUSIVE_LOCK  4
 const uint32_t RESERVED_COUNT = 1U<<29;
-const uint32_t PENDING_COUNT = 1U<<30;
-const uint32_t EXCLUSIVE_COUNT = 1U<<31;
 
 /*
 ** When using this VFS, the sqlite3_file* handles that SQLite uses are
@@ -80,7 +78,9 @@ struct VFSAsyncFile {
 
 	int debug_zcrefs, debug_zcreads, debug_reads;
 
-	VFSAsyncFile(std::string const& filename, int flags) : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0) {
+	int chunkSize;
+
+	VFSAsyncFile(std::string const& filename, int flags) : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0), chunkSize(0) {
 		filename_lockCount_openCount[filename].second++;
 	}
 	~VFSAsyncFile();
@@ -185,6 +185,12 @@ static int asyncWrite(sqlite3_file *pFile, const void *zBuf, int iAmt, sqlite_in
 
 static int asyncTruncate(sqlite3_file *pFile, sqlite_int64 size){
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+
+	// Adjust size to a multiple of chunkSize if set
+	if(p->chunkSize != 0) {
+		size = ((size + p->chunkSize - 1) / p->chunkSize) * p->chunkSize;
+	}
+
 	try {
 		waitFor( p->file->truncate( size ) );
 		return SQLITE_OK;
@@ -223,14 +229,13 @@ static int VFSAsyncFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 }
 
 static int asyncLock(sqlite3_file *pFile, int eLock){
-	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+	//VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 
 	//TraceEvent("FileLock").detail("File", p->filename).detail("Fd", p->file->debugFD()).detail("PrevLockLevel", p->lockLevel).detail("Op", eLock).detail("LockCount", *p->pLockCount);
 
 	return eLock == EXCLUSIVE_LOCK ? SQLITE_BUSY : SQLITE_OK;
 }
 static int asyncUnlock(sqlite3_file *pFile, int eLock) {
-	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 	assert( eLock <= SHARED_LOCK );
 
 	return SQLITE_OK;
@@ -245,7 +250,18 @@ static int asyncCheckReservedLock(sqlite3_file *pFile, int *pResOut){
 ** No xFileControl() verbs are implemented by this VFS.
 */
 static int VFSAsyncFileControl(sqlite3_file *pFile, int op, void *pArg){
-	return SQLITE_NOTFOUND;
+	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+	switch(op) {
+		case SQLITE_FCNTL_CHUNK_SIZE:
+			p->chunkSize = *(int *)pArg;
+			return SQLITE_OK;
+
+		case SQLITE_FCNTL_SIZE_HINT:
+			return asyncTruncate(pFile, *(int64_t *)pArg);
+
+		default:
+			return SQLITE_NOTFOUND;
+	};
 }
 
 static int asyncSectorSize(sqlite3_file *pFile){ return 512; }  // SOMEDAY: Would 4K be better?
@@ -680,7 +696,7 @@ static void asyncDlClose(sqlite3_vfs *pVfs, void *pHandle){
 */
 static int asyncRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
   for(int i=0; i<nByte; i++)
-	  zByte[i] = g_random->randomInt(0,256);
+	  zByte[i] = deterministicRandom()->randomInt(0,256);
   return SQLITE_OK;
 }
 

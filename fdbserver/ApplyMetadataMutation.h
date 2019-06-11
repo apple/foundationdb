@@ -42,6 +42,20 @@ struct applyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+static Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache, IKeyValueStore* txnStateStore) {
+	Reference<StorageInfo> storageInfo;
+	auto cacheItr = storageCache->find(id);
+	if(cacheItr == storageCache->end()) {
+		storageInfo = Reference<StorageInfo>( new StorageInfo() );
+		storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+		storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+		(*storageCache)[id] = storageInfo;
+	} else {
+		storageInfo = cacheItr->second;
+	}
+	return storageInfo;
+}
+
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
@@ -62,36 +76,19 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						decodeKeyServersValue(m.param2, src, dest);
 
 						ASSERT(storageCache);
-						Reference<StorageInfo> storageInfo;
 						ServerCacheInfo info;
 						info.tags.reserve(src.size() + dest.size());
 						info.src_info.reserve(src.size());
 						info.dest_info.reserve(dest.size());
 
-						for(auto id : src) {
-							auto cacheItr = storageCache->find(id);
-							if(cacheItr == storageCache->end()) {
-								storageInfo = Reference<StorageInfo>( new StorageInfo() );
-								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-								(*storageCache)[id] = storageInfo;
-							} else {
-								storageInfo = cacheItr->second;
-							}
+						for (const auto& id : src) {
+							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
 							info.src_info.push_back( storageInfo );
 						}
-						for(auto id : dest) {
-							auto cacheItr = storageCache->find(id);
-							if(cacheItr == storageCache->end()) {
-								storageInfo = Reference<StorageInfo>( new StorageInfo() );
-								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
-								(*storageCache)[id] = storageInfo;
-							} else {
-								storageInfo = cacheItr->second;
-							}
+						for (const auto& id : dest) {
+							auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
 							info.dest_info.push_back( storageInfo );
@@ -106,7 +103,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString()).detail("Server", serverKeysDecodeServer(m.param1))
-						.detail("TagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
+						.detail("TagKey", serverTagKeyFor( serverKeysDecodeServer(m.param1) )).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
 
 					toCommit->addTag( decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ) );
 					toCommit->addTypedMessage(privatized);
@@ -151,7 +148,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
-						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("ToCommit", toCommit!=NULL);
+						TraceEvent("MutationRequiresRestart", dbgid)
+							.detail("M", m.toString())
+							.detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
+							.detail("ToCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
 				}
@@ -179,7 +179,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 				}
 			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
-				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ) {
+				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) || m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 			else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
@@ -230,8 +230,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					// Log the modification
-					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", printable(m.param1))
-						.detail("LogRangeBegin", printable(logRangeBegin)).detail("LogRangeEnd", printable(logRangeEnd));
+					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", m.param1)
+						.detail("LogRangeBegin", logRangeBegin).detail("LogRangeEnd", logRangeEnd);
 				}
 			}
 			else if (m.param1.startsWith(globalKeysPrefix)) {
@@ -255,15 +255,13 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					if (m.param1 == lastEpochEndKey) {
-						for (auto t : allTags)
-							toCommit->addTag(t);
+						toCommit->addTags(allTags);
 						toCommit->addTypedMessage(LogProtocolMessage());
 					}
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					for (auto t : allTags)
-						toCommit->addTag(t);
+					toCommit->addTags(allTags);
 					toCommit->addTypedMessage(privatized);
 				}
 			}
@@ -354,6 +352,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
+			if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
+				if(!initialCommit) txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
+			}
 			if(range.intersects(applyMutationsEndRange)) {
 				KeyRangeRef commonEndRange(range & applyMutationsEndRange);
 				if(!initialCommit) txnStateStore->clear(commonEndRange);
@@ -383,8 +384,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				KeyRangeRef commonLogRange(range & logRangesRange);
 
 				TraceEvent("LogRangeClear")
-					.detail("RangeBegin", printable(range.begin)).detail("RangeEnd", printable(range.end))
-					.detail("IntersectBegin", printable(commonLogRange.begin)).detail("IntersectEnd", printable(commonLogRange.end));
+					.detail("RangeBegin", range.begin).detail("RangeEnd", range.end)
+					.detail("IntersectBegin", commonLogRange.begin).detail("IntersectEnd", commonLogRange.end);
 
 				// Remove the key range from the vector, if defined
 				if (vecBackupKeys) {
@@ -406,9 +407,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						// Decode the log destination and key value
 						logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);
 
-						TraceEvent("LogRangeErase").detail("AffectedKey", printable(logRangeAffected.key)).detail("AffectedValue", printable(logRangeAffected.value))
-							.detail("LogKeyBegin", printable(logKeyBegin)).detail("LogKeyEnd", printable(logKeyEnd))
-							.detail("LogDestination", printable(logDestination));
+						TraceEvent("LogRangeErase").detail("AffectedKey", logRangeAffected.key).detail("AffectedValue", logRangeAffected.value)
+							.detail("LogKeyBegin", logKeyBegin).detail("LogKeyEnd", logKeyEnd)
+							.detail("LogDestination", logDestination);
 
 						// Identify the locations to place the backup key
 						auto logRanges = vecBackupKeys->modify(KeyRangeRef(logKeyBegin, logKeyEnd));

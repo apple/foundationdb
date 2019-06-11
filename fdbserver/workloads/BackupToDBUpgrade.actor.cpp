@@ -34,7 +34,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Database extraDB;
 
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), g_random->random01() * 10.0);
+		backupAfter = getOption(options, LiteralStringRef("backupAfter"), deterministicRandom()->random01() * 10.0);
 		backupPrefix = getOption(options, LiteralStringRef("backupPrefix"), StringRef());
 		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"), 60.0);
@@ -56,8 +56,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++)
 			{
 				// Get a random range of a random sizes
-				beginRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
-				endRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
+				beginRange = KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
+				endRange = KeyRef(backupRanges.arena(), deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 
 				// Add the range to the array
 				backupRanges.push_back_deep(backupRanges.arena(), (beginRange < endRange) ? KeyRangeRef(beginRange, endRange) : KeyRangeRef(endRange, beginRange));

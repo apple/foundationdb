@@ -179,7 +179,7 @@ private:
 
 		//This is only designed to work in simulation
 		ASSERT(g_network->isSimulated());
-		this->id = g_random->randomUniqueID();
+		this->id = deterministicRandom()->randomUniqueID();
 
 		//TraceEvent("AsyncFileNonDurable_Create", id).detail("Filename", filename);
 		this->file = file;
@@ -188,7 +188,7 @@ private:
 		maxWriteDelay = 5.0;
 		hasBeenSynced = false;
 
-		killMode = (KillMode)g_random->randomInt(1, 3);
+		killMode = (KillMode)deterministicRandom()->randomInt(1, 3);
 		//TraceEvent("AsyncFileNonDurable_CreateEnd", id).detail("Filename", filename).backtrace();
 	}
 
@@ -414,7 +414,7 @@ private:
 		state int currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 		
-		state double delayDuration = g_random->random01() * self->maxWriteDelay;
+		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
@@ -427,7 +427,7 @@ private:
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length, true, writeEnded);
 
 			if(BUGGIFY_WITH_PROB(0.001))
-				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
+				priorModifications.push_back(delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, length) || self->killed.getFuture());
 
@@ -466,25 +466,25 @@ private:
 		vector<Future<Void>> writeFutures;
 		for(int writeOffset = 0; writeOffset < length; writeOffset += pageLength) {
 			//choose a random action to perform on this page write (write correctly, corrupt, or don't write)
-			KillMode pageKillMode = (KillMode)g_random->randomInt(0, self->killMode + 1);
+			KillMode pageKillMode = (KillMode)deterministicRandom()->randomInt(0, self->killMode + 1);
 		
 			for(int pageOffset = 0; pageOffset < pageLength; pageOffset += sectorLength) {
 				//If saving durable, then perform the write correctly.  Otherwise, perform the write correcly with a probability of 1/3.
 				//If corrupting the write, then this sector will be written correctly with a 1/4 chance
-				if(saveDurable || pageKillMode == NO_CORRUPTION || (pageKillMode == FULL_CORRUPTION && g_random->random01() < 0.25)) {
+				if(saveDurable || pageKillMode == NO_CORRUPTION || (pageKillMode == FULL_CORRUPTION && deterministicRandom()->random01() < 0.25)) {
 					//if (!saveDurable) TraceEvent(SevInfo, "AsyncFileNonDurableWrite", self->id).detail("Filename", self->filename).detail("Offset", offset+writeOffset+pageOffset).detail("Length", sectorLength);
 					writeFutures.push_back(self->file->write(dataCopy.begin() + writeOffset + pageOffset, sectorLength, offset + writeOffset + pageOffset));
 				}
 
 				//If the write is not durable, then the write will either be corrupted or not written at all.  If corrupted, there is 1/4 chance that a given
 				//sector will not be written
-				else if(pageKillMode == FULL_CORRUPTION && g_random->random01() < 0.66667) {
+				else if(pageKillMode == FULL_CORRUPTION && deterministicRandom()->random01() < 0.66667) {
 					//The incorrect part of the write can be the rightmost bytes (side = 0), the leftmost bytes (side = 1), or the entire write (side = 2)
-					int side = g_random->randomInt(0, 3);
+					int side = deterministicRandom()->randomInt(0, 3);
 
 					//There is a 1/2 chance that a bad write will have garbage written into its bad portion
 					//The chance is increased to 1 if the entire write is bad
-					bool garbage = side == 2 || g_random->random01() < 0.5;
+					bool garbage = side == 2 || deterministicRandom()->random01() < 0.5;
 
 					int64_t goodStart = 0;
 					int64_t goodEnd = sectorLength;
@@ -492,11 +492,11 @@ private:
 					int64_t badEnd = sectorLength;
 
 					if(side == 0) {
-						goodEnd = g_random->randomInt(0, sectorLength);
+						goodEnd = deterministicRandom()->randomInt(0, sectorLength);
 						badStart = goodEnd;
 					}
 					else if(side == 1) {
-						badEnd = g_random->randomInt(0, sectorLength);
+						badEnd = deterministicRandom()->randomInt(0, sectorLength);
 						goodStart = badEnd;
 					}
 					else
@@ -506,7 +506,7 @@ private:
 					if(garbage && badStart != badEnd) {
 						uint8_t *badData = const_cast<uint8_t*>(&dataCopy.begin()[badStart + writeOffset + pageOffset]);
 						for(int i = 0; i < badEnd - badStart; i += sizeof(uint32_t)) {
-							uint32_t val = g_random->randomUInt32();
+							uint32_t val = deterministicRandom()->randomUInt32();
 							memcpy(&badData[i], &val, std::min(badEnd - badStart - i, (int64_t)sizeof(uint32_t)));
 						}
 
@@ -538,7 +538,7 @@ private:
 		state int currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 		
-		state double delayDuration = g_random->random01() * self->maxWriteDelay;
+		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
@@ -549,7 +549,7 @@ private:
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(size, -1, true, truncateEnded);
 
 			if(BUGGIFY_WITH_PROB(0.001))
-				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
+				priorModifications.push_back(delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, 0) || self->killed.getFuture());
 
@@ -578,7 +578,7 @@ private:
 		}
 
 		//If performing a durable truncate, then pass it through to the file.  Otherwise, pass it through with a 1/2 chance
-		if(saveDurable || self->killMode == NO_CORRUPTION || g_random->random01() < 0.5)
+		if(saveDurable || self->killMode == NO_CORRUPTION || deterministicRandom()->random01() < 0.5)
 			wait(self->file->truncate(size));
 		else {
 			TraceEvent("AsyncFileNonDurable_DroppedTruncate", self->id).detail("Size", size);
@@ -630,7 +630,7 @@ private:
 		self->startSyncPromise = Promise<bool>();
 
 		//Writes will be durable in a kill with a 10% probability
-		state bool writeDurable = durable || g_random->random01() < 0.1;
+		state bool writeDurable = durable || deterministicRandom()->random01() < 0.1;
 		startSyncPromise.send(writeDurable);
 
 		//Wait for outstanding writes to complete
@@ -642,7 +642,7 @@ private:
 		if(!durable) {
 			//Sometimes sync the file if writes were made durably.  Before a file is first synced, it is stored in a temporary file and then renamed to the correct
 			//location once sync is called.  By not calling sync, we simulate a failure to fsync the directory storing the file
-			if(self->hasBeenSynced && writeDurable && g_random->random01() < 0.5) {
+			if(self->hasBeenSynced && writeDurable && deterministicRandom()->random01() < 0.5) {
 				TEST(true); //AsyncFileNonDurable kill was durable and synced
 				wait(success(errorOr(self->file->sync())));
 			}

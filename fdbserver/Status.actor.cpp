@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -169,7 +170,7 @@ public:
 	}
 
 	StatusCounter& parseText(const std::string& parsableText) {
-		sscanf(parsableText.c_str(), "%lf %lf %lld", &hz, &roughness, &counter);
+		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
 		return *this;
 	}
 
@@ -547,7 +548,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Database cx, Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
-	state double metric;
 
 	// construct a map from a process address to a status object containing a trace file open error
 	// this is later added to the messages subsection
@@ -606,6 +606,24 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (db->get().ratekeeper.present()) {
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
+	}
+
+	for(auto& tLogSet : db->get().logSystemConfig.tLogs) {
+		for(auto& it : tLogSet.logRouters) {
+			if(it.present()) {
+				roles.addRole("router", it.interf());
+			}
+		}
+	}
+
+	for(auto& old : db->get().logSystemConfig.oldTLogs) {
+		for(auto& tLogSet : old.tLogs) {
+			for(auto& it : tLogSet.logRouters) {
+				if(it.present()) {
+					roles.addRole("router", it.interf());
+				}
+			}
+		}
 	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
@@ -1154,18 +1172,21 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		TraceEventFields md = dataInfo[2];
 
 		// If we have a MovingData message, parse it.
+		int64_t partitionsInFlight = 0;
+		int movingHighestPriority = 1000;
 		if (md.size())
 		{
 			int64_t partitionsInQueue = md.getInt64("InQueue");
-			int64_t partitionsInFlight = md.getInt64("InFlight");
 			int64_t averagePartitionSize = md.getInt64("AverageShardSize");
+			partitionsInFlight = md.getInt64("InFlight");
+			movingHighestPriority = md.getInt("HighestPriority");
 
 			if( averagePartitionSize >= 0 ) {
 				JsonBuilderObject moving_data;
 				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
 				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
 				moving_data.setKeyRawNumber("total_written_bytes",md.getValue("BytesWritten"));
-				moving_data.setKeyRawNumber("highest_priority",md.getValue("HighestPriority"));
+				moving_data["highest_priority"] = movingHighestPriority;
 
 				// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
 				statusObjData["moving_data"] = moving_data;
@@ -1188,6 +1209,12 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
+			
+			if(movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+				highestPriority = movingHighestPriority;
+			} else if(partitionsInFlight > 0) {
+				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
+			}
 
 			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
@@ -1242,6 +1269,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
 			}
+			else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
+ 				stateSectionObj["healthy"] = true;
+ 				stateSectionObj["name"] = "healthy";
+ 			}
 			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
@@ -1751,7 +1782,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 							json.absorb(doc.get_obj());
 							wait(yield());
 						} catch(Error &e) {
-							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", printable(docs[j].key));
+							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}
 				}
@@ -1787,9 +1818,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
 			choose{
-				when(Version f = wait(tr.getReadVersion())) {
-					statusObj["database_locked"] = false;
-				}
+				when(wait(success(tr.getReadVersion()))) { statusObj["database_locked"] = false; }
 
 				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
@@ -2248,27 +2277,27 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 
 JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level) {
 	JsonBuilderArray r;
-	int size = g_random->randomInt(0, 50);
+	int size = deterministicRandom()->randomInt(0, 50);
 
 	while(--size) {
 		if(--limit <= 0)
 			break;
 
-		if(level > 0 && g_random->coinflip()) {
-			if(g_random->coinflip())
+		if(level > 0 && deterministicRandom()->coinflip()) {
+			if(deterministicRandom()->coinflip())
 				r.push_back(randomDocument(strings, limit, level - 1));
 			else
 				r.push_back(randomArray(strings, limit, level - 1));
 		}
 		else {
-			switch(g_random->randomInt(0, 3)) {
+			switch(deterministicRandom()->randomInt(0, 3)) {
 				case 0:
-					r.push_back(g_random->randomInt(0, 10000000));
+					r.push_back(deterministicRandom()->randomInt(0, 10000000));
 				case 1:
-					r.push_back(strings[g_random->randomInt(0, strings.size())]);
+					r.push_back(strings[deterministicRandom()->randomInt(0, strings.size())]);
 				case 2:
 				default:
-					r.push_back(g_random->random01());
+					r.push_back(deterministicRandom()->random01());
 			}
 		}
 	}
@@ -2278,29 +2307,29 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 
 JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level) {
 	JsonBuilderObject r;
-	int size = g_random->randomInt(0, 300);
+	int size = deterministicRandom()->randomInt(0, 300);
 
 	while(--size) {
 		if(--limit <= 0)
 			break;
 
-		const std::string &key = strings[g_random->randomInt(0, strings.size())];
+		const std::string &key = strings[deterministicRandom()->randomInt(0, strings.size())];
 
-		if(level > 0 && g_random->coinflip()) {
-			if(g_random->coinflip())
+		if(level > 0 && deterministicRandom()->coinflip()) {
+			if(deterministicRandom()->coinflip())
 				r[key] = randomDocument(strings, limit, level - 1);
 			else
 				r[key] = randomArray(strings, limit, level - 1);
 		}
 		else {
-			switch(g_random->randomInt(0, 3)) {
+			switch(deterministicRandom()->randomInt(0, 3)) {
 				case 0:
-					r[key] = g_random->randomInt(0, 10000000);
+					r[key] = deterministicRandom()->randomInt(0, 10000000);
 				case 1:
-					r[key] = strings[g_random->randomInt(0, strings.size())];
+					r[key] = strings[deterministicRandom()->randomInt(0, strings.size())];
 				case 2:
 				default:
-					r[key] = g_random->random01();
+					r[key] = deterministicRandom()->random01();
 			}
 		}
 	}
@@ -2313,14 +2342,13 @@ TEST_CASE("/status/json/builderPerf") {
 	int c = 1000000;
 	printf("Generating random strings\n");
 	while(--c)
-		strings.push_back(g_random->randomAlphaNumeric(g_random->randomInt(0, 50)));
+		strings.push_back(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 50)));
 
 	int elements = 100000;
 	int level = 6;
 	int iterations = 200;
 
 	printf("Generating and serializing random document\n");
-	double start = timer();
 
 	int64_t bytes = 0;
 	double generated = 0;
@@ -2355,7 +2383,7 @@ TEST_CASE("/status/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	printf("RESULT: %lld bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
+	printf("RESULT: %" PRId64 " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
 		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
 
 	return Void();

@@ -73,7 +73,7 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", range).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
@@ -101,7 +101,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	TransientStorageMetricSample( int64_t metricUnitsPerSample ) : StorageMetricSample(metricUnitsPerSample) {}
 
 	bool roll( KeyRef key, int64_t metric ) {
-		return g_random->random01() < (double)metric / metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+		return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
 	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
@@ -292,7 +292,7 @@ struct StorageServerMetrics {
 				double offset = (expectedSize - used) / divisor;
 				if( offset <= 0 )
 					return hasUsed ? lastKey : key;
-				return sample.splitEstimate( KeyRangeRef(lastKey, key), offset * ( ( 1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) + 2 * g_random->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) );
+				return sample.splitEstimate( KeyRangeRef(lastKey, key), offset * ( ( 1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) + 2 * deterministicRandom()->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) );
 			}
 		}
 
@@ -307,7 +307,7 @@ struct StorageServerMetrics {
 			StorageMetrics estimated = req.estimated;
 			StorageMetrics remaining = getMetrics( req.keys ) + used;
 
-			//TraceEvent("SplitMetrics").detail("Begin", printable(req.keys.begin)).detail("End", printable(req.keys.end)).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
 			
 			while( true ) {
 				if( remaining.bytes < 2*SERVER_KNOBS->MIN_SHARD_BYTES )
@@ -348,7 +348,7 @@ struct StorageServerMetrics {
 		// SOMEDAY: make bytes dynamic with hard disk space
 		rep.load = getMetrics(allKeys);
 
-		if (sb.free < 1e9 && g_random->random01() < 0.1)
+		if (sb.free < 1e9 && deterministicRandom()->random01() < 0.1)
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
 				.detail("Free", sb.free)
 				.detail("Total", sb.total)

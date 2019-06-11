@@ -355,17 +355,6 @@ struct CompactPreOrderTree {
 #endif
 };
 
-std::string printable(const StringRef& val) {
-	std::string s;
-	for (int i = 0; i<val.size(); i++) {
-		uint8_t b = val[i];
-		if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-		else if (b == '\\') s += "\\\\";
-		else s += format("\\x%02x", b);
-	}
-	return s;
-}
-
 void compactMapTests(std::vector<std::string> testData, std::vector<std::string> sampleQueries, std::string prefixTreeDOTFile = "") {
 	double t1, t2;
 	int r = 0;
@@ -524,20 +513,20 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		copies.push_back((CompactPreOrderTree*) new uint8_t[compactTreeBytes]);
 		memcpy(copies.back(), t, compactTreeBytes);
 	}
-	g_random->randomShuffle(copies);
+	deterministicRandom()->randomShuffle(copies);
 
 	std::vector<PrefixTree*> prefixTreeCopies;
 	for (int i = 0; i < 2*sampleQueries.size(); i++) {
 		prefixTreeCopies.push_back((PrefixTree *) new uint8_t[prefixTreeBytes]);
 		memcpy(prefixTreeCopies.back(), pt, prefixTreeBytes);
 	}
-	g_random->randomShuffle(prefixTreeCopies);
+	deterministicRandom()->randomShuffle(prefixTreeCopies);
 
 	std::vector<std::vector<std::string>> array_copies;
 	for (int i = 0; i < sampleQueries.size(); i++) {
 		array_copies.push_back(testData);
 	}
-	g_random->randomShuffle(array_copies);
+	deterministicRandom()->randomShuffle(array_copies);
 
 	printf("shuffled\n");
 
@@ -608,7 +597,7 @@ std::vector<std::string> sampleDocuments(int N) {
 	std::string oa = "\x01""amount\x00\x00";
 	std::string dbl = "\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 	for (int i = 0; i < N; i++) {
-		std::string id = BinaryWriter::toValue(g_random->randomUniqueID(), Unversioned()).substr(12).toString();
+		std::string id = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString();
 		testData.push_back(p + id + n);
 		testData.push_back(p + id + a);
 		for (int j = 0; j < 5; j++) {
@@ -696,10 +685,10 @@ void ingestBenchmark() {
 	std::set<StringRef> testmap;
 	for(int i = 0; i < 1000000; ++i) {
 		keys_generated.push_back(StringRef(arena, format("........%02X......%02X.....%02X........%02X", 
-			g_random->randomInt(0, 100),
-			g_random->randomInt(0, 100),
-			g_random->randomInt(0, 100),
-			g_random->randomInt(0, 100)
+			deterministicRandom()->randomInt(0, 100),
+			deterministicRandom()->randomInt(0, 100),
+			deterministicRandom()->randomInt(0, 100),
+			deterministicRandom()->randomInt(0, 100)
 		)));
 	}
 
@@ -726,7 +715,7 @@ void ingestBenchmark() {
 				pages.resize(pageCount);
 
 				for(auto &key : keys_generated) {
-					int p = g_random->randomInt(0, pageCount);
+					int p = deterministicRandom()->randomInt(0, pageCount);
 					Page *&pPage = pages[p];
 					if(pPage == nullptr)
 						pPage = new Page();
@@ -783,7 +772,7 @@ int main() {
 	printf("Left pointer is %s\n", CompactPreOrderTree::Node::ENABLE_LEFT_PTR ? "ON" : "OFF");
 	printf("Fancy build is %s\n", CompactPreOrderTree::ENABLE_FANCY_BUILD ? "ON" : "OFF");
 
-	g_random = new DeterministicRandom(1);
+	setThreadLocalDeterministicRandomSeed(1);
 
 	//ingestBenchmark();
 
@@ -804,27 +793,27 @@ int main() {
 	printf("\n16 byte hexadecimal random keys\n");
 	std::vector<std::string> testData;
 	for (int i = 0; i < 200; i++) {
-		testData.push_back(g_random->randomUniqueID().shortString());
+		testData.push_back(deterministicRandom()->randomUniqueID().shortString());
 	}
 	std::vector<std::string> sampleQueries;
 	for (int i = 0; i < 10000; i++) {
-		sampleQueries.push_back(g_random->randomUniqueID().shortString().substr(0, g_random->randomInt(0, 16)));
+		sampleQueries.push_back(deterministicRandom()->randomUniqueID().shortString().substr(0, deterministicRandom()->randomInt(0, 16)));
 	}
 	compactMapTests(testData, sampleQueries);
 
 	printf("\nRaw index keys\n");
 	testData.clear(); sampleQueries.clear();
 	for (int i = 0; i < 100; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 1234 * (i / 100), (i/10) % 10 + 1000) + g_random->randomUniqueID().shortString());
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 1234 * (i / 100), (i/10) % 10 + 1000) + deterministicRandom()->randomUniqueID().shortString());
 	}
 	for (int i = 0; i < 10000; i++)
-		sampleQueries.push_back(format("%d Main Street", g_random->randomInt(1000, 10000)));
+		sampleQueries.push_back(format("%d Main Street", deterministicRandom()->randomInt(1000, 10000)));
 	compactMapTests(testData, sampleQueries, "graph_addresses.dot");
 
 	printf("\nb+tree separators for index keys\n");
 	testData.clear();
 	for (int i = 0; i < 100000; i++) {
-		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 12 * (i / 100), (i/10) % 10 + 1000) + g_random->randomUniqueID().shortString());
+		testData.push_back(format("%d Main Street #%d, New York NY 12345, United States of America|", 12 * (i / 100), (i/10) % 10 + 1000) + deterministicRandom()->randomUniqueID().shortString());
 	}
 	testData = sampleBPlusTreeSeparators(testData, 0);
 	compactMapTests(testData, sampleQueries);
@@ -834,7 +823,7 @@ int main() {
 	sampleQueries.clear();
 	std::string p = "pre";
 	for (int i = 0; i < 10000; i++)
-		sampleQueries.push_back(p + BinaryWriter::toValue(g_random->randomUniqueID(), Unversioned()).substr(12).toString());
+		sampleQueries.push_back(p + BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned()).substr(12).toString());
 	compactMapTests(testData, sampleQueries);
 
 	printf("\nb+tree split keys for documents\n");

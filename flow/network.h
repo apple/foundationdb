@@ -25,6 +25,7 @@
 #include <array>
 #include <string>
 #include <stdint.h>
+#include <variant>
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
@@ -44,6 +45,7 @@ enum {
 	TaskFailureMonitor = 8700,
 	TaskResolutionMetrics = 8700,
 	TaskClusterController = 8650,
+	TaskProxyStorageRejoin = 8645,
 	TaskProxyCommitDispatcher = 8640,
 	TaskTLogQueuingMetrics = 8620,
 	TaskTLogPop = 8610,
@@ -51,7 +53,6 @@ enum {
 	TaskTLogPeek = 8590,
 	TaskTLogCommitReply = 8580,
 	TaskTLogCommit = 8570,
-	TaskTLogSpilledPeekReply = 8567,
 	TaskProxyGetRawCommittedVersion = 8565,
 	TaskProxyResolverReply = 8560,
 	TaskProxyCommitBatcher = 8550,
@@ -73,12 +74,15 @@ enum {
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
+	TaskTLogSpilledPeekReply = 2800,
 	TaskLowPriority = 2000,
 
 	TaskMinPriority = 1000
 };
 
 class Void;
+
+template<class T> class Optional;
 
 struct IPAddress {
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
@@ -88,36 +92,18 @@ struct IPAddress {
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
 	              "IPAddressStore must be std::array<uint8_t, 16>");
 
-	IPAddress();
-	explicit IPAddress(const IPAddressStore& v6addr);
-	explicit IPAddress(uint32_t v4addr);
+	IPAddress() : addr(uint32_t(0)) {}
+	explicit IPAddress(const IPAddressStore& v6addr) : addr(v6addr) {}
+	explicit IPAddress(uint32_t v4addr) : addr(v4addr) {}
 
-	bool isV6() const { return isV6addr; }
-	bool isV4() const { return !isV6addr; }
+	bool isV6() const { return std::holds_alternative<IPAddressStore>(addr); }
+	bool isV4() const { return !isV6(); }
 	bool isValid() const;
-
-	IPAddress(const IPAddress& rhs) : isV6addr(rhs.isV6addr) {
-		if(isV6addr) {
-			addr.v6 = rhs.addr.v6;
-		} else {
-			addr.v4 = rhs.addr.v4;
-		}
-	}
-
-	IPAddress& operator=(const IPAddress& rhs) {
-		isV6addr = rhs.isV6addr;
-		if(isV6addr) {
-			addr.v6 = rhs.addr.v6;
-		} else {
-			addr.v4 = rhs.addr.v4;
-		}
-		return *this;
-	}
 
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
-	uint32_t toV4() const { return addr.v4; }
-	const IPAddressStore& toV6() const { return addr.v6; }
+	uint32_t toV4() const { return std::get<uint32_t>(addr); }
+	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -128,23 +114,48 @@ struct IPAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isV6addr);
-		if(isV6addr) {
-			serializer(ar, addr.v6);
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, addr);
 		} else {
-			serializer(ar, addr.v4);
+			if (Ar::isDeserializing) {
+				bool v6;
+				serializer(ar, v6);
+				if (v6) {
+					IPAddressStore store;
+					serializer(ar, store);
+					addr = store;
+				} else {
+					uint32_t res;
+					serializer(ar, res);
+					addr = res;
+				}
+			} else {
+				bool v6 = isV6();
+				serializer(ar, v6);
+				if (v6) {
+					auto res = toV6();
+					serializer(ar, res);
+				} else {
+					auto res = toV4();
+					serializer(ar, res);
+				}
+			}
 		}
 	}
 
 private:
-	bool isV6addr;
-	union {
-		uint32_t v4;
-		IPAddressStore v6;
-	} addr;
+	std::variant<uint32_t, IPAddressStore> addr;
+};
+
+template<>
+struct Traceable<IPAddress> : std::true_type {
+	static std::string toString(const IPAddress& value) {
+		return value.toString();
+	}
 };
 
 struct NetworkAddress {
+	constexpr static FileIdentifier file_identifier = 14155727;
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
 	IPAddress ip;
 	uint16_t port;
@@ -182,13 +193,24 @@ struct NetworkAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
-			uint32_t ipV4;
-			serializer(ar, ipV4, port, flags);
-			ip = IPAddress(ipV4);
-		} else {
+		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, ip, port, flags);
+		} else {
+			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+				uint32_t ipV4;
+				serializer(ar, ipV4, port, flags);
+				ip = IPAddress(ipV4);
+			} else {
+				serializer(ar, ip, port, flags);
+			}
 		}
+	}
+};
+
+template<>
+struct Traceable<NetworkAddress> : std::true_type {
+	static std::string toString(const NetworkAddress& value) {
+		return value.toString();
 	}
 };
 
@@ -320,7 +342,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, bool useObjectSerializer = false);
 
 class INetwork {
 public:
@@ -381,6 +403,9 @@ public:
 
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
+
+	virtual bool useObjectSerializer() const = 0;
+	// Whether or not the object serializer should be used when sending packets
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

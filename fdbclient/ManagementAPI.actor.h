@@ -59,6 +59,8 @@ public:
 		MULTIPLE_ACTIVE_REGIONS,
 		REGIONS_CHANGED,
 		NOT_ENOUGH_WORKERS,
+		REGION_REPLICATION_MISMATCH,
+		DCID_MISSING,
 		SUCCESS
 	};
 };
@@ -188,6 +190,10 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database  cx );
 
 void schemaCoverage( std::string const& spath, bool covered=true );
 bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+
+// execute payload in 'snapCmd' on all the coordinators, TLogs and
+// storage nodes
+ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd);
 
 #include "flow/unactorcompiler.h"
 #endif

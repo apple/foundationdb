@@ -56,12 +56,12 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-extern IRandom* trace_random;
 extern const char* getHGVersion();
 
 using std::make_pair;
 using std::max;
 using std::min;
+using std::pair;
 
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
@@ -222,6 +222,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("NotCommitted", cx->transactionsNotCommitted)
 			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
 			.detail("ResourceConstrained", cx->transactionsResourceConstrained)
+			.detail("ProcessBehind", cx->transactionsProcessBehind)
 			.detail("MeanLatency", cx->latencies.mean())
 			.detail("MedianLatency", cx->latencies.median())
 			.detail("Latency90", cx->latencies.percentile(0.90))
@@ -364,9 +365,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			state std::vector<TrInfoChunk> trChunksQ;
 			for (auto &entry : cx->clientStatusUpdater.outStatusQ) {
 				auto &bw = entry.second;
-				int64_t value_size_limit = BUGGIFY ? g_random->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				int64_t value_size_limit = BUGGIFY ? deterministicRandom()->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
-				std::string random_id = g_random->randomAlphaNumeric(16);
+				std::string random_id = deterministicRandom()->randomAlphaNumeric(16);
 				std::string user_provided_id = entry.first.size() ? entry.first + "/" : "";
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
@@ -386,7 +387,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			}
 
 			// Commit the chunks splitting into different transactions if needed
-			state int64_t dataSizeLimit = BUGGIFY ? g_random->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+			state int64_t dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
 			tr = Transaction(Database(Reference<DatabaseContext>::addRef(cx)));
 			ASSERT(commitQ.empty() && (txBytes == 0));
@@ -431,7 +432,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			cx->clientStatusUpdater.outStatusQ.clear();
 			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : cx->clientInfo->get().clientTxnInfoSizeLimit;
-			if (!trChunksQ.empty() && g_random->random01() < clientSamplingProbability)
+			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
@@ -513,7 +514,7 @@ DatabaseContext::DatabaseContext(
 	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
+	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
@@ -625,7 +626,6 @@ pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const
 
 bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::pair<KeyRange,Reference<LocationInfo>>>& result, int limit, bool reverse ) {
 	result.clear();
-	auto locRanges = locationCache.intersectingRanges(range);
 
 	auto begin = locationCache.rangeContaining(range.begin);
 	auto end = locationCache.rangeContainingKeyBefore(range.end);
@@ -869,6 +869,9 @@ Future<Void> Cluster::onConnected() {
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
 	switch(option) {
 		// SOMEDAY: If the network is already started, should these three throw an error?
+		case FDBNetworkOptions::USE_OBJECT_SERIALIZER:
+			networkOptions.useObjectSerializer = extractIntOption(value) != 0;
+			break;
 		case FDBNetworkOptions::TRACE_ENABLE:
 			networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 			break;
@@ -1001,14 +1004,10 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if( g_network )
 		throw network_already_setup();
 
-	g_random = new DeterministicRandom( platform::getRandomSeed() );
-	trace_random = new DeterministicRandom( platform::getRandomSeed() );
-	g_nondeterministic_random = trace_random;
-	g_debug_random = trace_random;
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.useObjectSerializer);
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 
@@ -1126,13 +1125,13 @@ AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 		auto addr = NetworkAddress::parse(key.toString());
 		if (addr.isTLS()) {
 			TraceEvent(SevWarnAlways, "AddressExclusionParseError")
-				.detail("String", printable(key))
+				.detail("String", key)
 				.detail("Description", "Address inclusion string should not include `:tls' suffix.");
 			return AddressExclusion();
 		}
 		return AddressExclusion(addr.ip, addr.port);
 	} catch (Error& ) {
-		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
+		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", key);
 		return AddressExclusion();
 	}
 }
@@ -1326,15 +1325,15 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 		state uint64_t startTime;
 		state double startTimeD;
 		try {
-			//GetValueReply r = wait( g_random->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
+			//GetValueReply r = wait( deterministicRandom()->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
 			//return r.value;
 			if( info.debugID.present() ) {
-				getValueID = g_nondeterministic_random->randomUniqueID();
+				getValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("Servers", describe(ssi.second->get()));*/
 			}
@@ -1356,7 +1355,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1367,7 +1366,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-					.detail("Key", printable(key))
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1385,7 +1384,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 }
 
 ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
-	Version ver = wait(version);
+	wait(success(version));
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
@@ -1404,11 +1403,11 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 		try {
 			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
 			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
+				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
 				return k.getKey();
@@ -1421,7 +1420,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			} else {
 				TraceEvent(SevInfo, "GetKeyError")
 					.error(e)
-					.detail("AtKey", printable(k.getKey()))
+					.detail("AtKey", k.getKey())
 					.detail("Offset", k.offset);
 				throw e;
 			}
@@ -1464,7 +1463,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
 			if( info.debugID.present() ) {
-				watchValueID = g_nondeterministic_random->randomUniqueID();
+				watchValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1478,7 +1477,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
 			Version v = wait( waitForCommittedVersion( cx, resp ) );
 
-			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key", printable( key )).detail("Value", printable(value));
+			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key",  key ).detail("Value", value);
 
 			if( v - resp < 50000000 ) // False if there is a master failure between getting the response and getting the committed version, Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
 				return Void();
@@ -1487,8 +1486,9 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache( key );
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
-			} else if( e.code() == error_code_watch_cancelled ) {
-				TEST( true ); // Too many watches on the storage server, poll for changes instead
+			} else if( e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind ) {
+				TEST( e.code() == error_code_watch_cancelled ); // Too many watches on the storage server, poll for changes instead
+				TEST( e.code() == error_code_process_behind ); // The storage servers are all behind
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if ( e.code() == error_code_timed_out ) { //The storage server occasionally times out watches in case it was cancelled
 				TEST( true ); // A watch timed out
@@ -1551,13 +1551,13 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.Before");
 					/*TraceEvent("TransactionDebugGetExactRangeInfo", info.debugID.get())
-					.detail("ReqBeginKey", printable(req.begin.getKey()))
-					.detail("ReqEndKey", printable(req.end.getKey()))
-					.detail("ReqLimit", req.limit)
-					.detail("ReqLimitBytes", req.limitBytes)
-					.detail("ReqVersion", req.version)
-					.detail("Reverse", reverse)
-					.detail("Servers", locations[shard].second->description());*/
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
+						.detail("ReqLimit", req.limit)
+						.detail("ReqLimitBytes", req.limitBytes)
+						.detail("ReqVersion", req.version)
+						.detail("Reverse", reverse)
+						.detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
 				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
@@ -1641,8 +1641,8 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
 						.error(e)
-						.detail("ShardBegin", printable(locations[shard].first.begin))
-						.detail("ShardEnd", printable(locations[shard].first.end));
+						.detail("ShardBegin", locations[shard].first.begin)
+						.detail("ShardEnd", locations[shard].first.end);
 					throw;
 				}
 			}
@@ -1816,13 +1816,13 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
-						.detail("ReqBeginKey", printable(req.begin.getKey()))
-						.detail("ReqEndKey", printable(req.end.getKey()))
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("OriginalBegin", originalBegin.toString())
 						.detail("OriginalEnd", originalEnd.toString())
 						.detail("Begin", begin.toString())
 						.detail("End", end.toString())
-						.detail("Shard", printable(shard))
+						.detail("Shard", shard)
 						.detail("ReqLimit", req.limit)
 						.detail("ReqLimitBytes", req.limitBytes)
 						.detail("ReqVersion", req.version)
@@ -1837,8 +1837,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
-						.detail("ReqBeginKey", printable(req.begin.getKey()))
-						.detail("ReqEndKey", printable(req.end.getKey()))
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("RepIsMore", rep.more)
 						.detail("VersionReturned", rep.version)
 						.detail("RowsReturned", rep.data.size());*/
@@ -1867,7 +1867,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 					if( BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) ) {
 						output.more = true;
-						output.resize(output.arena(), g_random->randomInt(std::max(1,originalLimits.minRows),output.size()));
+						output.resize(output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows),output.size()));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 						return output;
 					}
@@ -1962,7 +1962,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
+	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), numRetries(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
 }
@@ -1985,6 +1985,7 @@ void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	info = r.info;
 	backoff = r.backoff;
 	numErrors = r.numErrors;
+	numRetries = r.numRetries;
 	committedVersion = r.committedVersion;
 	versionstampPromise = std::move(r.versionstampPromise);
 	watches = r.watches;
@@ -2235,7 +2236,7 @@ void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {
 void Transaction::makeSelfConflicting() {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
-	wr << g_random->randomUniqueID();
+	wr << deterministicRandom()->randomUniqueID();
 	auto r = singleKeyRange( wr.toValue(), tr.arena );
 	tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
 	tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
@@ -2283,6 +2284,45 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 		t.write_conflict_ranges.push_back( req.arena, r );
 
 	TEST(true); //NativeAPI atomic operation
+}
+
+ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayload, Optional<UID> debugID) {
+	try {
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
+		}
+
+		state ExecRequest req(execPayload, debugID);
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.Inside loop");
+		}
+		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::execReq, req, cx->taskID));
+		if (debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.After");
+		return Void();
+	} catch (Error& e) {
+		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
+		throw;
+	}
+}
+
+void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayload) {
+	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayload.toString());
+
+	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
+	if (cmdPayload.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
+
+	auto& req = tr;
+
+	// Helps with quickly finding the exec op in a tlog batch
+	setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+
+	auto& t = req.transaction;
+	auto r = singleKeyRange(cmdType, req.arena);
+	auto v = ValueRef(req.arena, cmdPayload);
+	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
 }
 
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
@@ -2350,7 +2390,7 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 }
 
 double Transaction::getBackoff(int errCode) {
-	double b = backoff * g_random->random01();
+	double b = backoff * deterministicRandom()->random01();
 	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
 				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
@@ -2362,6 +2402,10 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
 	}
+	maxRetries = cx->transactionMaxRetries;
+	if (maxRetries == -1) {
+		maxRetries = 10;
+	}
 }
 
 TransactionOptions::TransactionOptions() {
@@ -2371,9 +2415,17 @@ TransactionOptions::TransactionOptions() {
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
+	double oldMaxRetries = maxRetries;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
+}
+
+void Transaction::onErrorReset() {
+	int32_t oldNumRetires = numRetries;
+	reset();
+	numRetries = oldNumRetires;
 }
 
 void Transaction::reset() {
@@ -2453,7 +2505,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		return;
 	}
 
-	wait( delay( g_random->random01() ) ); // delay between 0 and 1 seconds
+	wait( delay( deterministicRandom()->random01() ) ); // delay between 0 and 1 seconds
 
 	//Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
@@ -2484,19 +2536,21 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 					Standalone<RangeResultRef> shouldBeEmpty = wait(
 						tr.getRange( it->range(), 1 ) );
 					if( shouldBeEmpty.size() ) {
-						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", printable(it->range().begin).c_str())
-							.detail("KeyEnd", printable(it->range().end).c_str());
+						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", it->range().begin)
+							.detail("KeyEnd", it->range().end);
 						return;
 					}
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Set").detail("Key", printable(it->range().begin).c_str())
-							.detail("Expected", printable(m.setValue).c_str());
+						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
+							.detail("Class", "Set")
+							.detail("Key", it->range().begin)
+							.detail("Expected", m.setValue);
 						if( !val.present() )
 							evt.detail("Actual", "_Value Missing_");
 						else
-							evt.detail("Actual", printable(val.get()).c_str());
+							evt.detail("Actual", val.get());
 						return;
 					}
 				}
@@ -2515,7 +2569,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 	state int retries = 0;
 	loop {
 		try {
-			TraceEvent("CommitDummyTransaction").detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
 			tr.options = options;
 			tr.info.taskID = info.taskID;
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -2526,7 +2580,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", range.begin).detail("Retries", retries);
 			wait( tr.onError(e) );
 		}
 		++retries;
@@ -2569,7 +2623,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 		if(info.debugID.present()) {
-			commitID = g_nondeterministic_random->randomUniqueID();
+			commitID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", info.debugID.get().first(), commitID.get().first());
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
 		}
@@ -2650,7 +2704,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
+			if (e.code() != error_code_transaction_too_old
+				&& e.code() != error_code_not_committed
+				&& e.code() != error_code_database_locked
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_transaction_not_permitted
+				&& e.code() != error_code_cluster_not_fully_recovered
+				&& e.code() != error_code_txn_exec_log_anti_quorum)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2685,7 +2745,8 @@ Future<Void> Transaction::commitMutations() {
 				.detail("Size", transactionSize)
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("ReadConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
-				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize());
+				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
+				.detail("DebugIdentifier", trLogInfo ? trLogInfo->identifier : "");
 		}
 
 		if(!apiVersionAtLeast(300)) {
@@ -2698,7 +2759,7 @@ Future<Void> Transaction::commitMutations() {
 		if( !readVersion.isValid() )
 			getReadVersion( GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY ); // sets up readVersion field.  We had no reads, so no need for (expensive) full causal consistency.
 
-		bool isCheckingWrites = options.checkWritesEnabled && g_random->random01() < 0.01;
+		bool isCheckingWrites = options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
 			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first < extraConflictRanges[i].get().second )
 				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
@@ -2712,10 +2773,10 @@ Future<Void> Transaction::commitMutations() {
 		}
 
 		if ( options.debugDump ) {
-			UID u = g_nondeterministic_random->randomUniqueID();
+			UID u = nondeterministicRandom()->randomUniqueID();
 			TraceEvent("TransactionDump", u);
 			for(auto i=tr.transaction.mutations.begin(); i!=tr.transaction.mutations.end(); ++i)
-				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", printable(i->param1)).detail("P2", printable(i->param2));
+				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", i->param1).detail("P2", i->param2);
 		}
 
 		if(options.lockAware) {
@@ -2761,6 +2822,7 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
+			//self->onErrorReset();
 			self->reset();
 		}
 
@@ -2837,15 +2899,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 			if (trLogInfo) {
 				if (trLogInfo->identifier.empty()) {
-					trLogInfo->identifier = printable(value.get());
+					trLogInfo->identifier = value.get().printable();
 				}
-				else if (trLogInfo->identifier != printable(value.get())) {
-					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", printable(value.get()));
+				else if (trLogInfo->identifier != value.get().printable()) {
+					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", value.get());
 					throw client_invalid_operation();
 				}
 			}
 			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::DONT_LOG));
+				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
 			}
 			break;
 
@@ -2930,7 +2992,6 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	state PromiseStream<double> replyTimes;
 	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
-	state double lastRequestTime = now();
 
 	loop {
 		send_batch = false;
@@ -2938,7 +2999,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
 				if (req.second.present()) {
 					if (!debugID.present())
-						debugID = g_nondeterministic_random->randomUniqueID();
+						debugID = nondeterministicRandom()->randomUniqueID();
 					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
 				}
 				requests.push_back(req.first);
@@ -3021,6 +3082,9 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 Future<Void> Transaction::onError( Error const& e ) {
+	if (numRetries < std::numeric_limits<int>::max()) {
+		numRetries++;
+	}
 	if (e.code() == error_code_success)
 	{
 		return client_invalid_operation();
@@ -3028,7 +3092,9 @@ Future<Void> Transaction::onError( Error const& e ) {
 	if (e.code() == error_code_not_committed ||
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
-		e.code() == error_code_proxy_memory_limit_exceeded)
+		e.code() == error_code_proxy_memory_limit_exceeded ||
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_cluster_not_fully_recovered)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3036,9 +3102,17 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsMaybeCommitted++;
 		if (e.code() == error_code_proxy_memory_limit_exceeded)
 			cx->transactionsResourceConstrained++;
+		if (e.code() == error_code_process_behind)
+			cx->transactionsProcessBehind++;
+		if (e.code() == error_code_cluster_not_fully_recovered) {
+			cx->transactionWaitsForFullRecovery++;
+			if (numRetries > options.maxRetries) {
+				return e;
+			}
+		}
 
 		double backoff = getBackoff(e.code());
-		reset();
+		onErrorReset();
 		return delay( backoff, info.taskID );
 	}
 	if (e.code() == error_code_transaction_too_old ||
@@ -3050,7 +3124,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsFutureVersions++;
 
 		double maxBackoff = options.maxBackoff;
-		reset();
+		onErrorReset();
 		return delay( std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID );
 	}
 
@@ -3154,7 +3228,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 			}
 		} else {
 			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
 				.detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
@@ -3241,7 +3315,7 @@ void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
 	if(!cx->isError()) {
 		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && deterministicRandom()->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
 			return Reference<TransactionLogInfo>(new TransactionLogInfo(TransactionLogInfo::DATABASE));
 		}
 	}
@@ -3253,4 +3327,103 @@ void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+}
+
+ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
+	state Transaction tr(inputCx);
+	state DatabaseContext* cx = inputCx.getPtr();
+	// remember the client ID before the snap operation
+	state UID preSnapClientUID = cx->clientInfo->get().id;
+
+	TraceEvent("SnapCreateEnter")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
+
+	StringRef snapCmdArgs = snapCmd;
+	StringRef snapCmdPart = snapCmdArgs.eat(":");
+	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+		.withSuffix(LiteralStringRef(":uid="))
+		.withSuffix(snapUIDRef)
+		.withSuffix(LiteralStringRef(","))
+		.withSuffix(snapCmdArgs);
+	state Standalone<StringRef>
+		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
+	// disable popping of TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
+			wait(timeoutError(tr.commit(), 10));
+			break;
+		} catch (Error& e) {
+			TraceEvent("DisableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
+
+	// snap the storage and Tlogs
+	// if we retry the below command in failure cases with the same snapUID
+	// then the snapCreate can end up creating multiple snapshots with
+	// the same name which needs additional handling, hence we fail in
+	// failure cases and let the caller retry with different snapUID
+	tr.reset();
+	try {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.execute(execSnap, snapPayloadRef);
+		wait(tr.commit());
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErroSnapTLogStorage").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
+
+	if (BUGGIFY) {
+		int32_t toDelay = deterministicRandom()->randomInt(1, 30);
+		wait(delay(toDelay));
+	}
+
+	// enable popping of the TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent("EnableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterUnlockingTLogs").detail("UID", snapUID);
+
+	// snap the coordinators
+	try {
+		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
+		wait(timeoutError(exec, 5.0));
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErrorSnapCoords").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingCoords").detail("UID", snapUID);
+
+	// if the client IDs did not change then we have a clean snapshot
+	UID postSnapClientUID = cx->clientInfo->get().id;
+	if (preSnapClientUID != postSnapClientUID) {
+		TraceEvent("UID mismatch")
+		    .detail("SnapPreSnapClientUID", preSnapClientUID)
+		    .detail("SnapPostSnapClientUID", postSnapClientUID);
+		throw coordinators_changed();
+	}
+
+	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
+	return Void();
 }

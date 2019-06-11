@@ -259,11 +259,13 @@ public:
 		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
 		bool completed = false;
+		double begin = timer_monotonic();
+
 		if( ctx.fallocateSupported && size >= lastFileSize ) {
 			result = fallocate( fd, 0, 0, size);
 			if (result != 0) {
 				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
+				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).detail("Size", size).GetLastError();
 				if ( fallocateErrCode == EOPNOTSUPP ) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
@@ -278,6 +280,12 @@ public:
 		if ( !completed )
 			result = ftruncate(fd, size);
 
+		double end = timer_monotonic();
+		if(nondeterministicRandom()->random01() < end-begin) {
+			TraceEvent("SlowKAIOTruncate")
+				.detail("TruncateTime", end - begin)
+				.detail("TruncateBytes", size - lastFileSize);
+		}
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if(result != 0) {
@@ -394,7 +402,7 @@ public:
 				ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
 				ctx.slowAioSubmitMetric->log();
 
-				if(g_nondeterministic_random->random01() < end-begin) {
+				if(nondeterministicRandom()->random01() < end-begin) {
 					TraceEvent("SlowKAIOLaunch")
 						.detail("IOSubmitTime", end-truncateComplete)
 						.detail("TruncateTime", truncateComplete-begin)
@@ -639,7 +647,7 @@ private:
 
 	ACTOR static void poll( Reference<IEventFD> ev ) {
 		loop {
-			int64_t evfd_count = wait( ev->read() );
+			wait(success(ev->read()));
 
 			wait(delay(0, TaskDiskIOComplete));
 
@@ -757,13 +765,13 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 
 	for(; iteration < numIterations; ++iteration) {
 		state std::vector<Future<Void>> futures;
-		state int numOps = g_random->randomInt(1, 20);
+		state int numOps = deterministicRandom()->randomInt(1, 20);
 		for(; numOps > 0; --numOps) {
-			if(g_random->coinflip()) {
-				futures.push_back(success(f->read(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096)));
+			if(deterministicRandom()->coinflip()) {
+				futures.push_back(success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096)));
 			}
 			else {
-				futures.push_back(f->write(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096));
+				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096));
 			}
 		}
 		state int fIndex = 0;

@@ -84,7 +84,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "router"
                      ]
                   },
                   "data_version":12341234,
@@ -458,7 +459,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
@@ -667,7 +669,8 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "triple",
         "three_datacenter",
         "three_datacenter_fallback",
-        "three_data_hall"
+        "three_data_hall",
+        "three_data_hall_fallback"
     ]},
     "regions":[{
         "datacenters":[{

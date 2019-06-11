@@ -19,15 +19,36 @@
  */
 
 #include "flow/flow.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/UnitTest.h"
 #include <stdarg.h>
+#include <cinttypes>
 
 INetwork *g_network = 0;
-IRandom *g_random = 0;
-IRandom *g_nondeterministic_random = 0;
-IRandom *g_debug_random = 0;
+
 FILE* randLog = 0;
+thread_local Reference<IRandom> seededRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
+
+void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
+	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
+}
+
+Reference<IRandom> deterministicRandom() {
+	if(!seededRandom) {
+		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
+	}
+	return seededRandom;
+}
+
+Reference<IRandom> nondeterministicRandom() {
+	static thread_local Reference<IRandom> random;
+	if(!random) {
+		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
+	}
+	return random;
+}
 
 std::string UID::toString() const {
 	return format("%016llx%016llx", part[0], part[1]);
@@ -36,7 +57,7 @@ std::string UID::toString() const {
 UID UID::fromString( std::string const& s ) {
 	ASSERT( s.size() == 32 );
 	uint64_t a=0, b=0;
-	int r = sscanf( s.c_str(), "%16llx%16llx", &a, &b );
+	int r = sscanf( s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b );
 	ASSERT( r == 2 );
 	return UID(a, b);
 }
@@ -198,7 +219,7 @@ int getSBVar(std::string file, int line){
 
 	const auto &flPair = std::make_pair(file, line);
 	if (!SBVars.count(flPair)){
-		SBVars[flPair] = g_random->random01() < P_BUGGIFIED_SECTION_ACTIVATED;
+		SBVars[flPair] = deterministicRandom()->random01() < P_BUGGIFIED_SECTION_ACTIVATED;
 		g_traceBatch.addBuggify( SBVars[flPair], line, file );
 		if( g_network ) g_traceBatch.dump();
 	}
@@ -212,4 +233,79 @@ bool validationIsEnabled() {
 
 void enableBuggify( bool enabled ) {
 	buggifyActivated = enabled;
+}
+
+TEST_CASE("/flow/FlatBuffers/ErrorOr") {
+	{
+		ErrorOr<int> in(worker_removed());
+		ErrorOr<int> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(out.isError());
+		ASSERT(out.getError().code() == in.getError().code());
+	}
+	{
+		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
+		ErrorOr<uint32_t> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(!out.isError());
+		ASSERT(out.get() == in.get());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/Optional") {
+	{
+		Optional<int> in;
+		Optional<int> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(!out.present());
+	}
+	{
+		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
+		Optional<uint32_t> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(out.present());
+		ASSERT(out.get() == in.get());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/Standalone") {
+	{
+		Standalone<StringRef> in(std::string("foobar"));
+		StringRef out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in == out);
+	}
+	{
+		StringRef in = LiteralStringRef("foobar");
+		Standalone<StringRef> out;
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in == out);
+	}
+	return Void();
 }

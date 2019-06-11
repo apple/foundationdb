@@ -800,7 +800,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 			return 0;
 
 		uint64_t t = explicitTime ? explicitTime : timer_int();
-		double x = g_random->random01();
+		double x = deterministicRandom()->random01();
 
 		int64_t l = 0;
 		if (x == 0.0)
@@ -829,6 +829,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).log( std::tuple_element<Is, typename Descriptor<E>::fields>::type::get( static_cast<E&>(*this) ), t, l, overflow, bytes ), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -838,6 +839,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).init(), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -847,6 +849,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).nextKey(t, l),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -865,6 +868,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).flushField( mk, rollTime, batch ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -879,6 +883,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).rollMetric( t ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -893,6 +898,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).registerField( mk, fieldKeys ),Void())...
 		};
+		(void)_;
 #endif
 	}
 protected:
@@ -1284,7 +1290,7 @@ public:
 		int64_t bytes = 0;
 
 		if(tv.time != 0) {
-			double x = g_random->random01();
+			double x = deterministicRandom()->random01();
 
 			int64_t l = 0;
 			if (x == 0.0)
@@ -1379,6 +1385,21 @@ struct MetricHandle {
 	typename T::ValueType getValue() const  { return ref->getValue(); }
 
 	Reference<T> ref;
+};
+
+template<class T>
+struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
+	static std::string toString(const MetricHandle<T>& value) {
+		return Traceable<typename T::ValueType>::toString(value.getValue());
+	}
+};
+
+template<class T>
+struct SpecialTraceMetricType<MetricHandle<T>> : SpecialTraceMetricType<typename T::ValueType> {
+	using parent = SpecialTraceMetricType<typename T::ValueType>;
+	static auto getValue(const MetricHandle<T>& value) -> decltype(parent::getValue(value.getValue())) {
+		return parent::getValue(value.getValue());
+	}
 };
 
 typedef MetricHandle<Int64Metric> Int64MetricHandle;
