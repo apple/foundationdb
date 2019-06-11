@@ -51,6 +51,7 @@
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/TDMetric.actor.h"
+#include <type_traits>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::pair;
@@ -307,6 +308,27 @@ public:
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
+	double old_rate = 1.0;
+	double currentRate() {
+		auto versionLag = version.get() - durableVersion.get();
+		double res;
+		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
+			res = 0.0;
+		} else if (versionLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
+			res = 1.0 - (double(versionLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX));
+		} else {
+			res = 1.0;
+		}
+		if (res != old_rate) {
+			TraceEvent(SevDebug, "LocalRatekeeperChange", thisServerID)
+				.detail("Old", old_rate)
+				.detail("New", res)
+				.detail("NDV", versionLag);
+			old_rate = res;
+		}
+		return res;
+	}
+
 	void addMutationToMutationLogOrStorage( Version ver, MutationRef m ); // Appends m to mutationLog@ver, or to storage if ver==invalidVersion
 
 	// Update the byteSample, and write the updates to the mutation log@ver, or to storage if ver==invalidVersion
@@ -485,6 +507,7 @@ public:
 			specialCounter(cc, "DurableVersion", [self](){ return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self](){ return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
+			specialCounter(cc, "LocalRatekeeper", [self]{ return self->currentRate(); });
 
 			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
@@ -592,7 +615,39 @@ public:
 	}
 
 	double getPenalty() {
-		 return std::max(1.0, (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - 2.0*SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) / SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		return std::max(std::max(1.0, (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
+													  2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
+								 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER),
+						(currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
+	}
+
+	template<class Reply>
+	using isLoadBalancedReply = std::is_base_of<LoadBalancedReply, Reply>;
+
+	template <class Reply>
+	static typename std::enable_if<isLoadBalancedReply<Reply>::value, void>::type sendErrorWithPenalty(
+		const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
+		Reply reply;
+		reply.error = err;
+		reply.penalty = penalty;
+		promise.send(reply);
+	}
+
+	template <class Reply>
+	static typename std::enable_if<!isLoadBalancedReply<Reply>::value, void>::type sendErrorWithPenalty(
+		const ReplyPromise<Reply>& promise, const Error& err, double) {
+		promise.sendError(err);
+	}
+
+	template<class Request, class HandleFunction>
+	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
+		auto rate = currentRate();
+		if (rate < 0.8 && deterministicRandom()->random01() > rate) {
+			//request.error = future_version();
+			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
+			return Void();
+		}
+		return fun(this, request);
 	}
 };
 
@@ -832,7 +887,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	} catch (Error& e) {
 		if(!canReplyWith(e))
 			throw;
-		req.reply.sendError(e);
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
 	++data->counters.finishedQueries;
@@ -877,7 +932,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 
 				if( data->watchBytes > SERVER_KNOBS->MAX_STORAGE_SERVER_WATCH_BYTES ) {
 					TEST(true); //Too many watches, reverting to polling
-					req.reply.sendError( watch_cancelled() );
+					data->sendErrorWithPenalty(req.reply, watch_cancelled(), data->getPenalty());
 					return Void();
 				}
 
@@ -900,7 +955,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 	} catch (Error& e) {
 		if(!canReplyWith(e))
 			throw;
-		req.reply.sendError(e);
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 	return Void();
 }
@@ -921,7 +976,7 @@ ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
 				return Void();
 			}
 			when( wait( timeoutDelay < 0 ? Never() : delay(timeoutDelay) ) ) {
-				req.reply.sendError( timed_out() );
+				data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
 				return Void();
 			}
 			when( wait( data->noRecentUpdates.onChange()) ) {}
@@ -962,7 +1017,7 @@ ACTOR Future<Void> getShardStateQ( StorageServer* data, GetShardStateRequest req
 	choose {
 		when( wait( getShardState_impl( data, req ) ) ) {}
 		when( wait( delay( g_network->isSimulated() ? 10 : 60 ) ) ) {
-			req.reply.sendError( timed_out() );
+			data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
 		}
 	}
 	return Void();
@@ -1374,7 +1429,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 	} catch (Error& e) {
 		if(!canReplyWith(e))
 			throw;
-		req.reply.sendError(e);
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
 	++data->counters.finishedQueries;
@@ -1431,7 +1486,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		//if (e.code() == error_code_wrong_shard_server) TraceEvent("WrongShardServer").detail("In","getKey");
 		if(!canReplyWith(e))
 			throw;
-		req.reply.sendError(e);
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
 	++data->counters.finishedQueries;
@@ -1453,6 +1508,7 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.bytesDurable = self->counters.bytesDurable.getValue();
 
 	reply.storageBytes = self->storage.getStorageBytes();
+	reply.localRateLimit = self->currentRate();
 
 	reply.version = self->version.get();
 	reply.cpuUsage = self->cpuUsage;
@@ -2802,6 +2858,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
+		if (g_network->isSimulated()) {
+			wait(g_pSimulator->checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str())));
+		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		wait( delay(0, TaskUpdateStorage) );
 
@@ -3358,7 +3417,7 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 			when (WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!self->isReadable( req.keys )) {
 					TEST( true );	// waitMetrics immediate wrong_shard_server()
-					req.reply.sendError(wrong_shard_server());
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					actors.add( self->metrics.waitMetrics( req, delayJittered( SERVER_KNOBS->STORAGE_METRIC_TIMEOUT ) ) );
 				}
@@ -3366,7 +3425,7 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 			when (SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
 				if (!self->isReadable( req.keys )) {
 					TEST( true );	// splitMetrics immediate wrong_shard_server()
-					req.reply.sendError(wrong_shard_server());
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->metrics.splitMetrics( req );
 				}
@@ -3475,20 +3534,20 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 					req.reply.send(GetValueReply());
 				else
-					actors.add( getValueQ( self, req ) );
+					actors.add(self->readGuard(req , getValueQ));
 			}
 			when( WatchValueRequest req = waitNext(ssi.watchValue.getFuture()) ) {
 				// TODO: fast load balancing?
 				// SOMEDAY: combine watches for the same key/value into a single watch
-				actors.add( watchValueQ( self, req ) );
+				actors.add(self->readGuard(req, watchValueQ));
 			}
 			when (GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
 				// Warning: This code is executed at extremely high priority (TaskLoadBalancedEndpoint), so downgrade before doing real work
-				actors.add( getKey( self, req ) );
+				actors.add(self->readGuard(req , getKey));
 			}
 			when (GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture()) ) {
 				// Warning: This code is executed at extremely high priority (TaskLoadBalancedEndpoint), so downgrade before doing real work
-				actors.add( getKeyValues( self, req ) );
+				actors.add(self->readGuard(req , getKeyValues));
 			}
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {

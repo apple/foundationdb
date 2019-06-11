@@ -129,9 +129,11 @@ set(FDBSERVER_SRCS
   workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
+  workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp

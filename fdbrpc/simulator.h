@@ -311,6 +311,9 @@ public:
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
+	Future<Void> checkDisabled(const std::string& desc) const;
+	void disableFor(const std::string& desc, double time);
+
 	static thread_local ProcessInfo* currentProcess;
 protected:
 	Mutex mutex;
@@ -320,6 +323,7 @@ private:
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
+	std::map<std::string, Future<Void>> disabledMap;
 	bool allSwapsDisabled;
 };
 
