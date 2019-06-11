@@ -114,7 +114,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> doSwitch(Database cx, DifferentClustersSameRVWorkload* self) {
-		state UID lockUid = g_random->randomUniqueID();
+		state UID lockUid = deterministicRandom()->randomUniqueID();
 		wait(delay(self->switchAfter));
 		state Future<Void> watchFuture;
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
