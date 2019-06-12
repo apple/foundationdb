@@ -477,23 +477,18 @@ struct Peer : NonCopyable {
 
 					// Wait until there is something to send.
 					while (self->unsent.empty()) {
-						Future<Void> clientReconnectDelayF = FlowTransport::transport().isClient() &&
-						                                             self->destination.isPublic() &&
-						                                             clientReconnectDelay
-						                                         ? delay(0)
-						                                         : Never();
-						choose {
-							when(wait(self->dataToSend.onTrigger())) {}
-							when(wait(clientReconnectDelayF)) { break; }
+						if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
+						    clientReconnectDelay) {
+							break;
 						}
+						wait(self->dataToSend.onTrigger());
 					}
 
 					ASSERT( self->destination.isPublic() );
 					self->outgoingConnectionIdle = false;
-					if (!FlowTransport::transport().isClient())
-						wait(delayJittered(
-						    std::max(0.0, self->lastConnectTime + self->reconnectionDelay -
-						                      now()))); // Don't connect() to the same peer more than once per 2 sec
+					wait(delayJittered(
+					    std::max(0.0, self->lastConnectTime + self->reconnectionDelay -
+					                      now()))); // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
 					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
@@ -1227,13 +1222,8 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 }
 
 void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
-	if (isClient) {
-		g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
-		g_network->setGlobal(INetwork::enClientFailureMonitor, (flowGlobalType)1);
-	} else {
-		g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
-		g_network->setGlobal(INetwork::enClientFailureMonitor, nullptr);
-	}
+	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
+	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);
