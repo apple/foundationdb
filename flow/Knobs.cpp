@@ -109,6 +109,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
+	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( DEFAULT_PACKET_BUFFER_BYTES,                   64 * 1024 );
+	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );

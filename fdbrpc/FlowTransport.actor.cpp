@@ -444,7 +444,7 @@ struct Peer : NonCopyable {
 			loop {
 				lastWriteTime = now();
 
-				int sent = conn->write(self->unsent.getUnsent(), 200 * 1024);  // avoid sending large packet
+				int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 				if (sent) {
 					self->transport->bytesSent += sent;
 					self->unsent.sent(sent);
@@ -735,14 +735,15 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 static int getNewBufferSize(uint8_t* begin, uint8_t* end, const NetworkAddress& peerAddress) {
 	const int len = end - begin;
 	if (len < sizeof(uint32_t)) {
-		return std::max(65536, len * 2);
+		return std::max(FLOW_KNOBS->DEFAULT_PACKET_BUFFER_BYTES, len * 2);
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 		throw platform_error();
 	}
-	return std::max<uint32_t>(4096, packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 1 : 2));
+	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
+	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 1 : 2));
 }
 
 ACTOR static Future<Void> connectionReader(
