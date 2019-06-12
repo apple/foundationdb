@@ -17,6 +17,8 @@
 #include <limits.h>
 #endif
 
+#define DEFAULT_RETRY_COUNT 3
+
 #define VERBOSE_NONE 0
 #define VERBOSE_DEFAULT 1
 #define VERBOSE_ANNOYING 2
