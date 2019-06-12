@@ -30,7 +30,7 @@ FoundationDB stores each piece of data on multiple servers. If a server containi
 Ordered Key-Value API
 ---------------------
 
-Simple can be powerful. FoundationDB uses an ordered key-value data model (and richer data models are exposed via :doc:`layers <layer-concept>`. Each "row" within the database consists of a key that is used to reference the row and a value which stores data associated with the key. No specific format for the keys or values is required; they are simply binary data. Because keys are kept in lexicographical (sorted) order, ranges of key-value pairs can be read efficiently.
+Simple can be powerful. FoundationDB uses an ordered key-value data model (and richer data models are exposed via :doc:`layers <layer-concept>`). Each "row" within the database consists of a key that is used to reference the row and a value which stores data associated with the key. No specific format for the keys or values is required; they are simply binary data. Because keys are kept in lexicographical (sorted) order, ranges of key-value pairs can be read efficiently.
 
 Watches
 -------
