@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.10
+=====
+
+Performance
+-----------
+
+* Improved the recovery speed of storage servers with large amount of data. `(PR #1700) <https://github.com/apple/foundationdb/pull/1700>`_
+
 6.1.9
 =====
 
