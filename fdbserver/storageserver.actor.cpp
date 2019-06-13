@@ -920,6 +920,10 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 				GetValueReply reply = wait( getReq.reply.getFuture() );
 				//TraceEvent("WatcherCheckValue").detail("Key",  req.key  ).detail("Value",  req.value  ).detail("CurrentValue",  v  ).detail("Ver", latest);
 
+				if(reply.error.present()) {
+					throw reply.error.get();
+				}
+				
 				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
 				if( req.debugID.present() )
