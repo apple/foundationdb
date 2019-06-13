@@ -84,19 +84,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-void ISimulator::disableFor(const std::string& desc, double time) {
-	disabledMap[desc] = map(::delay(time), [this, desc](Void v){ disabledMap.erase(desc); return Void(); });
-}
-
-Future<Void> ISimulator::checkDisabled(const std::string& desc) const
-{
-	auto iter = disabledMap.find(desc);
-	if (iter != disabledMap.end()) {
-		return iter->second;
-	}
-	return Void();
-}
-
 namespace std {
 template<>
 class hash<Endpoint> {

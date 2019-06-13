@@ -126,7 +126,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw result.getError();
+		throw process_behind(); 
 	}
 
 	return false;
