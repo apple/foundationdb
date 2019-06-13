@@ -1,11 +1,13 @@
-//#define BOOST_SYSTEM_NO_LIB
-//#define BOOST_DATE_TIME_NO_LIB
-//#define BOOST_REGEX_NO_LIB
-//#include <boost/process.hpp>
+#if !defined(_WIN32) && !defined(__APPLE__)
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include <boost/process.hpp>
+#endif
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
+#if defined(CMAKE_BUILD) || !defined(_WIN32)
 #include "versions.h"
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -81,6 +83,13 @@ void ExecCmdValueString::dbgPrint() {
 	return;
 }
 
+#if defined(_WIN32) || defined(__APPLE__)
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
+{
+	wait(delay(0.0));
+	return 0;
+}
+#else
 ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
 {
 	state std::string argsString;
@@ -90,7 +99,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	TraceEvent("SpawnProcess").detail("Cmd", binPath).detail("Args", argsString);
 
 	state int err = 0;
-	/*state double runTime = 0;
+	state double runTime = 0;
 	state boost::process::child c(binPath, boost::process::args(paramList),
 								  boost::process::std_err > boost::process::null);
 
@@ -130,12 +139,13 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 		}
 	} else {
 		err = c.exit_code();
-	}*/
+	}
 	TraceEvent("SpawnProcess")
 		.detail("Cmd", binPath)
 		.detail("Error", err);
 	return err;
 }
+#endif
 
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role) {
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
