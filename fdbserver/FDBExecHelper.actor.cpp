@@ -1,7 +1,7 @@
-#define BOOST_SYSTEM_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#include <boost/process.hpp>
+//#define BOOST_SYSTEM_NO_LIB
+//#define BOOST_DATE_TIME_NO_LIB
+//#define BOOST_REGEX_NO_LIB
+//#include <boost/process.hpp>
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -90,7 +90,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	TraceEvent("SpawnProcess").detail("Cmd", binPath).detail("Args", argsString);
 
 	state int err = 0;
-	state double runTime = 0;
+	/*state double runTime = 0;
 	state boost::process::child c(binPath, boost::process::args(paramList),
 								  boost::process::std_err > boost::process::null);
 
@@ -130,7 +130,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 		}
 	} else {
 		err = c.exit_code();
-	}
+	}*/
 	TraceEvent("SpawnProcess")
 		.detail("Cmd", binPath)
 		.detail("Error", err);
