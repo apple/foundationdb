@@ -25,7 +25,7 @@ Developers interested in using the FoundationDB store for an application can get
 
 ### Compiling from source
 
-For developers on an OS for which there is no binary package, or who would like
+Developers on an OS for which there is no binary package, or who would like
 to start hacking on the code, can get started by compiling from source.
 
 Currently there are two build systems: a collection of Makefiles and a

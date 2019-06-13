@@ -38,7 +38,7 @@ Members of the Apple FoundationDB team are part of the initial core committers h
 ### Opening a Pull Request
 We love pull requests! For minor changes, feel free to open up a PR directly. For larger feature development and any changes that may require community discussion, we ask that you discuss your ideas on the [community forums](https://forums.foundationdb.org) prior to opening a PR, and then reference that thread within your PR comment.
 
-CI will be run automatically for core committers, and by the request of a core committer on community PRs.  Tests can also be run locally via `ctest`, and core committers can run additional validation on pull requests prior to merging them.
+CI will be run automatically for core committers, and for community PRs it will be initiated by the request of a core committer.  Tests can also be run locally via `ctest`, and core committers can run additional validation on pull requests prior to merging them.
 
 ### Reporting issues
 Please refer to the section below on [using GitHub issues and the community forums](#using-github-issues-and-community-forums) for more info.

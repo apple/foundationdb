@@ -48,7 +48,7 @@
     By default, FoundationDB transactions guarantee :ref:`strictly serializable isolation <ACID>`, resulting in a state that is *as if* transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few :ref:`conflicts <developer-guide-transaction-conflicts>` but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.
 
 .. |snapshot-blurb3| replace::
-    Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case. Like stictly serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see :ref:`snapshot isolation`.
+    Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case. Like strictly serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see :ref:`snapshot isolation`.
 
 .. |snapshot-blurb4| replace::
     Snapshot reads also interact with transaction commit a little differently than normal reads. If a snapshot read is outstanding when transaction commit is called that read will immediately return an error. (Normally, transaction commit will wait until outstanding reads return before committing.)
