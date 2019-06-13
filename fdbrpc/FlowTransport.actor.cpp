@@ -732,7 +732,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 
 // Given unprocessed buffer [begin, end), check if next packet size is known and return
 // enough size for the next packet, whose format is: {size, optional_checksum, data}.
-static int getNewBufferSize(uint8_t* begin, uint8_t* end, const NetworkAddress& peerAddress) {
+static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
 	const int len = end - begin;
 	if (len < sizeof(uint32_t)) {
 		return std::max(FLOW_KNOBS->DEFAULT_PACKET_BUFFER_BYTES, len * 2);
