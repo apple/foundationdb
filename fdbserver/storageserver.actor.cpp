@@ -2863,7 +2863,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
 		if (g_network->isSimulated()) {
-			wait(g_pSimulator->checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str())));
+			double endTime = g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
+			if(endTime > now()) {
+				wait(delay(endTime - now(), TaskUpdateStorage));
+			}
 		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		wait( delay(0, TaskUpdateStorage) );
