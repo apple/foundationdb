@@ -2,6 +2,28 @@
 Release Notes
 #############
 
+6.1.10
+=====
+
+Performance
+-----------
+
+* Improved the recovery speed of storage servers with large amount of data. `(PR #1700) <https://github.com/apple/foundationdb/pull/1700>`_
+
+Fixes
+-----
+
+* The ``fdbrestore`` commands ``abort``, ``wait``, and ``status`` would use a default cluster file instead of the destination cluster file argument.  `(PR #1701) <https://github.com/apple/foundationdb/pull/1701>`_
+
+6.1.9
+=====
+
+Fixes
+-----
+
+* Sometimes a minority of coordinators would not converge to the leader. `(PR #1649) <https://github.com/apple/foundationdb/pull/1649>`_
+* HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. `(PR #1651) <https://github.com/apple/foundationdb/pull/1651>`_
+
 6.1.8
 =====
 
