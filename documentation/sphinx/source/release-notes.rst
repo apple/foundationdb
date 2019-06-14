@@ -10,6 +10,11 @@ Performance
 
 * Improved the recovery speed of storage servers with large amount of data. `(PR #1700) <https://github.com/apple/foundationdb/pull/1700>`_
 
+Fixes
+-----
+
+* Fdbrestore abort, wait, and status commands would only use a default cluster file and not the dest cluster argument.  `(PR #1701) <https://github.com/apple/foundationdb/pull/1701>`_
+
 6.1.9
 =====
 
