@@ -361,6 +361,7 @@ struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
 	bool isWrongConfiguration;
+	bool isWrongStoreType; // Does the storage server use a wrong storage engine
 	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
 	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
@@ -2765,10 +2766,14 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
-	if(type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
+	if(type == self->configuration.storageServerStoreType)
 		wait(Future<Void>(Never()));
 
 	return type;
+}
+
+bool inCorrectDC(DDTeamCollection* self, TCServerInfo *server) {
+	return (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 }
 
 ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
@@ -2870,7 +2875,8 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
-	state bool hasWrongStoreTypeOrDC = false;
+	state bool hasWrongStoretype = false;
+	state bool hasWrongDC = false;
 
 	try {
 		loop {
@@ -2928,10 +2934,14 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
-			if(hasWrongStoreTypeOrDC) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+			if(hasWrongDC) {
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("WrongDC", "?");
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
+			}
+			if (hasWrongStoretype) {
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+				status.isWrongStoreType = true;
 			}
 
 			// If the storage server is in the excluded servers list, it is undesired
@@ -2950,7 +2960,7 @@ ACTOR Future<Void> storageServerTracker(
 			failureTracker = storageServerFailureTracker( self, server, cx, &status, addedVersion );
 
 			//We need to recruit new storage servers if the key value store type has changed
-			if(hasWrongStoreTypeOrDC)
+			if(hasWrongDC)
 				self->restartRecruiting.trigger();
 
 			if ( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() ) {
@@ -3071,7 +3081,8 @@ ACTOR Future<Void> storageServerTracker(
 
 					//Restart the storeTracker for the new interface
 					storeTracker = keyValueStoreTypeTracker(self, server);
-					hasWrongStoreTypeOrDC = false;
+					hasWrongDC = false;
+					hasWrongStoretype = false;
 					self->restartTeamBuilder.trigger();
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
@@ -3087,7 +3098,8 @@ ACTOR Future<Void> storageServerTracker(
 					TEST(true); //KeyValueStore type changed
 
 					storeTracker = Never();
-					hasWrongStoreTypeOrDC = true;
+					hasWrongDC = inCorrectDC(self, server);
+					hasWrongStoretype = true;
 				}
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
