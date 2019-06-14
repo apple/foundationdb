@@ -779,7 +779,6 @@ const KeyRef exeRestore = LiteralStringRef("fdbrestore");
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
-extern void flushTraceFileVoid();
 extern const char* getHGVersion();
 
 #ifdef _WIN32

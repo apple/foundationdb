@@ -866,6 +866,13 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				if(req.waitForDuration) {
+					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
+					flushTraceFileVoid();
+					setProfilingEnabled(0);
+					g_network->stop();
+					threadSleep(req.waitForDuration);
+				}
 				if(rebootReq.checkData) {
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					wait( checkFile->sync() );
