@@ -252,7 +252,7 @@ class RubyObject(ObjectDescription):
         indextext = self.get_index_text(modname, name_cls)
         if indextext:
             self.indexnode['entries'].append(('single', indextext,
-                                              fullname, fullname))
+                                              fullname, fullname, None))
 
     def before_content(self):
         # needed for automatic qualification of members (reset in subclasses)
@@ -436,7 +436,7 @@ class RubyModule(Directive):
         if not noindex:
             indextext = _('%s (module)') % modname
             inode = addnodes.index(entries=[('single', indextext,
-                                             'module-' + modname, modname)])
+                                             'module-' + modname, modname, None)])
             ret.append(inode)
         return ret
 
