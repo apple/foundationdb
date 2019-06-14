@@ -773,7 +773,7 @@ ACTOR static Future<Void> connectionReader(
 	try {
 		loop {
 			loop {
-				int readAllBytes = buffer_end - unprocessed_end;
+				state int readAllBytes = buffer_end - unprocessed_end;
 				if (readAllBytes < 4096) {
 					Arena newArena;
 					const int unproc_len = unprocessed_end - unprocessed_begin;
@@ -787,13 +787,21 @@ ACTOR static Future<Void> connectionReader(
 					readAllBytes = buffer_end - unprocessed_end;
 				}
 
-				int readBytes = conn->read( unprocessed_end, buffer_end );
-				if(peer) {
-					peer->bytesReceived += readBytes;
+				state int totalReadBytes = 0;
+				while (true) {
+					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+					if (len == 0) break;
+					state int readBytes = conn->read(unprocessed_end, unprocessed_end + len);
+					if (readBytes == 0) break;
+					wait(yield(TaskReadSocket));
+					totalReadBytes += readBytes;
+					unprocessed_end += readBytes;
 				}
-				if (!readBytes) break;
-				state bool readWillBlock = readBytes != readAllBytes;
-				unprocessed_end += readBytes;
+				if (peer) {
+					peer->bytesReceived += totalReadBytes;
+				}
+				if (totalReadBytes == 0) break;
+				state bool readWillBlock = totalReadBytes != readAllBytes;
 
 				if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
