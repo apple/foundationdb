@@ -507,7 +507,7 @@ public:
 			specialCounter(cc, "DurableVersion", [self](){ return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self](){ return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
-			specialCounter(cc, "LocalRatekeeper", [self]{ return self->currentRate(); });
+			specialCounter(cc, "LocalRate", [self]{ return self->currentRate() * 100; });
 
 			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
