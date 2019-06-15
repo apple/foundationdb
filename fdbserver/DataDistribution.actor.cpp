@@ -56,6 +56,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
+	Promise<Void> removeWrongStoreType;
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -364,12 +365,12 @@ struct ServerStatus {
 	bool isWrongStoreType; // Does the storage server use a wrong storage engine
 	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
-	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
-	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
+	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), isWrongStoreType(false), initialized(false) {}
+	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), isWrongStoreType(false), initialized(true) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && isWrongStoreType == r.isWrongStoreType && locality == r.locality && initialized == r.initialized; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -593,6 +594,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> redundantTeamRemover;
+	Future<Void> wrongStoreTypeRemover;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -634,7 +636,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantTeamRemover(Void()), configuration(configuration),
+	    badTeamRemover(Void()), redundantTeamRemover(Void()), wrongStoreTypeRemover(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
 	    initialFailureReactionDelay(
@@ -2252,6 +2254,30 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
+ACTOR Future<Void> wrongStoreTypeRemover(DDTeamCollection* self) {
+	state int numServersRemoved = 0;
+	state std::vector<Future<Void>> serversRemoved;
+	state std::map<UID, Reference<TCServerInfo>>::iterator server;
+	loop {
+		wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
+
+		for ( server = self->server_info.begin(); server != self->server_info.end(); server++ ) {
+			auto serverStatus = self->server_status.get( server->second->lastKnownInterface.id() );
+			if ( serverStatus.isWrongStoreType ) {
+				server->second->removeWrongStoreType.send(Void());
+				serversRemoved.push_back(server->second->onRemoved);
+				numServersRemoved++;
+			}
+			if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
+				 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
+				wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
+				numServersRemoved = 0;
+				serversRemoved.clear();
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 	state int numMachineTeamRemoved = 0;
 	loop {
@@ -2809,6 +2835,12 @@ ACTOR Future<Void> storageServerFailureTracker(
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
+		// if (server->removeWrongStoreType) {
+		// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+		// 	status->isUndesired = true;
+		// 	status->isWrongConfiguration = true;
+		// }
+
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
 		if(inHealthyZone) {
 			status->isFailed = false;
@@ -2853,6 +2885,12 @@ ACTOR Future<Void> storageServerFailureTracker(
 			}
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
+			when ( wait( server->removeWrongStoreType.getFuture() ) ) {
+				TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+				status->isUndesired = true;
+				status->isWrongConfiguration = true;
+				status->isWrongStoreType = false;
+			}
 		}
 	}
 
@@ -2864,7 +2902,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 ACTOR Future<Void> storageServerTracker(
 	DDTeamCollection* self,
 	Database cx,
-	TCServerInfo *server, //This actor is owned by this TCServerInfo
+	TCServerInfo *server, //This actor is owned by this TCServerInfo, point to server_info[id]
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
@@ -2935,7 +2973,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
 			if(hasWrongDC) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("WrongDC", "?");
+				TraceEvent(SevWarn, "UndesiredDC", self->distributorId).detail("Server", server->id).detail("WrongDC", "?");
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
@@ -3338,6 +3376,10 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		if (self->redundantTeamRemover.isReady()) {
 			self->redundantTeamRemover = teamRemover(self);
 			self->addActor.send(self->redundantTeamRemover);
+		}
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = wrongStoreTypeRemover(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
 		}
 		self->traceTeamCollectionInfo();
 
