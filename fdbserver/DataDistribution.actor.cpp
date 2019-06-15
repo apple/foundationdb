@@ -2264,6 +2264,7 @@ ACTOR Future<Void> wrongStoreTypeRemover(DDTeamCollection* self) {
 		for ( server = self->server_info.begin(); server != self->server_info.end(); server++ ) {
 			auto serverStatus = self->server_status.get( server->second->lastKnownInterface.id() );
 			if ( serverStatus.isWrongStoreType ) {
+				TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
 				server->second->removeWrongStoreType.send(Void());
 				serversRemoved.push_back(server->second->onRemoved);
 				numServersRemoved++;
@@ -3136,7 +3137,7 @@ ACTOR Future<Void> storageServerTracker(
 					TEST(true); //KeyValueStore type changed
 
 					storeTracker = Never();
-					hasWrongDC = inCorrectDC(self, server);
+					hasWrongDC = !inCorrectDC(self, server);
 					hasWrongStoretype = true;
 				}
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
