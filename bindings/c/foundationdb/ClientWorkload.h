@@ -26,12 +26,14 @@
 #include <functional>
 #include <memory>
 
+#ifndef DLLEXPORT
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
 #elif defined(__GNUG__)
-#define DLLEXPORT __attribute__ ((visibility ("default")))
+#define DLLEXPORT __attribute__((visibility("default")))
 #else
 #error Missing symbol export
+#endif
 #endif
 
 typedef struct FDB_future FDBFuture;
@@ -40,10 +42,16 @@ typedef struct FDB_transaction FDBTransaction;
 
 enum class FDBSeverity { Debug, Info, Warn, WarnAlways, Error };
 
-class FDBWorkloadContext {
+class FDBLogger {
 public:
 	virtual void trace(FDBSeverity sev, const std::string& name,
-	                         const std::vector<std::pair<std::string, std::string>>& details) = 0;
+	                   const std::vector<std::pair<std::string, std::string>>& details) = 0;
+};
+
+class FDBWorkloadContext : public FDBLogger {
+public:
+	virtual uint64_t getProcessID() const = 0;
+	virtual void setProcessID(uint64_t processID) = 0;
 	virtual double now() const = 0;
 	virtual uint32_t rnd() const = 0;
 	virtual bool getOption(const std::string& name, bool defaultValue) = 0;
@@ -65,11 +73,9 @@ class GenericPromise {
 	std::shared_ptr<FDBPromise> impl;
 
 public:
-	template<class Ptr>
+	template <class Ptr>
 	explicit GenericPromise(Ptr&& impl) : impl(std::forward<Ptr>(impl)) {}
-	void send(T val) {
-		impl->send(&val);
-	}
+	void send(T val) { impl->send(&val); }
 };
 
 struct FDBPerfMetric {

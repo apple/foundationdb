@@ -192,12 +192,6 @@ if(NOT WIN32)
   target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
 
-set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
-set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
-if(WITH_JAVA_WORKLOAD)
-  list(APPEND FDBSERVER_SRCS workloads/JavaWorkload.actor.cpp)
-endif()
-
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
@@ -207,13 +201,6 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
-if(WITH_JAVA_WORKLOAD)
-  if(NOT JNI_FOUND)
-    message(SEND_ERROR "Trying to build Java workload but couldn't find JNI")
-  endif()
-  target_include_directories(fdbserver PRIVATE "${JNI_INCLUDE_DIRS}")
-  target_link_libraries(fdbserver PRIVATE "${JNI_LIBRARIES}")
-endif()
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

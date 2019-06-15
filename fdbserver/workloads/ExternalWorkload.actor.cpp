@@ -26,13 +26,26 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+extern void flushTraceFileVoid();
+
 namespace {
 
 template <class T>
 struct FDBPromiseImpl : FDBPromise {
 	Promise<T> impl;
 	FDBPromiseImpl(Promise<T> impl) : impl(impl) {}
-	void send(void* value) override { impl.send(*reinterpret_cast<T*>(value)); }
+	void send(void* value) override {
+		if (g_network->isOnMainThread()) {
+			impl.send(*reinterpret_cast<T*>(value));
+		} else {
+			onMainThreadVoid(
+			    [impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
+				    impl.send(val);
+				    return Void();
+			    },
+			    nullptr);
+		}
+	}
 };
 
 ACTOR template <class F, class T>
@@ -43,11 +56,58 @@ void keepAlive(F until, T db) {
 	}
 }
 
+struct FDBLoggerImpl : FDBLogger {
+	static FDBLogger* instance() {
+		static FDBLoggerImpl impl;
+		return &impl;
+	}
+	void trace(FDBSeverity sev, const std::string& name,
+	           const std::vector<std::pair<std::string, std::string>>& details) override {
+		auto traceFun = [=]() -> Future<Void> {
+			Severity severity;
+			switch (sev) {
+			case FDBSeverity::Debug:
+				severity = SevDebug;
+				break;
+			case FDBSeverity::Info:
+				severity = SevInfo;
+				break;
+			case FDBSeverity::Warn:
+				severity = SevWarn;
+				break;
+			case FDBSeverity::WarnAlways:
+				severity = SevWarnAlways;
+				break;
+			case FDBSeverity::Error:
+				severity = SevError;
+				break;
+			}
+			TraceEvent evt(severity, name.c_str());
+			for (const auto& p : details) {
+				evt.detail(p.first.c_str(), p.second);
+			}
+			return Void();
+		};
+		if (g_network->isOnMainThread()) {
+			traceFun();
+			flushTraceFileVoid();
+		} else {
+			onMainThreadVoid(
+			    [traceFun]() -> Future<Void> {
+				    traceFun();
+					flushTraceFileVoid();
+				    return Void();
+			    },
+			    nullptr);
+		}
+	}
+};
+
 struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	std::string libraryName, libraryPath;
 	bool success = true;
 	void* library = nullptr;
-	FDBWorkloadFactory* (*workloadFactory)(void);
+	FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 	std::shared_ptr<FDBWorkload> workloadImpl;
 
 	constexpr static const char* NAME = "External";
@@ -76,9 +136,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		auto wName = ::getOption(options, LiteralStringRef("workloadName"), LiteralStringRef(""));
 		auto fullPath = joinPath(libraryPath, toLibName(libraryName));
 		TraceEvent("ExternalWorkloadLoad")
-			.detail("LibraryName", libraryName)
-			.detail("LibraryPath", fullPath)
-			.detail("WorkloadName", wName);
+		    .detail("LibraryName", libraryName)
+		    .detail("LibraryPath", fullPath)
+		    .detail("WorkloadName", wName);
 		library = loadLibrary(fullPath.c_str());
 		if (library == nullptr) {
 			TraceEvent(SevError, "ExternalWorkloadLoadError");
@@ -91,7 +151,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 			success = false;
 			return;
 		}
-		workloadImpl = (*workloadFactory)()->create(wName.toString());
+		workloadImpl = (*workloadFactory)(FDBLoggerImpl::instance())->create(wName.toString());
 		if (!workloadImpl) {
 			TraceEvent(SevError, "WorkloadNotFound");
 			success = false;
@@ -180,40 +240,18 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	// context implementation
 	void trace(FDBSeverity sev, const std::string& name,
 	           const std::vector<std::pair<std::string, std::string>>& details) override {
-		auto traceFun = [=]() -> Future<Void> {
-			Severity severity;
-			switch (sev) {
-			case FDBSeverity::Debug:
-				severity = SevDebug;
-				break;
-			case FDBSeverity::Info:
-				severity = SevInfo;
-				break;
-			case FDBSeverity::Warn:
-				severity = SevWarn;
-				break;
-			case FDBSeverity::WarnAlways:
-				severity = SevWarnAlways;
-				break;
-			case FDBSeverity::Error:
-				severity = SevError;
-				break;
-			}
-			TraceEvent evt(severity, name.c_str());
-			for (const auto& p : details) {
-				evt.detail(p.first.c_str(), p.second);
-			}
-			return Void();
-		};
-		if (g_network->isOnMainThread()) {
-			traceFun();
+		return FDBLoggerImpl::instance()->trace(sev, name, details);
+	}
+	uint64_t getProcessID() const override {
+		if (g_network->isSimulated()) {
+			return reinterpret_cast<uint64_t>(g_simulator.getCurrentProcess());
 		} else {
-			onMainThreadVoid(
-			    [traceFun]() -> Future<Void> {
-				    traceFun();
-				    return Void();
-			    },
-			    nullptr);
+			return 0ul;
+		}
+	}
+	void setProcessID(uint64_t processID) override {
+		if (g_network->isSimulated()) {
+			g_simulator.currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
 		}
 	}
 	double now() const override { return g_network->now(); }

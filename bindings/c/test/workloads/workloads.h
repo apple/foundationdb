@@ -44,4 +44,4 @@ struct FDBWorkloadFactoryT : IFDBWorkloadFactory {
 	}
 };
 
-extern "C" DLLEXPORT FDBWorkloadFactory* workloadFactory();
+extern "C" DLLEXPORT FDBWorkloadFactory* workloadFactory(FDBLogger*);

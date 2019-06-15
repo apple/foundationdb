@@ -1,5 +1,5 @@
 /*
- * workloads.h
+ * Promise.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,24 +18,27 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+package com.apple.foundationdb.testing;
 
-FDBWorkloadFactoryImpl::~FDBWorkloadFactoryImpl() {}
+public class Promise {
+	private long nativePromise;
+	private boolean wasSet;
+	private static native void send(long self, boolean value);
+	private Promise(long nativePromise) {
+		this.nativePromise = nativePromise;
+		this.wasSet = false;
+	}
 
-std::map<std::string, IFDBWorkloadFactory*>& FDBWorkloadFactoryImpl::factories() {
-    static std::map<std::string, IFDBWorkloadFactory*> _factories;
-    return _factories;
-}
+	public boolean canBeSet() {
+		return !wasSet;
+	}
 
-std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(const std::string &name) {
-    auto res = factories().find(name);
-    if (res == factories().end()) {
-        return nullptr;
-    }
-    return res->second->create();
-}
+	public void send(boolean value) {
+		if (wasSet) {
+			throw new IllegalStateException("Promise was already set");
+		}
+		wasSet = true;
+		send(nativePromise, value);
+	}
 
-FDBWorkloadFactory* workloadFactory(FDBLogger*) {
-    static FDBWorkloadFactoryImpl impl;
-    return &impl;
 }
