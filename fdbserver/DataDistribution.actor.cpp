@@ -56,7 +56,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
-	Promise<Void> removeWrongStoreType;
+	Promise<Void> wrongStoreTypeRemoved;
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -374,7 +374,7 @@ struct ServerStatus {
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
-	bool excludeOnRecruit() { return !isFailed && !isWrongConfiguration; }
+	bool excludeOnRecruit() { return !isFailed && !isWrongConfiguration && !isWrongStoreType; }
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
@@ -2254,27 +2254,31 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
-ACTOR Future<Void> wrongStoreTypeRemover(DDTeamCollection* self) {
+ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state int numServersRemoved = 0;
 	state std::vector<Future<Void>> serversRemoved;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
+	TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
 	loop {
 		wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
-
-		for ( server = self->server_info.begin(); server != self->server_info.end(); server++ ) {
+		TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
+		ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
+		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
+			TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
 			auto serverStatus = self->server_status.get( server->second->lastKnownInterface.id() );
+			TraceEvent("WrongStoreTypeRemover").detail("Server", server->first).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
 			if ( serverStatus.isWrongStoreType ) {
 				TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-				server->second->removeWrongStoreType.send(Void());
+				server->second->wrongStoreTypeRemoved.send(Void());
 				serversRemoved.push_back(server->second->onRemoved);
 				numServersRemoved++;
 			}
-			if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
-				 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
-				wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
-				numServersRemoved = 0;
-				serversRemoved.clear();
-			}
+			// if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
+			// 	 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
+			// 	wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
+			// 	numServersRemoved = 0;
+			// 	serversRemoved.clear();
+			// }
 		}
 	}
 }
@@ -2793,7 +2797,7 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
-	if(type == self->configuration.storageServerStoreType)
+	if( type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
 		wait(Future<Void>(Never()));
 
 	return type;
@@ -2860,6 +2864,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		self->server_status.set( interf.id(), *status );
+		TraceEvent("MXTEST").detail("Server", interf.id()).detail("IsWrongStoreType", self->server_status.get(interf.id()).isWrongStoreType);
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2886,11 +2891,12 @@ ACTOR Future<Void> storageServerFailureTracker(
 			}
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
-			when ( wait( server->removeWrongStoreType.getFuture() ) ) {
+			when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) {
 				TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status->isUndesired = true;
 				status->isWrongConfiguration = true;
 				status->isWrongStoreType = false;
+				self->restartRecruiting.trigger();
 			}
 		}
 	}
@@ -3119,7 +3125,8 @@ ACTOR Future<Void> storageServerTracker(
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
 
 					//Restart the storeTracker for the new interface
-					storeTracker = keyValueStoreTypeTracker(self, server);
+					//storeTracker = hasWrongStoretype ? Never() : keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
+					storeTracker = keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
 					hasWrongDC = false;
 					hasWrongStoretype = false;
 					self->restartTeamBuilder.trigger();
@@ -3379,7 +3386,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->addActor.send(self->redundantTeamRemover);
 		}
 		if (self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = wrongStoreTypeRemover(self);
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
 			self->addActor.send(self->wrongStoreTypeRemover);
 		}
 		self->traceTeamCollectionInfo();
