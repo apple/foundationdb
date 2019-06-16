@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,60 +21,21 @@
 #pragma once
 #include <cstdint>
 
-namespace fdb_versions {
+#define PROTOCOAL_VERSION_FEATURE(v, x)                                                                                \
+	struct x {                                                                                                         \
+		static constexpr uint64_t protocolVersion = v;                                                                 \
+	};                                                                                                                 \
+	constexpr bool has##x() const { return this->version() >= x ::protocolVersion; }                                   \
+	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
-// Whenever a new breaking feature is introduced in FDB for which we need code
-// that tests whether the serialized version of the code was serialized with
-// that feature, the author should add this macro with the name of the feature
-// to the corresponding version. Users can than later call `version->hasFeature()`
-// on a deserialized `ProtocolVersion` to test for the feature.
-#define VERSION_FEATURE(x)                                                                                             \
-	constexpr bool has##x() const { return static_cast<const P*>(this)->version() >= protocolVersion; }
-
-// A version-class. These need to be ordered by version and the ordering
-// happens through inheritance. Each of these structs need to know about
-// the `ProtocolVersion`-class (through the template parameter) and it has
-// to be named `P` (otherwise the VERSION_FEATURE macro won't work anymore).
-// These classes are used to determine if a feature was available at a certain
-// protocol version. It does determine that through static polymorphism.
-template<class P>
-struct v5_5 {
-	static constexpr uint64_t protocolVersion = 0x0FDB00A551000000LL;
-
-	VERSION_FEATURE(MultiVersionClient)
-};
-
-template<class P>
-struct v5_6 : v5_5<P> {
-	static constexpr uint64_t protocolVersion = 0x0FDB00A560010001LL;
-
-	VERSION_FEATURE(TagLocality)
-};
-
-template <class P>
-struct v6_0 : v5_6<P> {
-	static constexpr uint64_t protocolVersion = 0x0FDB00B060000001LL;
-
-	VERSION_FEATURE(Fearless)
-};
-
-template <class P>
-struct v6_1 : v6_0<P> {};
-
-// This typedef needs to be updated whenever a new version is added
-template <class P>
-using latest_version = v6_1<P>;
-
-} // namespace fdb_versions
-
-// ProtocolVersion wraps a uint64_t to make it type safe. It has to inherit
-// from the newest version object and it will know about the current version.
+// ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
 // The default constuctor will initialize the version to 0 (which is an invalid
 // version). ProtocolVersion objects should never be compared to version numbers
 // directly. Instead one should always use the type-safe version types from which
 // this class inherits all.
-class ProtocolVersion : public fdb_versions::latest_version<ProtocolVersion> {
+class ProtocolVersion {
 	uint64_t _version;
+
 public: // constants
 	static constexpr uint64_t versionFlagMask = 0x0FFFFFFFFFFFFFFFLL;
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
@@ -102,12 +63,20 @@ public:
 
 	constexpr operator bool() const { return _version != 0; }
 	// comparison operators
+	// Comparison operators ignore the flags - this is because the version flags are stored in the
+	// most significant byte which can make comparison confusing. Also, generally, when one wants to
+	// compare versions, we are usually not interested in the flags.
 	constexpr bool operator==(const ProtocolVersion other) const { return version() == other.version(); }
 	constexpr bool operator!=(const ProtocolVersion other) const { return version() != other.version(); }
 	constexpr bool operator<=(const ProtocolVersion other) const { return version() <= other.version(); }
 	constexpr bool operator>=(const ProtocolVersion other) const { return version() >= other.version(); }
 	constexpr bool operator<(const ProtocolVersion other) const { return version() < other.version(); }
 	constexpr bool operator>(const ProtocolVersion other) const { return version() > other.version(); }
+
+public: // introduced features
+	PROTOCOAL_VERSION_FEATURE(0x0FDB00A560010001LL, TagLocality);
+	PROTOCOAL_VERSION_FEATURE(0x0FDB00B060000001LL, Fearless);
+	PROTOCOAL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
@@ -115,8 +84,8 @@ public:
 // The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
 // To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
 //
-//                                                        xyzdev
-//                                                        vvvv
+//                                                         xyzdev
+//                                                         vvvv
 constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B061070001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
