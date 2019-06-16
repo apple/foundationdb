@@ -110,16 +110,16 @@ description is not currently required but encouraged.
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
             description="Enables debugging feature to perform slow task profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production." />
-    <Option name="ClientBuggify_enable" code="80"
+    <Option name="client_buggify_enable" code="80"
             description="" />
-    <Option name="ClientBuggify_disable" code="81"
+    <Option name="client_buggify_disable" code="81"
             description="" />
-    <Option name="ClientBuggify_section_activated_probability" code="82"
+    <Option name="client_buggify_section_activated_probability" code="82"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of a CLIENT_BUGGIFY section being active for the current execution.  Only applies to code paths first traversed AFTER this option is changed." />
-    <Option name="ClientBuggify_section_fired_probability" code="83"
+    <Option name="client_buggify_section_fired_probability" code="83"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
-            description="Set the probability of an active CLIENT_BUGGIFY section being fired" />
+            description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
             description="This option is set automatically to communicate the list of supported clients to the active client."

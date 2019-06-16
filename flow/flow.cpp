@@ -233,6 +233,10 @@ int getSBVar(std::string file, int line, BuggifyType type){
 	return SBVars[flPair];
 }
 
+void clearBuggifySections(BuggifyType type) {
+	typedSBVars[type].clear();
+}
+
 bool validationIsEnabled(BuggifyType type) {
 	return buggifyActivated[int(type)];
 }

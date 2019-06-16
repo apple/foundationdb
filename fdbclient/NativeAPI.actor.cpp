@@ -996,17 +996,18 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
-		case FDBNetworkOptions::CLIENTBUGGIFY_ENABLE:
+		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);
 			break;
-		case FDBNetworkOptions::CLIENTBUGGIFY_DISABLE:
+		case FDBNetworkOptions::CLIENT_BUGGIFY_DISABLE:
 			enableBuggify(false, BuggifyType::Client);
 			break;
-		case FDBNetworkOptions::CLIENTBUGGIFY_SECTION_ACTIVATED_PROBABILITY:
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
 			validateOptionValue(value, true);
+			clearBuggifySections(BuggifyType::Client);
 			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
 			break;
-		case FDBNetworkOptions::CLIENTBUGGIFY_SECTION_FIRED_PROBABILITY:
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
 			validateOptionValue(value, true);
 			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
 			break;
@@ -2726,6 +2727,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
+					if (CLIENT_BUGGIFY) {
+						throw commit_unknown_result();
+					}
 					return Void();
 				} else {
 					if (info.debugID.present())
@@ -3122,9 +3126,6 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
 	}
 	if (!readVersion.isValid()) {
-		if (CLIENT_BUGGIFY) {
-			throw database_locked();
-		}
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();

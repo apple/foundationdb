@@ -74,6 +74,7 @@ enum class BuggifyType : uint8_t {
 	General=0, Client
 };
 bool isBuggifyEnabled(BuggifyType type);
+void clearBuggifySections(BuggifyType type);
 int getSBVar(std::string file, int line, BuggifyType);
 void enableBuggify(bool enabled, BuggifyType type);   // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);

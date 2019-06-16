@@ -2,6 +2,48 @@
 Client Testing
 ###############
 
+###################################
+Testing Error Handling with Buggify
+###################################
+
+FoundationDB clients need to handle errors correctly. Wrong error handling can lead to many bugs - in the worst case it can
+lead to a corrupted database. Because of this it is important that a application or layer author tests properly their
+application during failure scenarios. But this is non-trivial. In a developement environment cluster failures are very
+unlikely and it is therefore possible that certain types of exceptions are never tester in a controlled environment.
+
+The simplest way of testing for these kind of errors is a simple mechanism called ``Buggify``. If this option is enabled
+in the client, the client will randomly throw errors that an application might see in a production environment. Enable this
+option in testing will greatly improve the probabiliyty that error handling is tested properly.
+
+Options to Control Buggify
+==========================
+
+There are four network options to control the buggify behavior. By default, buggify is disabled (as it will behave in a way
+that is not desireable in a production environment). The options to control buggify are:
+
+- ``buggify_enable``
+  This option takes no argument and will enable buggify.
+- ``buggify_disable``
+  This can be used to disable buggify again.
+- ``client_buggify_section_activated_probability`` (default ``25``)
+  A number between 0 and 100.
+- ``client_buggify_section_fired_probability`` (default ``25``)
+  A number between 0 and 100.
+
+The way buggify works is by enabling sections in the code first that get only executed with a certain probability. Generally
+these code sections will simply introduce a synthetic error.
+
+When a section is passed for the first time, the client library will decide randomly whether that code section will be enabled
+or not. It will be enabled with a probability of ``client_buggify_section_activated_probability``.
+
+Whenever the client executes a buggify-enabled code-block, it will randomly execute it. This is to make sure that a certain
+exception doesn't always fire. The probably for executing such a section is ``client_buggify_section_fired_probability``.
+
+################################
+Simulation and Cluster Workloads
+################################
+
+
 FoundationDB comes with its own testing framework. Tests are implemented as workloads. A workload is nothing more than a class
 that gets called by server processes running the ``tester`` role. Additionally, a ``fdbserver`` process can run a simulator that
 simulates a full fdb cluster with several machines and different configurations in one process. This simulator can run the same
