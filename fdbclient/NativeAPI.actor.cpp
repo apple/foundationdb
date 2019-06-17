@@ -2670,6 +2670,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		throw deterministicRandom()->randomChoice(std::vector<Error>{
 				not_committed(),
 				transaction_too_old(),
+				proxy_memory_limit_exceeded(),
 				commit_unknown_result()});
 	}
 
