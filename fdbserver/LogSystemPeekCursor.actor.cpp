@@ -47,7 +47,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, rawLength, hasMsg, poppedVersion, tag ) );
 }
 
-void ILogSystem::ServerPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::ServerPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	rd.setProtocolVersion(version);
 }
 
@@ -306,7 +306,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor ) );
 }
 
-void ILogSystem::MergedPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::MergedPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	for( auto it : serverCursors )
 		if( it->hasMessage() )
 			it->setProtocolVersion( version );
@@ -532,7 +532,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::SetPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet ) );
 }
 
-void ILogSystem::SetPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::SetPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	for( auto& cursors : serverCursors ) {
 		for( auto& it : cursors ) {
 			if( it->hasMessage() ) {
@@ -807,7 +807,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MultiCursor::cloneNoMore() {
 	return cursors.back()->cloneNoMore();
 }
 
-void ILogSystem::MultiCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::MultiCursor::setProtocolVersion( ProtocolVersion version ) {
 	cursors.back()->setProtocolVersion(version);
 }
 
@@ -918,7 +918,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::BufferedCursor::cloneNoMore() {
 	return Reference<ILogSystem::IPeekCursor>();
 }
 
-void ILogSystem::BufferedCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::BufferedCursor::setProtocolVersion( ProtocolVersion version ) {
 	for(auto& c : cursors) {
 		c->setProtocolVersion(version);
 	}

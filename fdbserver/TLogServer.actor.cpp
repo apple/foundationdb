@@ -472,7 +472,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 
 	UID logId;
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	Version newPersistentDataVersion;
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;

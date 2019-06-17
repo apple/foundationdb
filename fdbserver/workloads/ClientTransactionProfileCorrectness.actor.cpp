@@ -27,7 +27,7 @@ static const int trIdFormatSize = 16;
 // Checks TransactionInfo format
 bool checkTxInfoEntryFormat(BinaryReader &reader) {
 	// Check protocol version
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	reader >> protocolVersion;
 	reader.setProtocolVersion(protocolVersion);
 
