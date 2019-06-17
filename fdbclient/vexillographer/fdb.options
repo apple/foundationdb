@@ -111,12 +111,12 @@ description is not currently required but encouraged.
     <Option name="enable_slow_task_profiling" code="71"
             description="Enables debugging feature to perform slow task profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production." />
     <Option name="client_buggify_enable" code="80"
-            description="" />
+            description="Enable client buggify - will make requests randomly fail (intendet for client testing)" />
     <Option name="client_buggify_disable" code="81"
-            description="" />
+            description="Disable client buggify" />
     <Option name="client_buggify_section_activated_probability" code="82"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
-            description="Set the probability of a CLIENT_BUGGIFY section being active for the current execution.  Only applies to code paths first traversed AFTER this option is changed." />
+            description="Set the probability of a CLIENT_BUGGIFY section being active for the current execution." />
     <Option name="client_buggify_section_fired_probability" code="83"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
