@@ -7,7 +7,7 @@ Testing Error Handling with Buggify
 ###################################
 
 FoundationDB clients need to handle errors correctly. Wrong error handling can lead to many bugs - in the worst case it can
-lead to a corrupted database. Because of this it is important that a application or layer author tests properly their
+lead to a corrupted database. Because of this it is important that an application or layer author tests properly their
 application during failure scenarios. But this is non-trivial. In a developement environment cluster failures are very
 unlikely and it is therefore possible that certain types of exceptions are never tester in a controlled environment.
 
