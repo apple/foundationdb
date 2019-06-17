@@ -1005,11 +1005,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
 			validateOptionValue(value, true);
 			clearBuggifySections(BuggifyType::Client);
-			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
+			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
 			validateOptionValue(value, true);
-			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
+			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
 			break;
 		case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
 			validateOptionValue(value, false);
