@@ -1387,7 +1387,13 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			startTime = timer_int();
 			startTimeD = now();
 			++cx->transactionPhysicalReads;
-			state GetValueReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			if (CLIENT_BUGGIFY) {
+				throw deterministicRandom()->randomChoice(
+					std::vector<Error>{ transaction_too_old(), future_version() });
+			}
+			state GetValueReply reply = wait(
+			    loadBalance(ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID),
+			                TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 			double latency = now() - startTimeD;
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
