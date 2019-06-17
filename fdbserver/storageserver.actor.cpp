@@ -3645,16 +3645,16 @@ ACTOR Future<bool> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 			state bool canRemove = wait( canRemoveStorageServer( &tr, id ) );
 			if (!canRemove) {
 				TEST(true); // it's possible that the caller had a transaction in flight that assigned keys to the server. Wait for it to reverse its mistake.
-				Void _ = wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskUpdateStorage) );
+				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskUpdateStorage) );
 				tr.reset();
 				TraceEvent("RemoveStorageServerRetrying").detail("Count", noCanRemoveCount++).detail("ServerID", id).detail("CanRemove", canRemove);
 			} else {
-				Void _ = wait(tr.commit());
+				wait(tr.commit());
 				return true;
 			}
 		} catch (Error& e) {
 			state Error err = e;
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
@@ -3792,8 +3792,8 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
         wait(self.storage.init());
 		//after a rollback there might be uncommitted changes.
 		//for memory storage engine type, wait until recovery is done before commit
-		state Future<bool> committed = self.storage.commit();
-		wait(success(dispose) || success(committed))
+		state Future<Void> committed = self.storage.commit();
+		wait(success(dispose) || success(committed));
 		if (committed.isReady()) {
 			// recovery finished before dispose
 			dispose.cancel();

@@ -416,7 +416,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi,
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<ClusterConnectionFile> const& connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+                                 Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
