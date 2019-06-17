@@ -3648,8 +3648,12 @@ ACTOR Future<bool> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 			}
 		} catch (Error& e) {
 			state Error err = e;
-			wait( tr.onError(e) );
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			try {
+			    wait( tr.onError(e));
+			} catch (Error& e2) {
+			    return Never();
+            }
+            TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
 }
