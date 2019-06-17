@@ -13,7 +13,7 @@ unlikely and it is therefore possible that certain types of exceptions are never
 
 The simplest way of testing for these kind of errors is a simple mechanism called ``Buggify``. If this option is enabled
 in the client, the client will randomly throw errors that an application might see in a production environment. Enable this
-option in testing will greatly improve the probabiliyty that error handling is tested properly.
+option in testing will greatly improve the probability that error handling is tested properly.
 
 Options to Control Buggify
 ==========================
