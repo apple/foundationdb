@@ -19,7 +19,7 @@ Options to Control Buggify
 ==========================
 
 There are four network options to control the buggify behavior. By default, buggify is disabled (as it will behave in a way
-that is not desireable in a production environment). The options to control buggify are:
+that is not desirable in a production environment). The options to control buggify are:
 
 - ``buggify_enable``
   This option takes no argument and will enable buggify.
