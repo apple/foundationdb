@@ -12,12 +12,14 @@ services:
     working_dir: /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb
     environment:
       - MAKEJOBS=1
+      - USE_CCACHE=1
       - BUILD_DIR=./work
 
   release-setup: &release-setup
     <<: *build-setup
     environment:
       - MAKEJOBS=1
+      - USE_CCACHE=1
       - RELEASE=true
       - BUILD_DIR=./work
 
