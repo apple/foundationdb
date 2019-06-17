@@ -21,7 +21,7 @@
 #pragma once
 #include <cstdint>
 
-#define PROTOCOAL_VERSION_FEATURE(v, x)                                                                                \
+#define PROTOCOL_VERSION_FEATURE(v, x)                                                                                \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
@@ -74,9 +74,9 @@ public:
 	constexpr bool operator>(const ProtocolVersion other) const { return version() > other.version(); }
 
 public: // introduced features
-	PROTOCOAL_VERSION_FEATURE(0x0FDB00A560010001LL, TagLocality);
-	PROTOCOAL_VERSION_FEATURE(0x0FDB00B060000001LL, Fearless);
-	PROTOCOAL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010001LL, TagLocality);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000001LL, Fearless);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
