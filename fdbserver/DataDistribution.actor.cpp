@@ -54,11 +54,13 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<Void> onRemoved;
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
+	bool isDesiredStoreType;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	Promise<Void> wrongStoreTypeRemoved;
 
-	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC) {
+	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : 
+					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), isDesiredStoreType(true) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 };
@@ -575,6 +577,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> initializationDoneActor;
 	Promise<Void> serverTrackerErrorOut;
 	AsyncVar<int> recruitingStream;
+	AsyncVar<UID> removeWrongStoreTypeServer; // Remove the storage server with wrong store type
 	Debouncer restartRecruiting;
 
 	int healthyTeamCount;
@@ -643,7 +646,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution)),
 	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
-	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
+	    optimalTeamCount(0), recruitingStream(0), removeWrongStoreTypeServer(UID()), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    processingUnhealthy(processingUnhealthy) {
@@ -2255,31 +2258,47 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 }
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
+	// return Void();
+
 	state int numServersRemoved = 0;
+	state bool hasWrongStoreTypeServer = false;
 	state std::vector<Future<Void>> serversRemoved;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
 	TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
+	printf("self->server_info.begin() == self->server_info.end():%d outloop\n", self->server_info.begin() == self->server_info.end());
+	
 	loop {
-		wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
-		TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
+		printf("self->server_info.begin() == self->server_info.end():%d\n", self->server_info.begin() == self->server_info.end());
+		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
 		ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
-		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
-			TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-			auto serverStatus = self->server_status.get( server->second->lastKnownInterface.id() );
-			TraceEvent("WrongStoreTypeRemover").detail("Server", server->first).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
-			if ( serverStatus.isWrongStoreType ) {
-				TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-				server->second->wrongStoreTypeRemoved.send(Void());
-				serversRemoved.push_back(server->second->onRemoved);
-				numServersRemoved++;
-			}
-			// if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
-			// 	 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
-			// 	wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
-			// 	numServersRemoved = 0;
-			// 	serversRemoved.clear();
-			// }
-		}
+		// for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
+		// 	printf("WrongStoreTypeRemover remove server:%s\n", server->first.toString().c_str());
+		// 	TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
+		// 	auto serverStatus = self->server_status.get( server->first );
+		// 	TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first).detail("IsWrongStoreType", serverStatus.isWrongStoreType).detail("ServerDesiredStoreType", server->second->isDesiredStoreType);
+		// 	if ( serverStatus.isWrongStoreType ) {
+		// 		TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
+		// 		server->second->wrongStoreTypeRemoved.send(Void());
+		// 		serversRemoved.push_back(server->second->onRemoved);
+		// 		numServersRemoved++;
+		// 		hasWrongStoreTypeServer = true;
+		// 	}
+		// 	if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
+		// 		 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
+		// 		//wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
+		// 		numServersRemoved = 0;
+		// 		serversRemoved.clear();
+		// 	}
+		// }
+		TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId);
+		wait( self->removeWrongStoreTypeServer.onChange() );
+		UID serverID = self->removeWrongStoreTypeServer.get();
+		auto serverStatus = self->server_status.get( server->first );
+		TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("WrongStoreTypeServer", self->removeWrongStoreTypeServer.get()).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
+		// if ( !hasWrongStoreTypeServer )  {
+		// 	wait( delay(2.0) );
+		// }
+		//wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
 	}
 }
 
@@ -2807,6 +2826,10 @@ bool inCorrectDC(DDTeamCollection* self, TCServerInfo *server) {
 	return (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 }
 
+bool isCorrectStoreType(DDTeamCollection* self, KeyValueStoreType type) {
+	return type == self->configuration.storageServerStoreType;
+}
+
 ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
 	state Transaction tr(cx);
 	loop {
@@ -2864,7 +2887,13 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		self->server_status.set( interf.id(), *status );
-		TraceEvent("MXTEST").detail("Server", interf.id()).detail("IsWrongStoreType", self->server_status.get(interf.id()).isWrongStoreType);
+		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id()).detail("IsWrongStoreType", self->server_status.get(interf.id()).isWrongStoreType);
+		UID tmpUID = interf.id();
+		self->removeWrongStoreTypeServer.set(tmpUID);
+		if ( self->server_status.get(interf.id()).isWrongStoreType ) {
+			// ? Why does this line causes segmentation fault?
+			self->removeWrongStoreTypeServer.set(tmpUID);
+		}
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2889,15 +2918,15 @@ ACTOR Future<Void> storageServerFailureTracker(
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
-			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
-			when ( wait( self->healthyZone.onChange() ) ) {}
-			when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) {
+			when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) { // MX: Why is this when never executed???
 				TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status->isUndesired = true;
 				status->isWrongConfiguration = true;
 				status->isWrongStoreType = false;
 				self->restartRecruiting.trigger();
 			}
+			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
+			when ( wait( self->healthyZone.onChange() ) ) {}
 		}
 	}
 
@@ -2987,6 +3016,7 @@ ACTOR Future<Void> storageServerTracker(
 			if (hasWrongStoretype) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status.isWrongStoreType = true;
+				server->isDesiredStoreType = false;
 			}
 
 			// If the storage server is in the excluded servers list, it is undesired
@@ -3122,7 +3152,10 @@ ACTOR Future<Void> storageServerTracker(
 
 					interfaceChanged = server->onInterfaceChanged;
 					// We rely on the old failureTracker being actorCancelled since the old actor now has a pointer to an invalid location
+					// ? What does this mean? Why does the old failureTracker has a pointer to an invalid location?
+					bool tmp = status.isWrongStoreType;
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
+					status.isWrongStoreType = tmp;
 
 					//Restart the storeTracker for the new interface
 					//storeTracker = hasWrongStoretype ? Never() : keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
@@ -3145,7 +3178,7 @@ ACTOR Future<Void> storageServerTracker(
 
 					storeTracker = Never();
 					hasWrongDC = !inCorrectDC(self, server);
-					hasWrongStoretype = true;
+					hasWrongStoretype = !isCorrectStoreType(self, type);
 				}
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
@@ -3385,10 +3418,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->redundantTeamRemover = teamRemover(self);
 			self->addActor.send(self->redundantTeamRemover);
 		}
-		if (self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
+		
 		self->traceTeamCollectionInfo();
 
 		if(self->includedDCs.size()) {
@@ -3402,6 +3432,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers( self ));
 		self->addActor.send(monitorHealthyTeams( self ));
 		self->addActor.send(waitHealthyZoneChange( self ));
+
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
