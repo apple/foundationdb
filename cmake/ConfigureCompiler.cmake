@@ -73,7 +73,6 @@ if(WIN32)
   add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
-
   set(GCC NO)
   set(CLANG NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
@@ -106,14 +105,14 @@ else()
 
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
-  add_compile_options(-ggdb)
+  add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
     add_compile_options(
-      -fno-omit-frame-pointer -fsanitize=address
+      -fsanitize=address
       -DUSE_ASAN)
-    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fno-omit-frame-pointer -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
   if(PORTABLE_BINARY)
