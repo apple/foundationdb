@@ -460,7 +460,7 @@ public:
 	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
 		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
-		platform::setCloseOnExec(socket.native_handle());
+		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
 	virtual void addref() { ReferenceCounted<Listener>::addref(); }
