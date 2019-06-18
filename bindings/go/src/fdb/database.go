@@ -162,7 +162,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // transaction or return the error.
 //
 // The transaction is retried if the error is or wraps an retryable Error.
-// The error is unwrapped with the xerrors.Wrapper, see https://godoc.org/golang.org/x/xerrors#Wrapper
+// The error is unwrapped with the xerrors.Wrapper. See https://godoc.org/golang.org/x/xerrors#Wrapper
 // for details.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
