@@ -1,0 +1,15 @@
+testTitle=MakoTest
+    testName=Mako
+    testDuration=10.0
+    transactionsPerSecond=100000
+    rows=1000000
+    sampleSize=100
+    valueBytes=16
+    keyBytes=16
+    operations=g5gr5:10i5ir5:10grv5
+    actorCountPerClient=256
+    enableLogging=false
+    commitGet=false
+    populateData=true
+    runBenchmark=true
+    preserveData=true

@@ -424,7 +424,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					for (int j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> reply = keyValueFutures[j].get();
 
-						if (!reply.present()) {
+						if (!reply.present() || reply.get().error.present()) {
 							//If the storage server didn't reply in a quiescent database, then the check fails
 							if(self->performQuiescentChecks) {
 								TraceEvent("ConsistencyCheck_KeyServerUnavailable").detail("StorageServer", shards[i].second[j].id().toString().c_str());
@@ -759,7 +759,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 
 							//Compare the results with other storage servers
-							if(rangeResult.present())
+							if(rangeResult.present() && !rangeResult.get().error.present())
 							{
 								state GetKeyValuesReply current = rangeResult.get();
 								totalReadAmount += current.data.expectedSize();

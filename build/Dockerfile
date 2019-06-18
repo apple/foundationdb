@@ -1,6 +1,6 @@
 FROM centos:6
-LABEL version=0.1.4
-ENV DOCKER_IMAGEVER=0.1.4
+LABEL version=0.1.5
+ENV DOCKER_IMAGEVER=0.1.5
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
@@ -10,7 +10,7 @@ RUN yum install -y yum-utils &&\
 	yum -y install devtoolset-8 java-1.8.0-openjdk-devel \
 		rh-python36-python-devel devtoolset-8-valgrind-devel \
 		mono-core rh-ruby24 golang python27 rpm-build debbuild \
-		python-pip npm dos2unix valgrind-devel &&\
+		python-pip npm dos2unix valgrind-devel ccache &&\
 	pip install boto3==1.1.1
 
 USER root

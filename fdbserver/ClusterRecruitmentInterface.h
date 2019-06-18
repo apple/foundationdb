@@ -50,6 +50,17 @@ struct ClusterControllerFullInterface {
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
+	bool hasMessage() {
+		return clientInterface.hasMessage() ||
+				recruitFromConfiguration.getFuture().isReady() ||
+				recruitRemoteFromConfiguration.getFuture().isReady() ||
+				recruitStorage.getFuture().isReady() ||
+				registerWorker.getFuture().isReady() || 
+				getWorkers.getFuture().isReady() || 
+				registerMaster.getFuture().isReady() ||
+				getServerDBInfo.getFuture().isReady();
+	}
+
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		recruitFromConfiguration.getEndpoint( TaskClusterController );

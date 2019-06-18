@@ -73,6 +73,7 @@
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
+    <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp" />
     <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp" />
     <ClCompile Include="sqlite\btree.c">
@@ -154,6 +155,7 @@
     <ActorCompiler Include="workloads\Serializability.actor.cpp" />
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
     <ActorCompiler Include="workloads\SnapTest.actor.cpp" />
+    <ActorCompiler Include="workloads\Mako.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />

@@ -1499,7 +1499,10 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 }
 
 ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
-	state Future<Void> failed = worker.address() == g_network->getLocalAddress() ? Never() : waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+	state Future<Void> failed =
+	    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
+	        ? Never()
+	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch fails for the worker.
 	wait(delay(0));
@@ -2705,6 +2708,16 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
+ACTOR Future<Void> replaceInterface( ClusterControllerFullInterface interf ) {
+	loop {
+		if( interf.hasMessage() ) {
+			wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_DELAY));
+			return Void();
+		}
+		wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_CHECK_DELAY));
+	}
+}
+
 ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, LocalityData locality ) {
 	loop {
 		state ClusterControllerFullInterface cci;
@@ -2713,19 +2726,23 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 		try {
 			//Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncPriorityInfo );
+			state Future<Void> shouldReplace = replaceInterface( cci );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
 				choose {
 					when( wait(currentCC->onChange()) ) {}
 					when( wait(leaderFail) ) { ASSERT(false); throw internal_error(); }
+					when( wait(shouldReplace) ) { break; }
 				}
 			}
+			if(!shouldReplace.isReady()) {
+				shouldReplace = Future<Void>();
+				hasConnected = true;
+				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
+				inRole = true;
 
-			hasConnected = true;
-			startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
-			inRole = true;
-
-			wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
+				wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
+			}
 		} catch(Error& e) {
 			if (inRole)
 				endRole(Role::CLUSTER_CONTROLLER, cci.id(), "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
