@@ -349,6 +349,8 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out);
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary( const char* filename );
 
+void setCloseOnExec( int fd );
+
 // Logs an out of memory error and exits the program
 void outOfMemory();
 
