@@ -1128,8 +1128,8 @@ ACTOR Future<Void> workerServer(
 				startRole( Role::READ_PROXY, recruited.id(), interf.id(), details );
 				DUMPTOKEN(recruited.getKey);
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::READ_PROXY, recruited.id(),
-				                                                     readProxyServer( recruited, req, dbInfo ) ) ) );
+				errorForwarders.add(zombie(recruited, forwardError(errors, Role::READ_PROXY, recruited.id(),
+				                                                   readProxyServer(recruited, req, dbInfo))));
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {

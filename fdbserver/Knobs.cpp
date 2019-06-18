@@ -357,6 +357,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( EXPECTED_TLOG_FITNESS,               ProcessClass::UnsetFit );
 	init( EXPECTED_LOG_ROUTER_FITNESS,         ProcessClass::UnsetFit );
 	init( EXPECTED_PROXY_FITNESS,              ProcessClass::UnsetFit );
+	init( EXPECTED_READ_PROXY_FITNESS,         ProcessClass::UnsetFit );
 	init( EXPECTED_RESOLVER_FITNESS,           ProcessClass::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 

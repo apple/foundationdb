@@ -82,10 +82,10 @@ ACTOR Future<Void> getKey(GetKeyRequest req, Database cx) {
 			state KeySelectorRef keySel = req.sel;
 			state KeyRef locationKey(keySel.getKey());
 			state std::pair<KeyRange, Reference<LocationInfo>> ssi =
-				wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, keySel.isBackward()));
+			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, keySel.isBackward()));
 			GetKeyReply reply = wait(loadBalance(ssi.second, &StorageServerInterface::getKey,
-												 GetKeyRequest(keySel, req.version), TaskDefaultPromiseEndpoint,
-												 false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
+			                                     GetKeyRequest(keySel, req.version), TaskDefaultPromiseEndpoint, false,
+			                                     cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 			req.reply.send(reply);
 			break;
 		} catch (Error& e) {
@@ -93,8 +93,10 @@ ACTOR Future<Void> getKey(GetKeyRequest req, Database cx) {
 				cx->invalidateCache(keySel.getKey(), keySel.isBackward());
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDefaultEndpoint));
-			} else {
+			} else if (e.code() != error_code_actor_cancelled) {
 				req.reply.sendError(e);
+				break;
+			} else {
 				break;
 			}
 		}
@@ -114,17 +116,32 @@ ACTOR Future<Void> readProxyServerCore(ReadProxyInterface readProxy, Reference<A
 	}
 }
 
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount,
+                                ReadProxyInterface interface) {
+	loop {
+		if (db->get().recoveryCount >= recoveryCount &&
+		    !std::count(db->get().client.readProxies.begin(), db->get().client.readProxies.end(), interface)) {
+			TraceEvent("ReadProxyServer_Removed", interface.id());
+			throw worker_removed();
+		}
+		wait (db->onChange());
+	}
+}
+
 ACTOR Future<Void> readProxyServer(ReadProxyInterface proxy, InitializeReadProxyRequest req,
                                    Reference<AsyncVar<ServerDBInfo>> db) {
+	TraceEvent("ReadProxyServer_Started", proxy.id());
 	try {
 		state Future<Void> core = readProxyServerCore(proxy, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
-			// when (checkRemoved( ... )) // TODO Implemented removed logic
+			when (wait(core)) { return Void(); }
+			when (wait(checkRemoved(db, req.recoveryCount, proxy))) {}
 		}
 	} catch (Error& e) {
-		TraceEvent("ReadProxyServerTerminated", proxy.id()).error(e, true);
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
+			TraceEvent("ReadProxyServer_Terminated", proxy.id()).error(e, true);
+			return Void();
+		}
+		throw;
 	}
-
-	return Void();
 }

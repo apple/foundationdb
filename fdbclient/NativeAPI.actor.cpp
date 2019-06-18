@@ -458,14 +458,18 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
-	state vector< MasterProxyInterface > curProxies;
+ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+                                                     AsyncTrigger* triggerVar) {
+	state vector<MasterProxyInterface> curProxies;
+	state vector<ReadProxyInterface> curReadProxies;
 	curProxies = clientDBInfo->get().proxies;
+	curReadProxies = clientDBInfo->get().readProxies;
 
-	loop{
+	loop {
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies) {
+		if (clientDBInfo->get().proxies != curProxies || clientDBInfo->get().readProxies != curReadProxies) {
 			curProxies = clientDBInfo->get().proxies;
+			curReadProxies = clientDBInfo->get().readProxies;
 			triggerVar->trigger();
 		}
 	}

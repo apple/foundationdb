@@ -197,6 +197,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	vector< MasterProxyInterface > proxies;
 	vector< MasterProxyInterface > provisionalProxies;
 	vector< ResolverInterface > resolvers;
+	vector<ReadProxyInterface> readProxies;
 
 	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
 
@@ -295,6 +296,24 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 
 	vector<ResolverInterface> newRecruits = wait( getAll( initializationReplies ) );
 	self->resolvers = newRecruits;
+
+	return Void();
+}
+
+ACTOR Future<Void> newReadProxies(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
+	vector<Future<ReadProxyInterface>> initializationReplies;
+	for (int i = 0; i < recr.readProxies.size(); ++i) {
+		InitializeReadProxyRequest req;
+		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
+		TraceEvent("ReadProxyReplies", self->dbgid).detail("WorkerID", recr.readProxies[i].id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(recr.readProxies[i].readProxy.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    master_recovery_failed()));
+	}
+
+	vector<ReadProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	self->readProxies = newRecruits;
 
 	return Void();
 }
@@ -447,13 +466,17 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 	}
 }
 
-Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& logSystemConfig, vector<MasterProxyInterface> proxies, vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount, vector<UID> priorCommittedLogServers ) {
+Future<Void> sendMasterRegistration(MasterData* self, LogSystemConfig const& logSystemConfig,
+                                    vector<MasterProxyInterface> proxies, vector<ReadProxyInterface> readProxies,
+                                    vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount,
+                                    vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
 	masterReq.logSystemConfig = logSystemConfig;
 	masterReq.proxies = proxies;
 	masterReq.resolvers = resolvers;
+	masterReq.readProxies = readProxies;
 	masterReq.recoveryCount = recoveryCount;
 	if(self->hasConfiguration) masterReq.configuration = self->configuration;
 	masterReq.registrationCount = ++self->registrationCount;
@@ -463,24 +486,30 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 	return brokenPromiseToNever( self->clusterController.registerMaster.getReply( masterReq ) );
 }
 
-ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILogSystem> logSystem ) {
+ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILogSystem> logSystem) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Future<Void> trigger =  self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
 	loop {
-		wait( trigger );
-		wait( delay( .001 ) );  // Coalesce multiple changes
+		wait(trigger);
+		wait(delay(.001)); // Coalesce multiple changes
 
-		trigger =  self->registrationTrigger.onTrigger();
+		trigger = self->registrationTrigger.onTrigger();
 
-		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
+		TraceEvent("MasterUpdateRegistration", self->dbgid)
+		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
+		    .detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
-			wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
+			wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies,
+			                            self->readProxies, self->resolvers, self->cstate.myDBState.recoveryCount,
+			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
-			wait( sendMasterRegistration( self.getPtr(), logSystem->getLogSystemConfig(), self->proxies, self->resolvers, self->cstate.myDBState.recoveryCount, vector<UID>() ) );
+			wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->proxies,
+			                            self->readProxies, self->resolvers, self->cstate.myDBState.recoveryCount,
+			                            vector<UID>()));
 		}
 	}
 }
@@ -559,17 +588,19 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 		return Never();
 	} else
 		TraceEvent("MasterRecoveryState", self->dbgid)
-			.detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
-			.detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
-			.detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
-			.detail("DesiredTLogs", self->configuration.getDesiredLogs())
-			.detail("RequiredProxies", 1)
-			.detail("DesiredProxies", self->configuration.getDesiredProxies())
-			.detail("RequiredResolvers", 1)
-			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
-			.detail("StoreType", self->configuration.storageServerStoreType)
-			.trackLatest("MasterRecoveryState");
-	
+		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
+		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
+		    .detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
+		    .detail("DesiredTLogs", self->configuration.getDesiredLogs())
+		    .detail("RequiredProxies", 1)
+		    .detail("DesiredProxies", self->configuration.getDesiredProxies())
+		    .detail("RequiredReadProxies", 1)
+		    .detail("DesiredReadProxies", self->configuration.getDesiredReadProxies())
+		    .detail("RequiredResolvers", 1)
+		    .detail("DesiredResolvers", self->configuration.getDesiredResolvers())
+		    .detail("StoreType", self->configuration.storageServerStoreType)
+		    .trackLatest("MasterRecoveryState");
+
 	//FIXME: we only need log routers for the same locality as the master
 	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
 	for(auto& old : self->cstate.prevDBState.oldTLogData) {
@@ -588,20 +619,22 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 			self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
 		}
 	}
-	
+
 	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
-		.detail("Proxies", recruits.proxies.size())
-		.detail("TLogs", recruits.tLogs.size())
-		.detail("Resolvers", recruits.resolvers.size())
-		.trackLatest("MasterRecoveryState");
+	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
+	    .detail("Proxies", recruits.proxies.size())
+	    .detail("ReadProxies", recruits.readProxies.size())
+	    .detail("TLogs", recruits.tLogs.size())
+	    .detail("Resolvers", recruits.resolvers.size())
+	    .trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait( newSeedServers( self, recruits, seedServers ) );
 	state vector<Standalone<CommitTransactionRef>> confChanges;
-	wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem, &confChanges ) );
+	wait(newProxies(self, recruits) && newReadProxies(self, recruits) && newResolvers(self, recruits) &&
+	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 	return confChanges;
 }
 
@@ -1280,6 +1313,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	recoverAndEndEpoch.cancel();
 
 	ASSERT( self->proxies.size() <= self->configuration.getDesiredProxies() );
+	ASSERT(self->readProxies.size() <= self->configuration.getDesiredReadProxies());
 	ASSERT( self->resolvers.size() <= self->configuration.getDesiredResolvers() );
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;

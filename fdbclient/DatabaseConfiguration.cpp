@@ -29,11 +29,13 @@ DatabaseConfiguration::DatabaseConfiguration()
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
+	masterProxyCount = resolverCount = readProxyCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
+	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
+	autoReadProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_READ_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	usableRegions = 1;
@@ -160,36 +162,21 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 bool DatabaseConfiguration::isValid() const {
-	if( !(initialized &&
-		tLogWriteAntiQuorum >= 0 &&
-		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
-		tLogReplicationFactor >= 1 &&
-		storageTeamSize >= 1 &&
-		getDesiredProxies() >= 1 &&
-		getDesiredLogs() >= 1 &&
-		getDesiredResolvers() >= 1 &&
-		tLogVersion != TLogVersion::UNSET &&
-		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
-		tLogDataStoreType != KeyValueStoreType::END &&
-		tLogSpillType != TLogSpillType::UNSET &&
-		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
-		storageServerStoreType != KeyValueStoreType::END &&
-		autoMasterProxyCount >= 1 &&
-		autoResolverCount >= 1 &&
-		autoDesiredTLogCount >= 1 &&
-		storagePolicy &&
-		tLogPolicy &&
-		getDesiredRemoteLogs() >= 1 &&
-		remoteTLogReplicationFactor >= 0 &&
-		repopulateRegionAntiQuorum >= 0 &&
-		repopulateRegionAntiQuorum <= 1 &&
-		usableRegions >= 1 &&
-		usableRegions <= 2 &&
-		regions.size() <= 2 &&
-		( usableRegions == 1 || regions.size() == 2 ) &&
-		( regions.size() == 0 || regions[0].priority >= 0 ) &&
-		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
+	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
+	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredProxies() >= 1 &&
+	      getDesiredReadProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
+	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
+	      tLogSpillType != TLogSpillType::UNSET &&
+	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
+	      storageServerStoreType != KeyValueStoreType::END && autoMasterProxyCount >= 1 && autoReadProxyCount >= 1 &&
+	      autoResolverCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy && tLogPolicy &&
+	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
+	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
+	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
+	      (regions.size() == 0 ||
+	       tLogPolicy->info() !=
+	           "dcid^2 x zoneid^2 x 1"))) { // We cannot specify regions with three_datacenter replication
 		return false;
 	}
 
@@ -298,6 +285,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( masterProxyCount != -1 ) {
 			result["proxies"] = masterProxyCount;
 		}
+		if (readProxyCount != -1) {
+			result["read_proxies"] = readProxyCount;
+		}
 		if( resolverCount != -1 ) {
 			result["resolvers"] = resolverCount;
 		}
@@ -312,6 +302,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		}
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
+		}
+		if (autoReadProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_READ_PROXIES) {
+			result["auto_read_proxies"] = autoReadProxyCount;
 		}
 		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS) {
 			result["auto_resolvers"] = autoResolverCount;
@@ -386,6 +379,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 
 	if (ck == LiteralStringRef("initialized")) initialized = true;
 	else if (ck == LiteralStringRef("proxies")) parse(&masterProxyCount, value);
+	else if (ck == LiteralStringRef("read_proxies")) parse(&readProxyCount, value);
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {

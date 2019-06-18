@@ -170,6 +170,18 @@ struct InitializeMasterProxyRequest {
 	}
 };
 
+struct InitializeReadProxyRequest {
+	constexpr static FileIdentifier file_identifier = 6416817; // FIXME: Choose something
+	uint64_t recoveryCount;
+	ReplyPromise<ReadProxyInterface> reply;
+
+	InitializeReadProxyRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryCount, reply);
+	}
+};
+
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
@@ -231,27 +243,6 @@ struct InitializeStorageRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
-	}
-};
-
-struct InitializeReadProxyRequest {
-	constexpr static FileIdentifier file_identifier = 6416817; // FIXME: Choose something
-	ReplyPromise<ReadProxyInterface> reply;
-
-	InitializeReadProxyRequest() {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
-struct InitializeReadProxyReply {
-	constexpr static FileIdentifier file_identifier = 10390646; // FIXME: Choose something.
-	ReadProxyInterface interf;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, interf);
 	}
 };
 

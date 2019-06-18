@@ -669,15 +669,22 @@ public:
 
 		auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used );
 		auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used );
+		auto first_read_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::ReadProxy, ProcessClass::ExcludeFit,
+		                                                     req.configuration, id_used);
 
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies()-1, req.configuration, id_used, first_proxy );
+		auto readProxies =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::ReadProxy, req.configuration.getDesiredReadProxies() - 1,
+		                                  req.configuration, id_used, first_read_proxy);
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers()-1, req.configuration, id_used, first_resolver );
 
 		proxies.push_back(first_proxy.worker);
+		readProxies.push_back(first_read_proxy.worker);
 		resolvers.push_back(first_resolver.worker);
 
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
+		for (int i = 0; i < readProxies.size(); i++) result.readProxies.push_back(readProxies[i].interf);
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].interf);
 
@@ -686,11 +693,22 @@ public:
 			result.oldLogRouters.push_back(oldLogRouters[i].interf);
 		}
 
-		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
-			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
-			  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(RoleFitness(resolvers, ProcessClass::Resolver)) ) ) {
+		if (now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
+		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
+		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
+		     (region.satelliteTLogReplicationFactor > 0 &&
+		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId),
+		                  ProcessClass::TLog)
+		          .betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog))) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(),
+		                 ProcessClass::Proxy)
+		         .betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_READ_PROXY_FITNESS, req.configuration.getDesiredReadProxies(),
+		                 ProcessClass::ReadProxy)
+		         .betterCount(RoleFitness(readProxies, ProcessClass::ReadProxy)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(),
+		                 ProcessClass::Resolver)
+		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver)))) {
 			return operation_failed();
 		}
 
@@ -783,11 +801,17 @@ public:
 					auto used = id_used;
 					auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used );
 					auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used );
+					auto first_read_proxy = getWorkerForRoleInDatacenter(
+					    dcId, ProcessClass::ReadProxy, ProcessClass::ExcludeFit, req.configuration, used);
 
 					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies()-1, req.configuration, used, first_proxy );
+					auto readProxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::Proxy,
+					                                                 req.configuration.getDesiredReadProxies() - 1,
+					                                                 req.configuration, used, first_read_proxy);
 					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers()-1, req.configuration, used, first_resolver );
 
 					proxies.push_back(first_proxy.worker);
+					readProxies.push_back(first_read_proxy.worker);
 					resolvers.push_back(first_resolver.worker);
 
 					auto fitness = RoleFitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver), ProcessClass::NoRole );
@@ -797,6 +821,8 @@ public:
 						bestDC = dcId;
 						for(int i = 0; i < resolvers.size(); i++)
 							result.resolvers.push_back(resolvers[i].interf);
+						for (int i = 0; i < readProxies.size(); i++)
+							result.readProxies.push_back(readProxies[i].interf);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
 
@@ -829,11 +855,18 @@ public:
 			}
 			//If this cluster controller dies, do not prioritize recruiting the next one in the same DC
 			desiredDcIds.set(vector<Optional<Key>>());
-			TraceEvent("FindWorkersForConfig").detail("Replication", req.configuration.tLogReplicationFactor)
-				.detail("DesiredLogs", req.configuration.getDesiredLogs()).detail("ActualLogs", result.tLogs.size())
-				.detail("DesiredProxies", req.configuration.getDesiredProxies()).detail("ActualProxies", result.proxies.size())
-				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
+			TraceEvent("FindWorkersForConfig")
+			    .detail("Replication", req.configuration.tLogReplicationFactor)
+			    .detail("DesiredLogs", req.configuration.getDesiredLogs())
+			    .detail("ActualLogs", result.tLogs.size())
+			    .detail("DesiredProxies", req.configuration.getDesiredProxies())
+			    .detail("ActualProxies", result.proxies.size())
+			    .detail("DesiredReadProxies", req.configuration.getDesiredReadProxies())
+			    .detail("ActualReadProxies", result.readProxies.size())
+			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
+			    .detail("ActualResolvers", result.resolvers.size());
 
+			// TODO: Add readproxy.
 			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
 				  RoleFitness(std::min(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), std::max(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), req.configuration.getDesiredProxies()+req.configuration.getDesiredResolvers(), ProcessClass::NoRole).betterCount(bestFitness) ) ) {
@@ -1060,12 +1093,19 @@ public:
 
 		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
 		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+		auto first_read_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::ReadProxy,
+		                                                     ProcessClass::ExcludeFit, db.config, id_used, true);
 
 		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies()-1, db.config, id_used, first_proxy, true );
+		auto readProxies = getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::ReadProxy,
+		                                                 db.config.getDesiredReadProxies() - 1, db.config, id_used,
+		                                                 first_read_proxy, true);
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers()-1, db.config, id_used, first_resolver, true );
 		proxies.push_back(first_proxy.worker);
+		readProxies.push_back(first_read_proxy.worker);
 		resolvers.push_back(first_resolver.worker);
 
+		// TODO: Put readProxy here?
 		RoleFitness newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver), ProcessClass::NoRole);
 		if(oldInFit.betterFitness(newInFit)) return false;
 		if(oldTLogFit > newTLogFit || oldInFit > newInFit || (oldSatelliteFallback && !newSatelliteFallback) || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
@@ -1090,6 +1130,10 @@ public:
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
 		}
+		// TODO: Decide what to do here?
+		// for (const ReadProxyInterface& interf : dbInfo.client.readProxies) {
+		// 	if (interf.locality.processId() == processId) return true;
+		// }
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
 		}
@@ -1714,13 +1758,26 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest const& req ) {
 	req.reply.send( Void() );
 
-	TraceEvent("MasterRegistrationReceived", self->id).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
-		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount).detail("Stalled", req.recoveryStalled);
+	TraceEvent("MasterRegistrationReceived", self->id)
+	    .detail("MasterId", req.id)
+	    .detail("Master", req.mi.toString())
+	    .detail("Tlogs", describe(req.logSystemConfig.tLogs))
+	    .detail("Resolvers", req.resolvers.size())
+	    .detail("RecoveryState", (int)req.recoveryState)
+	    .detail("RegistrationCount", req.registrationCount)
+	    .detail("Proxies", req.proxies.size())
+	    .detail("ReadProxies", req.readProxies.size())
+	    .detail("RecoveryCount", req.recoveryCount)
+	    .detail("Stalled", req.recoveryStalled);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
 	if ( db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
-		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
+		TraceEvent("MasterRegistrationNotFound", self->id)
+		    .detail("MasterId", req.id)
+		    .detail("ExistingId", db->serverInfo->get().master.id())
+		    .detail("RegCount", req.registrationCount)
+		    .detail("ExistingRegCount", db->masterRegistrationCount);
 		return;
 	}
 
@@ -1766,14 +1823,14 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	// Construct the client information
-	if (db->clientInfo->get().proxies != req.proxies) {
+	if (db->clientInfo->get().proxies != req.proxies || db->clientInfo->get().readProxies != req.readProxies) {
 		isChanged = true;
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.proxies = req.proxies;
+		clientInfo.readProxies = req.readProxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
-		clientInfo.readProxies = db->clientInfo->get().readProxies;
 		db->clientInfo->set( clientInfo );
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -2537,25 +2594,6 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 					self->db.setRatekeeper(interf.get());
 				}
 				checkOutstandingRequests(self);
-
-				// TODO: Recruit ReadProxy here for now.
-				{
-                    InitializeReadProxyRequest req;
-                    ErrorOr<ReadProxyInterface> interf = wait(worker.interf.readProxy.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
-					if (interf.present()) {
-                        TraceEvent("ReadProxyServerStarted").detail("ProxyId", interf.get().id());
-						auto clientDbInfo = self->db.clientInfo->get();
-						std::vector<ReadProxyInterface> readProxies {interf.get()};
-						clientDbInfo.readProxies = readProxies;
-						TraceEvent("ReadProxy_NumProxies").detail("Size", readProxies.size());
-						clientDbInfo.id = deterministicRandom()->randomUniqueID();
-						self->db.clientInfo->set(clientDbInfo);
-					} else {
-                        TraceEvent("ReadProxyServerStartFailed");
-					}
-				}
-				// Done.
-
 				return Void();
 			}
 		}

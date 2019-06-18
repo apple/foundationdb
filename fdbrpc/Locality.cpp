@@ -116,6 +116,23 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::ReadProxy:
+		switch (_class) {
+		case ProcessClass::ReadProxyClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
+		case ProcessClass::TesterClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::LogRouter:
 		switch( _class ) {
 		case ProcessClass::LogRouterClass:
