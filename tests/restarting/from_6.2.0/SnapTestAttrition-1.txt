@@ -27,6 +27,9 @@ testTitle=SnapTestTakeSnap
         clearAfterTest=false
         version=2
 
+        testName=Attrition
+        testDuration=10.0
+
 testTitle=SnapTestPost
 ;write 1000 Keys ending with odd numbers
         testName=SnapTest
@@ -35,8 +38,8 @@ testTitle=SnapTestPost
         testID=2
         clearAfterTest=false
 
-testTitle=SnapTestShutdown
-;save and shutdown
+; save and shutdown
+testTitle=SnapSimpleShutdown
         testName=SaveAndKill
         restartInfoLocation=simfdb/restartInfo.ini
         testDuration=10.0
