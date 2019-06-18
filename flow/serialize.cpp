@@ -21,8 +21,8 @@
 #include "flow/serialize.h"
 #include "flow/network.h"
 
-_AssumeVersion::_AssumeVersion( uint64_t version ) : v(version) {
-	if( version < minValidProtocolVersion ) {
+_AssumeVersion::_AssumeVersion( ProtocolVersion version ) : v(version) {
+	if(!version.isValid()) {
 		ASSERT(!g_network->isSimulated());
 		throw serialization_failed();
 	}
