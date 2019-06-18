@@ -996,6 +996,21 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
+			enableBuggify(true, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_DISABLE:
+			enableBuggify(false, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
+			validateOptionValue(value, true);
+			clearBuggifySections(BuggifyType::Client);
+			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
+			validateOptionValue(value, true);
+			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
+			break;
 		case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
 			validateOptionValue(value, false);
 			networkOptions.logClientInfo = false;
@@ -1372,7 +1387,13 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			startTime = timer_int();
 			startTimeD = now();
 			++cx->transactionPhysicalReads;
-			state GetValueReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			if (CLIENT_BUGGIFY) {
+				throw deterministicRandom()->randomChoice(
+					std::vector<Error>{ transaction_too_old(), future_version() });
+			}
+			state GetValueReply reply = wait(
+			    loadBalance(ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID),
+			                TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 			double latency = now() - startTimeD;
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
@@ -1862,6 +1883,11 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
+				if (CLIENT_BUGGIFY) {
+					throw deterministicRandom()->randomChoice(std::vector<Error>{
+							transaction_too_old(), future_version()
+								});
+				}
 				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 
 				if( info.debugID.present() ) {
@@ -2646,6 +2672,14 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
+	if(CLIENT_BUGGIFY) {
+		throw deterministicRandom()->randomChoice(std::vector<Error>{
+				not_committed(),
+				transaction_too_old(),
+				proxy_memory_limit_exceeded(),
+				commit_unknown_result()});
+	}
+
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -2700,6 +2734,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
+					if (CLIENT_BUGGIFY) {
+						throw commit_unknown_result();
+					}
 					return Void();
 				} else {
 					if (info.debugID.present())

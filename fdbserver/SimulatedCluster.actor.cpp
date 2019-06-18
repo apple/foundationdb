@@ -42,7 +42,6 @@
 #undef max
 #undef min
 
-extern bool buggifyActivated;
 extern "C" int g_expect_full_pointermap;
 extern const char* getHGVersion();
 
@@ -234,7 +233,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("ConnectionString", connFile ? connFile->getConnectionString().toString() : "")
 				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 				.detail("CommandLine", "fdbserver -r simulation")
-				.detail("BuggifyEnabled", buggifyActivated)
+				.detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
 				.detail("Simulated", true)
 				.trackLatest("ProgramStart");
 
@@ -1427,7 +1426,10 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
+		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(
+									   new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))),
+								   TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),
+						  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
