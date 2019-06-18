@@ -2179,6 +2179,19 @@ void makeTemporary( const char* filename ) {
 	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
 #endif
 }
+
+void setCloseOnExec( int fd ) {
+#if defined(__unixish__)
+	int options = fcntl(fd, F_GETFD);
+	if (options != -1) {
+		options = fcntl(fd, F_SETFD, options | FD_CLOEXEC);
+	}
+	if (options == -1) {
+		TraceEvent(SevWarnAlways, "PlatformSetCloseOnExecError").suppressFor(60).GetLastError();
+	}
+#endif
+}
+
 } // namespace platform
 
 #ifdef _WIN32
@@ -2194,18 +2207,6 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 #else
 	#error Port me!
 #endif
-
-void setCloseOnExec( int fd ) {
-#if defined(__unixish__)
-	int options = fcntl(fd, F_GETFD);
-	if (options != -1) {
-		options = fcntl(fd, F_SETFD, options | FD_CLOEXEC);
-	}
-	if (options == -1) {
-		TraceEvent(SevWarnAlways, "PlatformSetCloseOnExecError").suppressFor(60).GetLastError();
-	}
-#endif
-}
 
 void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
