@@ -301,7 +301,7 @@ struct ILogSystem {
 		//clones the peek cursor, however you cannot call getMore() on the cloned cursor.
 		virtual Reference<IPeekCursor> cloneNoMore() = 0;
 
-		virtual void setProtocolVersion( ProtocolVersion version ) = 0;
+		virtual void setProtocolVersion( uint64_t version ) = 0;
 
 		//if hasMessage() returns true, getMessage(), getMessageWithTags(), or reader() can be called.
 		//does not modify the cursor
@@ -397,7 +397,7 @@ struct ILogSystem {
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
+		virtual void setProtocolVersion( uint64_t version );
 		virtual Arena& arena();
 		virtual ArenaReader* reader();
 		virtual bool hasMessage();
@@ -443,7 +443,7 @@ struct ILogSystem {
 		MergedPeekCursor( std::vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
+		virtual void setProtocolVersion( uint64_t version );
 		virtual Arena& arena();
 		virtual ArenaReader* reader();
 		void calcHasMessage();
@@ -488,7 +488,7 @@ struct ILogSystem {
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, std::vector< std::vector< Reference<IPeekCursor> > > const& serverCursors, LogMessageVersion const& messageVersion, int bestSet, int bestServer, Optional<LogMessageVersion> nextVersion, bool useBestSet );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
+		virtual void setProtocolVersion( uint64_t version );
 		virtual Arena& arena();
 		virtual ArenaReader* reader();
 		void calcHasMessage();
@@ -524,7 +524,7 @@ struct ILogSystem {
 		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
+		virtual void setProtocolVersion( uint64_t version );
 		virtual Arena& arena();
 		virtual ArenaReader* reader();
 		virtual bool hasMessage();
@@ -584,7 +584,7 @@ struct ILogSystem {
 		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool collectTags );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-		virtual void setProtocolVersion( ProtocolVersion version );
+		virtual void setProtocolVersion( uint64_t version );
 		virtual Arena& arena();
 		virtual ArenaReader* reader();
 		virtual bool hasMessage();

@@ -736,7 +736,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	for(int i = 0; i < clients.size(); ++i) {
 		if(i != currentClientIndex && connectionAttempts[i]->connected) {
 			if(currentClientIndex >= 0 && !clients[i]->canReplace(clients[currentClientIndex])) {
-				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion.version()).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion.version());
+				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion);
 				connectionAttempts[i]->connected = false; // Permanently disable this client in favor of the current one
 				clients[i]->failed = true;
 				MultiVersionApi::api->updateSupportedVersions();
@@ -1277,15 +1277,15 @@ MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 void ClientInfo::loadProtocolVersion() {
 	std::string version = api->getClientVersion();
 	if(version == "unknown") {
-		protocolVersion = ProtocolVersion(0);
+		protocolVersion = 0;
 		return;
 	}
 
 	char *next;
 	std::string protocolVersionStr = ClientVersionRef(version).protocolVersion.toString();
-	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
+	protocolVersion = strtoull(protocolVersionStr.c_str(), &next, 16);
 
-	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
+	ASSERT(protocolVersion != 0 && protocolVersion != ULLONG_MAX);
 	ASSERT(next == &protocolVersionStr[protocolVersionStr.length()]);
 }
 
@@ -1298,7 +1298,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 		return true;
 	}
 
-	return !protocolVersion.isCompatible(other->protocolVersion);
+	return (protocolVersion & compatibleProtocolVersionMask) != (other->protocolVersion & compatibleProtocolVersionMask);
 }
 
 // UNIT TESTS

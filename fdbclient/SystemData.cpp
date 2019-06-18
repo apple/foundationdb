@@ -181,7 +181,7 @@ Version decodeServerTagHistoryKey( KeyRef const& key ) {
 Tag decodeServerTagValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, IncludeVersion() );
-	if(!reader.protocolVersion().hasTagLocality()) {
+	if( reader.protocolVersion() < 0x0FDB00A560010001LL ) {
 		int16_t id;
 		reader >> id;
 		if(id == invalidTagOld) {

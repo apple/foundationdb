@@ -25,7 +25,6 @@
 #include <stdint.h>
 #include <array>
 #include <set>
-#include "flow/ProtocolVersion.h"
 #include "flow/Error.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
@@ -53,22 +52,6 @@ BINARY_SERIALIZABLE( int64_t );
 BINARY_SERIALIZABLE( uint64_t );
 BINARY_SERIALIZABLE( bool );
 BINARY_SERIALIZABLE( double );
-BINARY_SERIALIZABLE( ProtocolVersion );
-
-template<>
-struct scalar_traits<ProtocolVersion> : std::true_type {
-	constexpr static size_t size = sizeof(uint64_t);
-
-	static void save(uint8_t* out, const ProtocolVersion& v) {
-		*reinterpret_cast<uint64_t*>(out) = v.versionWithFlags();
-	}
-
-	template <class Context>
-	static void load(const uint8_t* i, ProtocolVersion& out, Context& context) {
-		const uint64_t* in = reinterpret_cast<const uint64_t*>(i);
-		out = ProtocolVersion(*in);
-	}
-};
 
 template <class Archive, class Item>
 inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
@@ -104,7 +87,7 @@ class Serializer {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		t.serialize(ar);
-		ASSERT( ar.protocolVersion() );
+		ASSERT( ar.protocolVersion() != 0 );
 	}
 };
 
@@ -267,10 +250,19 @@ static bool valgrindCheck( const void* data, int bytes, const char* context ) {
 static inline bool valgrindCheck( const void* data, int bytes, const char* context ) { return true; }
 #endif
 
+extern const uint64_t currentProtocolVersion;
+extern const uint64_t minValidProtocolVersion;
+extern const uint64_t compatibleProtocolVersionMask;
+extern const uint64_t objectSerializerFlag;
+
+extern uint64_t removeFlags(uint64_t version);
+extern uint64_t addObjectSerializerFlag(uint64_t version);
+extern bool hasObjectSerializerFlag(uint64_t version);
+
 struct _IncludeVersion {
-	ProtocolVersion v;
-	explicit _IncludeVersion( ProtocolVersion defaultVersion ) : v(defaultVersion) {
-		ASSERT( defaultVersion.isValid() );
+	uint64_t v;
+	explicit _IncludeVersion( uint64_t defaultVersion ) : v(defaultVersion) {
+		ASSERT( defaultVersion >= minValidProtocolVersion );
 	}
 	template <class Ar>
 	void write( Ar& ar ) {
@@ -280,7 +272,7 @@ struct _IncludeVersion {
 	template <class Ar>
 	void read( Ar& ar ) {
 		ar >> v;
-		if (!v.isValid()) {
+		if (v < minValidProtocolVersion) {
 			auto err = incompatible_protocol_version();
 			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
@@ -297,19 +289,19 @@ struct _IncludeVersion {
 	}
 };
 struct _AssumeVersion {
-	ProtocolVersion v;
-	explicit _AssumeVersion( ProtocolVersion version );
+	uint64_t v;
+	explicit _AssumeVersion( uint64_t version );
 	template <class Ar> void write( Ar& ar ) { ar.setProtocolVersion(v); }
 	template <class Ar> void read( Ar& ar ) { ar.setProtocolVersion(v); }
 };
 struct _Unversioned {
-	template <class Ar> void write( Ar& ar ) {}
-	template <class Ar> void read( Ar& ar ) {}
+	template <class Ar> void write( Ar& ar ) { ar.setProtocolVersion(0); }
+	template <class Ar> void read( Ar& ar ) { ar.setProtocolVersion(0); }
 };
 
 // These functions return valid options to the VersionOptions parameter of the constructor of each archive type
-inline _IncludeVersion IncludeVersion( ProtocolVersion defaultVersion = currentProtocolVersion ) { return _IncludeVersion(defaultVersion); }
-inline _AssumeVersion AssumeVersion( ProtocolVersion version ) { return _AssumeVersion(version); }
+inline _IncludeVersion IncludeVersion( uint64_t defaultVersion = currentProtocolVersion ) { return _IncludeVersion(defaultVersion); }
+inline _AssumeVersion AssumeVersion( uint64_t version ) { return _AssumeVersion(version); }
 inline _Unversioned Unversioned() { return _Unversioned(); }
 
 //static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL, 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
@@ -434,13 +426,13 @@ public:
 		}
 	}
 
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+	uint64_t protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 private:
 	Arena arena;
 	uint8_t* data;
 	int size, allocated;
-	ProtocolVersion m_protocolVersion;
+	uint64_t m_protocolVersion;
 
 	void* writeBytes(int s) {
 		int p = size;
@@ -499,13 +491,13 @@ public:
 		writeBytes(&t, sizeof(T));
 	}
 
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+	uint64_t protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 
 private:
 	int len;
 	SplitBuffer buf;
-	ProtocolVersion m_protocolVersion;
+	uint64_t m_protocolVersion;
 
 	void writeBytes(const void *data, int wlen) {
 		ASSERT(wlen <= len);
@@ -559,8 +551,8 @@ public:
 
 	Arena& arena() { return m_pool; }
 
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+	uint64_t protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 
 	bool empty() const { return begin == end; }
 
@@ -577,7 +569,7 @@ public:
 private:
 	const char *begin, *end, *check;
 	Arena m_pool;
-	ProtocolVersion m_protocolVersion;
+	uint64_t m_protocolVersion;
 };
 
 class BinaryReader {
@@ -633,8 +625,8 @@ public:
 		return t;
 	}
 
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+	uint64_t protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 
 	void assertEnd() { ASSERT( begin == end ); }
 
@@ -654,7 +646,7 @@ public:
 private:
 	const char *begin, *end, *check;
 	Arena m_pool;
-	ProtocolVersion m_protocolVersion;
+	uint64_t m_protocolVersion;
 };
 
 struct SendBuffer {
@@ -687,7 +679,7 @@ struct PacketWriter {
 	PacketBuffer* buffer;
 	struct ReliablePacket *reliable;  // NULL if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
 	int length;
-	ProtocolVersion m_protocolVersion;
+	uint64_t m_protocolVersion;
 
 	// reliable is NULL if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
 	//   for filling in reliable->buffer, ->cont, ->begin, and ->end, but not ->prev or ->next.
@@ -720,8 +712,8 @@ struct PacketWriter {
 			serializeBytesAcrossBoundary(&t, sizeof(T));
 		}
 	}
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+	uint64_t protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 private:
 	void init( PacketBuffer* buf, ReliablePacket* reliable );
 };
