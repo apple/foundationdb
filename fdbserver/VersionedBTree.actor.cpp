@@ -504,7 +504,7 @@ struct RedwoodRecordRef {
 			Reader r(data);
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
-			int prefixLen = r.readVarInt();
+			r.readVarInt();  // prefixlen
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
@@ -1562,7 +1562,6 @@ private:
 				childEntries.push_back(entry);
 			}
 
-			int oldPages = pages.size();
 			pages = buildPages(false, dbBegin, dbEnd, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_usablePageSizeOverride);
 
 			debug_printf("Writing a new root level at version %" PRId64 " with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
@@ -2063,8 +2062,7 @@ private:
 			if(REDWOOD_DEBUG) {
  				debug_printf("%s Subtree update results for root PageID=%u\n", context.c_str(), root);
 				for(int i = 0; i < futureChildren.size(); ++i) {
-					const VersionedChildrenT &vc = futureChildren[i].get();
-					debug_printf("%s subtree result %s\n", context.c_str(), toString(vc).c_str());
+					debug_printf("%s subtree result %s\n", context.c_str(), toString(futureChildren[i].get()).c_str());
 				}
 			}
 
@@ -2410,7 +2408,7 @@ printf("\nCommitted: %s\n", self->counts.toString(true).c_str());
 				}
 
 				Reference<PageCursor> child = wait(self->pageCursor->getChild(self->pager, self->usablePageSizeOverride));
-				bool success = forward ? child->cursor.moveFirst() : child->cursor.moveLast();
+				forward ? child->cursor.moveFirst() : child->cursor.moveLast();
 				self->pageCursor = child;
 			}
 
@@ -3146,9 +3144,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 			}
 			wait(success(vall) && success(vrange));
 
-			int errors = vall.get() + vrange.get();
-
-			debug_printf("Verified through version %" PRId64 ", %d errors\n", v, errors);
+			debug_printf("Verified through version %" PRId64 ", %d errors\n", v, *pErrorCount);
 
 			if(*pErrorCount != 0)
 				break;
@@ -3985,10 +3981,14 @@ TEST_CASE("!/redwood/performance/set") {
 			// Avoid capturing this to freeze counter values
 			int recs = records;
 			int kvb = kvBytes;
+
+			// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the actor state object
+			double *pIntervalStart = &intervalStart;
+
 			commit = map(btree->commit(), [=](Void result) {
-				double elapsed = timer() - intervalStart;
+				double elapsed = timer() - *pIntervalStart;
 				printf("Committed %d kvBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed, kvb / elapsed / 1e6);
-				intervalStart = timer();
+				*pIntervalStart = timer();
 				return Void();
 			});
 			records = 0;
