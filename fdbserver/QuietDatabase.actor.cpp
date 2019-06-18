@@ -431,11 +431,13 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 					.detail("DataInFlight", dataInFlight.get())
 					.detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
 					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
+					.detail("MaxTLogQueueGate", maxTLogQueueGate)
 					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
 					.detail("TeamCollectionValid", teamCollectionValid.get())
 					.detail("MaxStorageQueueSize", storageQueueSize.get())
 					.detail("DataDistributionActive", dataDistributionActive.get())
-					.detail("StorageServersRecruiting", storageServersRecruiting.get());
+					.detail("StorageServersRecruiting", storageServersRecruiting.get())
+					.detail("NumSuccesses", numSuccesses);
 
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||

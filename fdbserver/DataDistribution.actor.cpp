@@ -2262,39 +2262,47 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 	state int numServersRemoved = 0;
 	state bool hasWrongStoreTypeServer = false;
-	state std::vector<Future<Void>> serversRemoved;
+	//state std::vector<Future<Void>> serversRemoved;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
-	TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
-	printf("self->server_info.begin() == self->server_info.end():%d outloop\n", self->server_info.begin() == self->server_info.end());
+	//TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
+	//printf("self->server_info.begin() == self->server_info.end():%d outloop\n", self->server_info.begin() == self->server_info.end());
 	
 	loop {
-		printf("self->server_info.begin() == self->server_info.end():%d\n", self->server_info.begin() == self->server_info.end());
+		wait( delay(2.0) );
+		//printf("self->server_info.begin() == self->server_info.end():%d\n", self->server_info.begin() == self->server_info.end());
 		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
-		ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
-		// for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
-		// 	printf("WrongStoreTypeRemover remove server:%s\n", server->first.toString().c_str());
-		// 	TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-		// 	auto serverStatus = self->server_status.get( server->first );
-		// 	TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first).detail("IsWrongStoreType", serverStatus.isWrongStoreType).detail("ServerDesiredStoreType", server->second->isDesiredStoreType);
-		// 	if ( serverStatus.isWrongStoreType ) {
-		// 		TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-		// 		server->second->wrongStoreTypeRemoved.send(Void());
-		// 		serversRemoved.push_back(server->second->onRemoved);
-		// 		numServersRemoved++;
-		// 		hasWrongStoreTypeServer = true;
-		// 	}
-		// 	if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
-		// 		 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
-		// 		//wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
-		// 		numServersRemoved = 0;
-		// 		serversRemoved.clear();
-		// 	}
-		// }
-		TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId);
-		wait( self->removeWrongStoreTypeServer.onChange() );
-		UID serverID = self->removeWrongStoreTypeServer.get();
-		auto serverStatus = self->server_status.get( server->first );
-		TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("WrongStoreTypeServer", self->removeWrongStoreTypeServer.get()).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
+		//ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
+		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
+			//printf("WrongStoreTypeRemover remove server:%s\n", server->first.toString().c_str());
+			//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
+			auto serverStatus = self->server_status.get( server->first );
+			NetworkAddress a = server->second->lastKnownInterface.address();
+			AddressExclusion addr( a.ip, a.port );
+			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
+				.detail("Addr", addr.toString())
+				.detail("IsWrongStoreType", serverStatus.isWrongStoreType).detail("ServerDesiredStoreType", server->second->isDesiredStoreType).detail("WrongStoreTypeRemovedCanBeSet", server->second->wrongStoreTypeRemoved.canBeSet());
+			if ( serverStatus.isWrongStoreType ) {
+				//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
+				if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
+					server->second->wrongStoreTypeRemoved.send(Void());
+					//serversRemoved.push_back(server->second->onRemoved);
+					numServersRemoved++;
+					hasWrongStoreTypeServer = true;
+					break;
+				}
+			}
+			if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
+				 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
+				//wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
+				numServersRemoved = 0;
+				//serversRemoved.clear();
+			}
+		}
+		//TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId);
+		//wait( self->removeWrongStoreTypeServer.onChange() );
+		//UID serverID = self->removeWrongStoreTypeServer.get();
+		//auto serverStatus = self->server_status.get( server->first );
+		//TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("WrongStoreTypeServer", self->removeWrongStoreTypeServer.get()).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
 		// if ( !hasWrongStoreTypeServer )  {
 		// 	wait( delay(2.0) );
 		// }
@@ -2918,13 +2926,13 @@ ACTOR Future<Void> storageServerFailureTracker(
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
-			when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) { // MX: Why is this when never executed???
-				TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-				status->isUndesired = true;
-				status->isWrongConfiguration = true;
-				status->isWrongStoreType = false;
-				self->restartRecruiting.trigger();
-			}
+			// when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) { // MX: Why is this when never executed???
+			// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+			// 	status->isUndesired = true;
+			// 	status->isWrongConfiguration = true;
+			// 	status->isWrongStoreType = false;
+			// 	self->restartRecruiting.trigger();
+			// }
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
 		}
@@ -2956,6 +2964,7 @@ ACTOR Future<Void> storageServerTracker(
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
+			// status.isWrongStoreType = false;
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually be eliminated
 			state std::vector<Future<Void>> otherChanges;
@@ -2973,7 +2982,8 @@ ACTOR Future<Void> storageServerTracker(
 						.detail("OtherHealthy", !self->server_status.get( i.second->id ).isUnhealthy());
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
-					if(!self->server_status.get( i.second->id ).isUnhealthy()) {
+					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
+					if(!self->server_status.get( i.second->id ).isUnhealthy() && !self->server_status.get( i.second->id ).isWrongStoreType ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3016,7 +3026,25 @@ ACTOR Future<Void> storageServerTracker(
 			if (hasWrongStoretype) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status.isWrongStoreType = true;
+				self->server_status.set( server->id, status ); // Must set the status.isWrongStoreType in the global server_status, so that the wrongStoreTypeRemover actor can keep track of it and ask to remove it
 				server->isDesiredStoreType = false;
+			}
+			if (hasWrongStoretype) {
+				try {
+					wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
+				} catch (Error &e) {
+					if (e.code() != error_code_broken_promise) {
+						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
+					} else {
+						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id);
+					}
+				}
+				
+				TraceEvent(SevWarn, "UndesiredStorageServerToRemoveMX", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+				status.isUndesired = true;
+				status.isWrongConfiguration = true;
+				storeTracker = keyValueStoreTypeTracker( self, server );
+				self->restartRecruiting.trigger();
 			}
 
 			// If the storage server is in the excluded servers list, it is undesired
