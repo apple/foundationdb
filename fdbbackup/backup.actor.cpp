@@ -797,7 +797,7 @@ void parentWatcher(void *parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", (long long) currentProtocolVersion);
+	printf("protocol %llx\n", (long long) currentProtocolVersion.version());
 }
 
 const char *BlobCredentialInfo =

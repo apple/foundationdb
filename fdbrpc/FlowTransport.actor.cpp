@@ -218,7 +218,7 @@ struct ConnectPacket {
 	// The value does not inclueds the size of `connectPacketLength` itself,
 	// but only the other fields of this structure.
 	uint32_t connectPacketLength;
-	uint64_t protocolVersion;      // Expect currentProtocolVersion
+	ProtocolVersion protocolVersion;      // Expect currentProtocolVersion
 
 	uint16_t canonicalRemotePort;  // Port number to reconnect to the originating process
 	uint64_t connectionId;         // Multi-version clients will use the same Id for both connections, other connections will set this to zero. Added at protocol Version 0x0FDB00A444020001.
@@ -269,7 +269,7 @@ struct ConnectPacket {
 		}
 
 		serializer(ar, protocolVersion, canonicalRemotePort, connectionId, canonicalRemoteIp4);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+		if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 			flags = 0;
 		} else {
 			// We can send everything in serialized packet, since the current version of ConnectPacket
@@ -326,13 +326,16 @@ struct Peer : NonCopyable {
 			pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
 			pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
 		} else {
-			pkt.canonicalRemotePort = 0;   // a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			// a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			pkt.canonicalRemotePort = 0;
 			pkt.setCanonicalRemoteIp(IPAddress(0));
 		}
 
 		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-		pkt.protocolVersion =
-		    g_network->useObjectSerializer() ? addObjectSerializerFlag(currentProtocolVersion) : currentProtocolVersion;
+		pkt.protocolVersion = currentProtocolVersion;
+		if (g_network->useObjectSerializer()) {
+			pkt.protocolVersion.addObjectSerializerFlag();
+		}
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
@@ -635,7 +638,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 }
 
 static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
-                        NetworkAddress const& peerAddress, uint64_t peerProtocolVersion) {
+                        NetworkAddress const& peerAddress, ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -749,7 +752,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool incompatiblePeerCounted = false;
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
-	state uint64_t peerProtocolVersion;
+	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
 	if (peer == nullptr) {
@@ -784,14 +787,14 @@ ACTOR static Future<Void> connectionReader(
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
 					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
-						uint64_t protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
+						auto protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
 						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));
 						ConnectPacket pkt;
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if(g_network->useObjectSerializer() != hasObjectSerializerFlag(pkt.protocolVersion) ||
-						   (removeFlags(pkt.protocolVersion) & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask)) {
+						if(g_network->useObjectSerializer() != pkt.protocolVersion.hasObjectSerializerFlag() ||
+						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -802,9 +805,9 @@ ACTOR static Future<Void> connectionReader(
 								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
 									    .detail("Reason", "IncompatibleProtocolVersion")
-									    .detail("LocalVersion", currentProtocolVersion)
-									    .detail("RejectedVersion", pkt.protocolVersion)
-									    .detail("VersionMask", compatibleProtocolVersionMask)
+									    .detail("LocalVersion", currentProtocolVersion.version())
+									    .detail("RejectedVersion", pkt.protocolVersion.version())
+									    .detail("VersionMask", ProtocolVersion::compatibleProtocolVersionMask)
 									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                                            : conn->getPeerAddress())
 									    .detail("ConnectionId", connectionId);
@@ -818,7 +821,7 @@ ACTOR static Future<Void> connectionReader(
 							}
 
 							compatible = false;
-							if(protocolVersion < 0x0FDB00A551000000LL) {
+							if(!protocolVersion.hasMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}

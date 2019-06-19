@@ -36,6 +36,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
+#include "flow/ProtocolVersion.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -48,31 +49,6 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
-//
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
-//
-//                                                       xyzdev
-//                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061070001LL;
-const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
-const uint64_t objectSerializerFlag          = 0x1000000000000000LL;
-const uint64_t versionFlagMask               = 0x0FFFFFFFFFFFFFFFLL;
-
-uint64_t removeFlags(uint64_t version) {
-	return version & versionFlagMask;
-}
-uint64_t addObjectSerializerFlag(uint64_t version) {
-	return version | objectSerializerFlag;
-}
-bool hasObjectSerializerFlag(uint64_t version) {
-	return (version & objectSerializerFlag) > 0;
-}
-
-// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
-static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>

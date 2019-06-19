@@ -197,7 +197,7 @@ public:
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, _data);
 		} else {
-			if (ar.protocolVersion() >= 0x0FDB00A446020001LL) {
+			if (ar.protocolVersion().hasLocality()) {
 				Standalone<StringRef> key;
 				Optional<Standalone<StringRef>> value;
 				uint64_t mapSize = (uint64_t)_data.size();
@@ -221,7 +221,7 @@ public:
 				set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
 				set(keyDcId, Standalone<StringRef>(dcId.toString()));
 
-				if (ar.protocolVersion() >= 0x0FDB00A340000001LL) {
+				if (ar.protocolVersion().hasProcessID()) {
 					serializer(ar, processId);
 					set(keyProcessId, Standalone<StringRef>(processId.toString()));
 				} else {

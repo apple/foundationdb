@@ -40,7 +40,7 @@ struct ClientDBInfo {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit);
 	}
