@@ -277,6 +277,13 @@ func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
+// Set the maximum transaction size which, if exceeded, will cause the transaction to be cancelled. Default to 10,000,000 bytes.
+//
+// Parameter: value in bytes
+func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
+}
+
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
 func (o DatabaseOptions) SetSnapshotRywEnable() error {
 	return o.setOpt(26, nil)
@@ -402,6 +409,13 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
+// Set the maximum transaction size which, if exceeded, will cause the transaction to be cancelled. Valid parameter values are ``[32, 10,000,000]```.
+//
+// Parameter: value in bytes
+func (o TransactionOptions) SetMaxTransactionSize(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
+}
+
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
 func (o TransactionOptions) SetSnapshotRywEnable() error {
 	return o.setOpt(600, nil)
@@ -451,7 +465,7 @@ const (
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
+	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -568,15 +582,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns “true“ if the error indicates the operations in the transactions
-	// should be retried because of transient error.
+	// Returns ``true`` if the error indicates the operations in the
+	// transactions should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns “true“ if the error indicates the transaction may have succeeded,
-	// though not in a way the system can verify.
+	// Returns ``true`` if the error indicates the transaction may have
+	// succeeded, though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns “true“ if the error indicates the transaction has not committed,
-	// though in a way that can be retried.
+	// Returns ``true`` if the error indicates the transaction has not
+	// committed, though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

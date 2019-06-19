@@ -126,7 +126,7 @@ public:
 
 	void getWriteConflicts( KeyRangeMap<bool> *result );
 
-	Database getDatabase() {
+	Database getDatabase() const {
 		return tr.getDatabase();
 	}
 private:

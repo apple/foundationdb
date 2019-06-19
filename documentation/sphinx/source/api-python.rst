@@ -24,6 +24,7 @@
 .. |retry-limit-database-option| replace:: :func:`Database.options.set_transaction_retry_limit`
 .. |timeout-database-option| replace:: :func:`Database.options.set_transaction_timeout`
 .. |max-retry-delay-database-option| replace:: :func:`Database.options.set_transaction_max_retry_delay`
+.. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |snapshot-ryw-enable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :ref:`future <api-python-future>`
@@ -377,6 +378,10 @@ Database options
 .. method:: Database.options.set_transaction_max_retry_delay(delay_limit)
 
     |option-db-tr-max-retry-delay-blurb|
+
+.. method:: Database.options.set_transaction_size_limit(size_limit)
+
+    |option-db-tr-size-limit-blurb|
 
 .. method:: Database.options.set_snapshot_ryw_enable()
 

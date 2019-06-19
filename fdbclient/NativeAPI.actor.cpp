@@ -522,6 +522,7 @@ DatabaseContext::DatabaseContext(
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
 	transactionMaxBackoff = CLIENT_KNOBS->FAILURE_MAX_DELAY;
+	transactionMaxBytes = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
 
 	logger = databaseLogger( this );
@@ -746,6 +747,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 		case FDBDatabaseOptions::TRANSACTION_MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			transactionMaxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+		case FDBDatabaseOptions::TRANSACTION_SIZE_LIMIT:
+			validateOptionValue(value, true);
+			transactionMaxBytes = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
 			validateOptionValue(value, false);
@@ -2398,6 +2403,7 @@ double Transaction::getBackoff(int errCode) {
 
 TransactionOptions::TransactionOptions(Database const& cx) {
 	maxBackoff = cx->transactionMaxBackoff;
+	customTransactionSizeLimit = cx->transactionMaxBytes;
 	reset(cx);
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
@@ -2411,6 +2417,7 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 TransactionOptions::TransactionOptions() {
 	memset(this, 0, sizeof(*this));
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	customTransactionSizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 }
 
 void TransactionOptions::reset(Database const& cx) {
@@ -2418,6 +2425,7 @@ void TransactionOptions::reset(Database const& cx) {
 	double oldMaxRetries = maxRetries;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	customTransactionSizeLimit = cx->transactionMaxBytes;
 	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
 }
@@ -2753,8 +2761,9 @@ Future<Void> Transaction::commitMutations() {
 			transactionSize = tr.transaction.mutations.expectedSize(); // Old API versions didn't account for conflict ranges when determining whether to throw transaction_too_large
 		}
 
-		if (transactionSize > (options.customTransactionSizeLimit == 0 ? (uint64_t)CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT : (uint64_t)options.customTransactionSizeLimit))
+		if (transactionSize > options.customTransactionSizeLimit) {
 			return transaction_too_large();
+		}
 
 		if( !readVersion.isValid() )
 			getReadVersion( GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY ); // sets up readVersion field.  We had no reads, so no need for (expensive) full causal consistency.
