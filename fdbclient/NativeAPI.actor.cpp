@@ -1038,7 +1038,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 		networkOptions.logClientInfo = true;
 
 	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.useObjectSerializer);
-	FlowTransport::createInstance(transportId);
+	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 
 	initTLSOptions();
