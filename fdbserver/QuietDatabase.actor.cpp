@@ -133,6 +133,40 @@ int64_t getPoppedVersionLag( const TraceEventFields& md ) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+	state Future<std::vector<WorkerDetails>> workersFuture = getWorkers(dbInfo);
+	state std::vector<WorkerDetails> workers = wait(workersFuture);
+
+	Optional<Value> coordinators = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(coordinatorsKey);
+						  }));
+	if (!coordinators.present()) {
+		throw operation_failed();
+	}
+	state std::vector<NetworkAddress> coordinatorsAddr =
+		ClusterConnectionString(coordinators.get().toString()).coordinators();
+	state std::set<NetworkAddress> coordinatorsAddrSet;
+	for (const auto & addr : coordinatorsAddr) {
+		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
+		coordinatorsAddrSet.insert(addr);
+	}
+
+	vector<WorkerInterface> result;
+	for(const auto & worker : workers) {
+		NetworkAddress primary = worker.interf.address();
+		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
+			|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+			result.push_back(worker.interf);
+		}
+	}
+	return result;
+}
+
 // This is not robust in the face of a TLog failure
 ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
@@ -193,6 +227,30 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			wait( tr.onError(e) );
 		}
 	}
+}
+
+ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool localOnly ) {
+	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
+	state Future<std::vector<WorkerDetails>> workersFuture = getWorkers(dbInfo);
+
+	state std::vector<StorageServerInterface> servers = wait(serversFuture);
+	state std::vector<WorkerDetails> workers = wait(workersFuture);
+	vector<WorkerInterface> result;
+
+	std::map<NetworkAddress, WorkerInterface> workersMap;
+	for(const auto & worker : workers) {
+		workersMap[worker.interf.address()] = worker.interf;
+	}
+	// FIXME: impelement localOnly
+	for (const auto & server : servers) {
+		auto itr = workersMap.find(server.address());
+		if(itr == workersMap.end()) {
+			TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
+			continue;
+		}
+		result.push_back(itr->second);
+	}
+	return result;
 }
 
 //Gets the maximum size of all the storage server queues

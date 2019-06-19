@@ -1615,6 +1615,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 
 	Future<Void> checkFatalError = data->otherError.getFuture();
 	data->durableVersion.set( nextDurableVersion );
+	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady()) checkFatalError.get();
 
 	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
@@ -1960,7 +1961,7 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 
 	if (!skip) {
 		setExecOpInProgress(execUID);
-		int err = wait(execHelper(&execArg, data->folder, "role=storage"));
+		int err = wait(execHelper(&execArg, data->folder, "role=storage", 1 /*version*/));
 		clearExecOpInProgress(execUID);
 	}
 	TraceEvent te = TraceEvent("ExecTraceStorage");
@@ -2821,6 +2822,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->noRecentUpdates.set(false);
 			data->lastUpdate = now();
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
+			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
 			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
