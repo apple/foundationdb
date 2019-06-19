@@ -82,6 +82,7 @@ public: // variables
 	std::string restartInfoLocation; // file location to store the snap restore info
 	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
 	bool skipCheck; // disable check if the exec fails
+	int snapVersion; // snapVersion to invoke
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -97,6 +98,7 @@ public: // ctor & dtor
 		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
 		        .toString();
 		skipCheck = false;
+		snapVersion = getOption(options, LiteralStringRef("version"), 1);
 	}
 
 public: // workload functions
@@ -235,7 +237,7 @@ public: // workload functions
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create.sh");
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID, self->snapVersion);
 					wait(status);
 					break;
 				} catch (Error& e) {
@@ -250,6 +252,12 @@ public: // workload functions
 							break;
 						}
 					}
+					if (self->snapVersion == 2) {
+						if (retry > 5) {
+							snapFailed = true;
+							break;
+						}
+					}
 				}
 			}
 			CSimpleIni ini;
@@ -258,6 +266,7 @@ public: // workload functions
 			std::string uidStr = self->snapUID.toString();
 			ini.SetValue("RESTORE", "RestoreSnapUID", uidStr.c_str());
 			ini.SetValue("RESTORE", "BackupFailed", format("%d", snapFailed).c_str());
+			ini.SetValue("RESTORE", "BackupVersion", format("%d", self->snapVersion).c_str());
 			ini.SaveFile(self->restartInfoLocation.c_str());
 			// write the snapUID to a file
 			TraceEvent("SnapshotCreateStatus").detail("Status", !snapFailed ? "Success" : "Failure");
@@ -349,7 +358,7 @@ public: // workload functions
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create1.sh");
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID, self->snapVersion);
 					wait(status);
 					break;
 				} catch (Error& e) {
