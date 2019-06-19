@@ -486,7 +486,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	*error = false;
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
-	int fd = open("/proc/self/statm", O_RDONLY);
+	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		TraceEvent("OpenStatmFileFailure");
 		*error = true;

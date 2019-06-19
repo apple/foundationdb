@@ -432,6 +432,7 @@ private:
 		// Socket settings that have to be set after connect or accept succeeds
 		socket.non_blocking(true);
 		socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		platform::setCloseOnExec(socket.native_handle());
 	}
 
 	void closeSocket() {
@@ -459,6 +460,7 @@ public:
 	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
 		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
+		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
 	virtual void addref() { ReferenceCounted<Listener>::addref(); }
