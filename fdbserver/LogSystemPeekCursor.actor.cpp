@@ -146,8 +146,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	loop {
 		state Version expectedBegin = self->messageVersion.version;
 		try {
-			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
-				self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
+			if (self->parallelGetMore || self->onlySpilled) {
+				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
+					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
+				}
+			} else if (self->futureResults.size() == 0) {
+				return Void();
 			}
 
 			choose {
@@ -235,7 +239,11 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
 	if( hasMessage() )
 		return Void();
 	if( !more.isValid() || more.isReady() ) {
-		more = (parallelGetMore || onlySpilled) ? serverPeekParallelGetMore(this, taskID) : serverPeekGetMore(this, taskID);
+		if (parallelGetMore || onlySpilled || futureResults.size()) {
+			more = serverPeekParallelGetMore(this, taskID);
+		} else {
+			more = serverPeekGetMore(this, taskID);
+		}
 	}
 	return more;
 }
