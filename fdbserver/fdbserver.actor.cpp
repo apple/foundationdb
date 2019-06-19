@@ -22,6 +22,7 @@
 // a macro that makes boost interprocess break on Windows.
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
@@ -983,6 +984,7 @@ int main(int argc, char* argv[]) {
 			}
 			const char *sRole;
 			Optional<uint64_t> ti;
+			std::string argStr;
 
 			switch (args.OptionId()) {
 				case OPT_HELP:
@@ -1050,10 +1052,12 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				case OPT_PUBLICADDR:
-					publicAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(publicAddressStrs, argStr, [](char c){return c == ',';});
 					break;
 				case OPT_LISTEN:
-					listenAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(listenAddressStrs, argStr, [](char c){return c == ',';});
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
