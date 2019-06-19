@@ -195,5 +195,3 @@ struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
 		member = a;
 	}
 };
-
-

@@ -431,7 +431,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, debugID ), TaskTLogCommitReply ) );
+					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, data.getHasExecOp(), debugID ), TaskTLogCommitReply ) );
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);
@@ -767,7 +767,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, vector<pair<Version,Tag>> history ) {
+	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, std::vector<std::pair<Version,Tag>> history ) {
 		while(history.size() && begin >= history.back().first) {
 			history.pop_back();
 		}
@@ -1108,11 +1108,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) {
+	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations) {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
 			if(log->isLocal && log->logServers.size()) {
-				log->getPushLocations(tags, locations, locationOffset);
+				log->getPushLocations(tags, locations, locationOffset, allLocations);
 				locationOffset += log->logServers.size();
 			}
 		}
@@ -1123,7 +1123,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Tag getRandomRouterTag() {
-		return Tag(tagLocalityLogRouter, g_random->randomInt(0, logRouterTags));
+		return Tag(tagLocalityLogRouter, deterministicRandom()->randomInt(0, logRouterTags));
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
@@ -1780,7 +1780,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->expectedLogSets = 1;
 		logSystem->recoveredAt = oldLogSystem->recoverAt;
 		logSystem->repopulateRegionAntiQuorum = configuration.repopulateRegionAntiQuorum;
-		logSystem->recruitmentID = g_random->randomUniqueID();
+		logSystem->recruitmentID = deterministicRandom()->randomUniqueID();
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
 		if(configuration.usableRegions > 1) {
@@ -2129,7 +2129,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (int i = 0; i < prevState.tLogLocalities.size(); i++) {
 			tlogs.emplace_back(prevState.tLogLocalities[i], i);
 		}
-		g_random->randomShuffle(tlogs);
+		deterministicRandom()->randomShuffle(tlogs);
 		// Rearrange the array such that things that the left is logs closer to being locked, and
 		// the right is logs that can't be locked.  This makes us prefer locking already-locked TLogs,
 		// which is how we respect the decisions made in the previous execution.
@@ -2186,7 +2186,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// with independant sets of data. This case will validated that no code is relying on the old
 		// quorum=(RF-AQ) logic, and now goes through the policy engine instead.
 		TEST(can_omit >= prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum);  // Locking a subset of the TLogs while ending an epoch.
-		const bool reboot_a_tlog = g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY && g_random->random01() < 0.25;
+		const bool reboot_a_tlog = g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY && deterministicRandom()->random01() < 0.25;
 		TraceEvent(SevInfo, "MasterRecoveryTLogLocking", dbgid)
 		    detail("Locks", tlogs.size() - can_omit)
 		    detail("Skipped", can_omit)

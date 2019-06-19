@@ -19,17 +19,36 @@
  */
 
 #include "flow/flow.h"
+#include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
 #include <stdarg.h>
 #include <cinttypes>
 
 INetwork *g_network = 0;
-IRandom *g_random = 0;
-IRandom *g_nondeterministic_random = 0;
-IRandom *g_debug_random = 0;
+
 FILE* randLog = 0;
+thread_local Reference<IRandom> seededRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
+
+void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
+	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
+}
+
+Reference<IRandom> deterministicRandom() {
+	if(!seededRandom) {
+		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
+	}
+	return seededRandom;
+}
+
+Reference<IRandom> nondeterministicRandom() {
+	static thread_local Reference<IRandom> random;
+	if(!random) {
+		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
+	}
+	return random;
+}
 
 std::string UID::toString() const {
 	return format("%016llx%016llx", part[0], part[1]);
@@ -188,19 +207,25 @@ Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
 	return r;
 }
 
-bool buggifyActivated = false;
-std::map<std::pair<std::string,int>, int> SBVars;
+namespace {
 
-double P_BUGGIFIED_SECTION_ACTIVATED = .25,
-	P_BUGGIFIED_SECTION_FIRES = .25,
-	P_EXPENSIVE_VALIDATION = .05;
+std::vector<bool> buggifyActivated{false, false};
+std::map<BuggifyType, std::map<std::pair<std::string,int>, int>> typedSBVars;
 
-int getSBVar(std::string file, int line){
-	if (!buggifyActivated) return 0;
+}
+
+std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{.25, .25};
+std::vector<double> P_BUGGIFIED_SECTION_FIRES{.25, .25};
+
+double P_EXPENSIVE_VALIDATION = .05;
+
+int getSBVar(std::string file, int line, BuggifyType type){
+	if (!buggifyActivated[int(type)]) return 0;
 
 	const auto &flPair = std::make_pair(file, line);
+	auto& SBVars = typedSBVars[type];
 	if (!SBVars.count(flPair)){
-		SBVars[flPair] = g_random->random01() < P_BUGGIFIED_SECTION_ACTIVATED;
+		SBVars[flPair] = deterministicRandom()->random01() < P_BUGGIFIED_SECTION_ACTIVATED[int(type)];
 		g_traceBatch.addBuggify( SBVars[flPair], line, file );
 		if( g_network ) g_traceBatch.dump();
 	}
@@ -208,12 +233,20 @@ int getSBVar(std::string file, int line){
 	return SBVars[flPair];
 }
 
-bool validationIsEnabled() {
-	return buggifyActivated;
+void clearBuggifySections(BuggifyType type) {
+	typedSBVars[type].clear();
 }
 
-void enableBuggify( bool enabled ) {
-	buggifyActivated = enabled;
+bool validationIsEnabled(BuggifyType type) {
+	return buggifyActivated[int(type)];
+}
+
+bool isBuggifyEnabled(BuggifyType type) {
+	return buggifyActivated[int(type)];
+}
+
+void enableBuggify(bool enabled, BuggifyType type) {
+	buggifyActivated[int(type)] = enabled;
 }
 
 TEST_CASE("/flow/FlatBuffers/ErrorOr") {
@@ -229,7 +262,7 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 		ASSERT(out.getError().code() == in.getError().code());
 	}
 	{
-		ErrorOr<uint32_t> in(g_random->randomUInt32());
+		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
 		ErrorOr<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);
@@ -254,7 +287,7 @@ TEST_CASE("/flow/FlatBuffers/Optional") {
 		ASSERT(!out.present());
 	}
 	{
-		Optional<uint32_t> in(g_random->randomUInt32());
+		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
 		Optional<uint32_t> out;
 		ObjectWriter writer;
 		writer.serialize(in);

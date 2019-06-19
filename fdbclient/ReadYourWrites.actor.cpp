@@ -472,7 +472,7 @@ public:
 		state bool readThroughEnd = false;
 		state int actualBeginOffset = begin.offset;
 		state int actualEndOffset = end.offset;
-		//state UID randomID = g_nondeterministic_random->randomUniqueID();
+		//state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		resolveKeySelectorFromCache( begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 		resolveKeySelectorFromCache( end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
@@ -745,7 +745,7 @@ public:
 		state bool readThroughEnd = false;
 		state int actualBeginOffset = begin.offset;
 		state int actualEndOffset = end.offset;
-		//state UID randomID = g_nondeterministic_random->randomUniqueID();
+		//state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		resolveKeySelectorFromCache( end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 		resolveKeySelectorFromCache( begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
@@ -1344,7 +1344,7 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 	}
 	
 	if (tr.apiVersionAtLeast(300)) {
-		if (keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) {
+		if ((keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) && (keys.begin != metadataVersionKey || keys.end != metadataVersionKeyEnd)) {
 			throw key_outside_legal_range();
 		}
 	}

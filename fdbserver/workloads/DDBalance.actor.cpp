@@ -50,7 +50,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 		nodesPerActor = nodes/(actorsPerClient*clientCount);
 
-		currentbin = g_random->randomInt(0,binCount);
+		currentbin = deterministicRandom()->randomInt(0,binCount);
 	}
 
 	virtual std::string description() { return "DDBalance"; }
@@ -130,7 +130,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 		for(int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++) order.push_back(o*10);
 
-		g_random->randomShuffle(order);
+		deterministicRandom()->randomShuffle(order);
 		for(i=0; i<order.size(); ) {
 			vector<Future<Void>> fs;
 			for(int j=0; j<100 && i<order.size(); j++) {
@@ -219,8 +219,8 @@ struct DDBalanceWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop {
-			nextBin = g_random->randomInt(key_space_drift,self->binCount+key_space_drift);
-			while(nextBin == currentBin) nextBin = g_random->randomInt(key_space_drift,self->binCount+key_space_drift);
+			nextBin = deterministicRandom()->randomInt(key_space_drift,self->binCount+key_space_drift);
+			while(nextBin == currentBin) nextBin = deterministicRandom()->randomInt(key_space_drift,self->binCount+key_space_drift);
 
 			vector<Future<Void>> fs;
 			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)

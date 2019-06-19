@@ -58,7 +58,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -369,10 +369,11 @@ struct StorageQueuingMetricsReply {
 	Version durableVersion; // latest version durable on storage server
 	double cpuUsage;
 	double diskUsage;
+	double localRateLimit;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage, localRateLimit);
 	}
 };
 

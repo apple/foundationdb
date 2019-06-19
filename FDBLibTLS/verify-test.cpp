@@ -28,7 +28,6 @@
 #include <openssl/objects.h>
 
 #include "fdbrpc/ITLSPlugin.h"
-#include "ReferenceCounted.h"
 
 #include "FDBLibTLS/FDBLibTLSPlugin.h"
 #include "FDBLibTLS/FDBLibTLSPolicy.h"
@@ -52,25 +51,6 @@ struct FDBLibTLSVerifyTest {
 	std::map<int, Criteria> issuer_criteria;
 	std::map<int, Criteria> root_criteria;
 };
-
-static std::string printable( std::string const& val ) {
-	static char const digits[] = "0123456789ABCDEF";
-	std::string s;
-
-	for ( int i = 0; i < val.size(); i++ ) {
-		uint8_t b = val[i];
-		if (b >= 32 && b < 127 && b != '\\')
-			s += (char)b;
-		else if (b == '\\')
-			s += "\\\\";
-		else {
-			s += "\\x";
-			s += digits[(b >> 4) & 15];
-			s += digits[b & 15];
-		}
-	}
-	return s;
-}
 
 static std::string criteriaToString(std::map<int, Criteria> const& criteria) {
 	std::string s;

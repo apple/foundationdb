@@ -26,7 +26,6 @@
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :class:`Future`
 .. |read-your-writes-disable-option| replace:: :meth:`Transaction.options.set_read_your_writes_disable`
-.. |read-your-writes-disable-option| replace:: :meth:`Transaction.options.set_read_your_writes_disable`
 .. |retry-limit-transaction-option| replace:: :meth:`Transaction.options.set_retry_limit`
 .. |timeout-transaction-option| replace:: :meth:`Transaction.options.set_timeout`
 .. |max-retry-delay-transaction-option| replace:: :meth:`Transaction.options.set_max_retry_delay`
@@ -498,7 +497,7 @@ Snapshot reads
 
 .. method:: Transaction.snapshot.get_read_version() -> Version
 
-    Identical to :meth:`Transaction.get_read_version` (since snapshot and serializable reads use the same read version).
+    Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
 Writing data
 ------------

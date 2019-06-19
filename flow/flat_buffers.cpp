@@ -26,7 +26,7 @@
 
 #include <algorithm>
 #include <iomanip>
-#include <boost/variant.hpp>
+#include <variant>
 
 namespace detail {
 
@@ -283,29 +283,10 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 
 } // namespace unit_tests
 
-template <class... Alternatives>
-struct union_like_traits<boost::variant<Alternatives...>> : std::true_type {
-	using Member = boost::variant<Alternatives...>;
-	using alternatives = pack<Alternatives...>;
-	static uint8_t index(const Member& variant) { return variant.which(); }
-	static bool empty(const Member& variant) { return false; }
-
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member& variant) {
-		return boost::get<index_t<i, alternatives>>(variant);
-	}
-
-	template <size_t i, class Alternative>
-	static const void assign(Member& member, const Alternative& a) {
-		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
-		member = a;
-	}
-};
-
 namespace unit_tests {
 
 TEST_CASE("flow/FlatBuffers/variant") {
-	using V = boost::variant<int, double, Nested2>;
+	using V = std::variant<int, double, Nested2>;
 	V v1;
 	V v2;
 	Arena arena;
@@ -316,21 +297,21 @@ TEST_CASE("flow/FlatBuffers/variant") {
 	out = save_members(arena, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<int>(v1) == boost::get<int>(v2));
+	ASSERT(std::get<int>(v1) == std::get<int>(v2));
 
 	v1 = 1.0;
 	out = save_members(arena, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<double>(v1) == boost::get<double>(v2));
+	ASSERT(std::get<double>(v1) == std::get<double>(v2));
 
 	v1 = Nested2{ 1, { "abc", "def" }, 2 };
 	out = save_members(arena, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<Nested2>(v1).a == boost::get<Nested2>(v2).a);
-	ASSERT(boost::get<Nested2>(v1).b == boost::get<Nested2>(v2).b);
-	ASSERT(boost::get<Nested2>(v1).c == boost::get<Nested2>(v2).c);
+	ASSERT(std::get<Nested2>(v1).a == std::get<Nested2>(v2).a);
+	ASSERT(std::get<Nested2>(v1).b == std::get<Nested2>(v2).b);
+	ASSERT(std::get<Nested2>(v1).c == std::get<Nested2>(v2).c);
 	return Void();
 }
 
@@ -404,7 +385,7 @@ struct Y1 {
 
 struct Y2 {
 	int a;
-	boost::variant<int> b;
+	std::variant<int> b;
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
@@ -509,9 +490,9 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
 	Standalone<VectorRef<StringRef>> vecIn;
-	auto numElements = g_random->randomInt(1, 20);
+	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {
-		auto str = g_random->randomAlphaNumeric(g_random->randomInt(0, 30));
+		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
 		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
 	}
 	Standalone<StringRef> value = ObjectWriter::toValue(vecIn);

@@ -46,7 +46,7 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData() : startTime(-1), priority(-1), workFactor(0), wantsNewServers(false), interval("QueuedRelocation") {}
-	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(g_random->randomUniqueID()), workFactor(0),
+	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
 		wantsNewServers(
 			rs.priority == PRIORITY_REBALANCE_SHARD ||
 			rs.priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
@@ -828,7 +828,7 @@ struct DDQueueData {
 
 			//logRelocation( rd, "LaunchedRelocation" );
 		}
-		if( now() - startTime > .001 && g_random->random01()<0.001 )
+		if( now() - startTime > .001 && deterministicRandom()->random01()<0.001 )
 			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime );
 
 		/*if( startedHere > 0 ) {
@@ -950,7 +950,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					// We randomly choose a server in bestTeams[i] as the shard's destination and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
-					int idx = g_random->randomInt(0, serverIds.size());
+					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
 					for(int j = 0; j < serverIds.size(); j++) {
@@ -1092,7 +1092,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	if( !shards.size() )
 		return false;
 
-	state KeyRange moveShard = g_random->randomChoice( shards );
+	state KeyRange moveShard = deterministicRandom()->randomChoice( shards );
 	StorageMetrics metrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(moveShard)) ) );
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);

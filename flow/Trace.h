@@ -331,10 +331,11 @@ struct TraceableStringImpl : std::true_type {
 				result.push_back('\\');
 				result.push_back('\\');
 			} else {
+				const uint8_t byte = *iter;
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char(*iter / 16));
-				result.push_back(base16Char(*iter));
+				result.push_back(base16Char(byte / 16));
+				result.push_back(base16Char(byte));
 			}
 		}
 		return result;

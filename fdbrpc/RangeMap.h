@@ -138,7 +138,7 @@ public:
 	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
 	Iterator randomRange() {
-		return Iterator( map.index( g_random->randomInt(0, map.size()-1) ) );
+		return Iterator( map.index( deterministicRandom()->randomInt(0, map.size()-1) ) );
 	}
 	Iterator nthRange(int n) { return Iterator(map.index(n)); }
 

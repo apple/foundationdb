@@ -147,14 +147,15 @@ function(fdb_install)
 endfunction()
 
 if(APPLE)
-  set(CPACK_GENERATOR TGZ PackageMaker)
+  set(CPACK_GENERATOR TGZ productbuild)
 else()
   set(CPACK_GENERATOR RPM DEB TGZ)
 endif()
 
 
 set(CPACK_PACKAGE_CHECKSUM SHA256)
-set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake" "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
+set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 
 ################################################################################
 # Version information
@@ -332,7 +333,7 @@ set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_CONTROL_EXTRA
 # MacOS configuration
 ################################################################################
 
-if(NOT WIN32)
+if(APPLE)
   install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
     DESTINATION "usr/local/foundationdb"
     COMPONENT clients-pm)

@@ -24,6 +24,6 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
-void setupAndRun(std::string const& dataFolder, const char* const& testFile, bool const& rebooting, Reference<TLSOptions> const& useSSL);
+void setupAndRun(std::string const& dataFolder, const char* const& testFile, bool const& rebooting, bool const& restoring, std::string const& whitelistBinPath, Reference<TLSOptions> const& useSSL);
 
 #endif

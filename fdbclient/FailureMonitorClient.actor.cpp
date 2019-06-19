@@ -143,7 +143,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					double slowThreshold = .200 + waitfor + FLOW_KNOBS->MAX_BUGGIFIED_DELAY;
 					double warnAlwaysThreshold = CLIENT_KNOBS->FAILURE_MIN_DELAY/2;
 
-					if (elapsed > slowThreshold && g_random->random01() < elapsed / warnAlwaysThreshold) {
+					if (elapsed > slowThreshold && deterministicRandom()->random01() < elapsed / warnAlwaysThreshold) {
 						TraceEvent(elapsed > warnAlwaysThreshold ? SevWarnAlways : SevWarn, "FailureMonitorClientSlow").detail("Elapsed", elapsed).detail("Expected", waitfor);
 					}
 
@@ -167,6 +167,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 }
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
+	TraceEvent("FailureMonitorStart").detail("IsClient", FlowTransport::transport().isClient());
+	if (FlowTransport::transport().isClient()) {
+		wait(Never());
+	}
+
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
 	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
 	auto localAddr = g_network->getLocalAddresses();

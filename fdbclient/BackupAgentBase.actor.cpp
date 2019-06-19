@@ -429,7 +429,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 				values.resize(values.arena(), values.size() / 2);
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
-				if(g_random->random01() < 0.5)
+				if(deterministicRandom()->random01() < 0.5)
 					wait(delay(6.0));
 			}
 
@@ -488,7 +488,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				rangevalue.resize(rangevalue.arena(), rangevalue.size() / 2);
 				rangevalue.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
-				if(g_random->random01() < 0.5)
+				if(deterministicRandom()->random01() < 0.5)
 					wait(delay(6.0));
 			}
 

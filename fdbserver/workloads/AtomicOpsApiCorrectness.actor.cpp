@@ -103,7 +103,7 @@ public:
 
 	// Test Atomic ops on non existing keys that results in a set
 	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key) {
-		state uint64_t intValue = g_random->randomInt(0, 10000000);
+		state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		state Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
 		// Do operation on Storage Server
@@ -145,7 +145,7 @@ public:
 
 	// Test Atomic ops on non existing keys that results in a unset
 	ACTOR Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key) {
-		state uint64_t intValue = g_random->randomInt(0, 10000000);
+		state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		state Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
 		// Do operation on Storage Server
@@ -191,8 +191,8 @@ public:
 	ACTOR Future<Void> testAtomicOpOnEmptyValue(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key, DoAtomicOpOnEmptyValueFunction opFunc) {
 		state Value existingVal;
 		state Value otherVal;
-		state uint64_t val = g_random->randomInt(0, 10000000);
-		if (g_random->random01() < 0.5) {
+		state uint64_t val = deterministicRandom()->randomInt(0, 10000000);
+		if (deterministicRandom()->random01() < 0.5) {
 			existingVal = StringRef((const uint8_t*)&val, sizeof(val));
 			otherVal = StringRef();
 		}
@@ -240,8 +240,8 @@ public:
 
 	// Test atomic ops in the normal case when the existing value is present
 	ACTOR Future<Void> testAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key, DoAtomicOpFunction opFunc) {
-		state uint64_t intValue1 = g_random->randomInt(0, 10000000);
-		state uint64_t intValue2 = g_random->randomInt(0, 10000000);
+		state uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
+		state uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
 		state Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
 		state Value val2 = StringRef((const uint8_t *)&intValue2, sizeof(intValue2));
 
@@ -290,8 +290,8 @@ public:
 	ACTOR Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, Key key,
 	                                                  bool keySet) {
 		state uint64_t opType = MutationRef::CompareAndClear;
-		state uint64_t intValue1 = g_random->randomInt(0, 10000000);
-		state uint64_t intValue2 = g_random->coinflip() ? intValue1 : g_random->randomInt(0, 10000000);
+		state uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
+		state uint64_t intValue2 = deterministicRandom()->coinflip() ? intValue1 : deterministicRandom()->randomInt(0, 10000000);
 
 		state Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
 		state Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));

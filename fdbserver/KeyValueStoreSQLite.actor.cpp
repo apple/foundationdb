@@ -20,6 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
+#include "fdbrpc/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -90,32 +91,45 @@ struct PageChecksumCodec {
 
 		char *pData = (char *)data;
 		int dataLen = pageLen - sizeof(SumType);
-		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
-		// Write sum directly to page or to sum variable based on mode
-		SumType *sumOut = write ? pSumInPage : &sum;
-		sumOut->part1 = pageNumber; //DO NOT CHANGE
-		sumOut->part2 = 0x5ca1ab1e;
-		hashlittle2(pData, dataLen, &sumOut->part1, &sumOut->part2);
-
-		// Verify if not in write mode
-		if(!write && sum != *pSumInPage) {
-			if(!silent)
-				TraceEvent (SevError, "SQLitePageChecksumFailure")
-					.error(checksum_failed())
-					.detail("CodecPageSize", pageSize)
-					.detail("CodecReserveSize", reserveSize)
-					.detail("Filename", filename)
-					.detail("PageNumber", pageNumber)
-					.detail("PageSize", pageLen)
-					.detail("ChecksumInPage", pSumInPage->toString())
-					.detail("ChecksumCalculated", sum.toString());
-
-			return false;
+		if (write) {
+			// Always write a CRC32 checksum for new pages
+			pSumInPage->part1 = 0; // Indicates CRC32 is being used
+			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			return true;
 		}
 
-		return true;
+		SumType sum;
+		if (pSumInPage->part1 == 0) {
+			// part1 being 0 indicates with high probability that a CRC32 checksum
+			// was used, so check that first. If this checksum fails, there is still
+			// some chance the page was written with hashlittle2, so fall back to checking
+			// hashlittle2
+			sum.part1 = 0;
+			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (sum == *pSumInPage) return true;
+		}
+
+		SumType hashLittle2Sum;
+		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
+		hashLittle2Sum.part2 = 0x5ca1ab1e;
+		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
+		if (hashLittle2Sum == *pSumInPage) return true;
+
+		if (!silent) {
+			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			trEvent.error(checksum_failed())
+			    .detail("CodecPageSize", pageSize)
+			    .detail("CodecReserveSize", reserveSize)
+			    .detail("Filename", filename)
+			    .detail("PageNumber", pageNumber)
+			    .detail("PageSize", pageLen)
+			    .detail("ChecksumInPage", pSumInPage->toString())
+			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+		}
+		return false;
 	}
 
 	static void * codec(void *vpSelf, void *data, Pgno pageNumber, int op) {
@@ -222,7 +236,7 @@ struct SQLiteDB : NonCopyable {
 	}
 
 	void checkError( const char* context, int rc ) {
-		//if (g_random->random01() < .001) rc = SQLITE_INTERRUPT;
+		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
@@ -1292,7 +1306,7 @@ void SQLiteDB::open(bool writable) {
 			// Either we died partway through creating this DB, or died partway through deleting it, or someone is monkeying with our files
 			// Create a new blank DB by backing up the WAL file (just in case it is important) and then hitting the next case
 			walFile = file_not_found();
-			renameFile( walpath, walpath + "-old-" + g_random->randomUniqueID().toString() );
+			renameFile( walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString() );
 			ASSERT_WE_THINK(false);  //< This code should not be hit in FoundationDB at the moment, because worker looks for databases to open by listing .fdb files, not .fdb-wal files
 			//TEST(true);  // Replace a partially constructed or destructed DB
 		}
@@ -1329,7 +1343,7 @@ void SQLiteDB::open(bool writable) {
 	if( !g_network->isSimulated() ) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
 	} else if( BUGGIFY ) {
-		chunkSize = 4096 * g_random->randomInt(0, 100);
+		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
 	} else {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
 	}
@@ -1676,7 +1690,7 @@ private:
 			cursor = new Cursor(conn, true);
 			checkFreePages();
 			++writesComplete;
-			if (t3-a.issuedTime > 10.0*g_random->random01())
+			if (t3-a.issuedTime > 10.0*deterministicRandom()->random01())
 				TraceEvent("KVCommit10sSample", dbgid).detail("Queued", t1-a.issuedTime).detail("Commit", t2-t1).detail("Checkpoint", t3-t2);
 
 			diskBytesUsed = waitForAndGet( conn.dbFile->size() ) + waitForAndGet( conn.walFile->size() );
@@ -1751,7 +1765,7 @@ private:
 					break;
 				}
 
-				if(canDelete && (!canVacuum || g_random->random01() < lazyDeleteBatchProbability)) {
+				if(canDelete && (!canVacuum || deterministicRandom()->random01() < lazyDeleteBatchProbability)) {
 					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
 					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
 

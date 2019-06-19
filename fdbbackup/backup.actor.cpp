@@ -1450,7 +1450,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 }
 
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
-										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
+										std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1491,7 +1491,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				}
 			}
 
-			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * deterministicRandom()->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
 			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
@@ -1506,7 +1506,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	std::string id = nondeterministicRandom()->randomUniqueID().toString();
 	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
 	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
@@ -1947,23 +1947,13 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
 	if(ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
 
 	if(targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
-		throw restore_error();
-	}
-
-	if(destClusterFile.empty()) {
-		fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-		throw restore_error();
-	}
-
-	if(!fileExists(destClusterFile)) {
-		fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", destClusterFile.c_str());
 		throw restore_error();
 	}
 
@@ -1988,7 +1978,6 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 	}
 
 	try {
-		state Database db = Database::createDatabase(destClusterFile, Database::API_VERSION_LATEST);
 		state FileBackupAgent backupAgent;
 
 		state Reference<IBackupContainer> bc = openBackupContainer(exeRestore.toString().c_str(), container);
@@ -3404,9 +3393,26 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			}
 
+			if(restoreClusterFileDest.empty()) {
+				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+				return FDB_EXIT_ERROR;
+			}
+
+			if(!fileExists(restoreClusterFileDest)) {
+				fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+				return FDB_EXIT_ERROR;
+			}
+
+			try {
+				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+			} catch(Error &e) {
+				fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+				return FDB_EXIT_ERROR;
+			}
+
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runRestore(restoreClusterFileDest, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
+					f = stopAfter( runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
 					break;
 				case RESTORE_WAIT:
 					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
