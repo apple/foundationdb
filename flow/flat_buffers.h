@@ -459,24 +459,28 @@ constexpr auto fields_helper() {
 template <class Member>
 using Fields = decltype(fields_helper<Member>());
 
-// TODO(anoyes): Make this `template <int... offsets>` so we can re-use
-// identical vtables even if they have different types.
-// Also, it's important that get_vtable always returns the same VTable pointer
+// It's important that get_vtable always returns the same VTable pointer
 // so that we can decide equality by comparing the pointers.
 
-extern VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& members,
-                              const std::vector<unsigned>& alignments);
+// First |numMembers| elements of sizesAndAlignments are sizes, the second
+// |numMembers| elements are alignments.
+extern VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAndAlignments);
+
+template <unsigned... MembersAndAlignments>
+const VTable* gen_vtable3() {
+	static VTable table =
+	    generate_vtable(sizeof...(MembersAndAlignments) / 2, std::vector<unsigned>{ MembersAndAlignments... });
+	return &table;
+}
 
 template <class... Members>
-VTable gen_vtable(pack<Members...> p) {
-	return generate_vtable(sizeof...(Members), std::vector<unsigned>{ { _SizeOf<Members>::size... } },
-	                       std::vector<unsigned>{ { _SizeOf<Members>::align... } });
+const VTable* gen_vtable2(pack<Members...> p) {
+	return gen_vtable3<_SizeOf<Members>::size..., _SizeOf<Members>::align...>();
 }
 
 template <class... Members>
 const VTable* get_vtable() {
-	static VTable table = gen_vtable(concat_t<Fields<Members>...>{});
-	return &table;
+	return gen_vtable2(concat_t<Fields<Members>...>{});
 }
 
 template <class F, class... Members>
