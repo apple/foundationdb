@@ -45,6 +45,10 @@ struct TLogInterface {
 	RequestStream< struct TLogConfirmRunningRequest > confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
+	RequestStream< struct TLogDisablePopRequest> disablePopRequest;
+	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
+	RequestStream< struct TLogSnapRequest> snapRequest;
+
 	
 	TLogInterface() {}
 	explicit TLogInterface(LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
@@ -69,7 +73,8 @@ struct TLogInterface {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
 		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
+		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
+		  , disablePopRequest, enablePopRequest, snapRequest);
 	}
 };
 
@@ -231,6 +236,7 @@ struct TLogCommitRequest {
 	}
 };
 
+
 struct TLogQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
@@ -252,6 +258,55 @@ struct TLogQueuingMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+struct TLogDisablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022806;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogDisablePopRequest() {}
+	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogEnablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022809;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogEnablePopRequest() {}
+	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	TLogSnapRequest() : snapPayload() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
 	}
 };
 
