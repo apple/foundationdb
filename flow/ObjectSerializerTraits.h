@@ -62,42 +62,15 @@ struct index_impl<0, pack<T, Ts...>> {
 template <int i, class Pack>
 using index_t = typename index_impl<i, Pack>::type;
 
-//  A smart pointer that knows whether or not to delete itself.
-template <class T>
-using OwnershipErasedPtr = std::unique_ptr<T, std::function<void(T*)>>;
-
-// Creates an OwnershipErasedPtr<T> that will delete itself.
-template <class T, class Deleter = std::default_delete<T>>
-OwnershipErasedPtr<T> ownedPtr(T* t, Deleter&& d = Deleter{}) {
-	return OwnershipErasedPtr<T>{ t, std::forward<Deleter>(d) };
-}
-
-// Creates an OwnershipErasedPtr<T> that will not delete itself.
-template <class T>
-OwnershipErasedPtr<T> unownedPtr(T* t) {
-	return OwnershipErasedPtr<T>{ t, [](T*) {} };
-}
-
-struct WriteRawMemory {
-	using Block = std::pair<OwnershipErasedPtr<const uint8_t>, size_t>;
-	std::vector<Block> blocks;
-
-	WriteRawMemory() {}
-	WriteRawMemory(Block&& b) { blocks.emplace_back(std::move(b.first), b.second); }
-	WriteRawMemory(std::vector<Block>&& v) : blocks(std::move(v)) {}
-
-	WriteRawMemory(WriteRawMemory&&) = default;
-	WriteRawMemory& operator=(WriteRawMemory&&) = default;
-
-	size_t size() const {
-		size_t result = 0;
-		for (const auto& b : blocks) {
-			result += b.second;
-		}
-		return result;
-	}
+struct Block {
+	const uint8_t* data;
+	size_t size;
 };
 
+template <class T>
+Block unownedPtr(T* t, size_t s) {
+	return Block{ t, s };
+}
 
 template <class T, typename = void>
 struct scalar_traits : std::false_type {
@@ -113,7 +86,8 @@ struct scalar_traits : std::false_type {
 
 template <class T>
 struct dynamic_size_traits : std::false_type {
-	static WriteRawMemory save(const T&);
+	static Block save(const T&);
+	static void serialization_done(const T&); // Optional. Called after the last call to save.
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -140,7 +114,6 @@ struct vector_like_traits : std::false_type {
 
 	static insert_iterator insert(VectorLike&);
 	static iterator begin(const VectorLike&);
-	static void deserialization_done(VectorLike&); // Optional
 };
 
 template <class UnionLike>

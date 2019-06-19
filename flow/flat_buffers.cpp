@@ -329,50 +329,9 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	return Void();
 }
 
-struct DynamicSizeThingy {
-	std::string x;
-	mutable int saves = 0;
-};
-
 } // namespace unit_tests
 
-template <>
-struct dynamic_size_traits<unit_tests::DynamicSizeThingy> : std::true_type {
-private:
-	using T = unit_tests::DynamicSizeThingy;
-
-public:
-	static WriteRawMemory save(const T& t) {
-		++t.saves;
-		T* t2 = new T(t);
-		return { { ownedPtr(reinterpret_cast<const uint8_t*>(t2->x.data()), [t2](auto*) { delete t2; }),
-			       t2->x.size() } };
-	}
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t* p, size_t n, T& t, Context&) {
-		t.x.assign(reinterpret_cast<const char*>(p), n);
-	}
-};
-
 namespace unit_tests {
-
-TEST_CASE("flow/FlatBuffers/dynamic_size_owned") {
-	DynamicSizeThingy x1 = { "abcdefg" };
-	DynamicSizeThingy x2;
-	Arena arena;
-	DummyContext context;
-	const uint8_t* out;
-
-	out = save_members(arena, FileIdentifier{}, x1);
-	ASSERT(x1.saves == 1);
-	// print_buffer(out, arena.get_size(out));
-	load_members(out, context, x2);
-	ASSERT(x1.x == x2.x);
-	return Void();
-}
 
 struct Y1 {
 	int a;

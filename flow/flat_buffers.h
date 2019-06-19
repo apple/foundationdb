@@ -174,9 +174,7 @@ private:
 	using T = std::string;
 
 public:
-	static WriteRawMemory save(const T& t) {
-		return { { unownedPtr(reinterpret_cast<const uint8_t*>(t.data())), t.size() } };
-	};
+	static Block save(const T& t) { return unownedPtr(reinterpret_cast<const uint8_t*>(t.data()), t.size()); };
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -233,13 +231,13 @@ template <class T>
 struct sfinae_true : std::true_type {};
 
 template <class T>
-auto test_deserialization_done(int) -> sfinae_true<decltype(T::deserialization_done)>;
+auto test_serialization_done(int) -> sfinae_true<decltype(T::serialization_done)>;
 
 template <class T>
-auto test_deserialization_done(long) -> std::false_type;
+auto test_serialization_done(long) -> std::false_type;
 
 template <class T>
-struct has_deserialization_done : decltype(test_deserialization_done<T>(0)) {};
+struct has_serialization_done : decltype(test_serialization_done<T>(0)) {};
 
 template <class T>
 constexpr int fb_scalar_size = is_scalar<T> ? scalar_traits<T>::size : sizeof(RelativeOffset);
@@ -324,19 +322,6 @@ struct PrecomputeSize {
 	// offset.
 	void write(const void*, int offset, int len) { current_buffer_size = std::max(current_buffer_size, offset); }
 
-	template <class ToRawMemory>
-	void writeRawMemory(ToRawMemory&& to_raw_memory) {
-		auto w = std::forward<ToRawMemory>(to_raw_memory)();
-		int start = RightAlign(current_buffer_size + w.size() + 4, 4);
-		write(nullptr, start, 4);
-		start -= 4;
-		for (auto& block : w.blocks) {
-			write(nullptr, start, block.second);
-			start -= block.second;
-		}
-		writeRawMemories.emplace_back(std::move(w));
-	}
-
 	struct Noop {
 		void write(const void* src, int offset, int len) {}
 		void writeTo(PrecomputeSize& writer, int offset) {
@@ -355,12 +340,13 @@ struct PrecomputeSize {
 		return Noop{ size, writeToIndex };
 	}
 
+	static constexpr bool finalPass = false;
+
 	int current_buffer_size = 0;
 
 	const int buffer_length = -1; // Dummy, the value of this should not affect anything.
 	const int vtable_start = -1; // Dummy, the value of this should not affect anything.
 	std::vector<int> writeToOffsets;
-	std::vector<WriteRawMemory> writeRawMemories;
 };
 
 template <class Member, class Context>
@@ -382,26 +368,9 @@ struct WriteToBuffer {
 		current_buffer_size = std::max(current_buffer_size, offset);
 	}
 
-	template <class ToRawMemory>
-	void writeRawMemory(ToRawMemory&&) {
-		auto& w = *write_raw_memories_iter;
-		uint32_t size = w.size();
-		int start = RightAlign(current_buffer_size + size + 4, 4);
-		write(&size, start, 4);
-		start -= 4;
-		for (auto& p : w.blocks) {
-			if (p.second > 0) {
-				write(reinterpret_cast<const void*>(p.first.get()), start, p.second);
-			}
-			start -= p.second;
-		}
-		++write_raw_memories_iter;
-	}
-
-	WriteToBuffer(int buffer_length, int vtable_start, uint8_t* buffer, std::vector<int> writeToOffsets,
-	              std::vector<WriteRawMemory>::iterator write_raw_memories_iter)
+	WriteToBuffer(int buffer_length, int vtable_start, uint8_t* buffer, std::vector<int> writeToOffsets)
 	  : buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
-	    writeToOffsets(std::move(writeToOffsets)), write_raw_memories_iter(write_raw_memories_iter) {}
+	    writeToOffsets(std::move(writeToOffsets)) {}
 
 	struct MessageWriter {
 		template <class T>
@@ -433,12 +402,13 @@ struct WriteToBuffer {
 	const int vtable_start;
 	int current_buffer_size = 0;
 
+	static constexpr bool finalPass = true;
+
 private:
 	void copy_memory(const void* src, int offset, int len) {
 		memcpy(static_cast<void*>(&buffer[buffer_length - offset]), src, len);
 	}
 	std::vector<int> writeToOffsets;
-	std::vector<WriteRawMemory>::iterator write_raw_memories_iter;
 	int writeToIndex = 0;
 	uint8_t* buffer;
 };
@@ -781,9 +751,6 @@ struct LoadMember {
 				++inserter;
 				current += sizeof(RelativeOffset);
 			}
-			if constexpr (has_deserialization_done<VectorTraits>::value) {
-				VectorTraits::deserialization_done(member);
-			}
 		} else if constexpr (is_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
@@ -909,9 +876,6 @@ struct LoadSaveHelper {
 			++inserter;
 			current += fb_size<T>;
 		}
-		if constexpr (has_deserialization_done<VectorTraits>::value) {
-			VectorTraits::deserialization_done(member);
-		}
 	}
 
 	template <class U, class Writer, typename = std::enable_if_t<is_scalar<U>>>
@@ -942,7 +906,15 @@ struct LoadSaveHelper {
 	template <class U, class Writer, typename = std::enable_if_t<is_dynamic_size<U>>>
 	RelativeOffset save(const U& message, Writer& writer, const VTableSet*,
 	                    std::enable_if_t<is_dynamic_size<U>, int> _ = 0) {
-		writer.writeRawMemory([&]() { return dynamic_size_traits<U>::save(message); });
+		auto block = dynamic_size_traits<U>::save(message);
+		uint32_t size = block.size;
+		int start = RightAlign(writer.current_buffer_size + size + 4, 4);
+		writer.write(&size, start, 4);
+		start -= 4;
+		writer.write(block.data, start, block.size);
+		if constexpr (has_serialization_done<dynamic_size_traits<U>>::value && Writer::finalPass) {
+			dynamic_size_traits<U>::serialization_done(message);
+		}
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
@@ -1058,7 +1030,7 @@ uint8_t* save(Allocator& allocator, const Root& root, FileIdentifier file_identi
 	uint8_t* out = allocator(precompute_size.current_buffer_size);
 	memset(out, 0, precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ precompute_size.current_buffer_size, vtable_start, out,
-		                         std::move(precompute_size.writeToOffsets), precompute_size.writeRawMemories.begin() };
+		                         std::move(precompute_size.writeToOffsets) };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier);
 	return out;
 }
