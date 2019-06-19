@@ -273,7 +273,7 @@ def run_simulation_test(basedir, options):
         pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
     else:
         pargs.append('-S')
-        pargs.append('off')
+        pargs.append('on')
     td = TestDirectory(basedir)
     if options.buggify:
         pargs.append('-b')
