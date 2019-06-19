@@ -269,7 +269,7 @@ struct ConnectPacket {
 		}
 
 		serializer(ar, protocolVersion, canonicalRemotePort, connectionId, canonicalRemoteIp4);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+		if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 			flags = 0;
 		} else {
 			// We can send everything in serialized packet, since the current version of ConnectPacket
@@ -638,7 +638,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 }
 
 static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
-                        NetworkAddress const& peerAddress, uint64_t peerProtocolVersion) {
+                        NetworkAddress const& peerAddress, ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -752,7 +752,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool incompatiblePeerCounted = false;
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
-	state uint64_t peerProtocolVersion;
+	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
 	if (peer == nullptr) {

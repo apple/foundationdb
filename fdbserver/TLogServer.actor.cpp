@@ -492,7 +492,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	FlowLock execOpLock;
 	bool execOpCommitInProgress;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, uint64_t protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, ProtocolVersion protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			// These are initialized differently on init() or recovery
@@ -1897,7 +1897,7 @@ ACTOR Future<Void> tLogCommit(
 	}
 
 	state Version execVersion = invalidVersion;
-	state ExecCmdValueString execArg();
+	state ExecCmdValueString execArg;
 	state TLogQueueEntryRef qe;
 	state StringRef execCmd;
 	state Standalone<VectorRef<Tag>> execTags;
@@ -2495,7 +2495,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
 
-		uint64_t protocolVersion = BinaryReader::fromStringRef<uint64_t>( fProtocolVersions.get()[idx].value, Unversioned() );
+		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID(), protocolVersion, std::vector<Tag>()) );

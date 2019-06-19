@@ -21,11 +21,11 @@
 #pragma once
 #include <cstdint>
 
-#define PROTOCOL_VERSION_FEATURE(v, x)                                                                                \
+#define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() >= x ::protocolVersion; }                                   \
+	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                   \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
@@ -61,7 +61,6 @@ public:
 	}
 	constexpr void removeAllFlags() { _version = version(); }
 
-	constexpr operator bool() const { return _version != 0; }
 	// comparison operators
 	// Comparison operators ignore the flags - this is because the version flags are stored in the
 	// most significant byte which can make comparison confusing. Also, generally, when one wants to
@@ -74,9 +73,19 @@ public:
 	constexpr bool operator>(const ProtocolVersion other) const { return version() > other.version(); }
 
 public: // introduced features
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010001LL, TagLocality);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000001LL, Fearless);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A200090000LL, Watches);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A2000D0000LL, MovableCoordinatedState);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A340000000LL, ProcessID);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A400040000LL, OpenDatabase);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A446020000LL, Locality);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, MultiGenerationTLog);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010000LL, TagLocality);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000000LL, Fearless);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061020000LL, EndpointAddrList);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, IPv6);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061060000LL, PseudoLocalities);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

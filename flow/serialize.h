@@ -104,7 +104,7 @@ class Serializer {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		t.serialize(ar);
-		ASSERT( ar.protocolVersion() );
+		ASSERT( ar.protocolVersion().isValid() );
 	}
 };
 
@@ -129,14 +129,14 @@ inline void load( Archive& ar, std::string& value ) {
 	ar >> length;
 	value.resize(length);
 	ar.serializeBytes( &value[0], (int)value.length() );
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Archive>
 inline void save( Archive& ar, const std::string& value ) {
 	ar << (int32_t)value.length();
 	ar.serializeBytes( (void*)&value[0], (int)value.length() );
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Archive, class T>
@@ -177,7 +177,7 @@ inline void save( Archive& ar, const std::vector<T>& value ) {
 	ar << (int)value.size();
 	for(auto it = value.begin(); it != value.end(); ++it)
 		ar << *it;
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::vector<T>& value ) {
@@ -189,21 +189,21 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 		value.push_back(T());
 		ar >> value[i];
 	}
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Archive, class T, size_t N>
 inline void save( Archive& ar, const std::array<T, N>& value ) {
 	for(int ii = 0; ii < N; ++ii)
 		ar << value[ii];
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 template <class Archive, class T, size_t N>
 inline void load( Archive& ar, std::array<T, N>& value ) {
 	for (int ii = 0; ii < N; ii++) {
 		ar >> value[ii];
 	}
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Archive, class T>
@@ -211,7 +211,7 @@ inline void save( Archive& ar, const std::set<T>& value ) {
 	ar << (int)value.size();
 	for(auto it = value.begin(); it != value.end(); ++it)
 		ar << *it;
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::set<T>& value ) {
@@ -223,7 +223,7 @@ inline void load( Archive& ar, std::set<T>& value ) {
 		ar >> currentValue;
 		value.insert(currentValue);
 	}
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Archive, class K, class V>
@@ -232,7 +232,7 @@ inline void save( Archive& ar, const std::map<K, V>& value ) {
 	for (const auto &it : value) {
 		ar << it.first << it.second;
 	}
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 template <class Archive, class K, class V>
 inline void load( Archive& ar, std::map<K, V>& value ) {
@@ -244,7 +244,7 @@ inline void load( Archive& ar, std::map<K, V>& value ) {
 		ar >> p.first >> p.second;
 		value.emplace(p);
 	}
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 #pragma intrinsic (memcpy)

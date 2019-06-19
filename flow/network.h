@@ -196,7 +196,7 @@ struct NetworkAddress {
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, ip, port, flags);
 		} else {
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
 				serializer(ar, ipV4, port, flags);
 				ip = IPAddress(ipV4);

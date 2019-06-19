@@ -169,7 +169,7 @@ struct StorageServerDisk {
 	void makeVersionDurable( Version version );
 	Future<bool> restoreDurableState();
 
-	void changeLogProtocol(Version version, uint64_t protocol);
+	void changeLogProtocol(Version version, ProtocolVersion protocol);
 
 	void writeMutation( MutationRef mutation );
 	void writeKeyValue( KeyValueRef kv );
@@ -3043,7 +3043,7 @@ void StorageServerDisk::makeVersionDurable( Version version ) {
 	//TraceEvent("MakeDurable", data->thisServerID).detail("FromVersion", prevStorageVersion).detail("ToVersion", version);
 }
 
-void StorageServerDisk::changeLogProtocol(Version version, uint64_t protocol) {
+void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
 	data->addMutationToMutationLogOrStorage(version, MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 

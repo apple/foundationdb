@@ -80,7 +80,7 @@ public:
 				choosePrimaryAddress();
 			}
 		} else {
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasEndpointAddrList()) {
 				addresses.secondaryAddress = Optional<NetworkAddress>();
 				serializer(ar, addresses.address, token);
 			} else {
