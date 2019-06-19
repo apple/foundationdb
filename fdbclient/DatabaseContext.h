@@ -109,7 +109,7 @@ public:
 	// switchConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
 	// new cluster.
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
-	Future<Void> recreateWatches();
+	Future<Void> connectionFileChanged();
 	bool switchable = false;
 
 	// private:
@@ -137,7 +137,7 @@ public:
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
 
-	AsyncTrigger recreateWatchesTrigger;
+	AsyncTrigger connectionFileChangedTrigger;
 
 	// Disallow any reads at a read version lower than minAcceptableReadVersion.  This way the client does not have to
 	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
