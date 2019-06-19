@@ -22,6 +22,7 @@
 .. |retry-limit-database-option| replace:: :meth:`Database.options.set_transaction_retry_limit`
 .. |timeout-database-option| replace:: :meth:`Database.options.set_transaction_timeout`
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
+.. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :class:`Future`

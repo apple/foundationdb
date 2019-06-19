@@ -306,6 +306,10 @@
 
     Set the default maximum number of retries for each transaction after which additional calls to |on-error-func| will throw the most recently seen error code. This is equivalent to calling |retry-limit-transaction-option| on each transaction created by this database.
 
+.. |option-db-tr-size-limit-blurb| replace::
+
+    Set the default maximum transaction size in bytes will throw the most recently seen error code. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database.
+
 .. |option-db-tr-timeout-blurb| replace::
 
     Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database. This option can only be called if the API version is at least 610.
