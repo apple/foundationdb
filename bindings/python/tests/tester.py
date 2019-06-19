@@ -130,6 +130,7 @@ def test_fdb_transactional_generator(db):
         @fdb.transactional
         def function_that_yields(tr):
             yield 0
+        function_that_yields(db)
         assert fdb.get_api_version() < 620, "Generators post-6.2.0 should throw"
     except ValueError as e:
         pass
