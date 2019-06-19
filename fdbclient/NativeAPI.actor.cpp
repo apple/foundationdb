@@ -3439,7 +3439,7 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
 }
 
-ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
+ACTOR Future<Void> snapCreateVersion1(Database inputCx, StringRef snapCmd, UID snapUID) {
 	state Transaction tr(inputCx);
 	state DatabaseContext* cx = inputCx.getPtr();
 	// remember the client ID before the snap operation
@@ -3535,5 +3535,85 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	}
 
 	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
+	return Void();
+}
+
+ACTOR Future<Void> snapshotDatabase(DatabaseContext* cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
+	TraceEvent("NativeAPI.SnapshotDatabaseEnter")
+		.detail("SnapPayload", snapPayload)
+		.detail("SnapUID", snapUID);
+	try {
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.snapshotDatabase.Before");
+		}
+
+		state ProxySnapRequest req(snapPayload, snapUID, debugID);
+		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, req, cx->taskID, true /*atmostOnce*/ ));
+		if (debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.SnapshotDatabase.After");
+	} catch (Error& e) {
+		TraceEvent("NativeAPI.SnapshotDatabaseError")
+			.detail("SnapPayload", snapPayload)
+			.detail("SnapUID", snapUID)
+			.error(e, true /* includeCancelled */);
+		throw;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID snapUID) {
+	state DatabaseContext* cx = inputCx.getPtr();
+	// remember the client ID before the snap operation
+	state UID preSnapClientUID = cx->clientInfo->get().id;
+
+	TraceEvent("SnapCreateEnterVersion2")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
+
+	StringRef snapCmdArgs = snapCmd;
+	StringRef snapCmdPart = snapCmdArgs.eat(":");
+	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+		.withSuffix(LiteralStringRef(":uid="))
+		.withSuffix(snapUIDRef)
+		.withSuffix(LiteralStringRef(","))
+		.withSuffix(snapCmdArgs);
+
+	try {
+		Future<Void> exec = snapshotDatabase(cx, snapPayloadRef, snapUID, snapUID);
+		wait(timeoutError(exec, g_network->isSimulated() ? 80 : 600)); // dependent on SERVER_KNOBS->SNAP_CRATE_MAX_TIMEOUT
+																	   // FIXME: remove the timeoutError and hard-coded time limits
+	} catch (Error& e) {
+		TraceEvent("SnapshotDatabaseErrorVersion2")
+			.detail("SnapCmd", snapCmd.toString())
+			.detail("UID", snapUID)
+			.error(e);
+		throw;
+	}
+
+	UID postSnapClientUID = cx->clientInfo->get().id;
+	if (preSnapClientUID != postSnapClientUID) {
+		// if the client IDs changed then we fail the snapshot
+		TraceEvent("UIDMismatchVersion2")
+		    .detail("SnapPreSnapClientUID", preSnapClientUID)
+		    .detail("SnapPostSnapClientUID", postSnapClientUID);
+		throw coordinators_changed();
+	}
+
+	TraceEvent("SnapCreateExitVersion2")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
+	return Void();
+}
+
+ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID, int version) {
+	if (version == 1) {
+		wait(snapCreateVersion1(inputCx, snapCmd, snapUID));
+		return Void();
+	}
+	wait(snapCreateVersion2(inputCx, snapCmd, snapUID));
 	return Void();
 }
