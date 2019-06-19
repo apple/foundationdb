@@ -49,9 +49,9 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
-	RequestStream<struct ExecRequest> execReq;
-
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream<struct ExecRequest> execReq;
+	RequestStream<struct ProxySnapRequest> proxySnapReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -63,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, execReq);
+				   txnState, getHealthMetrics, execReq, proxySnapReq);
 	}
 
 	void initEndpoints() {
@@ -345,6 +345,24 @@ struct ExecRequest
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, execPayload, reply, arena, debugID);
+	}
+};
+
+struct ProxySnapRequest
+{
+	constexpr static FileIdentifier file_identifier = 22204900;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit ProxySnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ProxySnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
 	}
 };
 
