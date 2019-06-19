@@ -31,7 +31,7 @@
 #error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 610)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 610
+#elif FDB_API_VERSION > 620
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -132,6 +132,10 @@ extern "C" {
                           uint8_t const** out_value,
                           int* out_value_length );
 
+#if FDB_API_VERSION >= 620
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_timer( double seconds );
+#endif
 #if FDB_API_VERSION >= 14
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_keyvalue_array( FDBFuture* f, FDBKeyValue const** out_kv,

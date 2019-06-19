@@ -93,6 +93,7 @@ public:
 	virtual void setupNetwork() = 0;
 	virtual void runNetwork() = 0;
 	virtual void stopNetwork() = 0;
+	virtual ThreadFuture<Void> delay(double s) = 0;
 
 	virtual Reference<IDatabase> createDatabase(const char *clusterFilePath) = 0;
 

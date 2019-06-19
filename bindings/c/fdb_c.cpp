@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -212,6 +212,11 @@ fdb_error_t fdb_future_get_error_v22( FDBFuture* f, const char** description ) {
 	if (description)
 		*description = TSAVB(f)->error.what();
 	return TSAVB(f)->error.code();
+}
+
+extern "C" DLLEXPORT
+FDBFuture* fdb_timer(double seconds) {
+	return reinterpret_cast<FDBFuture*>(API->delay(seconds).extractPtr());
 }
 
 extern "C" DLLEXPORT

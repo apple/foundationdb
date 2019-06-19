@@ -117,6 +117,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
+	ThreadFuture<Void> delay(double s) override;
 
 	Reference<IDatabase> createDatabase(const char *clusterFilePath);
 

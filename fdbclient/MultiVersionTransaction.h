@@ -55,6 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
+	FDBFuture* (*delay)(double s);
 	fdb_error_t* (*createDatabase)(const char *clusterFilePath, FDBDatabase **db);
 
 	//Database
@@ -188,6 +189,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
+	ThreadFuture<Void> delay(double seconds) override;
 
 	Reference<IDatabase> createDatabase(const char *clusterFilePath);
 	Reference<IDatabase> createDatabase609(const char *clusterFilePath); // legacy database creation
@@ -357,6 +359,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
+	ThreadFuture<Void> delay(double s) override;
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
 	Reference<IDatabase> createDatabase(const char *clusterFilePath);

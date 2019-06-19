@@ -53,9 +53,9 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [db, option, passValue](){ 
+	onMainThreadVoid( [db, option, passValue](){
 		db->checkDeferredError();
-		db->setOption(option, passValue.contents()); 
+		db->setOption(option, passValue.contents());
 	}, &db->deferredError );
 }
 
@@ -66,7 +66,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion](){ 
+	onMainThreadVoid([db, connFile, apiVersion](){
 		try {
 			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
 		}
@@ -367,6 +367,10 @@ void ThreadSafeApi::runNetwork() {
 
 void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
+}
+
+ThreadFuture<Void> ThreadSafeApi::delay(double s) {
+	return onMainThread([s]() { return ::delay(s); });
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char *clusterFilePath) {

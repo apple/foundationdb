@@ -361,6 +361,13 @@ void DLApi::stopNetwork() {
 	}
 }
 
+ThreadFuture<Void> DLApi::delay(double s) override {
+	auto f = api->delay(s);
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+									  return Void();
+								  });
+}
+
 Reference<IDatabase> DLApi::createDatabase609(const char *clusterFilePath) {
 	FdbCApi::FDBFuture *f = api->createCluster(clusterFilePath);
 
@@ -1126,6 +1133,10 @@ void MultiVersionApi::stopNetwork() {
 			client->api->stopNetwork();
 		}, true);
 	}
+}
+
+ThreadFuture<Void> MultiVersionApi::delay(double s) {
+	return localClient->api->delay(s);
 }
 
 void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
