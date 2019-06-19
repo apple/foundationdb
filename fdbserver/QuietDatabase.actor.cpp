@@ -22,8 +22,10 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -235,20 +237,35 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 
 	state std::vector<StorageServerInterface> servers = wait(serversFuture);
 	state std::vector<WorkerDetails> workers = wait(workersFuture);
-	vector<WorkerInterface> result;
 
-	std::map<NetworkAddress, WorkerInterface> workersMap;
+	state std::map<NetworkAddress, WorkerInterface> workersMap;
 	for(const auto & worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
-	// FIXME: impelement localOnly
+	Optional<Value> regionsValue = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+						  }));
+	ASSERT(regionsValue.present());
+	int usableRegions = atoi(regionsValue.get().toString().c_str());
+	auto masterDcId = dbInfo->get().master.locality.dcId();
+
+	vector<WorkerInterface> result;
 	for (const auto & server : servers) {
-		auto itr = workersMap.find(server.address());
-		if(itr == workersMap.end()) {
-			TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
-			continue;
+		TraceEvent(SevDebug, "DcIdInfo")
+			.detail("ServerLocalityID", server.locality.dcId())
+			.detail("MasterDcID", masterDcId);
+		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
+			auto itr = workersMap.find(server.address());
+			if(itr == workersMap.end()) {
+				TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
+				continue;
+			}
+			result.push_back(itr->second);
 		}
-		result.push_back(itr->second);
 	}
 	return result;
 }
