@@ -163,6 +163,8 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	Version version; // useful when latestVersion was requested
 	bool more;
 
+	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
