@@ -18,33 +18,36 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
+
+#include <iterator>
+
 #include "fdbclient/Atomic.h"
-#include "flow/Platform.h"
-#include "flow/ActorCollection.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/MutationList.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/ClusterInterface.h"
-#include "fdbclient/FailureMonitorClient.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TLSConnection.h"
+#include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/KeyRangeMap.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/MutationList.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/MonitorLeader.h"
+#include "flow/UnitTest.h"
+
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
-#include "fdbrpc/TLSConnection.h"
-#include "flow/Knobs.h"
-#include "fdbclient/Knobs.h"
-#include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/simulator.h"
-
-#include <iterator>
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -58,7 +61,6 @@
 
 extern const char* getHGVersion();
 
-using std::make_pair;
 using std::max;
 using std::min;
 using std::pair;
@@ -638,7 +640,7 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 			result.clear();
 			return false;
 		}
-		result.push_back( make_pair(r->range() & range, r->value()) );
+		result.push_back( std::make_pair(r->range() & range, r->value()) );
 		if(result.size() == limit)
 			break;
 
@@ -1242,7 +1244,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 				state int shard = 0;
 				for (; shard < rep.results.size(); shard++) {
 					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
-					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
+					results.emplace_back(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
 					wait(yield());
 				}
 
