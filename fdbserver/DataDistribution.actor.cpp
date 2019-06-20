@@ -58,9 +58,11 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	Promise<Void> wrongStoreTypeRemoved;
+	// A storage server's StoreType does not change. To change storeType for an ip:port, we destroy the old one and create a new one. 
+	KeyValueStoreType storeType;  //In storageServerTracker, we always update this value by asking storageServerInterface
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : 
-					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), isDesiredStoreType(true) {
+					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), isDesiredStoreType(true), storeType(KeyValueStoreType::END) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 };
@@ -1187,7 +1189,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		TraceEvent("DDConfig")
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
-		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
+		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+			.detail("StoreType", configuration.storageServerStoreType);
 	}
 
 	void traceServerInfo() {
@@ -1199,12 +1202,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("ServerInfoIndex", i++)
 			    .detail("ServerID", server.first.toString())
 			    .detail("ServerTeamOwned", server.second->teams.size())
-			    .detail("MachineID", server.second->machine->machineID.contents().toString());
+			    .detail("MachineID", server.second->machine->machineID.contents().toString())
+				.detail("StoreType", server.second->storeType.toString());
 		}
 		for (auto& server : server_info) {
 			const UID& uid = server.first;
 			TraceEvent("ServerStatus", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
+				.detail("IsWrongStoreType", server_status.get(uid).isWrongStoreType)
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 			    .detail("MachineTeamSize",
 			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1);
@@ -1945,6 +1950,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			.detail("CurrentTeamCount", teams.size())
 			.detail("ServerCount", server_info.size())
 			.detail("NonFailedServerCount", desiredServerSet.size());
+		traceAllInfo(true);
 	}
 
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
@@ -2176,7 +2182,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent(SevInfo, "NoneTeamRemovedWhenServerRemoved")
 			    .detail("Primary", primary)
 			    .detail("Debug", "ThisShouldRarelyHappen_CheckInfoBelow");
-			traceAllInfo();
+			traceAllInfo(true);
 		}
 
 		// Step: Remove machine info related to removedServer
@@ -2257,6 +2263,9 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
+// TODO: Can we pull each storage server's storeType and mark the storage server with wrongStoreType as unhealthy?
+// TODO: The actor is triggered by the AsyncVar (e.g., forceRecovery) which is set by the config change mutation
+// TODO: For change config mutation, we do not automatically recruit servers. Instead, we use this actor to recruit
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// return Void();
 
@@ -2268,7 +2277,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	//printf("self->server_info.begin() == self->server_info.end():%d outloop\n", self->server_info.begin() == self->server_info.end());
 	
 	loop {
-		wait( delay(2.0) );
+		wait( delay(1.0) || self->removeWrongStoreTypeServer.onChange() );
 		//printf("self->server_info.begin() == self->server_info.end():%d\n", self->server_info.begin() == self->server_info.end());
 		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
 		//ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
@@ -2281,7 +2290,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
 				.detail("Addr", addr.toString())
 				.detail("IsWrongStoreType", serverStatus.isWrongStoreType).detail("ServerDesiredStoreType", server->second->isDesiredStoreType).detail("WrongStoreTypeRemovedCanBeSet", server->second->wrongStoreTypeRemoved.canBeSet());
-			if ( serverStatus.isWrongStoreType ) {
+			if ( serverStatus.isWrongStoreType || server->second->storeType != self->configuration.storageServerStoreType ) {
 				//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
 				if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
 					server->second->wrongStoreTypeRemoved.send(Void());
@@ -2518,6 +2527,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
 							.detail("SignallingTeam", team->getDesc())
 							.detail("Primary", self->primary);
+						// Create a new team
+						self->restartRecruiting.trigger();
 					}
 
 					if(logTeamEvents) {
@@ -2725,6 +2736,10 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	return results;
 }
 
+// Q: Why do we need this actor?
+// The serverList system keyspace keeps the StorageServerInterface for each serverID. If a storage server process crashes and restarted at a different machine, will we reuse the StorageServerInterface?
+// A: Storage server's storeType and serverID are decided by the server's filename.
+// By parsing storage server file's filename on each disk, process on each machine creates the TCServer with the correct serverID and StorageServerInterface. 
 ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
 	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
@@ -2824,6 +2839,7 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
+	server->storeType = type; // Update server's storeType, especially when it was created
 	if( type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
 		wait(Future<Void>(Never()));
 
@@ -3031,7 +3047,8 @@ ACTOR Future<Void> storageServerTracker(
 			}
 			if (hasWrongStoretype) {
 				try {
-					wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
+					if ( server->wrongStoreTypeRemoved.canBeSet() )
+						wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
 				} catch (Error &e) {
 					if (e.code() != error_code_broken_promise) {
 						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
@@ -3043,7 +3060,7 @@ ACTOR Future<Void> storageServerTracker(
 				TraceEvent(SevWarn, "UndesiredStorageServerToRemoveMX", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
-				storeTracker = keyValueStoreTypeTracker( self, server );
+				//storeTracker = keyValueStoreTypeTracker( self, server );
 				self->restartRecruiting.trigger();
 			}
 
@@ -3296,10 +3313,14 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 }
 
 ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<struct ServerDBInfo>> db ) {
-	state Future<RecruitStorageReply> fCandidateWorker;
+	state Future<RecruitStorageReply> fCandidateWorker = Never();
 	state RecruitStorageRequest lastRequest;
+	state bool hasWrongStoreType;
+	state bool hasHealthyTeam;
 	loop {
 		try {
+			hasWrongStoreType = false;
+			hasHealthyTeam = (self->healthyTeamCount != 0);
 			RecruitStorageRequest rsr;
 			std::set<AddressExclusion> exclusions;
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
@@ -3308,6 +3329,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
 					exclusions.insert( AddressExclusion( addr.ip, addr.port ) );
+				}
+				if ( s->second->storeType != self->configuration.storageServerStoreType ) {
+					hasWrongStoreType = true;
 				}
 			}
 			for(auto addr : self->recruitingLocalities) {
@@ -3334,14 +3358,22 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
 			}
 
-			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
-				lastRequest = rsr;
-				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+			if ( !(hasWrongStoreType && hasHealthyTeam)  ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
+				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
+					lastRequest = rsr;
+					fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+				}
+			} else {
+				fCandidateWorker = Never();
 			}
+
+			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
+			self->traceAllInfo(true);
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
 					self->addActor.send(initializeStorage(self, candidateWorker));
+					fCandidateWorker = Never();
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
