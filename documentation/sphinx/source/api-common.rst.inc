@@ -308,7 +308,7 @@
 
 .. |option-db-tr-size-limit-blurb| replace::
 
-    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database.
+    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database. This limit can be overridden by setting per transaction size limit, which persists across transaction reset.
 
 .. |option-db-tr-timeout-blurb| replace::
 
@@ -396,6 +396,10 @@
 ..  |option-set-max-retry-delay-blurb| replace::
 
     Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
+
+..  |option-set-size-limit-blurb| replace::
+
+    Set the maximum transaction size limit in bytes. This size limit will persists transaction reset.
 
 ..  |option-set-timeout-blurb1| replace::
 

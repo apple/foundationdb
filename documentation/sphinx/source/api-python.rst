@@ -32,7 +32,7 @@
 .. |retry-limit-transaction-option| replace:: :func:`Transaction.options.set_retry_limit`
 .. |timeout-transaction-option| replace:: :func:`Transaction.options.set_timeout`
 .. |max-retry-delay-transaction-option| replace:: :func:`Transaction.options.set_max_retry_delay`
-.. |size-limit-transaction-option| replace:: :func:`Transaction.options.set_transaction_size_limit`
+.. |size-limit-transaction-option| replace:: :func:`Transaction.options.set_size_limit`
 .. |snapshot-ryw-enable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_disable`
 .. |lazy-iterator-object| replace:: generator
@@ -840,6 +840,10 @@ Transaction options
 .. method:: Transaction.options.set_max_retry_delay
 
     |option-set-max-retry-delay-blurb|
+
+.. method:: Transaction.options.set_size_limit
+
+    |option-set-size-limit-blurb|
 
 .. _api-python-timeout:
 

@@ -30,7 +30,7 @@
 .. |retry-limit-transaction-option| replace:: :meth:`Transaction.options.set_retry_limit`
 .. |timeout-transaction-option| replace:: :meth:`Transaction.options.set_timeout`
 .. |max-retry-delay-transaction-option| replace:: :meth:`Transaction.options.set_max_retry_delay`
-.. |size-limit-transaction-option| replace:: :meth:`Transaction.options.set_transaction_size_limit`
+.. |size-limit-transaction-option| replace:: :meth:`Transaction.options.set_size_limit`
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
@@ -784,6 +784,10 @@ Transaction options
 .. method:: Transaction.options.set_max_retry_delay() -> nil
 
     |option-set-max-retry-delay-blurb|
+
+.. method:: Transaction.options.set_size_limit() -> nil
+
+    |option-set-size-limit-blurb|
 
 .. method:: Transaction.options.set_timeout() -> nil
 

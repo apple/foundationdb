@@ -412,7 +412,7 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 // Set the maximum transaction size which, if exceeded, will cause the transaction to be cancelled. Valid parameter values are ``[32, 10,000,000]```.
 //
 // Parameter: value in bytes
-func (o TransactionOptions) SetMaxTransactionSize(param int64) error {
+func (o TransactionOptions) SetSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
