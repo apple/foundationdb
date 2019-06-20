@@ -401,7 +401,7 @@ private:
 public:
 	bool orEqual;	// (or equal to key, if this is true)
 	int offset;		// and then move forward this many items (or backward if negative)
-	KeySelectorRef() {}
+	KeySelectorRef() : orEqual(false), offset(0) {}
 	KeySelectorRef( const KeyRef& key, bool orEqual, int offset ) : orEqual(orEqual), offset(offset) {
 		setKey(key);
 	}

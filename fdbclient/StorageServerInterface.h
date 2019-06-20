@@ -192,7 +192,7 @@ struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
 
-	GetKeyReply() : sel(KeySelectorRef(KeyRef(), false, 0)) {}
+	GetKeyReply() {}
 	GetKeyReply(KeySelector sel) : sel(sel) {}
 
 	template <class Ar>
