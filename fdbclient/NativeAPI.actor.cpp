@@ -640,12 +640,10 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 			result.clear();
 			return false;
 		}
-		result.push_back( std::make_pair(r->range() & range, r->value()) );
-		if(result.size() == limit)
+		result.emplace_back(r->range() & range, r->value());
+		if (result.size() == limit || begin == end) {
 			break;
-
-		if(begin == end)
-			break;
+		}
 
 		if(reverse)
 			--end;
@@ -2425,9 +2423,10 @@ TransactionOptions::TransactionOptions() {
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
 	double oldMaxRetries = maxRetries;
+	uint32_t oldSizeLimit = customTransactionSizeLimit;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
-	customTransactionSizeLimit = cx->transactionMaxBytes;
+	customTransactionSizeLimit = oldSizeLimit;
 	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
 }
