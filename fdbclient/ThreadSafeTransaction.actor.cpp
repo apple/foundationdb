@@ -53,9 +53,9 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [db, option, passValue](){ 
+	onMainThreadVoid( [db, option, passValue](){
 		db->checkDeferredError();
-		db->setOption(option, passValue.contents()); 
+		db->setOption(option, passValue.contents());
 	}, &db->deferredError );
 }
 
@@ -66,7 +66,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion](){ 
+	onMainThreadVoid([db, connFile, apiVersion](){
 		try {
 			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
 		}
@@ -312,7 +312,10 @@ void ThreadSafeTransaction::reset() {
 
 extern const char* getHGVersion();
 
-ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getHGVersion(), currentProtocolVersion)), transportId(0) {}
+ThreadSafeApi::ThreadSafeApi()
+  : apiVersion(-1),
+    clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getHGVersion(), currentProtocolVersion.versionWithFlags())),
+    transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;

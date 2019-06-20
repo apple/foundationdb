@@ -88,7 +88,7 @@ void SlowConflictSet::add( const VectorRef<KeyRangeRef>& clearRanges, const Vect
 }
 
 
-PerfDoubleCounter 
+PerfDoubleCounter
 	g_buildTest("Build", skc),
 	g_add("Add", skc),
 	g_add_sort("A.Sort", skc),
@@ -163,7 +163,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int &outputChar
 	// termination
 	if (character == ki.key.size()){
 		outputCharacter = 0;
-		return false; 
+		return false;
 	}
 
 	if (character == ki.key.size()+1) {
@@ -313,8 +313,8 @@ private:
 		uint8_t* value() { return end() + nPointers*(sizeof(Node*)+sizeof(Version)); }
 		int length() { return valueLength; }
 		Node* getNext(int i) { return *((Node**)end() + i); }
-		void setNext(int i, Node* n) { 
-			*((Node**)end() + i) = n; 
+		void setNext(int i, Node* n) {
+			*((Node**)end() + i) = n;
 			#if defined(_DEBUG) || 1
 			/*if (n && n->level() < i)
 				*(volatile int*)0 = 0;*/
@@ -438,7 +438,7 @@ public:
 		// Returns true if we have advanced to the next level
 		force_inline bool advance() {
 			Node* next = x->getNext(level-1);
-			
+
 			if (next == alreadyChecked || !less(next->value(), next->length(), value.begin(), value.size())) {
 				alreadyChecked = next;
 				level--;
@@ -464,7 +464,7 @@ public:
 			Node *n = finger[0]->getNext(0);	// or alreadyChecked, but that is more easily invalidated
 			if (n && n->length() == value.size() && !memcmp(n->value(), value.begin(), value.size()))
 				return n;
-			else 
+			else
 				return NULL;
 		}
 
@@ -477,9 +477,9 @@ public:
 	int count() {
 		int count = 0;
 		Node* x = header->getNext(0);
-		while (x) { 
-			x = x->getNext(0); 
-			count++; 
+		while (x) {
+			x = x->getNext(0);
+			count++;
 		}
 		return count;
 	}
@@ -561,7 +561,7 @@ public:
 	void partition( StringRef* begin, int splitCount, SkipList* output ) {
 		for(int i=splitCount-1; i>=0; i--) {
 			Finger f( header, begin[i] );
-			while (!f.finished()) 
+			while (!f.finished())
 				f.nextLevel();
 			split(f, output[i+1]);
 		}
@@ -585,7 +585,7 @@ public:
 	}
 
 	void find( const StringRef* values, Finger* results, int* temp, int count ) {
-		// Relying on the ordering of values, descend until the values aren't all in the 
+		// Relying on the ordering of values, descend until the values aren't all in the
 		// same part of the tree
 
 		// vtune: 11 parts
@@ -674,7 +674,7 @@ public:
 		while (nodeCount--) {
 			Node* x = f.finger[0]->getNext(0);
 			if (!x) break;
-			
+
 			// double prefetch gives +25% speed (single threaded)
 			Node* next = x->getNext(0);
 			_mm_prefetch( (const char*)next, _MM_HINT_T0 );
@@ -703,7 +703,7 @@ public:
 
 private:
 	void remove( const Finger& start, const Finger& end ) {
-		if (start.finger[0] == end.finger[0]) 
+		if (start.finger[0] == end.finger[0])
 			return;
 
 		Node *x = start.finger[0]->getNext(0);
@@ -792,17 +792,17 @@ private:
 						return conflict();
 				}
 				state = 1;
-			case 1: 
+			case 1:
 				{
 					// check the end side of the pyramid
 					Node *e = end.finger[end.level];
 					while (e->getMaxVersion(end.level) > version) {
-						if (end.finished()) 
+						if (end.finished())
 							return conflict();
 						end.nextLevel();
 						Node *f = end.finger[end.level];
 						while (e != f){
-							if (e->getMaxVersion(end.level) > version) 
+							if (e->getMaxVersion(end.level) > version)
 								return conflict();
 							e = e->getNext(end.level);
 						}
@@ -814,11 +814,11 @@ private:
 						Node *nextS = start.finger[start.level]->getNext(start.level);
 						Node *p = nextS;
 						while (p != s){
-							if (p->getMaxVersion(start.level) > version) 
+							if (p->getMaxVersion(start.level) > version)
 								return conflict();
 							p = p->getNext(start.level);
 						}
-						if (start.finger[start.level]->getMaxVersion(start.level) <= version) 
+						if (start.finger[start.level]->getMaxVersion(start.level) <= version)
 							return noConflict();
 						s = nextS;
 						if (start.finished()) {
@@ -854,7 +854,7 @@ private:
 		Node* node = header;
 		for(int l=MaxLevels-1; l>=0; l--) {
 			Node* next;
-			while ( (next=node->getNext(l)) != NULL ) 
+			while ( (next=node->getNext(l)) != NULL )
 				node = next;
 			end.finger[l] = node;
 		}
@@ -866,7 +866,7 @@ private:
 	}
 };
 
-struct Action { 
+struct Action {
 	virtual void operator()() = 0;		// self-destructs
 };
 typedef Action* PAction;
@@ -1184,7 +1184,7 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	mergeWriteConflictRanges(now);
 	g_merge += timer()-t;
-	
+
 	for (int i = 0; i < transactionCount; i++)
 	{
 		if (!transactionConflictStatus[i])
@@ -1198,7 +1198,7 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	if (newOldestVersion > cs->oldestVersion) {
 		cs->oldestVersion = newOldestVersion;
-		SkipList::Finger finger; 
+		SkipList::Finger finger;
 		int temp;
 		cs->versionHistory.find( &cs->removalKey, &finger, &temp, 1 );
 		cs->versionHistory.removeBefore( cs->oldestVersion, finger, combinedWriteConflictRanges.size()*3 + 10 );
@@ -1208,28 +1208,29 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 }
 
 void ConflictBatch::checkReadConflictRanges() {
-	if (!combinedReadConflictRanges.size()) 
+	if (!combinedReadConflictRanges.size())
 		return;
 
-	if (PARALLEL_THREAD_COUNT) {
-		Event done[PARALLEL_THREAD_COUNT?PARALLEL_THREAD_COUNT:1];
-		for(int t=0; t<PARALLEL_THREAD_COUNT; t++) {
-			cs->worker_nextAction[t] = action( [&,t] {
+#if PARALLEL_THREAD_COUNT
+	Event done[PARALLEL_THREAD_COUNT ? PARALLEL_THREAD_COUNT : 1];
+	for (int t = 0; t < PARALLEL_THREAD_COUNT; t++) {
+		cs->worker_nextAction[t] = action([&, t] {
 #pragma GCC diagnostic push
-DISABLE_ZERO_DIVISION_FLAG
-				auto begin = &combinedReadConflictRanges[0] + t*combinedReadConflictRanges.size()/PARALLEL_THREAD_COUNT;
-				auto end = &combinedReadConflictRanges[0] + (t+1)*combinedReadConflictRanges.size()/PARALLEL_THREAD_COUNT;
+			DISABLE_ZERO_DIVISION_FLAG
+			auto begin = &combinedReadConflictRanges[0] + t * combinedReadConflictRanges.size() / PARALLEL_THREAD_COUNT;
+			auto end =
+			    &combinedReadConflictRanges[0] + (t + 1) * combinedReadConflictRanges.size() / PARALLEL_THREAD_COUNT;
 #pragma GCC diagnostic pop
-				cs->versionHistory.detectConflicts( begin, end-begin, transactionConflictStatus );
-				done[t].set();
-			});
-			cs->worker_ready[t]->set();
-		}
-		for(int i=0; i<PARALLEL_THREAD_COUNT; i++)
-			done[i].block();
-	} else {
-		cs->versionHistory.detectConflicts( &combinedReadConflictRanges[0], combinedReadConflictRanges.size(), transactionConflictStatus );
+			cs->versionHistory.detectConflicts(begin, end - begin, transactionConflictStatus);
+			done[t].set();
+		});
+		cs->worker_ready[t]->set();
 	}
+	for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) done[i].block();
+#else
+	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
+	                                   transactionConflictStatus);
+#endif
 }
 
 void ConflictBatch::addConflictRanges(Version now, std::vector< std::pair<StringRef,StringRef> >::iterator begin, std::vector< std::pair<StringRef,StringRef> >::iterator end,SkipList* part) {
@@ -1258,7 +1259,7 @@ void ConflictBatch::addConflictRanges(Version now, std::vector< std::pair<String
 }
 
 void ConflictBatch::mergeWriteConflictRanges(Version now) {
-	if (!combinedWriteConflictRanges.size()) 
+	if (!combinedWriteConflictRanges.size())
 		return;
 
 	if (PARALLEL_THREAD_COUNT) {

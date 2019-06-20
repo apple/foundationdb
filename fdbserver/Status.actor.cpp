@@ -1961,7 +1961,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
-		statusObj["protocol_version"] = format("%llx", currentProtocolVersion);
+		statusObj["protocol_version"] = format("%llx", currentProtocolVersion.versionWithFlags());
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
 
 		state Optional<DatabaseConfiguration> configuration;

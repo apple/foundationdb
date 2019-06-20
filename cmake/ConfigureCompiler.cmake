@@ -75,8 +75,11 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -155,13 +158,17 @@ else()
   else()
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas -fdiagnostics-color=always)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+  elseif(CLANG)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type
-    -fdiagnostics-color=always
     -fPIC)
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(

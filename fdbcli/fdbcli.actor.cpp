@@ -545,7 +545,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.versionWithFlags());
 }
 
 void printHelpOverview() {
@@ -1329,7 +1329,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						NetworkAddress parsedAddress;
 						try {
 							parsedAddress = NetworkAddress::parse(address);
-						} catch (Error& e) {
+						} catch (Error&) {
 							// Groups all invalid IP address/port pair in the end of this detail group.
 							line = format("  %-22s (invalid IP address or port)", address.c_str());
 							IPAddress::IPAddressStore maxIp;
@@ -1847,10 +1847,10 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for(auto t = tokens.begin()+1; t != tokens.end(); ++t)
-		if (t->startsWith(nameTokenBegin)) {
-			setName = t->substr(nameTokenBegin.size());
-			std::copy( t+1, tokens.end(), t );
+	for(auto tok = tokens.begin()+1; tok != tokens.end(); ++tok)
+		if (tok->startsWith(nameTokenBegin)) {
+			setName = tok->substr(nameTokenBegin.size());
+			std::copy( tok+1, tokens.end(), tok );
 			tokens.resize( tokens.size()-1 );
 			break;
 		}

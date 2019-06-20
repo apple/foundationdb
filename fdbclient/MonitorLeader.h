@@ -36,7 +36,9 @@ Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Re
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 
+#ifndef __INTEL_COMPILER
 #pragma region Implementation
+#endif
 
 Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo, Reference<AsyncVar<int>> const& connectedCoordinatorsNum  );
 
@@ -69,6 +71,8 @@ Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 #endif

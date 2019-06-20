@@ -2561,7 +2561,9 @@ static int newDatabase(BtShared *pBt){
 ** proceed.
 */
 SQLITE_PRIVATE int sqlite3BtreeBeginTrans(Btree *p, int wrflag){
+#ifndef SQLITE_OMIT_SHARED_CACHE
   sqlite3 *pBlock = 0;
+#endif
   BtShared *pBt = p->pBt;
   int rc = SQLITE_OK;
 
@@ -4644,10 +4646,10 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
               goto moveto_finish;
             }
             
-            int partial_c = c;
             c = sqlite3VdbeRecordCompare(nCell, pCellKey, pIdxKey, (SQLITE3_BTREE_FORCE_FULL_COMPARISONS ? 0 : nextStartField), NULL);
 
             #if SQLITE3_BTREE_FORCE_FULL_COMPARISONS
+            int partial_c = c;
             /* If more data was NOT required but the partial comparison produced a different result than full
              * then something is wrong, log stuff and abort */
             if(!moreDataRequired && partial_c != c) {

@@ -457,7 +457,7 @@ struct union_like_traits<Optional<T>> : std::true_type {
 	}
 
 	template <size_t i>
-	static const void assign(Member& member, const T& t) {
+	static void assign(Member& member, const T& t) {
 		member = t;
 	}
 };

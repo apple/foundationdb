@@ -252,24 +252,6 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 	}
 }
 
-ACTOR static Future<Standalone<StringRef> > getSampleVersionStamp(Transaction *tr) {
-	loop{
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait(success(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793"))));
-			state Future<Standalone<StringRef> > vstamp = tr->getVersionstamp();
-			tr->makeSelfConflicting();
-			wait(tr->commit());
-			Standalone<StringRef> val = wait(vstamp);
-			return val;
-		}
-		catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
 struct TrInfoChunk {
 	ValueRef value;
 	Key key;

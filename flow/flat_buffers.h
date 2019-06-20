@@ -80,7 +80,7 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	}
 
 	template <int i, class Type>
-	static const void assign(Member& m, const Type& t) {
+	static void assign(Member& m, const Type& t) {
 		std::get<i>(m) = t;
 	}
 };
@@ -262,6 +262,11 @@ private:
 		} else {
 			return struct_offset_impl<RightAlign(o, fb_scalar_size<T>) + fb_scalar_size<T>, index - 1, Ts...>::offset;
 		}
+#ifdef __INTEL_COMPILER
+		// ICC somehow things that this method does not return
+		// see: https://software.intel.com/en-us/forums/intel-c-compiler/topic/799473
+		return 1;
+#endif
 	}
 
 public:
@@ -685,15 +690,15 @@ struct SaveVisitorLambda {
 				    auto typeVectorWriter = writer.getMessageWriter(num_entries); // type tags are one byte
 				    auto offsetVectorWriter = writer.getMessageWriter(num_entries * sizeof(RelativeOffset));
 				    auto iter = VectorTraits::begin(member);
-				    for (int i = 0; i < num_entries; ++i) {
+				    for (int j = 0; j < num_entries; ++j) {
 					    uint8_t type_tag = UnionTraits::index(*iter);
 					    uint8_t fb_type_tag =
 					        UnionTraits::empty(*iter) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
-					    typeVectorWriter.write(&fb_type_tag, i, sizeof(fb_type_tag));
+					    typeVectorWriter.write(&fb_type_tag, j, sizeof(fb_type_tag));
 					    if (!UnionTraits::empty(*iter)) {
 						    RelativeOffset offset =
 						        (SaveAlternative<Writer, UnionTraits>{ writer, vtableset }).save(type_tag, *iter);
-						    offsetVectorWriter.write(&offset, i * sizeof(offset), sizeof(offset));
+						    offsetVectorWriter.write(&offset, j * sizeof(offset), sizeof(offset));
 					    }
 					    ++iter;
 				    }
@@ -1110,4 +1115,3 @@ struct EnsureTable {
 private:
 	object_construction<T> t;
 };
-

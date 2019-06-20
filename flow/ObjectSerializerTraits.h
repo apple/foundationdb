@@ -154,7 +154,7 @@ struct union_like_traits : std::false_type {
 	static const index_t<i, alternatives>& get(const Member&);
 
 	template <int i, class Alternative>
-	static const void assign(Member&, const Alternative&);
+	static void assign(Member&, const Alternative&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -171,7 +171,7 @@ struct struct_like_traits : std::false_type {
 	static const index_t<i, types>& get(const Member&);
 
 	template <int i>
-	static const void assign(Member&, const index_t<i, types>&);
+	static void assign(Member&, const index_t<i, types>&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -190,7 +190,7 @@ struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
 	}
 
 	template <size_t i, class Alternative>
-	static const void assign(Member& member, const Alternative& a) {
+	static void assign(Member& member, const Alternative& a) {
 		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
 		member = a;
 	}

@@ -57,7 +57,9 @@
 using std::pair;
 using std::make_pair;
 
+#ifndef __INTEL_COMPILER
 #pragma region Data Structures
+#endif
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
@@ -668,10 +670,14 @@ void StorageServer::byteSampleApplyMutation( MutationRef const& m, Version ver )
 		ASSERT(false); // Mutation of unknown type modfying byte sample
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 /////////////////////////////////// Validation ///////////////////////////////////////
+#ifndef __INTEL_COMPILER
 #pragma region Validation
+#endif
 bool validateRange( StorageServer::VersionedData::ViewAtVersion const& view, KeyRangeRef range, Version version, UID id, Version minInsertVersion ) {
 	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
 	// * Old mutations are erased: All items in versionedData.atLatest() have insertVersion() > durableVersion()
@@ -742,7 +748,9 @@ void validate(StorageServer* data, bool force = false) {
 		throw;
 	}
 }
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 void
 updateProcessStats(StorageServer* self)
@@ -763,7 +771,9 @@ updateProcessStats(StorageServer* self)
 }
 
 ///////////////////////////////////// Queries /////////////////////////////////
+#ifndef __INTEL_COMPILER
 #pragma region Queries
+#endif
 ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 	// This could become an Actor transparently, but for now it just does the lookup
 	if (version == latestVersion)
@@ -1521,10 +1531,14 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	req.reply.send( reply );
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 /////////////////////////// Updates ////////////////////////////////
+#ifndef __INTEL_COMPILER
 #pragma region Updates
+#endif
 
 ACTOR Future<Void> doEagerReads( StorageServer* data, UpdateEagerReadInfo* eager ) {
 	eager->finishKeyBegin();
@@ -2940,10 +2954,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 	}
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 ////////////////////////////////// StorageServerDisk ///////////////////////////////////////
+#ifndef __INTEL_COMPILER
 #pragma region StorageServerDisk
+#endif
 
 void StorageServerDisk::makeNewStorageServerDurable() {
 	storage->set( persistFormat );
@@ -3409,10 +3427,14 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 	return ::waitMetrics(this, req, delay);
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 /////////////////////////////// Core //////////////////////////////////////
+#ifndef __INTEL_COMPILER
 #pragma region Core
+#endif
 
 ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi ) {
 	state Future<Void> doPollMetrics = Void();
@@ -3778,7 +3800,9 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	}
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 /*
 4 Reference count
