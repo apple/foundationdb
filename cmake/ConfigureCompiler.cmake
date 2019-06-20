@@ -162,6 +162,7 @@ else()
     add_compile_options(-Wno-pragmas -fdiagnostics-color=always)
   elseif(ICC)
     add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
   elseif(CLANG)
   endif()
   add_compile_options(-Wno-error=format
