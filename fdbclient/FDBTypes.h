@@ -43,6 +43,7 @@ enum {
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6,
+	tagLocalityTxs = -7,
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
 

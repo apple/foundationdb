@@ -89,9 +89,9 @@ public:
 		return result;
 	}
 
-	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
+	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags) {
 		satelliteTagLocations.clear();
-		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
+		satelliteTagLocations.resize(std::max({logRouterTags,oldLogRouterTags,txsTags,oldTxsTags})+1);
 
 		std::map<int,int> server_usedBest;
 		std::set<std::pair<int,int>> used_servers;
@@ -235,7 +235,7 @@ public:
 	                      bool allLocations = false) {
 		if(locality == tagLocalitySatellite) {
 			for(auto& t : tags) {
-				if(t == txsTag || t.locality == tagLocalityLogRouter) {
+				if(t == txsTag || t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
 					for(int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {
 						locations.push_back(locationOffset + loc);
 					}
@@ -520,8 +520,9 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		Version poppedVersion;
+		bool needsPopped;
 
-		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
+		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds, bool needsPopped = true );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -575,13 +576,14 @@ struct ILogSystem {
 		LogMessageVersion messageVersion;
 		Version end;
 		bool hasNextMessage;
+		bool withTags;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
 		std::vector<Tag> tags;
 		void combineMessages();
 
-		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool collectTags );
+		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags = false );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -652,12 +654,14 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
-	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) = 0;
-		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
+	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd ) = 0;
+		// Same contract as peek(), but only for peeking the txsLocality. It allows specifying a preferred peek locality.
 
 	virtual Version getKnownCommittedVersion() = 0;
 
 	virtual Future<Void> onKnownCommittedVersionChange() = 0;
+
+	virtual void popTxs( Version upTo, int8_t popLocality = tagLocalityInvalid ) = 0;
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
@@ -705,6 +709,8 @@ struct ILogSystem {
 
 	virtual Tag getRandomRouterTag() = 0;
 
+	virtual Tag getRandomTxsTag() = 0;
+
 	virtual void stopRejoins() = 0;
 
 	// Returns the pseudo tag to be popped for the given process class. If the
@@ -750,6 +756,10 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
+	}
+
+	void addTxsTag() {
+		next_message_tags.push_back( logSystem->getRandomTxsTag() );
 	}
 
 	// addTag() adds a tag for the *next* message to be added
