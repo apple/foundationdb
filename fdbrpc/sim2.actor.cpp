@@ -394,6 +394,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode );
 
 #if defined(_WIN32)
 #include <io.h>
+#define O_CLOEXEC 0
 
 #elif defined(__unixish__)
 #define _open ::open
