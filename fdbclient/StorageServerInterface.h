@@ -163,6 +163,8 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	Version version; // useful when latestVersion was requested
 	bool more;
 
+	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
@@ -190,7 +192,7 @@ struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
 
-	GetKeyReply() {}
+	GetKeyReply() : sel(KeySelectorRef(KeyRef(), false, 0)) {}
 	GetKeyReply(KeySelector sel) : sel(sel) {}
 
 	template <class Ar>
