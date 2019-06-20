@@ -371,8 +371,9 @@ struct ServerStatus {
 	LocalityData locality;
 	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), isWrongStoreType(false), initialized(false) {}
 	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), isWrongStoreType(false), initialized(true) {}
-	bool isUnhealthy() const { return isFailed || isUndesired; }
-	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
+	bool isUnhealthy() const { return isFailed || isUndesired; } 
+	bool isUnhealthyOrWrongStoreType() const { return isFailed || isUndesired || isWrongStoreType; } 
+	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : isWrongStoreType ? "WrongStoreType" : "Healthy"; }
 
 	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && isWrongStoreType == r.isWrongStoreType && locality == r.locality && initialized == r.initialized; }
 
@@ -895,7 +896,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
 			for(const auto& server : self->badTeams[idx]->getServers()) {
-				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
+				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthyOrWrongStoreType()) {
 					servers.push_back(server);
 				}
 			}
@@ -1002,7 +1003,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		std::map<Optional<Standalone<StringRef>>, int> machineTeams;
 		for(auto s = server_info.begin(); s != server_info.end(); ++s) {
-			if(!server_status.get(s->first).isUnhealthy()) {
+			if(!server_status.get(s->first).isUnhealthyOrWrongStoreType()) {
 				int stc = s->second->teams.size();
 				minTeams = std::min(minTeams, stc);
 				maxTeams = std::max(maxTeams, stc);
@@ -1176,7 +1177,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int constructMachinesFromServers() {
 		int totalServerIndex = 0;
 		for(auto i = server_info.begin(); i != server_info.end(); ++i) {
-			if (!server_status.get(i->first).isUnhealthy()) {
+			if (!server_status.get(i->first).isUnhealthyOrWrongStoreType()) {
 				checkAndCreateMachine(i->second);
 				totalServerIndex++;
 			}
@@ -1493,7 +1494,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Healthy machine has at least one healthy server
 		for (auto& server : machine->serversOnMachine) {
-			if (!server_status.get(server->id).isUnhealthy()) {
+			if (!server_status.get(server->id).isUnhealthyOrWrongStoreType()) {
 				return true;
 			}
 		}
@@ -1507,7 +1508,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int minTeamNumber = std::numeric_limits<int>::max();
 		for (auto& server : server_info) {
 			// Only pick healthy server, which is not failed or excluded.
-			if (server_status.get(server.first).isUnhealthy()) continue;
+			if (server_status.get(server.first).isUnhealthyOrWrongStoreType()) continue;
 
 			int numTeams = server.second->teams.size();
 			if (numTeams < minTeamNumber) {
@@ -1582,7 +1583,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int calculateHealthyServerCount() {
 		int serverCount = 0;
 		for (auto i = server_info.begin(); i != server_info.end(); ++i) {
-			if (!server_status.get(i->first).isUnhealthy()) {
+			if (!server_status.get(i->first).isUnhealthyOrWrongStoreType()) {
 				++serverCount;
 			}
 		}
@@ -1720,7 +1721,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					} else {
 						std::vector<Reference<TCServerInfo>> healthyProcesses;
 						for (auto it : machine->serversOnMachine) {
-							if (!server_status.get(it->id).isUnhealthy()) {
+							if (!server_status.get(it->id).isUnhealthyOrWrongStoreType()) {
 								healthyProcesses.push_back(it);
 							}
 						}
@@ -2980,7 +2981,7 @@ ACTOR Future<Void> storageServerTracker(
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
-			// status.isWrongStoreType = false;
+			status.isWrongStoreType = server->storeType != self->configuration.storageServerStoreType;
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually be eliminated
 			state std::vector<Future<Void>> otherChanges;
@@ -3374,6 +3375,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
 					self->addActor.send(initializeStorage(self, candidateWorker));
 					fCandidateWorker = Never();
+					if ( !hasHealthyTeam ) {
+						self->restartTeamBuilder.trigger();
+					}
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
