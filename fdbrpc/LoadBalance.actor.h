@@ -65,6 +65,7 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	}
 };
 
+// Subclasses must initialize all members in their default constructors
 struct LoadBalancedReply {
 	double penalty;
 	Optional<Error> error;
