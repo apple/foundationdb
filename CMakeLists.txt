@@ -18,7 +18,7 @@
 # limitations under the License.
 cmake_minimum_required(VERSION 3.12)
 project(foundationdb
-  VERSION 6.1.0
+  VERSION 6.1
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -75,6 +75,45 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 # Version information
 ################################################################################
 
+# Get precise FDB_REVISION
+execute_process(
+  COMMAND git describe --tags --dirty
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+  OUTPUT_VARIABLE CURRENT_GIT_DESCRIPTION_WNL
+  RESULT_VARIABLE GIT_DESCRIBE_RESULT)
+if(NOT ${GIT_DESCRIBE_RESULT} EQUAL 0)
+  message(FATAL_ERROR "Could not find a tag.")
+endif()
+string(STRIP "${CURRENT_GIT_DESCRIPTION_WNL}" CURRENT_GIT_DESCRIPTION)
+string(REGEX REPLACE "^([0-9]*).*\\.([0-9]*).*\\.([^.]*)$" "\\1" TAG_MAJOR "${CURRENT_GIT_DESCRIPTION}")
+string(REGEX REPLACE "^([0-9]*).*\\.([0-9]*).*\\.([^.]*)$" "\\2" TAG_MINOR "${CURRENT_GIT_DESCRIPTION}")
+string(REGEX REPLACE "^([0-9]*).*\\.([0-9]*).*\\.([^.]*)$" "\\3" FDB_REVISION "${CURRENT_GIT_DESCRIPTION}")
+
+if(NOT "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}" STREQUAL "${TAG_MAJOR}.${TAG_MINOR}")
+  message(FATAL_ERROR "Tag does not match ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}. git describe result: ${CURRENT_GIT_DESCRIPTION}")
+endif()
+
+# Encode compiler configuration into version.
+set(version_tags "")
+if(USE_ASAN)
+  list(APPEND version_tags "-ASAN")
+endif()
+if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
+  list(APPEND version_tags "-${CMAKE_BUILD_TYPE}")
+endif()
+if(NOT FDB_RELEASE)
+  list(APPEND version_tags "-PRERELEASE")
+endif()
+if(USE_VALGRIND)
+  list(APPEND version_tags "-VALGRIND")
+endif()
+if(version_tags)
+  list(SORT version_tags)
+  list(REMOVE_DUPLICATES version_tags)
+  list(JOIN version_tags "" VERSION_TAGS_STR)
+endif()
+set(FDB_REVISION "${FDB_REVISION}${VERSION_TAGS_STR}")
+
 set(USE_VERSIONS_TARGET OFF CACHE BOOL "Use the deprecated versions.target file")
 if(USE_VERSIONS_TARGET)
   add_custom_target(version_file ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/versions.target)
@@ -92,7 +131,7 @@ if(USE_VERSIONS_TARGET)
   endif()
 else()
   set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-  set(FDB_VERSION ${PROJECT_VERSION})
+  set(FDB_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${FDB_REVISION}")
   set(FDB_VERSION_PLAIN ${FDB_VERSION})
 endif()
 
