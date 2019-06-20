@@ -1520,7 +1520,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		return deterministicRandom()->randomChoice(leastUsedServers);
+		if ( leastUsedServers.empty() ) {
+			return Reference<TCServerInfo>();
+		} else {
+			return deterministicRandom()->randomChoice(leastUsedServers);
+		}
 	}
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
@@ -1692,9 +1696,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			std::vector<UID> bestServerTeam;
 			int bestScore = std::numeric_limits<int>::max();
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
+			bool earlyQuitBuild = false;
 			for (int i = 0; i < maxAttempts && i < 100; ++i) {
 				// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
-				Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
+				Reference<TCServerInfo> chosenServer = findOneLeastUsedServer(); 
+				if (!chosenServer.isValid()) {
+					TraceEvent(SevWarn, "NoValidServer").detail("Primary", primary);
+					earlyQuitBuild = true;
+					break;
+				}
 				// Note: To avoid creating correlation of picked machine teams, we simply choose a random machine team
 				// instead of choosing the least used machine team.
 				// The correlation happens, for example, when we add two new machines, we may always choose the machine
@@ -1756,6 +1766,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
+			if ( earlyQuitBuild ) {
+				break;
+			}
 			if (bestServerTeam.size() != configuration.storageTeamSize) {
 				// Not find any team and will unlikely find a team
 				break;
