@@ -3790,9 +3790,9 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 		choose {
 			//after a rollback there might be uncommitted changes.
 			//for memory storage engine type, wait until recovery is done before commit
-			wait(self.storage.commit()) {}
+			when( wait(self.storage.commit()))  {}
 
-			wait(memoryStoreRecover (persistentData, connFile, self.thisServerID)) {
+			when( wait(memoryStoreRecover (persistentData, connFile, self.thisServerID))) {
 				TraceEvent("DisposeStorageServer", self.thisServerID);
 				throw worker_removed();
 			}
