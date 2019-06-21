@@ -399,7 +399,7 @@
 
 ..  |option-set-size-limit-blurb| replace::
 
-    Set the maximum transaction size limit in bytes. This size limit will persists transaction reset.
+    Set the maximum transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit. The value set by this limit will persist across transaction resets.
 
 ..  |option-set-timeout-blurb1| replace::
 
