@@ -985,6 +985,7 @@ int main(int argc, char* argv[]) {
 			const char *sRole;
 			Optional<uint64_t> ti;
 			std::string argStr;
+			std::vector<std::string> tmpStrings;
 
 			switch (args.OptionId()) {
 				case OPT_HELP:
@@ -1053,11 +1054,13 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_PUBLICADDR:
 					argStr = args.OptionArg();
-					boost::split(publicAddressStrs, argStr, [](char c){return c == ',';});
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_LISTEN:
 					argStr = args.OptionArg();
-					boost::split(listenAddressStrs, argStr, [](char c){return c == ',';});
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
