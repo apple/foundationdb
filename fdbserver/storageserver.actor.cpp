@@ -1318,8 +1318,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 			ASSERT(returnKey != sel.getKey());
 
 			return returnKey;
-		}
-		else
+		} else
 			return forward ? range.end : range.begin;
 	}
 }
@@ -3623,9 +3622,9 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterConnectionFile> connFile, UID id)
 {
-    if(store->getType() != KeyValueStoreType::MEMORY || connFile.getPtr() == nullptr) {
-        return Never();
-    }
+	if (store->getType() != KeyValueStoreType::MEMORY || connFile.getPtr() == nullptr) {
+		return Never();
+	}
 
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST);
@@ -3786,7 +3785,7 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
 
-        wait(self.storage.init());
+		wait(self.storage.init());
 		choose {
 			//after a rollback there might be uncommitted changes.
 			//for memory storage engine type, wait until recovery is done before commit
