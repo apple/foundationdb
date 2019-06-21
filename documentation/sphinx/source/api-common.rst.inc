@@ -308,7 +308,7 @@
 
 .. |option-db-tr-size-limit-blurb| replace::
 
-    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database. This limit can be overridden by setting per transaction size limit, which persists across transaction reset.
+    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database.
 
 .. |option-db-tr-timeout-blurb| replace::
 
