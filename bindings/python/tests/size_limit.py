@@ -48,7 +48,7 @@ def run(clusterFile):
 	except fdb.impl.FDBError as e:
 		assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
 
-	# clear size limit by setting to a larger value
+	# Per transaction option overrides database option
 	db.options.set_transaction_size_limit(1000000)
 	try:
 		setValueWithLimit(db, 't3', value, 1000)
