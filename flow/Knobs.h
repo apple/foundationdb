@@ -129,7 +129,6 @@ public:
 	int64_t PACKET_WARNING;  // 2MB packet warning quietly allows for 1MB system messages
 	double TIME_OFFSET_LOGGING_INTERVAL;
 	int MAX_PACKET_SEND_BYTES;
-	int DEFAULT_PACKET_BUFFER_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
 
 	//Sim2
