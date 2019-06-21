@@ -18,33 +18,36 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
+
+#include <iterator>
+
 #include "fdbclient/Atomic.h"
-#include "flow/Platform.h"
-#include "flow/ActorCollection.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/MutationList.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/ClusterInterface.h"
-#include "fdbclient/FailureMonitorClient.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TLSConnection.h"
+#include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/KeyRangeMap.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/MutationList.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/MonitorLeader.h"
+#include "flow/UnitTest.h"
+
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
-#include "fdbrpc/TLSConnection.h"
-#include "flow/Knobs.h"
-#include "fdbclient/Knobs.h"
-#include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/simulator.h"
-
-#include <iterator>
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -58,7 +61,6 @@
 
 extern const char* getHGVersion();
 
-using std::make_pair;
 using std::max;
 using std::min;
 using std::pair;
@@ -522,6 +524,7 @@ DatabaseContext::DatabaseContext(
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
 	transactionMaxBackoff = CLIENT_KNOBS->FAILURE_MAX_DELAY;
+	transactionMaxSize = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
 
 	logger = databaseLogger( this );
@@ -668,12 +671,10 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 			result.clear();
 			return false;
 		}
-		result.push_back( make_pair(r->range() & range, r->value()) );
-		if(result.size() == limit)
+		result.emplace_back(r->range() & range, r->value());
+		if (result.size() == limit || begin == end) {
 			break;
-
-		if(begin == end)
-			break;
+		}
 
 		if(reverse)
 			--end;
@@ -777,6 +778,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 		case FDBDatabaseOptions::TRANSACTION_MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			transactionMaxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+		case FDBDatabaseOptions::TRANSACTION_SIZE_LIMIT:
+			validateOptionValue(value, true);
+			transactionMaxSize = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
 			validateOptionValue(value, false);
@@ -1282,7 +1287,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 				state int shard = 0;
 				for (; shard < rep.results.size(); shard++) {
 					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
-					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
+					results.emplace_back(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
 					wait(yield());
 				}
 
@@ -2454,6 +2459,7 @@ double Transaction::getBackoff(int errCode) {
 
 TransactionOptions::TransactionOptions(Database const& cx) {
 	maxBackoff = cx->transactionMaxBackoff;
+	sizeLimit = cx->transactionMaxSize;
 	reset(cx);
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
@@ -2467,13 +2473,16 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 TransactionOptions::TransactionOptions() {
 	memset(this, 0, sizeof(*this));
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 }
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
 	double oldMaxRetries = maxRetries;
+	uint32_t oldSizeLimit = sizeLimit;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	sizeLimit = oldSizeLimit;
 	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
 }
@@ -2820,8 +2829,9 @@ Future<Void> Transaction::commitMutations() {
 			transactionSize = tr.transaction.mutations.expectedSize(); // Old API versions didn't account for conflict ranges when determining whether to throw transaction_too_large
 		}
 
-		if (transactionSize > (options.customTransactionSizeLimit == 0 ? (uint64_t)CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT : (uint64_t)options.customTransactionSizeLimit))
+		if (transactionSize > options.sizeLimit) {
 			return transaction_too_large();
+		}
 
 		if( !readVersion.isValid() )
 			getReadVersion( GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY ); // sets up readVersion field.  We had no reads, so no need for (expensive) full causal consistency.
@@ -2992,6 +3002,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+
+		case FDBTransactionOptions::SIZE_LIMIT:
+			validateOptionValue(value, true);
+			options.sizeLimit = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 			break;
 
 		case FDBTransactionOptions::LOCK_AWARE:

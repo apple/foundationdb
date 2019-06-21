@@ -147,7 +147,7 @@ struct TransactionOptions {
 	double maxBackoff;
 	uint32_t maxRetries;
 	uint32_t getReadVersionFlags;
-	uint32_t customTransactionSizeLimit;
+	uint32_t sizeLimit;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;

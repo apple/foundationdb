@@ -157,6 +157,7 @@ public:
 	double transactionTimeout;
 	int transactionMaxRetries;
 	double transactionMaxBackoff;
+	int transactionMaxSize;  // Max size in bytes.
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
