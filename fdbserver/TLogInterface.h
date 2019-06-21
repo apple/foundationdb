@@ -150,10 +150,11 @@ struct TLogPeekReply {
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
+	bool onlySpilled;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin);
+		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled);
 	}
 };
 
@@ -163,15 +164,16 @@ struct TLogPeekRequest {
 	Version begin;
 	Tag tag;
 	bool returnIfBlocked;
+	bool onlySpilled;
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence) {}
+	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, bool onlySpilled, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, returnIfBlocked, sequence, reply);
+		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
 	}
 };
 

@@ -84,19 +84,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-void ISimulator::disableFor(const std::string& desc, double time) {
-	disabledMap[desc] = map(::delay(time), [this, desc](Void v){ disabledMap.erase(desc); return Void(); });
-}
-
-Future<Void> ISimulator::checkDisabled(const std::string& desc) const
-{
-	auto iter = disabledMap.find(desc);
-	if (iter != disabledMap.end()) {
-		return iter->second;
-	}
-	return Void();
-}
-
 namespace std {
 template<>
 class hash<Endpoint> {
@@ -407,6 +394,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode );
 
 #if defined(_WIN32)
 #include <io.h>
+#define O_CLOEXEC 0
 
 #elif defined(__unixish__)
 #define _open ::open
@@ -533,7 +521,7 @@ private:
 		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion( int flags ) {
-		int outFlags = O_BINARY;
+		int outFlags = O_BINARY | O_CLOEXEC;
 		if( flags&OPEN_READWRITE ) outFlags |= O_RDWR;
 		if( flags&OPEN_CREATE ) outFlags |= O_CREAT;
 		if( flags&OPEN_READONLY ) outFlags |= O_RDONLY;

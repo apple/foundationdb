@@ -65,6 +65,7 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	}
 };
 
+// Subclasses must initialize all members in their default constructors
 struct LoadBalancedReply {
 	double penalty;
 	Optional<Error> error;
@@ -126,7 +127,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw result.getError();
+		throw process_behind(); 
 	}
 
 	return false;

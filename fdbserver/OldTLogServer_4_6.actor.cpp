@@ -92,7 +92,7 @@ namespace oldTLog_4_6 {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			if( ar.protocolVersion() >= 0x0FDB00A460010001) {
+			if (ar.protocolVersion().hasMultiGenerationTLog()) {
 				serializer(ar, version, messages, tags, knownCommittedVersion, id);
 			} else if(ar.isDeserializing) {
 				serializer(ar, version, messages, tags);

@@ -472,7 +472,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 
 	UID logId;
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	Version newPersistentDataVersion;
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
@@ -492,7 +492,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	FlowLock execOpLock;
 	bool execOpCommitInProgress;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, uint64_t protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, ProtocolVersion protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			// These are initialized differently on init() or recovery
@@ -1365,6 +1365,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 		rep.popped = poppedVer;
 		rep.end = poppedVer;
+		rep.onlySpilled = false;
 
 		if(req.sequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
@@ -1391,6 +1392,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	}
 
 	state Version endVersion = logData->version.get() + 1;
+	state bool onlySpilled = false;
 
 	//grab messages from disk
 	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
@@ -1400,7 +1402,11 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		// SOMEDAY: Only do this if an initial attempt to read from disk results in insufficient data and the required data is no longer in memory
 		// SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the result?
 
-		peekMessagesFromMemory( logData, req, messages2, endVersion );
+		if (req.onlySpilled) {
+			endVersion = logData->persistentDataDurableVersion + 1;
+		} else {
+			peekMessagesFromMemory( logData, req, messages2, endVersion );
+		}
 
 		if (req.tag == txsTag) {
 			Standalone<VectorRef<KeyValueRef>> kvs = wait(
@@ -1414,10 +1420,12 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				messages.serializeBytes(kv.value);
 			}
 
-			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 				endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
-			else
+				onlySpilled = true;
+			} else {
 				messages.serializeBytes( messages2.toValue() );
+			}
 		} else {
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
 			Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
@@ -1494,13 +1502,20 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			messageReads.clear();
 			memoryReservation.release();
 
-			if (earlyEnd)
+			if (earlyEnd) {
 				endVersion = lastRefMessageVersion + 1;
-			else
+				onlySpilled = true;
+			} else {
 				messages.serializeBytes( messages2.toValue() );
+			}
 		}
 	} else {
-		peekMessagesFromMemory( logData, req, messages, endVersion );
+		if (req.onlySpilled) {
+			endVersion = logData->persistentDataDurableVersion + 1;
+		} else {
+			peekMessagesFromMemory( logData, req, messages, endVersion );
+		}
+
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
 
@@ -1509,6 +1524,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 	reply.messages = messages.toValue();
 	reply.end = endVersion;
+	reply.onlySpilled = onlySpilled;
 
 	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
@@ -1897,7 +1913,7 @@ ACTOR Future<Void> tLogCommit(
 	}
 
 	state Version execVersion = invalidVersion;
-	state ExecCmdValueString execArg();
+	state ExecCmdValueString execArg;
 	state TLogQueueEntryRef qe;
 	state StringRef execCmd;
 	state Standalone<VectorRef<Tag>> execTags;
@@ -2495,7 +2511,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
 
-		uint64_t protocolVersion = BinaryReader::fromStringRef<uint64_t>( fProtocolVersions.get()[idx].value, Unversioned() );
+		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID(), protocolVersion, std::vector<Tag>()) );

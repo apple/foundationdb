@@ -94,10 +94,9 @@ struct PageChecksumCodec {
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
 		if (write) {
-			// Always write a hashlittle2 checksum for new pages
-			pSumInPage->part1 = pageNumber; // DO NOT CHANGE
-			pSumInPage->part2 = 0x5ca1ab1e;
-			hashlittle2(pData, dataLen, &pSumInPage->part1, &pSumInPage->part2);
+			// Always write a CRC32 checksum for new pages
+			pSumInPage->part1 = 0; // Indicates CRC32 is being used
+			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			return true;
 		}
 

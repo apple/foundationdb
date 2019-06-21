@@ -357,6 +357,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	reply.messages = messages.toValue();
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
+	reply.onlySpilled = false;
 
 	req.reply.send( reply );
 	//TraceEvent("LogRouterPeek4", self->dbgid);

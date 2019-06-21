@@ -355,6 +355,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	int64_t worstStorageQueueStorageServer = 0;
 	int64_t worstStorageDurabilityLagStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
+	double worstStorageLocalLimit = 0;
+	double limitingStorageLocalLimit = 0;
 
 	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
 	std::map<UID, limitReason_t> ssReasons;
@@ -383,6 +385,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
+		worstStorageLocalLimit = std::min(worstStorageLocalLimit, ss.localRateLimit);
 
 		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
 		worstStorageDurabilityLagStorageServer = std::max(worstStorageDurabilityLagStorageServer, storageDurabilityLag);
@@ -435,8 +438,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			}
 		}
 
-		if (i->value.localRateLimit < 0.99) {
-			auto lim = double(self->actualTpsMetric) * i->value.localRateLimit;
+		if (ss.localRateLimit < 0.99) {
+			auto lim = double(self->actualTpsMetric) * ss.localRateLimit;
 			if (lim < limitTps) {
 				limitTps = lim;
 				ssLimitReason = limitReason_t::storage_server_read_load;
@@ -468,6 +471,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		}
 
 		limitingStorageQueueStorageServer = ss->second->lastReply.bytesInput - ss->second->smoothDurableBytes.smoothTotal();
+		limitingStorageLocalLimit = ss->second->lastReply.localRateLimit;
 		limits->tpsLimit = ss->first;
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst SS, we still report it as the limiting process
 		limitReason = ssReasons[reasonID];
@@ -614,6 +618,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
 			.detail("WorstStorageServerQueue", worstStorageQueueStorageServer)
 			.detail("LimitingStorageServerQueue", limitingStorageQueueStorageServer)
+			.detail("WorstStorageLocalLimit", worstStorageLocalLimit)
+			.detail("LimitingStorageLocalLimit", limitingStorageLocalLimit)
 			.detail("WorstTLogQueue", worstStorageQueueTLog)
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)

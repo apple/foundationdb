@@ -54,7 +54,7 @@ fdb_error_t wait_future(FDBFuture *f) {
 int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
   FDBFuture *f;
   fdb_error_t err = 0;
-  int retry = 3;
+  int retry = DEFAULT_RETRY_COUNT;
 
   do {
     f = fdb_transaction_commit(transaction);
@@ -86,7 +86,7 @@ int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
 	stats->ops[OP_COMMIT]++;
       break;
     }
-  } while (retry--);
+  } while (err && retry--);
   
   return err;
 }
@@ -271,7 +271,7 @@ int64_t run_op_getreadversion(FDBTransaction *transaction) {
   int64_t rv = 0;
   FDBFuture *f;
   fdb_error_t err;
-  int retry = 3;
+  int retry = DEFAULT_RETRY_COUNT;
 
   do {
     f = fdb_transaction_get_read_version(transaction);
@@ -287,7 +287,7 @@ int64_t run_op_getreadversion(FDBTransaction *transaction) {
 	break;
       }
     }
-  } while (retry--);
+  } while (err && retry--);
 
   if (err) {
     fprintf(stderr, "ERROR: fdb_transaction_get_version: %s\n", fdb_get_error(err));
@@ -309,7 +309,7 @@ int run_op_get(FDBTransaction *transaction, char *keystr, char *valstr,
   char *val;
   int vallen;
   fdb_error_t err;
-  int retry = 3;
+  int retry = DEFAULT_RETRY_COUNT;
 
   do {
     f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
@@ -326,7 +326,7 @@ int run_op_get(FDBTransaction *transaction, char *keystr, char *valstr,
 	break;
       }
     }
-  } while (retry--);
+  } while (err && retry--);
 
   if (err) {
     fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));
@@ -351,7 +351,7 @@ int run_op_getrange(FDBTransaction *transaction, char *keystr, char *keystr2,
   FDBKeyValue const *out_kv;
   int out_count;
   int out_more;
-  int retry = 3;
+  int retry = DEFAULT_RETRY_COUNT;
 
   do {
     f = fdb_transaction_get_range(
@@ -373,7 +373,7 @@ int run_op_getrange(FDBTransaction *transaction, char *keystr, char *keystr2,
 	break;
       }
     }
-  } while (retry--);
+  } while (err && retry--);
 
   if (err) {
     fprintf(stderr, "ERROR: fdb_transaction_get_range: %s\n", fdb_get_error(err));
@@ -397,7 +397,7 @@ int run_op_update(FDBTransaction *transaction, char *keystr, char *valstr) {
   char *val;
   int vallen;
   fdb_error_t err;
-  int retry = 3;
+  int retry = DEFAULT_RETRY_COUNT;
 
   /* GET first */
   do {
@@ -414,7 +414,7 @@ int run_op_update(FDBTransaction *transaction, char *keystr, char *valstr) {
 	break;
       }
     }
-  } while (retry--);
+  } while (err && retry--);
 
   if (err) {
     fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));

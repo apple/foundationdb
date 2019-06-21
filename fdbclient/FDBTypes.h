@@ -401,7 +401,7 @@ private:
 public:
 	bool orEqual;	// (or equal to key, if this is true)
 	int offset;		// and then move forward this many items (or backward if negative)
-	KeySelectorRef() {}
+	KeySelectorRef() : orEqual(false), offset(0) {}
 	KeySelectorRef( const KeyRef& key, bool orEqual, int offset ) : orEqual(orEqual), offset(offset) {
 		setKey(key);
 	}
@@ -604,7 +604,7 @@ struct TLogVersion {
 		MIN_SUPPORTED = V2,
 		MAX_SUPPORTED = V3,
 		MIN_RECRUITABLE = V2,
-		DEFAULT = V2,
+		DEFAULT = V3,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -639,7 +639,7 @@ struct TLogSpillType {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum SpillType {
 		UNSET = 0,
-		DEFAULT = 1,
+		DEFAULT = 2,
 		VALUE = 1,
 		REFERENCE = 2,
 		END = 3,

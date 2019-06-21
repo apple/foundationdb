@@ -497,7 +497,7 @@ Snapshot reads
 
 .. method:: Transaction.snapshot.get_read_version() -> Version
 
-    Identical to :meth:`Transaction.get_read_version` (since snapshot and serializable reads use the same read version).
+    Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
 Writing data
 ------------

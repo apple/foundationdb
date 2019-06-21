@@ -49,12 +49,14 @@ struct RebootRequest {
 	constexpr static FileIdentifier file_identifier = 11913957;
 	bool deleteData;
 	bool checkData;
+	uint32_t waitForDuration;
 
-	explicit RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
+	explicit RebootRequest(bool deleteData = false, bool checkData = false, uint32_t waitForDuration = 0)
+	  : deleteData(deleteData), checkData(checkData), waitForDuration(waitForDuration) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, deleteData, checkData);
+		serializer(ar, deleteData, checkData, waitForDuration);
 	}
 };
 

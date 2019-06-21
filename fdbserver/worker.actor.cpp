@@ -486,7 +486,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	*error = false;
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
-	int fd = open("/proc/self/statm", O_RDONLY);
+	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		TraceEvent("OpenStatmFileFailure");
 		*error = true;
@@ -866,6 +866,13 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				if(req.waitForDuration) {
+					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
+					flushTraceFileVoid();
+					setProfilingEnabled(0);
+					g_network->stop();
+					threadSleep(req.waitForDuration);
+				}
 				if(rebootReq.checkData) {
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					wait( checkFile->sync() );
