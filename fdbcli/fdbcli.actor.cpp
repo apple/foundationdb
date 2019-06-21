@@ -537,6 +537,10 @@ void initHelp() {
 		"maintenance [on|off] [ZONEID] [SECONDS]",
 		"mark a zone for maintenance",
 		"Calling this command with `on' prevents data distribution from moving data away from the processes with the specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this command with `off' will disable maintenance.\n");
+	helpMap["consistencycheck"] = CommandHelp(
+		"consistencycheck [on|off]",
+		"enables or disables consistencycheck",
+		"Calling this command with `on' enables consistency check to run and `off' will disable the same. Calling this command with no arguments will display setting for consistency check.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2908,6 +2912,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else {
 							wait( makeInterruptable( setHealthyZone( db, tokens[2], seconds ) ) );
 						}
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "consistencycheck")) {
+					getTransaction(db, tr, options, intrans);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					if (tokens.size() == 1) {
+						state Future<Optional<Standalone<StringRef>>> ccSuspendSettingFuture = tr->get(fdbShouldConsistencyCheckBeSuspended);
+						wait( makeInterruptable( success(ccSuspendSettingFuture) ) );
+						bool ccSuspendSetting = ccSuspendSettingFuture.get().present() ? BinaryReader::fromStringRef<bool>(ccSuspendSettingFuture.get().get(), Unversioned()) : false;
+						printf("ConsistencyCheck is %s\n", ccSuspendSetting ? "off" : "on");
+					}
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
+						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(true, Unversioned()));
+						wait( commitTransaction(tr) );
+					}
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
+						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(false, Unversioned()));
+						wait( commitTransaction(tr) );
 					} else {
 						printUsage(tokens[0]);
 						is_error = true;

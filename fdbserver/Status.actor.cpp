@@ -1038,6 +1038,32 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 	return statusObj;
 }
 
+ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool isAvailable) {
+	if(isAvailable) {
+		try {
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+					bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
+					if(ccSuspend) {
+						messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
+					}
+					break;
+				} catch(Error &e) {
+					wait(tr.onError(e));
+				}
+			}
+		} catch(Error &e) {
+			incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
+		}
+	}
+	return Void();
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -1992,6 +2018,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!latencyProbeResults.empty()) {
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
+
+			wait(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons, isAvailable));
 
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
