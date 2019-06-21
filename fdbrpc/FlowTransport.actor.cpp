@@ -735,7 +735,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
 	const int len = end - begin;
 	if (len < sizeof(uint32_t)) {
-		return std::max(FLOW_KNOBS->DEFAULT_PACKET_BUFFER_BYTES, len * 2);
+		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
