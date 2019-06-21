@@ -154,6 +154,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							.detail("ToCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
+					if ( m.param1.startsWith( storeTypeConfig ) ) {
+						TraceEvent("ChangeStoreType", dbgid).detail("Param1", m.param1).detail("Param2", m.param2);
+					}
 				}
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}

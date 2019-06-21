@@ -484,13 +484,16 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			for(auto i=m.begin(); i!=m.end(); ++i) {
+				TraceEvent("ChangeConfigAPI").detail("Param1", i->first).detail("Param2", i->second);
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
 
 			wait( tr.commit() );
+			TraceEvent("ChangeConfigAPI").detail("NewConfig", newConfig.toString()).detail("OldConfig", oldConfig.toString());
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
