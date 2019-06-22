@@ -32,6 +32,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	double switchAfter;
 	Value keyToRead;
 	Value keyToWatch;
+	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator.extraDB != nullptr);
@@ -57,7 +58,12 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		return success(timeout(waitForAll(clients), testDuration));
 	}
 
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override {
+		if (clientId == 0 && !switchComplete) {
+			TraceEvent(SevError, "DifferentClustersSwitchNotComplete");
+		}
+		return true;
+	}
 
 	void getMetrics(vector<PerfMetric>& m) override {}
 
@@ -150,11 +156,15 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		// want to make that more likely for this test. So read at |rv| then unlock.
 		wait(unlockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_UnlockedExtraDB");
-		ASSERT(!watchFuture.isReady());
+		ASSERT(!watchFuture.isReady() || watchFuture.isError());
+		if (watchFuture.isError()) {
+			TraceEvent(SevError, "DifferentClusters_WatchFutureError").error(watchFuture.getError());
+		}
 		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ LiteralStringRef("") }));
 		TraceEvent("DifferentClusters_WaitingForWatch");
 		wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));
 		TraceEvent("DifferentClusters_Done");
+		self->switchComplete = true;
 		return Void();
 	}
 
