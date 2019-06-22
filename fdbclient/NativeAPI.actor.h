@@ -137,7 +137,6 @@ private:
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 
-	Future<Void> connectionFileMon; // Manages the monitorLeader actor
 	Future<Void> failMon;
 	Future<Void> connected;
 };

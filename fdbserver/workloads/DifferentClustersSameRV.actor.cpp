@@ -27,6 +27,7 @@
 
 // A workload attempts to read from two different clusters with the same read version.
 struct DifferentClustersSameRVWorkload : TestWorkload {
+	Database originalDB;
 	Database extraDB;
 	double testDuration;
 	double switchAfter;
@@ -53,6 +54,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			return Void();
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionFile(), -1);
+		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this), doSwitch(switchConnFileDb, this),
 			                                  writerClient(cx, this), writerClient(extraDB, this) };
 		return success(timeout(waitForAll(clients), testDuration));
@@ -127,9 +129,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			watchFuture = tr->watch(self->keyToWatch);
 			return Void();
 		}));
-		wait(lockDatabase(cx, lockUid) && lockDatabase(self->extraDB, lockUid));
+		wait(lockDatabase(self->originalDB, lockUid) && lockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_LockedDatabases");
-		std::pair<Version, Optional<Value>> read1 = wait(doRead(cx, self));
+		std::pair<Version, Optional<Value>> read1 = wait(doRead(self->originalDB, self));
 		state Version rv = read1.first;
 		state Optional<Value> val1 = read1.second;
 		wait(doWrite(self->extraDB, self->keyToRead, val1));
@@ -138,7 +140,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_AdvancedVersion");
 		wait(cx->switchConnectionFile(Reference<ClusterConnectionFile>(
 		    new ClusterConnectionFile(self->extraDB->getConnectionFile()->getConnectionString()))));
-		TraceEvent("DifferentClusters_SwitchdConnectionFile");
+		TraceEvent("DifferentClusters_SwitchedConnectionFile");
 		state Transaction tr(cx);
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -165,6 +167,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));
 		TraceEvent("DifferentClusters_Done");
 		self->switchComplete = true;
+		wait(unlockDatabase(self->originalDB, lockUid)); // So quietDatabase can finish
 		return Void();
 	}
 

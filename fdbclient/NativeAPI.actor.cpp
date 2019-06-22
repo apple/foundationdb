@@ -545,11 +545,17 @@ DatabaseContext::DatabaseContext(Reference<Cluster> cluster, Reference<AsyncVar<
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
-	try {
+ACTOR static Future<Void> monitorClientInfo(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
+                                            Reference<AsyncVar<Reference<ClusterConnectionFile>>> async_ccf,
+                                            Reference<AsyncVar<ClientDBInfo>> outInfo,
+                                            Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed) {
+	ASSERT(async_ccf);
+	loop {
+		state Reference<ClusterConnectionFile> ccf = async_ccf->get();
+		state Future<Void> ccfChanged = async_ccf->onChange();
 		state Optional<double> incorrectTime;
 		state Future<Void> leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
-		loop {
+		try {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
@@ -607,23 +613,23 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 					if (skipWaitForProxyFail) continue;
 
 					leaderMon = Void();
-					wait(waitForAny(onProxyFailureVec));
-					leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
+					wait(waitForAny(onProxyFailureVec) || ccfChanged);
 				}
 				when( wait( clusterInterface->onChange() ) ) {
 					if(clusterInterface->get().present())
 						TraceEvent("ClientInfo_CCInterfaceChange").detail("CCID", clusterInterface->get().get().id());
 				}
 				when( wait( connectedCoordinatorsNumDelayed->onChange() ) ) {}
+				when(wait(ccfChanged)) {}
 			}
-		}
-	} catch( Error& e ) {
-		TraceEvent(SevError, "MonitorClientInfoError")
-			.error(e)
-			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
-			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
+		} catch (Error& e) {
+			TraceEvent(SevError, "MonitorClientInfoError")
+			    .error(e)
+			    .detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
+			    .detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
 
-		throw;
+			throw;
+		}
 	}
 }
 
@@ -634,7 +640,10 @@ Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>>
 	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
 	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface, connectedCoordinatorsNum));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNumDelayed);
+	Future<Void> clientInfoMonitor =
+	    delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed,
+	                    CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) ||
+	    monitorClientInfo(clusterInterface, cluster->getConnectionFile(), clientInfo, connectedCoordinatorsNumDelayed);
 
 	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false));
 }
@@ -869,7 +878,10 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
 	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNum, apiVersion));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo, connectedCoordinatorsNumDelayed);
+	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed,
+	                                                 CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) ||
+	                                 monitorClientInfo(cluster->getClusterInterface(), cluster->getConnectionFile(),
+	                                                   clientInfo, connectedCoordinatorsNumDelayed);
 
 	DatabaseContext *db;
 	if(preallocatedDb) {
@@ -902,29 +914,6 @@ Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar
 	: clusterInterface(clusterInterface)
 {
 	init(connFile, true, connectedCoordinatorsNum);
-}
-
-ACTOR Future<Void> monitorConnectionFile(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
-                                         Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
-                                         Reference<AsyncVar<int>> connectedCoordinatorsNum) {
-	state Future<Void> monitor;
-	state Future<Void> firstTime = Void();
-	loop {
-		choose {
-			when(wait(firstTime || connFile->onChange())) {
-				firstTime = Never();
-				if (connFile->get()) {
-					monitor.cancel();
-					monitor = monitorLeader(connFile->get(), clusterInterface, connectedCoordinatorsNum);
-				} else {
-					monitor = Never();
-				}
-			}
-			when(wait(monitor)) {
-				ASSERT(false); // monitorLeader should never quit.
-			}
-		}
-	}
 }
 
 void Cluster::init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor,
@@ -964,7 +953,6 @@ void Cluster::init(Reference<ClusterConnectionFile> connFile, bool startClientIn
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
 		}
 
-		connectionFileMon = monitorConnectionFile(connectionFile, clusterInterface, connectedCoordinatorsNum);
 		failMon = failureMonitorClient( clusterInterface, false );
 	}
 }
