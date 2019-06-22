@@ -56,7 +56,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
-	Promise<Void> wrongStoreTypeRemoved;
+	AsyncTrigger wrongStoreTypeRemoved; //wrongStoreTypeRemoved
 	// A storage server's StoreType does not change. To change storeType for an ip:port, we destroy the old one and create a new one. 
 	KeyValueStoreType storeType;  //In storageServerTracker, we always update this value by asking storageServerInterface
 
@@ -2295,17 +2295,20 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			NetworkAddress a = server->second->lastKnownInterface.address();
 			AddressExclusion addr( a.ip, a.port );
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
-				.detail("Addr", addr.toString())
-				.detail("WrongStoreTypeRemovedCanBeSet", server->second->wrongStoreTypeRemoved.canBeSet());
+				.detail("Addr", addr.toString());
 			if ( server->second->storeType != self->configuration.storageServerStoreType ) {
 				//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-				if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
-					server->second->wrongStoreTypeRemoved.send(Void());
-					//serversRemoved.push_back(server->second->onRemoved);
-					numServersRemoved++;
-					hasWrongStoreTypeServer = true;
-					break;
-				}
+				server->second->wrongStoreTypeRemoved.trigger();
+				numServersRemoved++;
+				hasWrongStoreTypeServer = true;
+				break;
+				// if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
+				// 	server->second->wrongStoreTypeRemoved.send(Void());
+				// 	//serversRemoved.push_back(server->second->onRemoved);
+				// 	numServersRemoved++;
+				// 	hasWrongStoreTypeServer = true;
+				// 	break;
+				// }
 			}
 			if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
 				 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
@@ -3033,13 +3036,15 @@ ACTOR Future<Void> storageServerTracker(
 				status.isWrongConfiguration = true;
 			}
 			if (hasWrongStoretype) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?").detail("WrongStoreTypeRemoverCanBeSet", server->wrongStoreTypeRemoved.canBeSet());
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				try {
-					if ( server->wrongStoreTypeRemoved.canBeSet() ) {
-						TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
-						self->removeWrongStoreTypeServer.trigger();
-						wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
-					}
+					// Q: If wrongStoreTypeRemoved is AsyncVar, is the AsyncVar.send() delivered? From what I observed: another actor sends it but the receiver didn't receive it and quit, it seems not.
+					wait( server->wrongStoreTypeRemoved.onTrigger() ); // This can be a long wait
+					// if ( server->wrongStoreTypeRemoved.canBeSet() ) {
+					// 	TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
+					// 	self->removeWrongStoreTypeServer.trigger();
+					// 	wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
+					// }
 				} catch (Error &e) {
 					if (e.code() != error_code_broken_promise) {
 						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
