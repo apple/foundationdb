@@ -54,7 +54,6 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<Void> onRemoved;
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
-	bool isDesiredStoreType;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	Promise<Void> wrongStoreTypeRemoved;
@@ -62,7 +61,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	KeyValueStoreType storeType;  //In storageServerTracker, we always update this value by asking storageServerInterface
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : 
-					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), isDesiredStoreType(true), storeType(KeyValueStoreType::END) {
+					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 };
@@ -366,16 +365,15 @@ struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
 	bool isWrongConfiguration;
-	bool isWrongStoreType; // Does the storage server use a wrong storage engine
 	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
-	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), isWrongStoreType(false), initialized(false) {}
-	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), isWrongStoreType(false), initialized(true) {}
+	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; } 
-	bool isUnhealthyOrWrongStoreType() const { return isFailed || isUndesired; } //|| isWrongStoreType
-	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" :  "Healthy"; } //isWrongStoreType ? "WrongStoreType" :
+	bool isUnhealthyOrWrongStoreType() const { return isFailed || isUndesired; }
+	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" :  "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && isWrongStoreType == r.isWrongStoreType && locality == r.locality && initialized == r.initialized; }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -1210,7 +1208,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			const UID& uid = server.first;
 			TraceEvent("ServerStatus", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
-				.detail("IsWrongStoreType", server_status.get(uid).isWrongStoreType)
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 			    .detail("MachineTeamSize",
 			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1);
@@ -2287,14 +2284,10 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state bool hasWrongStoreTypeServer = false;
 	//state std::vector<Future<Void>> serversRemoved;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
-	//TraceEvent("WrongStoreTypeRemoverStart").detail("ServerInfoSize", self->server_info.size());
-	//printf("self->server_info.begin() == self->server_info.end():%d outloop\n", self->server_info.begin() == self->server_info.end());
 	
 	loop {
 		wait( delay(1.0) || self->removeWrongStoreTypeServer.onTrigger() );
-		//printf("self->server_info.begin() == self->server_info.end():%d\n", self->server_info.begin() == self->server_info.end());
 		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
-		//ASSERT( self->server_info.begin() != self->server_info.end() && self->server_info.size() > 0 );
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
 			//printf("WrongStoreTypeRemover remove server:%s\n", server->first.toString().c_str());
 			//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
@@ -2303,8 +2296,8 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			AddressExclusion addr( a.ip, a.port );
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
 				.detail("Addr", addr.toString())
-				.detail("IsWrongStoreType", serverStatus.isWrongStoreType).detail("ServerDesiredStoreType", server->second->isDesiredStoreType).detail("WrongStoreTypeRemovedCanBeSet", server->second->wrongStoreTypeRemoved.canBeSet());
-			if ( serverStatus.isWrongStoreType || server->second->storeType != self->configuration.storageServerStoreType ) {
+				.detail("WrongStoreTypeRemovedCanBeSet", server->second->wrongStoreTypeRemoved.canBeSet());
+			if ( server->second->storeType != self->configuration.storageServerStoreType ) {
 				//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
 				if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
 					server->second->wrongStoreTypeRemoved.send(Void());
@@ -2321,15 +2314,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				//serversRemoved.clear();
 			}
 		}
-		//TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId);
-		//wait( self->removeWrongStoreTypeServer.onChange() );
-		//UID serverID = self->removeWrongStoreTypeServer.get();
-		//auto serverStatus = self->server_status.get( server->first );
-		//TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("WrongStoreTypeServer", self->removeWrongStoreTypeServer.get()).detail("IsWrongStoreType", serverStatus.isWrongStoreType);
-		// if ( !hasWrongStoreTypeServer )  {
-		// 	wait( delay(2.0) );
-		// }
-		//wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
 	}
 }
 
@@ -2925,8 +2909,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		self->server_status.set( interf.id(), *status );
-		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id()).detail("IsWrongStoreType", self->server_status.get(interf.id()).isWrongStoreType);
-		if ( self->server_status.get(interf.id()).isWrongStoreType  ||  server->storeType != self->configuration.storageServerStoreType ) {
+		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id());
+		if ( server->storeType != self->configuration.storageServerStoreType ) {
 			self->removeWrongStoreTypeServer.trigger();
 		}
 		if( status->isFailed )
@@ -2957,7 +2941,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 			// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 			// 	status->isUndesired = true;
 			// 	status->isWrongConfiguration = true;
-			// 	status->isWrongStoreType = false;
 			// 	self->restartRecruiting.trigger();
 			// }
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
@@ -2991,7 +2974,6 @@ ACTOR Future<Void> storageServerTracker(
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
-			status.isWrongStoreType = server->storeType != self->configuration.storageServerStoreType;
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually be eliminated
 			state std::vector<Future<Void>> otherChanges;
@@ -3010,7 +2992,7 @@ ACTOR Future<Void> storageServerTracker(
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
-					if(!self->server_status.get( i.second->id ).isUnhealthy() && !self->server_status.get( i.second->id ).isWrongStoreType ) {
+					if ( !self->server_status.get( i.second->id ).isUnhealthy() && i.second->storeType == self->configuration.storageServerStoreType ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3052,11 +3034,6 @@ ACTOR Future<Void> storageServerTracker(
 			}
 			if (hasWrongStoretype) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?").detail("WrongStoreTypeRemoverCanBeSet", server->wrongStoreTypeRemoved.canBeSet());
-				status.isWrongStoreType = true;
-				self->server_status.set( server->id, status ); // Must set the status.isWrongStoreType in the global server_status, so that the wrongStoreTypeRemover actor can keep track of it and ask to remove it
-				server->isDesiredStoreType = false;
-			}
-			if (hasWrongStoretype) {
 				try {
 					if ( server->wrongStoreTypeRemoved.canBeSet() ) {
 						TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
@@ -3212,9 +3189,7 @@ ACTOR Future<Void> storageServerTracker(
 					interfaceChanged = server->onInterfaceChanged;
 					// We rely on the old failureTracker being actorCancelled since the old actor now has a pointer to an invalid location
 					// ? What does this mean? Why does the old failureTracker has a pointer to an invalid location?
-					bool tmp = status.isWrongStoreType;
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
-					status.isWrongStoreType = tmp;
 
 					//Restart the storeTracker for the new interface
 					//storeTracker = hasWrongStoretype ? Never() : keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
