@@ -52,7 +52,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	Promise<Void> removed;
 	Future<Void> onRemoved;
-	Promise<Void> wakeUpTracker;
+	Promise<Void> wakeUpTracker; // Change it to Trigger because Promise can only be set once!
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
@@ -599,6 +599,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> badTeamRemover;
 	Future<Void> redundantTeamRemover;
 	Future<Void> wrongStoreTypeRemover;
+	Future<Void> serversOnSameAddrChecker;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -640,7 +641,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantTeamRemover(Void()), wrongStoreTypeRemover(Void()), configuration(configuration),
+	    badTeamRemover(Void()), redundantTeamRemover(Void()), wrongStoreTypeRemover(Void()), serversOnSameAddrChecker(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
 	    initialFailureReactionDelay(
@@ -2274,9 +2275,6 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
-// TODO: Can we pull each storage server's storeType and mark the storage server with wrongStoreType as unhealthy?
-// TODO: The actor is triggered by the AsyncVar (e.g., forceRecovery) which is set by the config change mutation
-// TODO: For change config mutation, we do not automatically recruit servers. Instead, we use this actor to recruit
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// return Void();
 
@@ -2317,6 +2315,31 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				//serversRemoved.clear();
 			}
 		}
+	}
+}
+
+// Check if there exist more than one server on the same address (ip:port); if yes, wake up the servers' tracker
+ACTOR Future<Void> checkServerOnSameAddress(DDTeamCollection* self) {
+	state std::map<AddressExclusion, vector<Reference<TCServerInfo>>> servers;
+	state std::map<AddressExclusion, vector<Reference<TCServerInfo>>>::iterator serversIter;
+	state std::map<UID, Reference<TCServerInfo>>::iterator server;
+
+	loop {
+		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
+			NetworkAddress a = server->second->lastKnownInterface.address();
+			AddressExclusion addr( a.ip, a.port );
+			servers[addr].push_back(server->second);
+		}
+
+		for ( serversIter = servers.begin(); serversIter != servers.end(); serversIter++ ) {
+			if ( serversIter->second.size() > 1 ) {
+				for ( auto& tcServer : serversIter->second ) {
+					if( !tcServer->wakeUpTracker.isSet() )
+						tcServer->wakeUpTracker.send(Void());
+				}
+			}
+		}
+		wait( delay(30.0) );
 	}
 }
 
@@ -2888,12 +2911,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
-		// if (server->removeWrongStoreType) {
-		// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-		// 	status->isUndesired = true;
-		// 	status->isWrongConfiguration = true;
-		// }
-
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
 		if(inHealthyZone) {
 			status->isFailed = false;
@@ -2940,14 +2957,15 @@ ACTOR Future<Void> storageServerFailureTracker(
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
-			// when ( wait( server->wrongStoreTypeRemoved.getFuture() ) ) { // MX: Why is this when never executed???
-			// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemove", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-			// 	status->isUndesired = true;
-			// 	status->isWrongConfiguration = true;
-			// 	self->restartRecruiting.trigger();
-			// }
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
+			when ( wait( server->wrongStoreTypeRemoved.onTrigger() ) ) {
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
+					.detail("StoreType", server->storeType).detail("ConfigStoreType", self->configuration.storageServerStoreType);
+				status->isUndesired = true;
+				status->isWrongConfiguration = true;
+				self->restartRecruiting.trigger();
+			}
 		}
 	}
 
@@ -3035,30 +3053,30 @@ ACTOR Future<Void> storageServerTracker(
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
-			if (hasWrongStoretype) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-				try {
-					// Q: If wrongStoreTypeRemoved is AsyncVar, is the AsyncVar.send() delivered? From what I observed: another actor sends it but the receiver didn't receive it and quit, it seems not.
-					wait( server->wrongStoreTypeRemoved.onTrigger() ); // This can be a long wait
-					// if ( server->wrongStoreTypeRemoved.canBeSet() ) {
-					// 	TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
-					// 	self->removeWrongStoreTypeServer.trigger();
-					// 	wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
-					// }
-				} catch (Error &e) {
-					if (e.code() != error_code_broken_promise) {
-						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
-					} else {
-						TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id);
-					}
-				}
+			// if (hasWrongStoretype) {
+			// 	TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+			// 	try {
+			// 		// Q: If wrongStoreTypeRemoved is AsyncVar, is the AsyncVar.send() delivered? From what I observed: another actor sends it but the receiver didn't receive it and quit, it seems not.
+			// 		wait( server->wrongStoreTypeRemoved.onTrigger() ); // This can be a long wait
+			// 		// if ( server->wrongStoreTypeRemoved.canBeSet() ) {
+			// 		// 	TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
+			// 		// 	self->removeWrongStoreTypeServer.trigger();
+			// 		// 	wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
+			// 		// }
+			// 	} catch (Error &e) {
+			// 		if (e.code() != error_code_broken_promise) {
+			// 			TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
+			// 		} else {
+			// 			TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id);
+			// 		}
+			// 	}
 				
-				TraceEvent(SevWarn, "UndesiredStorageServerToRemoveMX", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-				status.isUndesired = true;
-				status.isWrongConfiguration = true;
-				//storeTracker = keyValueStoreTypeTracker( self, server );
-				self->restartRecruiting.trigger();
-			}
+			// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemoveMX", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
+			// 	status.isUndesired = true;
+			// 	status.isWrongConfiguration = true;
+			// 	//storeTracker = keyValueStoreTypeTracker( self, server );
+			// 	self->restartRecruiting.trigger();
+			// }
 
 			// If the storage server is in the excluded servers list, it is undesired
 			NetworkAddress a = server->lastKnownInterface.address();
@@ -3494,6 +3512,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		if (self->wrongStoreTypeRemover.isReady()) {
 			self->wrongStoreTypeRemover = removeWrongStoreType(self);
 			self->addActor.send(self->wrongStoreTypeRemover);
+		}
+
+		if (self->serversOnSameAddrChecker.isReady()) {
+			self->serversOnSameAddrChecker = checkServerOnSameAddress(self);
+			self->addActor.send(self->serversOnSameAddrChecker);
 		}
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
