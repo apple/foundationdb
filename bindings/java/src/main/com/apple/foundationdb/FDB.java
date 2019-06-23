@@ -472,12 +472,25 @@ public class FDB {
 		return singleton.Error_predicate(predicate, code);
 	}
 
+	/**
+	 * Returns a Future which will fire after at least the given number of seconds
+	 * This can be useful for testing purposes.
+	 *
+	 * @param seconds The number of seconds after which this Future should fire.
+	 * @param e The Executor to use for this Future
+	 */
+	public FutureVoid timer(double seconds, Executor e) {
+		long res = Network_timer(seconds);
+		return new FutureVoid(res, e);
+	}
+
 	static native void Select_API_version(int version) throws FDBException;
 
 	private native void Network_setOption(int code, byte[] value) throws FDBException;
 	private native void Network_setup() throws FDBException;
 	private native void Network_run() throws FDBException;
 	private native void Network_stop() throws FDBException;
+	private native long Network_timer(double seconds);
 
 	private native boolean Error_predicate(int predicate, int code);
 

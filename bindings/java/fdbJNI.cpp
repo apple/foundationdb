@@ -21,18 +21,18 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 
 #include <foundationdb/fdb_c.h>
 
-#define JNI_NULL nullptr 
+#define JNI_NULL nullptr
 
 #if defined(__GNUG__)
 #undef JNIEXPORT
 #define JNIEXPORT __attribute__ ((visibility ("default")))
 #endif
 
-static JavaVM* g_jvm = nullptr; 
+static JavaVM* g_jvm = nullptr;
 static thread_local JNIEnv* g_thread_jenv = nullptr;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = JNI_NULL;
 static thread_local bool is_external = false;
@@ -313,7 +313,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 	jmethodID resultCtorId = jenv->GetMethodID(resultCls, "<init>", "([BIZ)V");
 	if( jenv->ExceptionOccurred() )
 		return JNI_NULL;
- 
+
 	FDBFuture *f = (FDBFuture *)future;
 
 	const FDBKeyValue *kvs;
@@ -353,7 +353,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 
 	jclass resultCls = jenv->FindClass("com/apple/foundationdb/RangeResult");
 	jmethodID resultCtorId = jenv->GetMethodID(resultCls, "<init>", "([B[IZ)V");
- 
+
 	FDBFuture *f = (FDBFuture *)future;
 
 	const FDBKeyValue *kvs;
@@ -376,7 +376,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, JNI_NULL); 
+	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, JNI_NULL);
 	if (!keyvalues_barr) {
 		throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return JNI_NULL;
@@ -391,7 +391,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 		return JNI_NULL;
 	}
 
-	jint *length_barr = jenv->GetIntArrayElements(lengthArray, JNI_NULL); 
+	jint *length_barr = jenv->GetIntArrayElements(lengthArray, JNI_NULL);
 	if( !length_barr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
@@ -592,7 +592,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getKey(JNIEnv *jenv, jobject, jlong tPtr, 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getKey(JNIEnv *jenv, jobject, jlong tPtr,
 		jbyteArray keyBytes, jboolean orEqual, jint offset, jboolean snapshot) {
 	if( !tPtr || !keyBytes ) {
 		throwParamNotNull(jenv);
@@ -614,7 +614,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRange
   (JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBeginBytes, jboolean orEqualBegin, jint offsetBegin,
-		jbyteArray keyEndBytes, jboolean orEqualEnd, jint offsetEnd, jint rowLimit, jint targetBytes, 
+		jbyteArray keyEndBytes, jboolean orEqualEnd, jint offsetEnd, jint rowLimit, jint targetBytes,
 		jint streamingMode, jint iteration, jboolean snapshot, jboolean reverse) {
 	if( !tPtr || !keyBeginBytes || !keyEndBytes ) {
 		throwParamNotNull(jenv);
@@ -637,7 +637,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 
-	FDBFuture *f = fdb_transaction_get_range( tr, 
+	FDBFuture *f = fdb_transaction_get_range( tr,
 			barrBegin, jenv->GetArrayLength( keyBeginBytes ), orEqualBegin, offsetBegin,
 			barrEnd, jenv->GetArrayLength( keyEndBytes ), orEqualEnd, offsetEnd, rowLimit,
 			targetBytes, (FDBStreamingMode)streamingMode, iteration, snapshot, reverse);
@@ -668,7 +668,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		return;
 	}
 
-	fdb_transaction_set( tr, 
+	fdb_transaction_set( tr,
 			barrKey, jenv->GetArrayLength( keyBytes ),
 			barrValue, jenv->GetArrayLength( valueBytes ) );
 	jenv->ReleaseByteArrayElements( keyBytes, (jbyte *)barrKey, JNI_ABORT );
@@ -715,7 +715,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1c
 		return;
 	}
 
-	fdb_transaction_clear_range( tr, 
+	fdb_transaction_clear_range( tr,
 			barrKeyBegin, jenv->GetArrayLength( keyBeginBytes ),
 			barrKeyEnd, jenv->GetArrayLength( keyEndBytes ) );
 	jenv->ReleaseByteArrayElements( keyBeginBytes, (jbyte *)barrKeyBegin, JNI_ABORT );
@@ -745,7 +745,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1m
 		return;
 	}
 
-	fdb_transaction_atomic_op( tr, 
+	fdb_transaction_atomic_op( tr,
 			barrKey, jenv->GetArrayLength( key ),
 			barrValue, jenv->GetArrayLength( value ),
 			(FDBMutationType)code);
@@ -934,7 +934,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Select_1API_1version(JNIE
 			char errorStr[1024];
 			if(FDB_API_VERSION > maxSupportedVersion) {
 				snprintf(errorStr, sizeof(errorStr), "This version of the FoundationDB Java binding is not supported by the installed "
-						 							 "FoundationDB C library. The binding requires a library that supports API version " 
+						 							 "FoundationDB C library. The binding requires a library that supports API version "
 						 							 "%d, but the installed library supports a maximum version of %d.",
 													 FDB_API_VERSION, maxSupportedVersion);
 			}
@@ -1003,6 +1003,10 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1stop(JNIEnv *jen
 	}
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Network_1timer(JNIEnv*, jobject, jdouble seconds) {
+	return reinterpret_cast<jlong>(fdb_timer(seconds));
+}
+
 jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 	g_jvm = vm;
 	return JNI_VERSION_1_1;
@@ -1011,4 +1015,3 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 #ifdef __cplusplus
 }
 #endif
-
