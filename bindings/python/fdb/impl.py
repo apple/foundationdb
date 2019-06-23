@@ -1335,6 +1335,9 @@ def init_c_api():
     _capi.fdb_stop_network.restype = ctypes.c_int
     _capi.fdb_stop_network.errcheck = check_error_code
 
+    _capi.fdb_timer.argtypes = [ ctypes.c_double ]
+    _capi.fdb_timer.restype = ctypes.c_void_p
+
     _capi.fdb_future_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_future_destroy.restype = None
 
@@ -1652,6 +1655,9 @@ open_databases = {}
 
 cacheLock = threading.Lock()
 
+
+def timer(seconds):
+    return Future(_capi.fdb_timer(seconds))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated
