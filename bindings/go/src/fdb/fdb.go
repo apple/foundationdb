@@ -116,7 +116,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 610
+	headerVersion := 620
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -128,7 +128,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 610 {
+	if version < 200 || version > 620 {
 		return errAPIVersionNotSupported
 	}
 
@@ -352,6 +352,12 @@ func byteSliceToPtr(b []byte) *C.uint8_t {
 		return (*C.uint8_t)(unsafe.Pointer(&b[0]))
 	}
 	return nil
+}
+
+func Timer(seconds float64) FutureNil {
+	return &futureNil {
+		future: newFuture(C.fdb_timer(seconds)),
+	}
 }
 
 // A KeyConvertible can be converted to a FoundationDB Key. All functions in the
