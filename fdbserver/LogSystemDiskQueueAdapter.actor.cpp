@@ -66,6 +66,7 @@ public:
 				}
 				if(!self->cursor->hasMessage()) {
 					self->recoveryLoc = self->cursor->version().version;
+					wait(delay(0));
 					continue;
 				}
 			}
