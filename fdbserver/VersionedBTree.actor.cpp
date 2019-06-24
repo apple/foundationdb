@@ -2914,16 +2914,37 @@ int randomSize(int max) {
 	return n;
 }
 
-KeyValue randomKV(int keySize = 10, int valueSize = 5) {
-	int kLen = randomSize(1 + keySize);
-	int vLen = valueSize > 0 ? randomSize(valueSize) : 0;
+StringRef randomString(Arena &arena, int len, char firstChar = 'a', char lastChar = 'z') {
+	++lastChar;
+	StringRef s = makeString(len, arena);
+	for(int i = 0; i < len; ++i) {
+		*(uint8_t *)(s.begin() + i) = (uint8_t)g_random->randomInt(firstChar, lastChar);
+	}
+	return s;
+}
+
+Standalone<StringRef> randomString(int len, char firstChar = 'a', char lastChar = 'z') {
+	Standalone<StringRef> s;
+	(StringRef &)s = randomString(s.arena(), len, firstChar, lastChar);
+	return s;
+}
+
+KeyValue randomKV(int maxKeySize = 10, int maxValueSize = 5) {
+	int kLen = randomSize(1 + maxKeySize);
+	int vLen = maxValueSize > 0 ? randomSize(maxValueSize) : 0;
+
 	KeyValue kv;
-	kv.key = makeString(kLen, kv.arena());
-	kv.value = makeString(vLen, kv.arena());
+
+	kv.key = randomString(kv.arena(), kLen, 'a', 'm');
 	for(int i = 0; i < kLen; ++i)
 		mutateString(kv.key)[i] = (uint8_t)g_random->randomInt('a', 'm');
-	for(int i = 0; i < vLen; ++i)
-		mutateString(kv.value)[i] = (uint8_t)g_random->randomInt('n', 'z');
+
+	if(vLen > 0) {
+		kv.value = randomString(kv.arena(), vLen, 'n', 'z');
+		for(int i = 0; i < vLen; ++i)
+			mutateString(kv.value)[i] = (uint8_t)g_random->randomInt('o', 'z');
+	}
+
 	return kv;
 }
 
@@ -3906,17 +3927,15 @@ TEST_CASE("!/redwood/correctness/btree") {
 	return Void();
 }
 
-ACTOR Future<Void> pointReads(VersionedBTree *btree, int count, int nodeCount) {
+ACTOR Future<Void> randomSeeks(VersionedBTree *btree, int count) {
 	state Version readVer = wait(btree->getLatestVersion());
 	state int c = 0;
 	state double readStart = timer();
-	printf("Executing %d point reads\n", count);
-	state Key k = makeString(4);
+	printf("Executing %d random seeks\n", count);
 	state Reference<IStoreCursor> cur = btree->readAtVersion(readVer);
 	while(c < count) {
-		//cur = btree->readAtVersion(readVer);
-		*(uint32_t *)k.begin() = bigEndian32(g_random->randomInt(0, nodeCount));
-		wait(success(cur->findFirstEqualOrGreater(k, true, 0)));
+		state Key k = randomString(20, 'a', 'b');
+		wait(success(cur->findFirstEqualOrGreater(k, false, 0)));
 		++c;
 	}
 	double elapsed = timer() - readStart;
@@ -3938,47 +3957,51 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(btree->init());
 
 	state int nodeCount = 1e9;
-	state int maxChangesPerVersion = 1000;
+	state int maxChangesPerVersion = 500000;
 	state int64_t kvBytesTarget = 200e6;
-	int maxKeySize = 50;
-	int maxValueSize = 100;
-	state int maxConsecutiveRun = 6;
-
-	state std::string key(maxKeySize, 'k');
-	state std::string value(maxValueSize, 'v');
+	state int maxKeyPrefixSize = 50;
+	state int maxValueSize = 100;
+	state int maxConsecutiveRun = 1;
 	state int64_t kvBytes = 0;
 	state int64_t kvBytesTotal = 0;
 	state int records = 0;
 	state Future<Void> commit = Void();
+	state std::string value(maxValueSize, 'v');
 
 	printf("Starting.\n");
 	state double intervalStart = timer();
+	state double start = intervalStart;
 
 	while(kvBytesTotal < kvBytesTarget) {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
 		btree->setWriteVersion(version);
 		int changes = g_random->randomInt(0, maxChangesPerVersion);
-		int baseKey = g_random->randomInt(0, nodeCount);
-		while(changes--) {
+
+		while(changes > 0) {
 			KeyValue kv;
-			// Change first 4 bytes of key to an int
-			*(uint32_t *)key.data() = bigEndian32(baseKey++);
-			if(g_random->randomInt(0, maxConsecutiveRun) == 0) {
-				baseKey = g_random->randomInt(0, nodeCount);
+			kv.key = randomString(kv.arena(), g_random->randomInt(sizeof(uint32_t), maxKeyPrefixSize + sizeof(uint32_t) + 1), 'a', 'b');
+			int32_t index = g_random->randomInt(0, nodeCount);
+			int runLength = g_random->randomInt(1, maxConsecutiveRun + 1);
+
+			while(runLength > 0 && changes > 0) {
+				*(uint32_t *)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
+				kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
+
+				btree->set(kv);
+
+				--runLength;
+				--changes;
+				kvBytes += kv.key.size() + kv.value.size();
+				++records;
 			}
-			kv.key = StringRef((uint8_t *)key.data(), g_random->randomInt(10, key.size()));
-			kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
-			btree->set(kv);
-			kvBytes += kv.key.size() + kv.value.size();
-			kvBytesTotal += kv.key.size() + kv.value.size();
-			++records;
 		}
 
-		if(kvBytes > 1e6 || kvBytesTotal >= kvBytesTarget) {
+		if(kvBytes > 2e6) {
 			wait(commit);
+			printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n", kvBytesTotal / 1e6, kvBytesTotal / (timer() - start) / 1e6);
 
-			// Avoid capturing this to freeze counter values
+			// Avoid capturing via this to freeze counter values
 			int recs = records;
 			int kvb = kvBytes;
 
@@ -3991,15 +4014,18 @@ TEST_CASE("!/redwood/performance/set") {
 				*pIntervalStart = timer();
 				return Void();
 			});
-			records = 0;
+
+			kvBytesTotal += kvBytes;
 			kvBytes = 0;
+			records = 0;
 		}
 	}
 
 	wait(commit);
+	printf("Cumulative %lld kvBytes written at %.2f MB/s\n", kvBytesTotal, kvBytesTotal / (timer() - start) / 1e6);
 
-	state int reads = 3e5;
-	wait(pointReads(btree, reads, nodeCount) && pointReads(btree, reads, nodeCount) && pointReads(btree, reads, nodeCount));
+	state int reads = 30000;
+	wait(randomSeeks(btree, reads) && randomSeeks(btree, reads) && randomSeeks(btree, reads));
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
