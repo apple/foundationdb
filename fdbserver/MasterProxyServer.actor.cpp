@@ -1573,13 +1573,25 @@ proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData)
 			TraceEvent(SevWarnAlways, "DataDistributorNotPresent");
 			throw operation_failed();
 		}
-		Future<Void> ddSnapReq = brokenPromiseToNever(
-			commitData->db->get().distributor.get().distributorSnapReq.getReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID))
+		state Future<ErrorOr<Void>> ddSnapReq = brokenPromiseToNever(
+			commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID))
 			);
 		try {
 			double snapTimeout = g_network->isSimulated() ? 10.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
-			double maxTimeout = 7 * snapTimeout;
-			wait(timeoutError(ddSnapReq, maxTimeout));
+			state double maxTimeout = 7 * snapTimeout;
+			choose {
+				when (ErrorOr<Void> result = wait(ddSnapReq)) {
+					if (result.isError()) {
+						throw result.getError();
+					}
+				}
+				when (wait(delay(maxTimeout))) {
+					throw timed_out();
+				}
+			}
+			if (ddSnapReq.isError()) {
+				throw operation_failed();
+			}
 		} catch (Error& e) {
 			TraceEvent("SnapMasterProxy.DDSnapResponseError")
 				.detail("SnapPayload", snapReq.snapPayload)
