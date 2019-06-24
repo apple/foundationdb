@@ -37,11 +37,11 @@ else()
   strip_debug_symbols(fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
-target_link_libraries(fdb_c PUBLIC fdbclient)
+target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
 target_include_directories(fdb_c PUBLIC
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
@@ -78,12 +78,41 @@ endif()
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
-fdb_install(TARGETS fdb_c
+
+set(targets_export_name "FoundationDB-Client")
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(version_config "${generated_dir}/${targets_export_name}ConfigVersion.cmake")
+set(project_config "${generated_dir}/${targets_export_name}Config.cmake")
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${version_config}" VERSION ${GENERIC_LIB_VERSION} COMPATIBILITY AnyNewerVersion
+)
+configure_file("${PROJECT_SOURCE_DIR}/cmake/Config.cmake.in" "${project_config}" @ONLY)
+
+fdb_install(
+  TARGETS fdb_c
+  EXPORT ${targets_export_name}
   DESTINATION lib
   COMPONENT clients)
 fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-  DESTINATION include COMPONENT clients)
-#install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
+  DESTINATION include
+  DESTINATION_SUFFIX /foundationdb
+  COMPONENT clients)
+fdb_install(
+  FILES "${project_config}" "${version_config}"
+  DESTINATION lib
+  DESTINATION_SUFFIX "/cmake/${targets_export_name}"
+  COMPONENT clients)
+fdb_configure_and_install(
+  FILE "${PROJECT_SOURCE_DIR}/cmake/foundationdb-client.pc.in"
+  DESTINATION lib
+  DESTINATION_SUFFIX "/pkgconfig"
+  COMPONENT clients)
+fdb_install(
+  EXPORT ${targets_export_name}
+  DESTINATION lib
+  DESTINATION_SUFFIX "/cmake/${targets_export_name}"
+  COMPONENT clients)
