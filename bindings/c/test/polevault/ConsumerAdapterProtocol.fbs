@@ -1,0 +1,73 @@
+// IDL of objects serialized in ConsumerAdapter protocol
+
+namespace ConsAdapter.serialization;
+
+table Mutation {
+  type:int8;
+  param1:string;
+  param2:string;
+}
+
+table KeyRange {
+  begin:string;
+  end:string;
+}
+
+struct UID {
+part1:int64;
+part2:int64;
+}
+
+struct GlobalVersion {
+version:int64;
+previousVersion:int64;
+switchCount:int32;
+}
+
+struct ReplicatorState {
+  lastRepVersion:GlobalVersion;
+  id:UID;
+}
+
+table GetReplicatorStateReq {
+  repState:ReplicatorState;
+}
+table SetReplicatorStateReq {
+  repState:ReplicatorState;
+}
+table PushBatchReq {
+  repState:ReplicatorState;
+  mutations:[Mutation];
+}
+table VerifyRangeReq {
+  repState:ReplicatorState;
+  ranges:[KeyRange];
+  checksums:[uint32];
+}
+
+union Request {GetReplicatorStateReq, SetReplicatorStateReq, PushBatchReq, VerifyRangeReq}
+
+table ConsumerAdapterRequest {
+      request:Request;
+      endpoint:uint32;
+}
+
+table ReplyResp {
+      repState:ReplicatorState;
+      error:int32;
+}
+
+table FinishResp {
+      checksums:[uint32];
+      error:int8;
+}
+
+union Response{ReplyResp, FinishResp}
+
+table ConsumerAdapterResponse {
+      response:Response;
+      endpoint:uint32;
+}
+
+root_type ConsumerAdapterRequest;
+file_identifier "j>/y";

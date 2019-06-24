@@ -28,7 +28,23 @@ add_custom_target(fdb_c_generated DEPENDS ${asm_file}
 vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
 
+message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
+message("CMAKE CUR SOURCE DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
+message("CMAKE CUR BIN DIR: ${CMAKE_CURRENT_BINARY_DIR}")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/polevault/cmake")
+
+message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
+
+
 include(GenerateExportHeader)
+include(CompileFlatBuffers)
+
+add_custom_command(PRE_BUILD
+  OUTPUT ConsumerAdapterProtocol_generated.h
+  COMMAND ${FLATC} --cpp --gen-mutable ${CMAKE_CURRENT_SOURCE_DIR}/ConsumerAdapterProtocol.fbs
+  DEPENDS  ${CMAKE_CURRENT_SOURCE_DIR}/ConsumerAdapterProtocol.fbs
+  DEPENDS flatbuffers)
+add_custom_target(ConsumerAdapterGen DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ConsumerAdapterProtocol_generated.h)
 
 if(OPEN_FOR_IDE)
   add_library(fdb_c OBJECT ${FDB_C_SRCS} ${asm_file})
@@ -41,7 +57,9 @@ target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb
+  ${flatbuffers_PREFIX}/include
+  test/polevault)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
@@ -78,7 +96,13 @@ endif()
 set(c_workloads_srcs
   test/workloads/workloads.cpp
   test/workloads/workloads.h
-  test/workloads/SimpleWorkload.cpp)
+  test/workloads/SimpleWorkload.cpp
+  test/workloads/FakeSnowCannonWorkload.cpp
+  test/polevault/SCLoadGenerator.cpp
+  test/polevault/SCLoadGenerator.h
+  test/polevault/ConsumerClient.h
+  test/polevault/ConsumerClientFDB6.cpp
+  )
 
 if(OPEN_FOR_IDE)
   add_library(c_workloads OBJECT ${c_workloads_srcs})
