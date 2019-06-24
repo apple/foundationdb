@@ -422,7 +422,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 
 			for( int i = 0; i < serverList.get().size(); i++ ) {
 				auto ssi = decodeServerListValue( serverList.get()[i].value );
-				result->allServers.push_back( std::make_pair(ssi, id_data[ssi.locality.processId()].processClass) );
+				result->allServers.push_back( std::make_pair(ssi, id_data[ssi.locality.processId()].processClass) ); // MXQ: How do we ensure each TCServer ssi saved processId() always exist from workers?
 				server_dc[ssi.id()] = ssi.locality.dcId();
 			}
 
@@ -2276,45 +2276,30 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 }
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
-	// return Void();
-
 	state int numServersRemoved = 0;
 	state bool hasWrongStoreTypeServer = false;
-	//state std::vector<Future<Void>> serversRemoved;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
+	state vector<Reference<TCServerInfo>> serversToRemove;
 	
 	loop {
 		wait( delay(1.0) || self->removeWrongStoreTypeServer.onTrigger() );
 		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
+		serversToRemove.clear();
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
-			//printf("WrongStoreTypeRemover remove server:%s\n", server->first.toString().c_str());
-			//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-			auto serverStatus = self->server_status.get( server->first );
 			NetworkAddress a = server->second->lastKnownInterface.address();
 			AddressExclusion addr( a.ip, a.port );
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
 				.detail("Addr", addr.toString());
 			if ( server->second->storeType != self->configuration.storageServerStoreType ) {
-				//TraceEvent("WrongStoreTypeRemover").detail("Server", server->first);
-				server->second->wrongStoreTypeRemoved.trigger();
-				numServersRemoved++;
-				hasWrongStoreTypeServer = true;
-				break;
-				// if ( server->second->wrongStoreTypeRemoved.canBeSet() ) {
-				// 	server->second->wrongStoreTypeRemoved.send(Void());
-				// 	//serversRemoved.push_back(server->second->onRemoved);
-				// 	numServersRemoved++;
-				// 	hasWrongStoreTypeServer = true;
-				// 	break;
-				// }
-			}
-			if ( numServersRemoved >= SERVER_KNOBS->STR_NUM_SERVERS_REMOVED_ONCE ) {
-				 // wait for all marked servers to be removed or a configurable duration in case some server can not be removed
-				//wait( waitForAll(serversRemoved) || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT) );
-				numServersRemoved = 0;
-				//serversRemoved.clear();
+				serversToRemove.push_back(server->second);
+				//break;
 			}
 		}
+		for ( auto& s : serversToRemove ) {
+			if ( s.isValid() ) {
+				s->wrongStoreTypeRemoved.trigger();
+			}
+		}				
 	}
 }
 
@@ -2964,7 +2949,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 					.detail("StoreType", server->storeType).detail("ConfigStoreType", self->configuration.storageServerStoreType);
 				status->isUndesired = true;
 				status->isWrongConfiguration = true;
-				self->restartRecruiting.trigger();
 			}
 		}
 	}
