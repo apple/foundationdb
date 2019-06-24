@@ -18,22 +18,25 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
 #include "fdbrpc/FlowTransport.h"
-#include "fdbrpc/genericactors.actor.h"
-#include "fdbrpc/fdbrpc.h"
-#include "flow/Net2Packet.h"
-#include "flow/ActorCollection.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/ObjectSerializer.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/crc32c.h"
-#include "fdbrpc/simulator.h"
-#include <unordered_map>
 
+#include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
 #endif
+
+#include "fdbrpc/crc32c.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/simulator.h"
+#include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/flow.h"
+#include "flow/Net2Packet.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
