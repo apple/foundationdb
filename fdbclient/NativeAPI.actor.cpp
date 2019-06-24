@@ -1465,7 +1465,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			}
 			state GetValueReply reply;
 			choose {
-				when(wait(cx->connectionFileChanged())) { throw all_alternatives_failed(); }
+				when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 				when(GetValueReply _reply =
 				         wait(loadBalance(ssi.second, &StorageServerInterface::getValue,
 				                          GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false,
@@ -1538,7 +1538,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			++cx->transactionPhysicalReads;
 			state GetKeyReply reply;
 			choose {
-				when(wait(cx->connectionFileChanged())) { throw all_alternatives_failed(); }
+				when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 				when(GetKeyReply _reply =
 				         wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()),
 				                          TaskDefaultPromiseEndpoint, false,
@@ -1711,7 +1711,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				++cx->transactionPhysicalReads;
 				state GetKeyValuesReply rep;
 				choose {
-					when(wait(cx->connectionFileChanged())) { throw all_alternatives_failed(); }
+					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyValuesReply _rep =
 					         wait(loadBalance(locations[shard].second, &StorageServerInterface::getKeyValues, req,
 					                          TaskDefaultPromiseEndpoint, false,
