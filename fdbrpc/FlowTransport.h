@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 
