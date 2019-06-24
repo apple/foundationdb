@@ -31,7 +31,7 @@ vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DI
 message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
 message("CMAKE CUR SOURCE DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
 message("CMAKE CUR BIN DIR: ${CMAKE_CURRENT_BINARY_DIR}")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/polevault/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter/cmake")
 
 message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
 
@@ -59,7 +59,7 @@ target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb
   ${flatbuffers_PREFIX}/include
-  test/polevault)
+  test/workloads/IngestAdapter)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
@@ -98,10 +98,10 @@ set(c_workloads_srcs
   test/workloads/workloads.h
   test/workloads/SimpleWorkload.cpp
   test/workloads/FakeSnowCannonWorkload.cpp
-  test/polevault/SCLoadGenerator.cpp
-  test/polevault/SCLoadGenerator.h
-  test/polevault/ConsumerClient.h
-  test/polevault/ConsumerClientFDB6.cpp
+  test/workloads/IngestAdapter/SCLoadGenerator.cpp
+  test/workloads/IngestAdapter/SCLoadGenerator.h
+  test/workloads/IngestAdapter/ConsumerClient.h
+  test/workloads/IngestAdapter/ConsumerClientFDB6.cpp
   )
 
 if(OPEN_FOR_IDE)

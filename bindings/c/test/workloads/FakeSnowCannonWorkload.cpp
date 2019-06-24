@@ -2,8 +2,8 @@
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"
-#include <polevault/SCLoadGenerator.h>
-#include <polevault/ConsumerClient.h>
+#include "IngestAdapter/SCLoadGenerator.h"
+#include "IngestAdapter/ConsumerClient.h"
 
 namespace {
 
