@@ -546,13 +546,13 @@ DatabaseContext::DatabaseContext(Reference<Cluster> cluster, Reference<AsyncVar<
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
 ACTOR static Future<Void> monitorClientInfo(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
-                                            Reference<AsyncVar<Reference<ClusterConnectionFile>>> async_ccf,
+                                            Reference<AsyncVar<Reference<ClusterConnectionFile>>> asyncCcf,
                                             Reference<AsyncVar<ClientDBInfo>> outInfo,
                                             Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed) {
-	ASSERT(async_ccf);
+	ASSERT(asyncCcf);
 	loop {
-		state Reference<ClusterConnectionFile> ccf = async_ccf->get();
-		state Future<Void> ccfChanged = async_ccf->onChange();
+		state Reference<ClusterConnectionFile> ccf = asyncCcf->get();
+		state Future<Void> ccfChanged = asyncCcf->onChange();
 		state Optional<double> incorrectTime;
 		state Future<Void> leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
 		try {
