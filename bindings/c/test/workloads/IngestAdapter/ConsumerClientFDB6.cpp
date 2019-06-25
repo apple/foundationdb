@@ -4,7 +4,7 @@
 using namespace std;
 using namespace ConsAdapter::serialization;
 
-std::string ConsumerClientFDB6::repStateKey = "\xff/snowCannonProxy/ReplicatorState";
+std::string ConsumerClientFDB6::repStateKey = "snowCannonProxy/ReplicatorState";
 
 ConsumerClientFDB6::ConsumerClientFDB6(std::string clusterFile) : clusterFile(clusterFile) {
 	log.trace("ConsumerClientFDB6Create");
@@ -98,6 +98,7 @@ int ConsumerClientFDB6::startNetwork() {
 #define CHECK_TXN_FUTURE_CB(fut, tag)                                                                                  \
 	{                                                                                                                  \
 		auto ferr = fdb_future_get_error(fut);                                                                         \
+		log.trace(fmt::format("Client6_{}_TxnFutCBCheck", tag), { { "err", STR(fdb_get_error(ferr)) } });              \
 		if (ferr) {                                                                                                    \
 			log.trace(fmt::format("Client6_{}_TxnRetryOnError", tag),                                                  \
 			          { { "err", STR(fdb_get_error(ferr)) }, { "buffer", reqBuffer->toStr() } });                      \
@@ -199,6 +200,7 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	// Get operation
 	FDBFuture* f = fdb_transaction_get(txn, (uint8_t*)ConsumerClientFDB6::repStateKey.c_str(),
 	                                   ConsumerClientFDB6::repStateKey.size(), false);
+	log.trace("GETKEY", { { "key", ConsumerClientFDB6::repStateKey } });
 	err = fdb_future_set_callback(f, &ConsumerClientFDB6::checkReplicatorStateCB, reqBuffer);
 	CHECK(err, "BeginTxnSetCB");
 	return err;
@@ -215,11 +217,11 @@ void ConsumerClientFDB6::checkReplicatorStateCB(FDBFuture* fut, void* arg) {
 	char* val;
 	int valLen;
 	int out_present;
-	err = fdb_future_get_version(fut, &rv);
+	/*err = fdb_future_get_version(fut, &rv);
 	CHECK(err, "GetVersion");
 	log.trace("Client6GetRepStateCBVersion",
 	          { { "version", STR(rv) }, { "present", STR(out_present) }, { "err", STR(fdb_get_error(err)) } });
-
+  */
 	err = fdb_future_get_value(fut, &out_present, (const uint8_t**)&val, &valLen);
 	CHECK(err, "GetValue");
 	auto repState = flatbuffers::GetRoot<ConsAdapter::serialization::ReplicatorState>(static_cast<const void*>(val));

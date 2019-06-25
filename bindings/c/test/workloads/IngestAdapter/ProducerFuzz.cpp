@@ -251,6 +251,11 @@ void ProducerFuzz::updateStatsOnResponse(const ConsumerAdapterResponse* resp, Me
 			if (epStats.type == MessageBufferType::T_GetReplicatorStateReq) {
 				getReqsSuccess++;
 			}
+		} else {
+			trace->error("FATAL: txn failed:{}", err);
+			report();
+			close();
+			exit(err);
 		}
 		verifiesComplete += epStats.ranges;
 		if (epStats.type == MessageBufferType::T_PushBatchReq) {
