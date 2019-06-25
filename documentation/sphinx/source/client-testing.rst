@@ -1,3 +1,6 @@
+.. default-domain:: cpp
+.. highlight:: cpp
+
 ###############
 Client Testing
 ###############
@@ -49,24 +52,112 @@ that gets called by server processes running the ``tester`` role. Additionally, 
 simulates a full fdb cluster with several machines and different configurations in one process. This simulator can run the same
 workloads you can run on a real cluster. It will also inject random failures like network partitions and disk failures.
 
-Currently, workloads can only be implemented in Java, support for other languages might come later.
-
 This tutorial explains how one can implement a workload, how one can orchestrate a workload on a cluster with multiple clients, and
 how one can run a workload within a simulator. Running in a simulator is also useful as it does not require any setup: you can simply
 run one command that will provide you with a fully functional FoundationDB cluster.
 
-Preparing the fdbserver Binary
-==============================
+General Overview
+================
 
-In order to run a Java workload, ``fdbserver`` needs to be able to embed a JVM. Because of that it needs to be linked against JNI.
-The official FDB binaries do not link against JNI and therefore one can't use that to run a Java workload. Instead you need to
-download the sources and build them. Make sure that ``cmake`` can find Java and pass ``-DWITH_JAVA_WORKLOAD=ON`` to cmake.
+Workloads in FoundationDB are generally compiled into the binary. However, FoundationDB also provides the ability to load workloads
+dynamically. This is done through ``dlopen`` (on Unix like operating systems) or ``LoadLibrary`` (on Windows).
 
-After FoundationDB was built, you can use ``bin/fdbserver`` to run the server. The jar file containing the client library can be
-found in ``packages/fdb-VERSION.jar``. Both of these are in the build directory.
+Parallelism and Determinism
+===========================
 
-Implementing a Workload
-=======================
+A workload can run either in a simulation or on a real cluster. In simulation, ``fdbserver`` will simulate a whole cluster and will
+use a deterministic random number generator to simulate random behavior and random failures. This random number generator is initialized
+with a random seed. In case of a test failure, the user can reuse the given seed and rerun the same test in order to further observe
+and debug the behavior.
+
+However, this will only work as long as the workload doesn't introduce any non-deterministic behavior. One example of non-deterministic
+behavior is the running multiple threads.
+
+The workload is created in the main network thread and it will run in the main network thread. Because of this, using any blocking
+function (for example ``blockUntilReady`` on a future object) will result in a deadlock. Using the callback API is therefore required
+if one wants to keep the simulator's deterministic behavior.
+
+For existing applications and layers, however, not using the blocking API might not be an option. For these use-cases, a user can chose
+to start new threads and use the blocking API from within these threads. This will mean that test failures will be non-deterministic and
+might be hard to reproduce.
+
+To start a new thread, one has to "bind" operating system threads to their simulated processes. This can be done by setting the
+``ProcessId`` in the child threads when they get created. In Java this is done by only starting new threads through the provided
+``Executor``. In the C++ API one can use the ``FDBWorkloadContext`` to do that. For example:
+
+.. code-block:: C++
+
+   template<class Fun>
+   std::thread startThread(FDBWorkloadContext* context, Fun fun) {
+       auto processId = context->getProcessID();
+       return std::thread([context, processID, fun](
+           context->setProcessID(processID);
+           fun();
+       ));
+   }
+
+Finding the Shared Object
+=========================
+
+When the test starts, ``fdbserver`` needs to find the shared object to load. The name of this shared object has to be provided.
+
+For Java, we provide an implementation in ``libjava_workloads.so`` which can be built out of the sources. The tester will look
+for the key ``libraryName`` in the test file which should be the name of the library without extension and without the ``lib``
+prefix (so ``java_workloads`` if you want to write a Java workload).
+
+By default, the process will look for the library in the directory ``../shared/foundationdb/`` relative to the location of the
+``fdbserver`` binary. If the library is somewhere else on the system, one can provide the absolute path to the library (only
+the folder, not the file name) in the test file with the ``libraryPath`` option.
+
+Implementing a C++ Workload
+===========================
+
+In order to implement a workload, one has to build a shared library that links against the fdb client library. This library has to
+exppse a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
+This mechanism allows the other to implement as many workloads within one library as she wants. To do this the pure virtual classes
+``FDBWorkloadFactory`` and ``FDBWorkload`` have to be implemented.
+
+.. function:: FDBWorkloadFactory* workloadFactory(FDBLogger*)
+
+   This function has to be defined within the shared library and will be called by ``fdbserver`` for looking up a specific workload.
+   ``FDBLogger`` will be passed and is guaranteed to survive for the lifetime of the process. This class can be used to write to the
+   FoundationDB traces. Logging anything with severity ``FDBSeverity::Error`` will result in a hard test failure. This function needs
+   to have c-linkage, so define it in a ``extern "C"`` block.
+
+.. function:: std::shared_ptr<FDBWorkload> FDBWorkload::create(const std::string& name)
+
+   This is the only method to be implemented in ``FDBWorkloadFactory``. If the test file contains a key-value pair ``workloadName``
+   the value will be passed to this method (empty string otherwise). This way, a library author can implement many workloads in one
+   library and use the test file to chose which one to run (or run multiple workloads either concurrently or serially).
+
+.. function:: std::string FDBWorkload::description() const
+
+   This method has to return the name of the workload. This can be a static name and is primarily used for tracing.
+
+.. function:: bool FDBWorkload::init(FDBWorkloadContext* context)
+
+   Right after initialization
+
+.. function:: void FDBWorkload::setup(FDBDatabase* db, GenericPromise<bool> done)
+
+   This method will be called by the tester during the setup phase. It should be used to populate the database.
+
+.. function:: void FDBWorkload::start(FDBDatabase* db, GenericPromise<bool> done)
+
+   This method should run the actual test.
+
+.. function:: void FDBWorkload::check(FDBDatabase* db, GenericPromise<bool> done)
+
+   When the tester completes, this method will be called. A workload should run any consistency/correctness tests
+   during this phase.
+
+.. function:: void FDBWorkload::getMetrics(std::vector<FDBPerfMetric>& out) const
+
+   If a workload collects metrics (like latencies or throughput numbers), these should be reported back here.
+   The multitester (or test orchestrator) will collect all metrics from all test clients and it will aggregate them.
+
+Implementing a Java Workload
+============================
 
 In order to implement your own workload in Java you can simply create an implementation of the abstract class ``AbstractWorkload``.
 A minimal implementation will look like this:
@@ -74,6 +165,7 @@ A minimal implementation will look like this:
 .. code-block:: java
 
    package my.package;
+   import com.apple.foundationdb.testing.Promise;
    import com.apple.foundationdb.testing.AbstractWorkload;
    import com.apple.foundationdb.testing.WorkloadContext;
 
@@ -83,19 +175,21 @@ A minimal implementation will look like this:
        }
 
        @Override
-       public void setup(Database db) {
+       public void setup(Database db, Promise promise) {
            log(20, "WorkloadSetup", null);
+           promise.send(true);
        }
 
        @Override
        public void start(Database db) {
            log(20, "WorkloadStarted", null);
+           promise.send(true);
        }
 
        @Override
        public boolean check(Database db) {
            log(20, "WorkloadFailureCheck", null);
-           return true;
+           promise.send(true);
        }
    }
 
@@ -165,9 +259,9 @@ A test file might look like this:
 .. code-block:: none
 
    testTitle=MyTest
-     testName=JavaWorkload
-     workloadClass=my.package.MinimalWorkload
-     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     testName=External
+     libraryName=java_workloads
+     workloadName=my.package.MinimalWorkload
      classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
 
      testName=Attrition
@@ -176,15 +270,15 @@ A test file might look like this:
      machinesToKill=3
 
    testTitle=AnotherTest
-     workloadClass=my.package.MinimalWorkload
-     workloadClass=my.package.MinimalWorkload
-     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     testName=External
+     libraryName=java_workloads
+     workloadName=my.package.MinimalWorkload
      classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
-     someOpion=foo
+     someOption=foo
 
-     workloadClass=my.package.AnotherWorkload
-     workloadClass=my.package.AnotherWorkload
-     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     testName=External
+     libraryName=java_workloads
+     workloadName=my.package.AnotherWorkload
      classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
      anotherOption=foo
 

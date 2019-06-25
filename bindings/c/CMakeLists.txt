@@ -75,6 +75,20 @@ if(NOT WIN32)
   target_link_libraries(mako PRIVATE fdb_c)
 endif()
 
+set(c_workloads_srcs
+  test/workloads/workloads.cpp
+  test/workloads/workloads.h
+  test/workloads/SimpleWorkload.cpp)
+
+if(OPEN_FOR_IDE)
+  add_library(c_workloads OBJECT ${c_workloads_srcs})
+else()
+  add_library(c_workloads SHARED ${c_workloads_srcs})
+endif()
+set_target_properties(c_workloads PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
+target_link_libraries(c_workloads PUBLIC fdb_c)
+
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
