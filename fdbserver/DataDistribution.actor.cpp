@@ -2285,7 +2285,7 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state int numServersRemoved = 0;
-	state bool hasWrongStoreTypeServer = false;
+	state bool prevHasWrongStoreTypeServer = false;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
 	state vector<Reference<TCServerInfo>> serversToRemove;
 	
@@ -2303,6 +2303,12 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				//break;
 			}
 		}
+		if ( prevHasWrongStoreTypeServer && serversToRemove.empty() ) {
+			self->restartRecruiting.trigger(); // From hasWrongStoreType to noWrongStoreType, ensure all SS processes have a SS
+		}
+
+		prevHasWrongStoreTypeServer = !serversToRemove.empty();
+
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
 			self->doBuildTeams = true;
 			self->restartTeamBuilder.trigger();
@@ -3355,6 +3361,12 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
 			}
 
+			// if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
+			// 	lastRequest = rsr;
+			// 	fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+			// 	numRecuitSSPending++;
+			// }
+
 			if ( ((hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType) && numRecuitSSPending < 5 ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
 				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 					lastRequest = rsr;
@@ -3379,10 +3391,10 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					--numRecuitSSPending;
 					self->addActor.send(initializeStorage(self, candidateWorker));
 					fCandidateWorker = Never();
-					if ( !hasHealthyTeam ) {
+					//if ( !hasHealthyTeam ) {
 						self->doBuildTeams = true;
 						self->restartTeamBuilder.trigger();
-					}
+					//}
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
