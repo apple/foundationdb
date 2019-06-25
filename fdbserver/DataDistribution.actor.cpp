@@ -3309,9 +3309,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state bool hasHealthyTeam;
 	state int numRecuitSSPending = 0;
 	// TODO: ask CC to cancel outstanding recruitments
-	RecruitStorageRequest cancelOutstandingRecruit;
-	cancelOutstandingRecruit.cancelOutstandingRecruit = true;
-	RecruitStorageReply waitForOutstandingReq = wait( db->get().clusterInterface.recruitStorage.getReply( cancelOutstandingRecruit, TaskDataDistribution ) );
+	// RecruitStorageRequest cancelOutstandingRecruit;
+	// cancelOutstandingRecruit.cancelOutstandingRecruit = true;
+	// RecruitStorageReply waitForOutstandingReq = wait( db->get().clusterInterface.recruitStorage.getReply( cancelOutstandingRecruit, TaskDataDistribution ) );
 	//wait( waitForOutstandingReq );
 	loop {
 		try {
