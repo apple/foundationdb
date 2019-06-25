@@ -75,7 +75,7 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
@@ -737,7 +737,7 @@ ACTOR Future<Void> workerServer(
 			}
 		} else {
 			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskDefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
+			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskPriority::DefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
 		}
 	}
 
@@ -1169,7 +1169,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
-				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
 			}
 			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				state ExecCmdValueString execArg(req.execPayload);

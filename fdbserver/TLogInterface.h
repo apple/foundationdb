@@ -56,11 +56,11 @@ struct TLogInterface {
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
-		popMessages.getEndpoint( TaskTLogPop );
-		peekMessages.getEndpoint( TaskTLogPeek );
-		confirmRunning.getEndpoint( TaskTLogConfirmRunning );
-		commit.getEndpoint( TaskTLogCommit );
+		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
+		popMessages.getEndpoint( TaskPriority::TLogPop );
+		peekMessages.getEndpoint( TaskPriority::TLogPeek );
+		confirmRunning.getEndpoint( TaskPriority::TLogConfirmRunning );
+		commit.getEndpoint( TaskPriority::TLogCommit );
 	}
 
 	template <class Ar> 

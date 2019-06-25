@@ -48,7 +48,7 @@ struct FlowReceiver : private NetworkMessageReceiver {
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
-	const Endpoint& getEndpoint(int taskID) {
+	const Endpoint& getEndpoint(TaskPriority taskID) {
 		if (!endpoint.isValid()) {
 			m_isLocalEndpoint = true;
 			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
@@ -56,7 +56,7 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		return endpoint;
 	}
 
-	void makeWellKnownEndpoint(Endpoint::Token token, int taskID) {
+	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		ASSERT(!endpoint.isValid());
 		m_isLocalEndpoint = true;
 		endpoint.token = token;
@@ -128,7 +128,7 @@ public:
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
-	const Endpoint& getEndpoint(int taskID = TaskDefaultPromiseEndpoint) const { return sav->getEndpoint(taskID); }
+	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const { return sav->getEndpoint(taskID); }
 
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav) rhs.sav->addPromiseRef();
@@ -204,19 +204,19 @@ template <class Reply>
 void resetReply(ReplyPromise<Reply> & p) { p.reset(); }
 
 template <class Request>
-void resetReply(Request& r, int taskID) { r.reply.reset(); r.reply.getEndpoint(taskID); }
+void resetReply(Request& r, TaskPriority taskID) { r.reply.reset(); r.reply.getEndpoint(taskID); }
 
 template <class Reply>
-void resetReply(ReplyPromise<Reply> & p, int taskID) { p.reset(); p.getEndpoint(taskID); }
+void resetReply(ReplyPromise<Reply> & p, TaskPriority taskID) { p.reset(); p.getEndpoint(taskID); }
 
 template <class Request>
-void setReplyPriority(Request& r, int taskID) { r.reply.getEndpoint(taskID); }
+void setReplyPriority(Request& r, TaskPriority taskID) { r.reply.getEndpoint(taskID); }
 
 template <class Reply>
-void setReplyPriority(ReplyPromise<Reply> & p, int taskID) { p.getEndpoint(taskID); }
+void setReplyPriority(ReplyPromise<Reply> & p, TaskPriority taskID) { p.getEndpoint(taskID); }
 
 template <class Reply>
-void setReplyPriority(const ReplyPromise<Reply> & p, int taskID) { p.getEndpoint(taskID); }
+void setReplyPriority(const ReplyPromise<Reply> & p, TaskPriority taskID) { p.getEndpoint(taskID); }
 
 
 
@@ -281,7 +281,7 @@ public:
 		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, int taskID) const {
+	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		return getReply(value);
 	}
@@ -290,7 +290,7 @@ public:
 		return getReply(ReplyPromise<X>());
 	}
 	template <class X>
-	Future<X> getReplyWithTaskID(int taskID) const {
+	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
 		ReplyPromise<X> reply;
 		reply.getEndpoint(taskID);
 		return getReply(reply);
@@ -302,7 +302,7 @@ public:
 	//   If cancelled or returns failure, request was or will be delivered zero or one times.
 	//   The caller must be capable of retrying if this request returns failure
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value, int taskID) const {
+	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
@@ -344,7 +344,7 @@ public:
 	//   If it returns failure, the failure detector considers the endpoint failed permanently or for the given amount of time
 	//   See IFailureMonitor::onFailedFor() for an explanation of the duration and slope parameters.
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration, double sustainedFailureSlope, int taskID) const {
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration, double sustainedFailureSlope, TaskPriority taskID) const {
 		// If it is local endpoint, no need for failure monitoring
 		return waitValueOrSignal(getReply(value, taskID),
 				makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(taskID), sustainedFailureDuration, sustainedFailureSlope),
@@ -388,8 +388,8 @@ public:
 		//queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	Endpoint getEndpoint(int taskID = TaskDefaultEndpoint) const { return queue->getEndpoint(taskID); }
-	void makeWellKnownEndpoint(Endpoint::Token token, int taskID) {
+	Endpoint getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const { return queue->getEndpoint(taskID); }
+	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		queue->makeWellKnownEndpoint(token, taskID);
 	}
 

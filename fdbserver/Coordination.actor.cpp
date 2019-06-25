@@ -52,8 +52,8 @@ GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
 
 GenerationRegInterface::GenerationRegInterface( INetwork* local )
 {
-	read.makeWellKnownEndpoint( WLTOKEN_GENERATIONREG_READ, TaskCoordination );
-	write.makeWellKnownEndpoint( WLTOKEN_GENERATIONREG_WRITE, TaskCoordination );
+	read.makeWellKnownEndpoint( WLTOKEN_GENERATIONREG_READ, TaskPriority::Coordination );
+	write.makeWellKnownEndpoint( WLTOKEN_GENERATIONREG_WRITE, TaskPriority::Coordination );
 }
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
@@ -67,9 +67,9 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
 LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) 
 	: ClientLeaderRegInterface(local)
 {
-	candidacy.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskCoordination );
-	leaderHeartbeat.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT, TaskCoordination );
-	forward.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_FORWARD, TaskCoordination );
+	candidacy.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination );
+	leaderHeartbeat.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT, TaskPriority::Coordination );
+	forward.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination );
 }
 
 ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )

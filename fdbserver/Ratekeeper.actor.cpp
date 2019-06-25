@@ -300,7 +300,7 @@ ACTOR Future<Void> trackEachStorageServer(
 ACTOR Future<Void> monitorServerListChange(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
-	state Database db = openDBOnServer(dbInfo, TaskRatekeeper, true, true);
+	state Database db = openDBOnServer(dbInfo, TaskPriority::Ratekeeper, true, true);
 	state std::map<UID, StorageServerInterface> oldServers;
 	state Transaction tr(db);
 
@@ -629,7 +629,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 }
 
 ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo, DatabaseConfiguration* conf) {
-	state Database cx = openDBOnServer(dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 

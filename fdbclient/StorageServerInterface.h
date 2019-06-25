@@ -80,9 +80,9 @@ struct StorageServerInterface {
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
 	void initEndpoints() {
-		getValue.getEndpoint( TaskLoadBalancedEndpoint );
-		getKey.getEndpoint( TaskLoadBalancedEndpoint );
-		getKeyValues.getEndpoint( TaskLoadBalancedEndpoint );
+		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 };
 
