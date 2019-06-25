@@ -153,22 +153,26 @@ public: // workload functions
 
 	ACTOR Future<Void> snapExecHelper(SnapTestWorkload* self, Database cx, StringRef keyRef, StringRef valueRef) {
 		state Transaction tr(cx);
+		state int retry = 0;
 		loop {
 			try {
 				tr.execute(keyRef, valueRef);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
-				try {
-					wait(tr.onError(e));
-				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered
-						|| e.code() == error_code_txn_exec_log_anti_quorum) {
-						TraceEvent(SevWarnAlways, "ClusterNotFullyRecovered");
+				++retry;
+				if (e.code() == error_code_txn_exec_log_anti_quorum) {
+					self->skipCheck = true;
+					break;
+
+				}
+				if (e.code() == error_code_cluster_not_fully_recovered) {
+					TraceEvent(SevWarnAlways, "ClusterNotFullyRecovered")
+						.error(e);
+					if (retry > 10) {
 						self->skipCheck = true;
 						break;
 					}
-					throw;
 				}
 			}
 		}
@@ -235,10 +239,13 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered ||
-						e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_txn_exec_log_anti_quorum) {
+						snapFailed = true;
+						break;
+					}
+					if (e.code() == error_code_cluster_not_fully_recovered) {
 						++retry;
-						if (retry > 3) {
+						if (retry > 10) {
 							snapFailed = true;
 							break;
 						}

@@ -394,6 +394,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode );
 
 #if defined(_WIN32)
 #include <io.h>
+#define O_CLOEXEC 0
 
 #elif defined(__unixish__)
 #define _open ::open
@@ -1651,6 +1652,9 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		tasks.push( Task( time, taskID, taskCount++, getCurrentProcess(), std::move(signal) ) );
 		mutex.leave();
+	}
+	bool isOnMainThread() const override {
+		return net2->isOnMainThread();
 	}
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
 		return delay( 0, taskID, process );

@@ -159,7 +159,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			}
 		}
 	}
-};
+}
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;

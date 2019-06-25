@@ -537,6 +537,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+void flushTraceFileVoid();
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.

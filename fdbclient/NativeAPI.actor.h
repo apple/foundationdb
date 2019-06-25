@@ -145,9 +145,8 @@ struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
-	uint32_t maxRetries;
 	uint32_t getReadVersionFlags;
-	uint32_t customTransactionSizeLimit;
+	uint32_t sizeLimit;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
@@ -291,7 +290,6 @@ public:
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
-	void onErrorReset();
 	void fullReset();
 	double getBackoff(int errCode);
 	void debugTransaction(UID dID) { info.debugID = dID; }
@@ -302,7 +300,6 @@ public:
 
 	TransactionInfo info;
 	int numErrors;
-	int numRetries;
 
 	std::vector<Reference<Watch>> watches;
 
