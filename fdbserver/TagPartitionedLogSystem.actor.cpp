@@ -1477,7 +1477,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->rejoins = rejoins;
 				logSystem->lockResults = lockResults;
 				logSystem->recoverAt = minEnd;
-				logSystem->knownCommittedVersion = knownCommittedVersion;
+				if (knownCommittedVersion > minEnd) {
+					// FIXME: Remove the Sev40 once disk snapshot v2 feature is enabled, in all other
+					// code paths we should never be here.
+					TraceEvent(SevError, "KCVIsInvalid")
+						.detail("KnownCommittedVersion", knownCommittedVersion)
+						.detail("MinEnd", minEnd);
+					logSystem->knownCommittedVersion = minEnd;
+				} else {
+					logSystem->knownCommittedVersion = knownCommittedVersion;
+				}
 				logSystem->remoteLogsWrittenToCoreState = true;
 				logSystem->stopped = true;
 				logSystem->pseudoLocalities = prevState.pseudoLocalities;
