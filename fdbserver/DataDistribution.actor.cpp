@@ -1450,6 +1450,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
+				traceAllInfo(true);
 				break;
 			}
 
@@ -3391,6 +3392,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					self->addActor.send(initializeStorage(self, candidateWorker));
 					fCandidateWorker = Never();
 					if ( !hasHealthyTeam ) {
+						self->doBuildTeams = true;
 						self->restartTeamBuilder.trigger();
 					}
 				}
@@ -3690,7 +3692,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();
 				}
-			}
+			} 
 		}
 	}
 }
@@ -3713,6 +3715,17 @@ bool isDDConfigurationChanged( Reference<DataDistributorData> self, const Databa
 	return false;
 }
 
+void updateDDConfiguration( Reference<DataDistributorData> self, const DatabaseConfiguration* conf ) {
+	if ( self->primaryTeamCollection.isValid() ) {
+		self->primaryTeamCollection->configuration = *conf;
+	}
+	if ( self->remoteTeamCollection.isValid() ) {
+		self->remoteTeamCollection->configuration = *conf;
+	}
+
+	return;
+}
+
 ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
 	loop {
@@ -3728,9 +3741,10 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
 				if( isDDConfigurationChanged(self, &conf) ) { // Check primaryDD and remoteDD's configuration
 					// Throw errors?
-					throw please_reboot();
+					//throw please_reboot(); // We need to cancel the trackers on the old data distributor that was rebooted
+					updateDDConfiguration(self, &conf);
 					// self->configuration = conf; 
-					// self->registrationTrigger.trigger(); //TODO
+					//// self->registrationTrigger.trigger(); //TODO
 				}
 				state Future<Void> storeTypeWatch = tr.watch( storeTypeConfig );
 
@@ -3933,6 +3947,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
 			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled);
+			//self->primaryTeamCollection = Reference<DDTeamCollection>();
+			//self->remoteTeamCollection = Reference<DDTeamCollection>(); // We need to cancel the trackers on the old data distributor that was rebooted
 			if( ddEnabled )
 				throw err;
 		}
