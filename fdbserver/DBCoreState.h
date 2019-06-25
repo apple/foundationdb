@@ -65,7 +65,7 @@ struct CoreTLogSet {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+		if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 			tLogVersion = TLogVersion::V2;
 		} else {
 			serializer(ar, tLogVersion);
@@ -88,7 +88,7 @@ struct OldTLogCoreData {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+		if( ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, epochEnd);
 		}
 		else if(ar.isDeserializing) {
@@ -96,7 +96,7 @@ struct OldTLogCoreData {
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
-		if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+		if (ar.protocolVersion().hasPseudoLocalities()) {
 			serializer(ar, pseudoLocalities);
 		}
 	}
@@ -137,15 +137,15 @@ struct DBCoreState {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		if(g_network->isSimulated() && ar.protocolVersion() < 0x0FDB00A460010001LL) {
+		if(g_network->isSimulated() && !ar.protocolVersion().hasMultiGenerationTLog()) {
 			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
 			flushAndExit(0);
 		}
 		
-		ASSERT(ar.protocolVersion() >= 0x0FDB00A460010001LL);
-		if(ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+		ASSERT(ar.protocolVersion().hasMultiGenerationTLog());
+		if(ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
-			if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+			if (ar.protocolVersion().hasPseudoLocalities()) {
 				serializer(ar, pseudoLocalities);
 			}
 		} else if(ar.isDeserializing) {

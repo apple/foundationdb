@@ -147,9 +147,9 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 						offset = 0;
 				}
 				else if(self->unbufferedIO)
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
 				else
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 			}
 
 			wait(waitForAll(self->writeFutures));

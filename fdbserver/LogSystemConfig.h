@@ -142,7 +142,7 @@ struct TLogSet {
 			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
 		} else {
 			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 				tLogVersion = TLogVersion::V2;
 			} else {
 				serializer(ar, tLogVersion);

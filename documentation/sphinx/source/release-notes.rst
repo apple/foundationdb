@@ -20,6 +20,9 @@ Status
 Bindings
 --------
 
+* Go: The Go bindings now require Go version 1.11 or later.
+* Go: Fix issue with finalizers running too early that could lead to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
+
 Other Changes
 -------------
 

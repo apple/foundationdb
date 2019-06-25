@@ -470,6 +470,10 @@ void initHelp() {
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
+	helpMap["snapshot"] = CommandHelp(
+		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
+		"snapshot the database",
+		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",
@@ -2121,6 +2125,11 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 	return false;
 }
 
+ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
+	wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
+	return false;
+}
+
 ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 	if( tokens.size() == 1 ) {
 		vector<ProcessData> _workers = wait( makeInterruptable(getWorkers(db)) );
@@ -2540,7 +2549,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
 
 		try {
-			state UID randomID = g_random->randomUniqueID();
+			state UID randomID = deterministicRandom()->randomUniqueID();
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;
@@ -2715,6 +2724,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						bool err = wait( include(db,tokens) );
+						if (err) is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "snapshot")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						bool err = wait(createSnapshot(db, tokens[1]));
 						if (err) is_error = true;
 					}
 					continue;

@@ -27,6 +27,9 @@
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\KillRegion.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -231,6 +234,9 @@
     <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\SuspendProcesses.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -285,6 +291,9 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Mako.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />

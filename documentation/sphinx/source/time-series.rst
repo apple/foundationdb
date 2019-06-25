@@ -1,6 +1,4 @@
-.. default-domain:: rb
 .. highlight:: ruby
-.. module:: FDB
 
 ################
 Time-Series Data
@@ -95,7 +93,7 @@ Ordering and Transactions
 
 FoundationDB’s ability to let you structure your data in different ways, keep track of metrics, and search it with varying granularity is a direct result of two key features of our key-value store: global ordering and ACID transactions. And as you’ve seen from the code included above, the direct impact of these properties is simpler application code and overall faster development.
 
-Global ordering makes a big difference if you’re attempting to process significant amounts of sequential information because the database can retrieve that information quickly and efficiently. So rather than having to package your data into a single database object or broadcast a request for many individual data elements that correspond to a given range of application data (e.g. time0, time1, time2, . . ., timen), a globally ordered storage system, like FoundationDB, can generate a single range request to the database for the matching data. And internally, FoundationDB can further optimize requests by knowing which data resides on which machines, so there’s no need to broadcast the data request to all machines in the cluster.
+Global ordering makes a big difference if you’re attempting to process significant amounts of sequential information because the database can retrieve that information quickly and efficiently. So rather than having to package your data into a single database object or broadcast a request for many individual data elements that correspond to a given range of application data (e.g. time0, time1, time2, . . ., timeN), a globally ordered storage system, like FoundationDB, can generate a single range request to the database for the matching data. And internally, FoundationDB can further optimize requests by knowing which data resides on which machines, so there’s no need to broadcast the data request to all machines in the cluster.
 
 Global indexing also makes a huge difference in terms of application complexity and database efficiency. Many non-relational databases provide node-specific indexing and secondary indexing, but if you wanted global indexes, you would have to build those at the application level to ensure the index and related data get updated atomically.
 

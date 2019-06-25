@@ -58,7 +58,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -70,7 +70,7 @@ struct StorageServerInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-			if (ar.protocolVersion() >= 0x0FDB00A200090001LL) serializer(ar, watchValue);
+			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
@@ -162,6 +162,8 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
+
+	GetKeyValuesReply() : version(invalidVersion), more(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -369,10 +371,11 @@ struct StorageQueuingMetricsReply {
 	Version durableVersion; // latest version durable on storage server
 	double cpuUsage;
 	double diskUsage;
+	double localRateLimit;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage, localRateLimit);
 	}
 };
 

@@ -218,7 +218,7 @@ struct ConnectPacket {
 	// The value does not inclueds the size of `connectPacketLength` itself,
 	// but only the other fields of this structure.
 	uint32_t connectPacketLength;
-	uint64_t protocolVersion;      // Expect currentProtocolVersion
+	ProtocolVersion protocolVersion;      // Expect currentProtocolVersion
 
 	uint16_t canonicalRemotePort;  // Port number to reconnect to the originating process
 	uint64_t connectionId;         // Multi-version clients will use the same Id for both connections, other connections will set this to zero. Added at protocol Version 0x0FDB00A444020001.
@@ -269,7 +269,7 @@ struct ConnectPacket {
 		}
 
 		serializer(ar, protocolVersion, canonicalRemotePort, connectionId, canonicalRemoteIp4);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+		if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 			flags = 0;
 		} else {
 			// We can send everything in serialized packet, since the current version of ConnectPacket
@@ -326,13 +326,16 @@ struct Peer : NonCopyable {
 			pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
 			pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
 		} else {
-			pkt.canonicalRemotePort = 0;   // a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			// a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
+			pkt.canonicalRemotePort = 0;
 			pkt.setCanonicalRemoteIp(IPAddress(0));
 		}
 
 		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-		pkt.protocolVersion =
-		    g_network->useObjectSerializer() ? addObjectSerializerFlag(currentProtocolVersion) : currentProtocolVersion;
+		pkt.protocolVersion = currentProtocolVersion;
+		if (g_network->useObjectSerializer()) {
+			pkt.protocolVersion.addObjectSerializerFlag();
+		}
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
@@ -394,7 +397,7 @@ struct Peer : NonCopyable {
 
 		loop {
 			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				throw connection_failed();
+				throw connection_unreferenced();
 			}
 
 			wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
@@ -404,6 +407,7 @@ struct Peer : NonCopyable {
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 			state int64_t startingBytes = peer->bytesReceived;
+			state int timeouts = 0;
 			loop {
 				choose {
 					when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
@@ -411,7 +415,11 @@ struct Peer : NonCopyable {
 							TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
 							throw connection_failed();
 						}
+						if(timeouts > 1) {
+							TraceEvent(SevWarnAlways, "ConnectionSlowPing").suppressFor(1.0).detail("WithAddr", peer->destination).detail("Timeouts", timeouts);
+						}
 						startingBytes = peer->bytesReceived;
+						timeouts++;
 					}
 					when (wait( reply.getFuture() )) {
 						break;
@@ -460,26 +468,54 @@ struct Peer : NonCopyable {
 		TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 			.detail("PeerAddr", self->destination)
 			.detail("ConnSet", (bool)conn);
+
+		// This is used only at client side and is used to override waiting for unsent data to update failure monitoring
+		// status. At client, if an existing connection fails, we retry making a connection and if that fails, then only
+		// we report that address as failed.
+		state bool clientReconnectDelay = false;
 		loop {
 			try {
 				if (!conn) {  // Always, except for the first loop with an incoming connection
 					self->outgoingConnectionIdle = true;
-					// Wait until there is something to send
-					while ( self->unsent.empty() )
-						wait( self->dataToSend.onTrigger() );
+
+					// Wait until there is something to send.
+					while (self->unsent.empty()) {
+						if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
+						    clientReconnectDelay) {
+							break;
+						}
+						wait(self->dataToSend.onTrigger());
+					}
+
 					ASSERT( self->destination.isPublic() );
 					self->outgoingConnectionIdle = false;
-					wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
+					wait(delayJittered(
+					    std::max(0.0, self->lastConnectTime + self->reconnectionDelay -
+					                      now()))); // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
 					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 					Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
 					if (_conn) {
-						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-						self->prependConnectPacket();
+						if (FlowTransport::transport().isClient()) {
+							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+						}
+						if (self->unsent.empty()) {
+							_conn->close();
+							clientReconnectDelay = false;
+							continue;
+						} else {
+							conn = _conn;
+							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+							    .suppressFor(1.0)
+							    .detail("PeerAddr", self->destination);
+							self->prependConnectPacket();
+						}
 					} else {
 						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+						if (FlowTransport::transport().isClient()) {
+							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+						}
 						throw connection_failed();
 					}
 
@@ -492,7 +528,9 @@ struct Peer : NonCopyable {
 					self->transport->countConnEstablished++;
 					wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
 				} catch (Error& e) {
-					 if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed ))
+					if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
+					    e.code() == error_code_connection_unreferenced ||
+					    (g_network->isSimulated() && e.code() == error_code_checksum_failed))
 						self->transport->countConnClosedWithoutError++;
 					else
 						self->transport->countConnClosedWithError++;
@@ -508,7 +546,9 @@ struct Peer : NonCopyable {
 				}
 				self->discardUnreliablePackets();
 				reader = Future<Void>();
-				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
+				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
+				          e.code() == error_code_connection_unreferenced ||
+				          (g_network->isSimulated() && e.code() == error_code_checksum_failed);
 
 				if(self->compatible) {
 					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
@@ -529,6 +569,9 @@ struct Peer : NonCopyable {
 				}
 
 				if (conn) {
+					if (FlowTransport::transport().isClient()) {
+						clientReconnectDelay = true;
+					}
 					conn->close();
 					conn = Reference<IConnection>();
 				}
@@ -595,7 +638,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 }
 
 static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
-                        NetworkAddress const& peerAddress, uint64_t peerProtocolVersion) {
+                        NetworkAddress const& peerAddress, ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -633,16 +676,16 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");
-				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+				int flipBits = 32 - (int) floor(log2(deterministicRandom()->randomUInt32()));
 
-				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				uint32_t firstFlipByteLocation = deterministicRandom()->randomUInt32() % packetLen;
+				int firstFlipBitLocation = deterministicRandom()->randomInt(0, 8);
 				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
 				flipBits--;
 
 				for (int i = 0; i < flipBits; i++) {
-					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-					int bitLocation = g_random->randomInt(0, 8);
+					uint32_t byteLocation = deterministicRandom()->randomUInt32() % packetLen;
+					int bitLocation = deterministicRandom()->randomInt(0, 8);
 					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
 						*(p + byteLocation) ^= 1 << bitLocation;
 					}
@@ -709,7 +752,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool incompatiblePeerCounted = false;
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
-	state uint64_t peerProtocolVersion;
+	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
 	if (peer == nullptr) {
@@ -744,14 +787,14 @@ ACTOR static Future<Void> connectionReader(
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
 					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
-						uint64_t protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
+						auto protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
 						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));
 						ConnectPacket pkt;
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if(g_network->useObjectSerializer() != hasObjectSerializerFlag(pkt.protocolVersion) ||
-						   (removeFlags(pkt.protocolVersion) & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask)) {
+						if(g_network->useObjectSerializer() != pkt.protocolVersion.hasObjectSerializerFlag() ||
+						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -762,9 +805,9 @@ ACTOR static Future<Void> connectionReader(
 								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
 									    .detail("Reason", "IncompatibleProtocolVersion")
-									    .detail("LocalVersion", currentProtocolVersion)
-									    .detail("RejectedVersion", pkt.protocolVersion)
-									    .detail("VersionMask", compatibleProtocolVersionMask)
+									    .detail("LocalVersion", currentProtocolVersion.version())
+									    .detail("RejectedVersion", pkt.protocolVersion.version())
+									    .detail("VersionMask", ProtocolVersion::compatibleProtocolVersionMask)
 									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                                            : conn->getPeerAddress())
 									    .detail("ConnectionId", connectionId);
@@ -778,7 +821,7 @@ ACTOR static Future<Void> connectionReader(
 							}
 
 							compatible = false;
-							if(protocolVersion < 0x0FDB00A551000000LL) {
+							if(!protocolVersion.hasMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}
@@ -981,6 +1024,10 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
+	if (FlowTransport::transport().isClient()) {
+		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+	}
+
 	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
 	Peer* peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
@@ -1008,7 +1055,7 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 }
 
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.token = g_random->randomUniqueID();
+	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
@@ -1177,9 +1224,9 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 	return self->numIncompatibleConnections > 0;
 }
 
-void FlowTransport::createInstance( uint64_t transportId )
-{
+void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
+	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);

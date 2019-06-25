@@ -36,6 +36,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
+#include "flow/ProtocolVersion.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -48,31 +49,6 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
-//
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
-//
-//                                                       xyzdev
-//                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061070001LL;
-const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
-const uint64_t objectSerializerFlag          = 0x1000000000000000LL;
-const uint64_t versionFlagMask               = 0x0FFFFFFFFFFFFFFFLL;
-
-uint64_t removeFlags(uint64_t version) {
-	return version & versionFlagMask;
-}
-uint64_t addObjectSerializerFlag(uint64_t version) {
-	return version | objectSerializerFlag;
-}
-bool hasObjectSerializerFlag(uint64_t version) {
-	return (version & objectSerializerFlag) > 0;
-}
-
-// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
-static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -289,7 +265,7 @@ public:
 	}
 
 	explicit Connection( boost::asio::io_service& io_service )
-		: id(g_nondeterministic_random->randomUniqueID()), socket(io_service)
+		: id(nondeterministicRandom()->randomUniqueID()), socket(io_service)
 	{
 	}
 
@@ -432,6 +408,7 @@ private:
 		// Socket settings that have to be set after connect or accept succeeds
 		socket.non_blocking(true);
 		socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		platform::setCloseOnExec(socket.native_handle());
 	}
 
 	void closeSocket() {
@@ -459,6 +436,7 @@ public:
 	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
 		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
+		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
 	virtual void addref() { ReferenceCounted<Listener>::addref(); }
@@ -626,7 +604,7 @@ void Net2::run() {
 		updateNow();
 		double now = this->currentTime;
 
-		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
+		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
 		if (sleepTime) trackMinPriority( 0, now );
@@ -708,7 +686,7 @@ void Net2::run() {
 		}
 #endif
 
-		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
+		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
 
 		trackMinPriority( minTaskID, nnow );
@@ -765,7 +743,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 
-		if ( !DEBUG_DETERMINISM && (g_nondeterministic_random->random01() < sampleRate ))
+		if ( !DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate ))
 			TraceEvent(elapsed > warnThreshold ? SevWarnAlways : SevInfo, "SlowTask").detail("TaskID", priority).detail("MClocks", elapsed/1e6).detail("Duration", duration).detail("SampleRate", sampleRate).detail("NumYields", numYields);
 	}
 }

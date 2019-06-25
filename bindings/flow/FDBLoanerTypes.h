@@ -258,8 +258,6 @@ namespace FDB {
 
 	typedef Standalone<KeyRangeRef> KeyRange;
 
-	std::string printable( const StringRef& val );
-
 	template <class T>
 	static std::string describe(T const& item) {
 		return item.toString();

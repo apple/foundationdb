@@ -42,7 +42,7 @@ TEST_CASE("/flow/Deque/queue") {
 	
 	int to_push = 0, to_pop = 0;
 	while (to_pop != 1000) {
-		if (to_push != 1000 && (q.empty() || g_random->random01() < 0.55)) {
+		if (to_push != 1000 && (q.empty() || deterministicRandom()->random01() < 0.55)) {
 			q.push(to_push++);
 		} else {
 			ASSERT(q.front() == to_pop++);

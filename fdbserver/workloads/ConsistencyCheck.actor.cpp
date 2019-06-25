@@ -219,11 +219,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					//Check that nothing is in the TLog queues
-					int64_t maxTLogQueueSize = wait(getMaxTLogQueueSize(cx, self->dbInfo));
-					if(maxTLogQueueSize > 1e5)  // FIXME: Should be zero?
+					std::pair<int64_t,int64_t> maxTLogQueueInfo = wait(getTLogQueueInfo(cx, self->dbInfo));
+					if(maxTLogQueueInfo.first > 1e5)  // FIXME: Should be zero?
 					{
-						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueSize);
+						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueInfo.first);
 						self->testFailure("Non-zero tlog queue size");
+					}
+
+					if(maxTLogQueueInfo.second > 30e6)
+					{
+						TraceEvent("ConsistencyCheck_PoppedVersionLag").detail("PoppedVersionLag", maxTLogQueueInfo.second);
+						self->testFailure("large popped version lag");
 					}
 
 					//Check that nothing is in the storage server queues
@@ -418,7 +424,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					for (int j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> reply = keyValueFutures[j].get();
 
-						if (!reply.present()) {
+						if (!reply.present() || reply.get().error.present()) {
 							//If the storage server didn't reply in a quiescent database, then the check fails
 							if(self->performQuiescentChecks) {
 								TraceEvent("ConsistencyCheck_KeyServerUnavailable").detail("StorageServer", shards[i].second[j].id().toString().c_str());
@@ -753,7 +759,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 
 							//Compare the results with other storage servers
-							if(rangeResult.present())
+							if(rangeResult.present() && !rangeResult.get().error.present())
 							{
 								state GetKeyValuesReply current = rangeResult.get();
 								totalReadAmount += current.data.expectedSize();

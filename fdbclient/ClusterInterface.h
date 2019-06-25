@@ -42,6 +42,15 @@ struct ClusterInterface {
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
+	bool hasMessage() {
+		return openDatabase.getFuture().isReady() ||
+		failureMonitoring.getFuture().isReady() || 
+		databaseStatus.getFuture().isReady() ||
+		ping.getFuture().isReady() ||
+		getClientWorkers.getFuture().isReady() ||
+		forceRecovery.getFuture().isReady();
+	}
+
 	void initEndpoints() {
 		openDatabase.getEndpoint( TaskClusterController );
 		failureMonitoring.getEndpoint( TaskFailureMonitor );
@@ -146,7 +155,7 @@ struct OpenDatabaseRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A400040001LL);
+			ASSERT(ar.protocolVersion().hasOpenDatabase());
 		}
 		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply,
 				   arena);

@@ -148,6 +148,7 @@ public:
 	int64_t transactionsMaybeCommitted;
 	int64_t transactionsResourceConstrained;
 	int64_t transactionsProcessBehind;
+	int64_t transactionWaitsForFullRecovery;
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
@@ -156,6 +157,7 @@ public:
 	double transactionTimeout;
 	int transactionMaxRetries;
 	double transactionMaxBackoff;
+	int transactionMaxSize;  // Max size in bytes.
 	int snapshotRywEnabled;
 
 	Future<Void> logger;

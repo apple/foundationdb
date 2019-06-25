@@ -40,7 +40,7 @@ def init_logging(loglevel, logdir):
 
 
 class LogParser:
-    def __init__(self, basedir, name, infile, out, aggregationPolicy):
+    def __init__(self, basedir, name, infile, out, aggregationPolicy, symbolicateBacktraces):
         self.basedir = basedir
         self.name = name
         self.infile = infile
@@ -48,6 +48,7 @@ class LogParser:
         self.result = True
         self.address_re = re.compile(r'(0x[0-9a-f]+\s+)+')
         self.aggregationPolicy = aggregationPolicy
+        self.symbolicateBacktraces = symbolicateBacktraces
         self.outStream = None
         if self.aggregationPolicy == 'NONE':
             self.out = None
@@ -105,7 +106,6 @@ class LogParser:
         return match.group(0)
 
     def processTraces(self):
-        backtraces = 0
         linenr = 0
         with open(self.infile) as f:
             line = f.readline()
@@ -121,7 +121,7 @@ class LogParser:
                     self.fail()
                 if self.name is not None:
                     obj['testname'] = self.name
-                if self.sanitizeBacktrace(obj) is not None and backtraces == 0:
+                if self.symbolicateBacktraces and self.sanitizeBacktrace(obj) is not None:
                     obj = self.applyAddr2line(obj)
                 self.writeObject(obj)
 
@@ -155,8 +155,8 @@ class LogParser:
 
 
 class JSONParser(LogParser):
-    def __init__(self, basedir, name, infile, out, aggregationPolicy):
-        super().__init__(basedir, name, infile, out, aggregationPolicy)
+    def __init__(self, basedir, name, infile, out, aggregationPolicy, symbolicateBacktraces):
+        super().__init__(basedir, name, infile, out, aggregationPolicy, symbolicateBacktraces)
 
     def processLine(self, line, linenr):
         try:
@@ -196,8 +196,8 @@ class XMLParser(LogParser):
         def warning(self, exception):
             self.warnings.append(exception)
 
-    def __init__(self, basedir, name, infile, out, aggregationPolicy):
-        super().__init__(basedir, name, infile, out, aggregationPolicy)
+    def __init__(self, basedir, name, infile, out, aggregationPolicy, symbolicateBacktraces):
+        super().__init__(basedir, name, infile, out, aggregationPolicy, symbolicateBacktraces)
 
     def writeHeader(self):
         self.write('<?xml version="1.0"?>\n<Trace>\n')
@@ -242,21 +242,21 @@ def get_traces(d, log_format):
     return traces
 
 
-def process_traces(basedir, testname, path, out, aggregationPolicy, log_format, return_codes, cmake_seed):
+def process_traces(basedir, testname, path, out, aggregationPolicy, symbolicateBacktraces, log_format, return_codes, cmake_seed):
     res = True
     backtraces = []
     parser = None
     if log_format == 'json':
-        parser = JSONParser(basedir, testname, None, out, aggregationPolicy)
+        parser = JSONParser(basedir, testname, None, out, aggregationPolicy, symbolicateBacktraces)
     else:
-        parser = XMLParser(basedir, testname, None, out, aggregationPolicy)
+        parser = XMLParser(basedir, testname, None, out, aggregationPolicy, symbolicateBacktraces)
     parser.processReturnCodes(return_codes)
     res = parser.result
     for trace in get_traces(path, log_format):
         if log_format == 'json':
-            parser = JSONParser(basedir, testname, trace, out, aggregationPolicy)
+            parser = JSONParser(basedir, testname, trace, out, aggregationPolicy, symbolicateBacktraces)
         else:
-            parser = XMLParser(basedir, testname, trace, out, aggregationPolicy)
+            parser = XMLParser(basedir, testname, trace, out, aggregationPolicy, symbolicateBacktraces)
         if not res:
             parser.fail()
         parser.processTraces()
@@ -273,7 +273,7 @@ def run_simulation_test(basedir, options):
         pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
     else:
         pargs.append('-S')
-        pargs.append('random')
+        pargs.append('off')
     td = TestDirectory(basedir)
     if options.buggify:
         pargs.append('-b')
@@ -317,14 +317,14 @@ def run_simulation_test(basedir, options):
     res = True
     if options.aggregate_traces == 'NONE':
         res = process_traces(basedir, options.name,
-                             wd, None, 'NONE',
+                             wd, None, 'NONE', options.symbolicate,
                              options.log_format, return_codes, options.seed)
     else:
         with open(outfile, 'a') as f:
             os.lockf(f.fileno(), os.F_LOCK, 0)
             pos = f.tell()
             res = process_traces(basedir, options.name,
-                                 wd, f, options.aggregate_traces,
+                                 wd, f, options.aggregate_traces, options.symbolicate,
                                  options.log_format, return_codes, options.seed)
             f.seek(pos)
             os.lockf(f.fileno(), os.F_ULOCK, 0)
@@ -368,6 +368,8 @@ if __name__ == '__main__':
                         choices=['xml', 'json'], help='Log format (json or xml)')
     parser.add_argument('-O', '--old-binary', required=False, default=None,
                         help='Path to the old binary to use for upgrade tests')
+    parser.add_argument('-S', '--symbolicate', action='store_true', default=False,
+                        help='Symbolicate backtraces in trace events')
     parser.add_argument('--aggregate-traces', default='NONE',
                         choices=['NONE', 'FAILED', 'ALL'])
     parser.add_argument('--keep-logs', default='FAILED',

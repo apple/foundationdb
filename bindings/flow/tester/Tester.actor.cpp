@@ -97,7 +97,7 @@ std::string tupleToString(Tuple const& tuple) {
 			if(type == Tuple::UTF8) {
 				str += "u";
 			}
-			str += "\'" + printable(tuple.getString(i)) + "\'";
+			str += "\'" + tuple.getString(i).printable() + "\'";
 		}
 		else if(type == Tuple::INT) {
 			str += format("%ld", tuple.getInt(i));
@@ -220,9 +220,9 @@ ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string
 
 	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
 	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
-	       printable(subspace).c_str(), results.size());
+	       StringRef(subspace).printable().c_str(), results.size());
 	for (auto & s : results) {
-		printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
 	}
 
 	return Void();
@@ -1030,7 +1030,7 @@ struct TuplePackFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1119,7 +1119,7 @@ struct TupleRangeFunc : InstructionFunc {
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if(deterministicRandom()->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
 				if(type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
@@ -1550,6 +1550,7 @@ struct UnitTestsFunc : InstructionFunc {
 		const uint64_t retryLimit = 50;
 		const uint64_t noRetryLimit = -1;
 		const uint64_t maxRetryDelay = 100;
+		const uint64_t sizeLimit = 100000;
 
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_LOCATION_CACHE_SIZE, Optional<StringRef>(StringRef((const uint8_t*)&locationCacheSize, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MAX_WATCHES, Optional<StringRef>(StringRef((const uint8_t*)&maxWatches, 8)));
@@ -1558,6 +1559,7 @@ struct UnitTestsFunc : InstructionFunc {
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&noTimeout, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_MAX_RETRY_DELAY, Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&sizeLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&noRetryLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_ENABLE);
@@ -1791,7 +1793,7 @@ ACTOR void _test_versionstamp() {
 
 		ASSERT(trVersion.compare(dbVersion) == 0);
 
-		fprintf(stderr, "%s\n", printable(trVersion).c_str());
+		fprintf(stderr, "%s\n", trVersion.printable().c_str());
 
 		g_network->stop();
 	}
@@ -1809,8 +1811,7 @@ int main( int argc, char** argv ) {
 	try {
 		platformInit();
 		registerCrashHandler();
-		g_random = new DeterministicRandom(1);
-		g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(1);
 
 		// Get arguments
 		if (argc < 3) {

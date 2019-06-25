@@ -331,10 +331,11 @@ struct TraceableStringImpl : std::true_type {
 				result.push_back('\\');
 				result.push_back('\\');
 			} else {
+				const uint8_t byte = *iter;
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char(*iter / 16));
-				result.push_back(base16Char(*iter));
+				result.push_back(base16Char(byte / 16));
+				result.push_back(base16Char(byte));
 			}
 		}
 		return result;
@@ -536,6 +537,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+void flushTraceFileVoid();
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.

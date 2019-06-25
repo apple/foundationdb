@@ -1171,7 +1171,7 @@ namespace fileBackup {
 					// Start writing a new file after verifying this task should keep running as of a new read version (which must be >= outVersion)
 					outVersion = values.second;
 					// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
-					state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
+					state int blockSize = BUGGIFY ? deterministicRandom()->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
 					state Version snapshotBeginVersion;
 					state int64_t snapshotRangeFileCount;
 
@@ -1600,7 +1600,7 @@ namespace fileBackup {
 				state std::vector<KeyRange> rangesToAdd;
 
 				// Limit number of tasks added per transaction
-				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
+				int taskBatchSize = BUGGIFY ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 				int added = 0;
 
 				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
@@ -1696,7 +1696,7 @@ namespace fileBackup {
 								Version scheduledVersion = invalidVersion;
 								// If the next dispatch version is in the future, choose a random version at which to start the new task.
 								if(nextDispatchVersion > recentReadVersion)
-									scheduledVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
+									scheduledVersion = recentReadVersion + deterministicRandom()->random01() * (nextDispatchVersion - recentReadVersion);
 
 								// Range tasks during the initial snapshot should run at a higher priority
 								int priority = latestSnapshotEndVersion.present() ? 0 : 1;
@@ -1862,7 +1862,7 @@ namespace fileBackup {
 			}
 
 			// Block size must be at least large enough for 1 max size key, 1 max size value, and overhead, so conservatively 125k.
-			state int blockSize = BUGGIFY ? g_random->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+			state int blockSize = BUGGIFY ? deterministicRandom()->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
 			state Reference<IBackupFile> outFile = wait(bc->writeLogFile(beginVersion, endVersion, blockSize));
 			state LogFileWriter logFile(outFile, blockSize);
 
@@ -2631,7 +2631,7 @@ namespace fileBackup {
 
 				state int start = 0;
 				state int end = data.size();
-				state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+				state int dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 				tr->reset();
 				loop{
@@ -2818,7 +2818,7 @@ namespace fileBackup {
 
 			state int start = 0;
 			state int end = data.size();
-			state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			state int dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			loop {
@@ -3578,7 +3578,7 @@ public:
 			prevConfig.clear(tr);
 		}
 
-		state BackupConfig config(g_random->randomUniqueID());
+		state BackupConfig config(deterministicRandom()->randomUniqueID());
 		state UID uid = config.getUid();
 
 		// This check will ensure that current backupUid is later than the last backup Uid
@@ -3631,7 +3631,7 @@ public:
 			if (existingDestUidValue.present()) {
 				destUidValue = existingDestUidValue.get();
 			} else {
-				destUidValue = BinaryWriter::toValue(g_random->randomUniqueID(), Unversioned());
+				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 				tr->set(destUidLookupPath, destUidValue);
 			}
 		}
@@ -4290,7 +4290,7 @@ public:
 		//Lock src, record commit version
 		state Transaction tr(cx);
 		state Version commitVersion;
-		state UID randomUid = g_random->randomUniqueID();
+		state UID randomUid = deterministicRandom()->randomUniqueID();
 		loop {
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
@@ -4370,7 +4370,7 @@ const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
-	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, g_random->randomUniqueID());
+	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, deterministicRandom()->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {

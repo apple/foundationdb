@@ -92,7 +92,7 @@ namespace oldTLog_4_6 {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			if( ar.protocolVersion() >= 0x0FDB00A460010001) {
+			if (ar.protocolVersion().hasMultiGenerationTLog()) {
 				serializer(ar, version, messages, tags, knownCommittedVersion, id);
 			} else if(ar.isDeserializing) {
 				serializer(ar, version, messages, tags);
@@ -304,7 +304,7 @@ namespace oldTLog_4_6 {
 		bool terminated;
 
 		TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-				: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
+				: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
 				  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 				  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 				  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
@@ -1078,7 +1078,7 @@ namespace oldTLog_4_6 {
 			{
 				TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
 					.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
-				if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * g_random->random01() ) );
+				if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );
 				throw worker_removed();
 			}
 
@@ -1158,7 +1158,7 @@ namespace oldTLog_4_6 {
 			}
 			when (TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())){
 				if (req.debugID.present() ) {
-					UID tlogDebugID = g_nondeterministic_random->randomUniqueID();
+					UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
 					g_traceBatch.addEvent("TransactionDebug", tlogDebugID.first(), "TLogServer.TLogConfirmRunningRequest");
 				}

@@ -61,6 +61,8 @@
 #include "versions.h"
 #endif
 
+#include "fdbmonitor/SimpleIni.h"
+
 #ifdef  __linux__
 #include <execinfo.h>
 #include <signal.h>
@@ -79,8 +81,8 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -158,6 +160,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
 	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
+	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -178,7 +181,6 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 
 extern const char* getHGVersion();
 
-extern IRandom* trace_random;
 extern void flushTraceFileVoid();
 
 extern bool noUnseed;
@@ -330,7 +332,7 @@ UID getSharedMemoryMachineId() {
 		try {
 			// "0" is the default parameter "addr"
 			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
-			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
+			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
@@ -914,6 +916,7 @@ int main(int argc, char* argv[]) {
 		const char *testFile = "tests/default.txt";
 		std::string kvFile;
 		std::string testServersStr;
+		std::string whitelistBinPaths;
 		std::vector<std::string> publicAddressStrs, listenAddressStrs;
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
@@ -1194,7 +1197,7 @@ int main(int argc, char* argv[]) {
 				case OPT_RESTARTING:
 					restarting = true;
 					break;
-				case OPT_RANDOMSEED: {
+			    case OPT_RANDOMSEED: {
 					char* end;
 					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
 					if( *end ) {
@@ -1300,6 +1303,9 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				}
+				case OPT_WHITELIST_BINPATH:
+					whitelistBinPaths = args.OptionArg();
+					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
 					args.OptionArg();
@@ -1412,26 +1418,14 @@ int main(int argc, char* argv[]) {
 		if( zoneId.present() )
 			printf("ZoneId set to %s, dcId to %s\n", printable(zoneId).c_str(), printable(dcId).c_str());
 
-		g_random = new DeterministicRandom(randomSeed);
-		if (role == Simulation)
-			trace_random = new DeterministicRandom(1);
-		else
-			trace_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_nondeterministic_random = new DeterministicRandom(2);
-		else
-			g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_debug_random = new DeterministicRandom(3);
-		else
-			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(randomSeed);
 
 		if(role==Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if(buggifyOverride.present())
 				buggifyEnabled = buggifyOverride.get();
 		}
-		enableBuggify( buggifyEnabled );
+		enableBuggify(buggifyEnabled, BuggifyType::General);
 
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
@@ -1529,7 +1523,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
 			g_network = newNet2(useThreadPool, true, useObjectSerializer);
-			FlowTransport::createInstance(1);
+			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
 			if (publicAddressStrs.empty()) {
@@ -1654,7 +1648,8 @@ int main(int argc, char* argv[]) {
 
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
-				if( directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." && directories[i] != "backups") {
+				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
 					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
@@ -1671,12 +1666,85 @@ int main(int argc, char* argv[]) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
+			int isRestoring = 0;
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
-			}
+			} else {
+				CSimpleIni ini;
+				ini.SetUnicode();
+				std::string absDataFolder = abspath(dataFolder);
+				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
+				int backupFailed = true;
+				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
+				if (isRestoringStr) {
+					isRestoring = atoi(isRestoringStr);
+					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", NULL);
+					if (isRestoring && backupFailedStr) {
+						backupFailed = atoi(backupFailedStr);
+					}
+				}
+				if (isRestoring && !backupFailed) {
+					std::vector<std::string> returnList;
+					std::string ext = "";
+					returnList = platform::listDirectories(absDataFolder);
+					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
-			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
+					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
+					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
+
+					// delete all files (except fdb.cluster) in non-snap directories
+					for (int i = 0; i < returnList.size(); i++) {
+						if (returnList[i] == "." || returnList[i] == "..") {
+							continue;
+						}
+						if (returnList[i].find(snapStr) != std::string::npos) {
+							continue;
+						}
+
+						std::string childf = absDataFolder + "/" + returnList[i];
+						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+						for (int j = 0; j < returnFiles.size(); j++) {
+							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
+								TraceEvent("DeletingNonSnapfiles")
+									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
+								deleteFile(childf + "/" + returnFiles[j]);
+							}
+						}
+					}
+					// move the contents from snap folder to the original folder,
+					// delete snap folders
+					for (int i = 0; i < returnList.size(); i++) {
+						if (returnList[i] == "." || returnList[i] == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + returnList[i];
+						// delete snap directories which are not part of restoreSnapUID
+						if (returnList[i].find(snapStr) == std::string::npos) {
+							if (returnList[i].find("snap") != std::string::npos) {
+								platform::eraseDirectoryRecursive(dirSrc);
+							}
+							continue;
+						}
+						// remove empty/partial snap directories
+						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
+						if (childrenList.size() == 0) {
+							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
+							platform::eraseDirectoryRecursive(dirSrc);
+							continue;
+						}
+						std::string origDir = returnList[i].substr(0, 32);
+						std::string dirToRemove = absDataFolder + "/" + origDir;
+						TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
+						platform::eraseDirectoryRecursive(dirToRemove);
+						renameFile(dirSrc, dirToRemove);
+						TraceEvent("RenamingSnapToOriginalDirectory")
+							.detail("Oldname", dirSrc)
+							.detail("Newname", dirToRemove);
+					}
+				}
+			}
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, tlsOptions);
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1687,7 +1755,7 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize) );
+			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );
@@ -1737,7 +1805,7 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
+		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime").detail("SimTime", now()-startNow).detail("RealTime", timer()-start)
 			.detail("RandomUnseed", unseed);
 

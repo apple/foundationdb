@@ -28,7 +28,7 @@
 #define __write ::write
 #define __close ::close
 #define __fsync ::fsync
-#define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL
+#define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
 #define TRACEFILE_MODE 0664
 #elif defined(_WIN32)
 #include <windows.h>

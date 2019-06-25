@@ -6,6 +6,10 @@ then
 
    source ${source_dir}/modules/util.sh
 
+   install_build_tools() {
+       apt-get -y install cmake gcc
+   }
+
    install() {
        local __res=0
        enterfun

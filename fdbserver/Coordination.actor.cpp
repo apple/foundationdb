@@ -159,16 +159,16 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			}
 		}
 	}
-};
+}
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
-		g_random->randomUniqueID());
+		deterministicRandom()->randomUniqueID());
 	state Future<Void> actor = localGenerationReg(reg, &store);
-	state Key the_key(g_random->randomAlphaNumeric( g_random->randomInt(0, 10)));
+	state Key the_key(deterministicRandom()->randomAlphaNumeric( deterministicRandom()->randomInt(0, 10)));
 
-	state UniqueGeneration firstGen(0, g_random->randomUniqueID());
+	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
 
 	{
 		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, firstGen)));
@@ -271,37 +271,21 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				return Void();
 			} else {
 				Optional<LeaderInfo> nextNominee;
-				if (availableLeaders.size() && availableCandidates.size()) {
-					nextNominee = ( *availableLeaders.begin() < *availableCandidates.begin() ) ? *availableLeaders.begin() : *availableCandidates.begin();
-				} else if (availableLeaders.size()) {
-					nextNominee = *availableLeaders.begin();
-				} else if (availableCandidates.size()) {
+				if( availableCandidates.size() && (!availableLeaders.size() || availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin())) ) {
 					nextNominee = *availableCandidates.begin();
-				} else {
-					nextNominee = Optional<LeaderInfo>();
+				} else if( availableLeaders.size() ) {
+					nextNominee = *availableLeaders.begin();
 				}
 
-				bool foundCurrentNominee = false;
-				if(currentNominee.present()) {
-					for(auto& it : availableLeaders) {
-						if(currentNominee.get().equalInternalId(it)) {
-							foundCurrentNominee = true;
-							break;
-						}
-					}
-				}
-
-				if ( !nextNominee.present() || !foundCurrentNominee || currentNominee.get().leaderChangeRequired(nextNominee.get()) ) {
-					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
-						.detail("Changed", nextNominee != currentNominee).detail("Key", key);
+				if( !currentNominee.present() || !nextNominee.present() || !currentNominee.get().equalInternalId(nextNominee.get()) || nextNominee.get() > currentNominee.get() ) {
+					TraceEvent("NominatingLeader").detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
+					.detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID()).detail("Key", printable(key));
 					for(unsigned int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
-					currentNominee = nextNominee;
-				} else if (currentNominee.get().equalInternalId(nextNominee.get())) {
-					// leader becomes better
-					currentNominee = nextNominee;
 				}
+
+				currentNominee = nextNominee;
 
 				if( availableLeaders.size() ) {
 					nextInterval = delay( SERVER_KNOBS->POLLING_FREQUENCY );
@@ -450,7 +434,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 }
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder) {
-	state UID myID = g_random->randomUniqueID();
+	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface( g_network );
 	state GenerationRegInterface myInterface( g_network );
 	state OnDemandStore store( dataFolder, myID );

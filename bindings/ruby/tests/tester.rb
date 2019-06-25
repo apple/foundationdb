@@ -459,6 +459,7 @@ class Tester
             @db.options.set_transaction_timeout(100000)
             @db.options.set_transaction_timeout(0)
             @db.options.set_transaction_max_retry_delay(100)
+            @db.options.set_transaction_size_limit(100000)
             @db.options.set_transaction_retry_limit(10)
             @db.options.set_transaction_retry_limit(-1)
             @db.options.set_snapshot_ryw_enable()

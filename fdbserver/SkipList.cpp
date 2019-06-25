@@ -285,10 +285,10 @@ private:
 
 	int randomLevel() {
 		/*int l = 0;
-		while (g_random->random01() < 0.5 && l < MaxLevels-1) l++;
+		while (deterministicRandom()->random01() < 0.5 && l < MaxLevels-1) l++;
 		return l; */
 
-		//g_random->randomInt(0, 1<<(MaxLevels-1));
+		//deterministicRandom()->randomInt(0, 1<<(MaxLevels-1));
 		uint32_t i = uint32_t(skfastrand()) >> (32-(MaxLevels-1));
 		int level = 0;
 		while (i&1) {
@@ -649,7 +649,7 @@ public:
 			if (length == 1) { // forced down
 				f.finger[lev] = begin;
 			} else {
-				int c = g_random->randomInt(0, length);
+				int c = deterministicRandom()->randomInt(0, length);
 				for( Node* x = begin; x != end; x=x->getNext(lev) )
 					if (!c--) {
 						f.finger[lev] = begin = x;
@@ -1396,13 +1396,13 @@ void miniConflictSetTest() {
 		int size = 64*5;		// Also run 64*64*5 to test multiple words of andValues and orValues
 		MiniConflictSet mini(size);
 		for(int j=0; j<2; j++) {
-			int a = g_random->randomInt(0, size);
-			int b = g_random->randomInt(a, size);
+			int a = deterministicRandom()->randomInt(0, size);
+			int b = deterministicRandom()->randomInt(a, size);
 			mini.set( a, b );
 		}
 		for(int j=0; j<4; j++) {
-			int a = g_random->randomInt(0, size);
-			int b = g_random->randomInt(a, size);
+			int a = deterministicRandom()->randomInt(0, size);
+			int b = deterministicRandom()->randomInt(a, size);
 			mini.any( a, b );	// Tests correctness internally
 		}
 	}
@@ -1438,14 +1438,14 @@ void skipListTest() {
 		success[i].assign( testData[i].size(), false );
 		success2[i].assign( testData[i].size(), false );
 		for(int j=0; j<testData[i].size(); j++) {
-			int key = g_random->randomInt(0, 20000000);
-			int key2 = key + 1 + g_random->randomInt(0, 10);
+			int key = deterministicRandom()->randomInt(0, 20000000);
+			int key2 = key + 1 + deterministicRandom()->randomInt(0, 10);
 			testData[i][j] = KeyRangeRef(
 				setK( testDataArena, key ),
 				setK( testDataArena, key2 ) );
 		}
 	}
-	printf("Test data generated (%d)\n", g_random->randomInt(0,100000));
+	printf("Test data generated (%d)\n", deterministicRandom()->randomInt(0,100000));
 	printf("  %d threads, %d batches, %d/batch\n", PARALLEL_THREAD_COUNT, testData.size(), testData[0].size());
 
 	printf("Running\n");

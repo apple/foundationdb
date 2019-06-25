@@ -736,7 +736,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	for(int i = 0; i < clients.size(); ++i) {
 		if(i != currentClientIndex && connectionAttempts[i]->connected) {
 			if(currentClientIndex >= 0 && !clients[i]->canReplace(clients[currentClientIndex])) {
-				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion);
+				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion.version()).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion.version());
 				connectionAttempts[i]->connected = false; // Permanently disable this client in favor of the current one
 				clients[i]->failed = true;
 				MultiVersionApi::api->updateSupportedVersions();
@@ -1277,15 +1277,15 @@ MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 void ClientInfo::loadProtocolVersion() {
 	std::string version = api->getClientVersion();
 	if(version == "unknown") {
-		protocolVersion = 0;
+		protocolVersion = ProtocolVersion(0);
 		return;
 	}
 
 	char *next;
 	std::string protocolVersionStr = ClientVersionRef(version).protocolVersion.toString();
-	protocolVersion = strtoull(protocolVersionStr.c_str(), &next, 16);
+	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
-	ASSERT(protocolVersion != 0 && protocolVersion != ULLONG_MAX);
+	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
 	ASSERT(next == &protocolVersionStr[protocolVersionStr.length()]);
 }
 
@@ -1298,7 +1298,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 		return true;
 	}
 
-	return (protocolVersion & compatibleProtocolVersionMask) != (other->protocolVersion & compatibleProtocolVersionMask);
+	return !protocolVersion.isCompatible(other->protocolVersion);
 }
 
 // UNIT TESTS
@@ -1364,11 +1364,11 @@ private:
 
 struct FutureInfo {
 	FutureInfo() {
-		if(g_random->coinflip()) {
-			expectedValue = Error(g_random->randomInt(1, 100));
+		if(deterministicRandom()->coinflip()) {
+			expectedValue = Error(deterministicRandom()->randomInt(1, 100));
 		}
 		else {
-			expectedValue = g_random->randomInt(0, 100);
+			expectedValue = deterministicRandom()->randomInt(0, 100);
 		}
 	}
 
@@ -1388,14 +1388,14 @@ struct FutureInfo {
 FutureInfo createVarOnMainThread(bool canBeNever=true) {
 	FutureInfo f;
 	
-	if(g_random->coinflip()) {
+	if(deterministicRandom()->coinflip()) {
 		f.future = onMainThread([f, canBeNever]() {
 			Future<Void> sleep ;
-			if(canBeNever && g_random->coinflip()) {
+			if(canBeNever && deterministicRandom()->coinflip()) {
 				sleep = Never();
 			}
 			else {
-				sleep = delay(0.1 * g_random->random01());
+				sleep = delay(0.1 * deterministicRandom()->random01());
 			}
 
 			if(f.expectedValue.isError()) {
@@ -1417,7 +1417,7 @@ FutureInfo createVarOnMainThread(bool canBeNever=true) {
 }
 
 THREAD_FUNC setAbort(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<Void>*)arg)->send(Void());
 		((ThreadSingleAssignmentVar<Void>*)arg)->delref();
@@ -1430,7 +1430,7 @@ THREAD_FUNC setAbort(void *arg) {
 }
 
 THREAD_FUNC releaseMem(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		// Must get for releaseMemory to work
 		((ThreadSingleAssignmentVar<int>*)arg)->get();
@@ -1449,7 +1449,7 @@ THREAD_FUNC releaseMem(void *arg) {
 }
 
 THREAD_FUNC destroy(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<int>*)arg)->cancel();
 	}
@@ -1461,7 +1461,7 @@ THREAD_FUNC destroy(void *arg) {
 }
 
 THREAD_FUNC cancel(void *arg) {
-	threadSleep(0.1 * g_random->random01());
+	threadSleep(0.1 * deterministicRandom()->random01());
 	try {
 		((ThreadSingleAssignmentVar<int>*)arg)->addref();
 		destroy(arg);
@@ -1533,8 +1533,8 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 
 				auto tfp = tf.future.extractPtr();
 
-				if(g_random->coinflip()) {
-					if(g_random->coinflip()) {
+				if(deterministicRandom()->coinflip()) {
+					if(deterministicRandom()->coinflip()) {
 						threads.push_back(g_network->startThread(releaseMem, tfp));
 					}
 					threads.push_back(g_network->startThread(cancel, tfp));
@@ -1576,7 +1576,7 @@ struct AbortableTest {
 
 		auto newFuture = FutureInfo(abortableFuture(f.future, ThreadFuture<Void>(abort)), f.expectedValue, f.legalErrors);
 
-		if(!abort->isReady() && g_random->coinflip()) {
+		if(!abort->isReady() && deterministicRandom()->coinflip()) {
 			ASSERT(abort->status == ThreadSingleAssignmentVarBase::Unset);
 			newFuture.threads.push_back(g_network->startThread(setAbort, abort));
 		}
@@ -1718,7 +1718,7 @@ struct FlatMapTest {
 				ASSERT(!f.expectedValue.isError() && f.expectedValue.get() == v.get());
 			}
 
-			if(mapFuture.expectedValue.isError() && g_random->coinflip()) {
+			if(mapFuture.expectedValue.isError() && deterministicRandom()->coinflip()) {
 				return ErrorOr<ThreadFuture<int>>(mapFuture.expectedValue.getError());
 			}
 			else {

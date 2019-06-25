@@ -18,33 +18,36 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
+
+#include <iterator>
+
 #include "fdbclient/Atomic.h"
-#include "flow/Platform.h"
-#include "flow/ActorCollection.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/MutationList.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/ClusterInterface.h"
-#include "fdbclient/FailureMonitorClient.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TLSConnection.h"
+#include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/KeyRangeMap.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/MutationList.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/MonitorLeader.h"
+#include "flow/UnitTest.h"
+
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
-#include "fdbrpc/TLSConnection.h"
-#include "flow/Knobs.h"
-#include "fdbclient/Knobs.h"
-#include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/simulator.h"
-
-#include <iterator>
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -56,10 +59,8 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-extern IRandom* trace_random;
 extern const char* getHGVersion();
 
-using std::make_pair;
 using std::max;
 using std::min;
 using std::pair;
@@ -366,9 +367,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			state std::vector<TrInfoChunk> trChunksQ;
 			for (auto &entry : cx->clientStatusUpdater.outStatusQ) {
 				auto &bw = entry.second;
-				int64_t value_size_limit = BUGGIFY ? g_random->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				int64_t value_size_limit = BUGGIFY ? deterministicRandom()->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
-				std::string random_id = g_random->randomAlphaNumeric(16);
+				std::string random_id = deterministicRandom()->randomAlphaNumeric(16);
 				std::string user_provided_id = entry.first.size() ? entry.first + "/" : "";
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
@@ -388,7 +389,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			}
 
 			// Commit the chunks splitting into different transactions if needed
-			state int64_t dataSizeLimit = BUGGIFY ? g_random->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+			state int64_t dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
 			tr = Transaction(Database(Reference<DatabaseContext>::addRef(cx)));
 			ASSERT(commitQ.empty() && (txBytes == 0));
@@ -433,7 +434,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			cx->clientStatusUpdater.outStatusQ.clear();
 			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : cx->clientInfo->get().clientTxnInfoSizeLimit;
-			if (!trChunksQ.empty() && g_random->random01() < clientSamplingProbability)
+			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
@@ -523,6 +524,7 @@ DatabaseContext::DatabaseContext(
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
 	transactionMaxBackoff = CLIENT_KNOBS->FAILURE_MAX_DELAY;
+	transactionMaxSize = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
 
 	logger = databaseLogger( this );
@@ -542,6 +544,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), laten
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
 	try {
 		state Optional<double> incorrectTime;
+		state Future<Void> leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
@@ -572,6 +575,36 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 				when( ClientDBInfo ni = wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().openDatabase.getReply( req ) ) : Never() ) ) {
 					TraceEvent("ClientInfoChange").detail("ChangeID", ni.id);
 					outInfo->set(ni);
+
+					if (ni.proxies.empty()) {
+						TraceEvent("ClientInfo_NoProxiesReturned").detail("ChangeID", ni.id);
+						continue;
+					} else if (!FlowTransport::transport().isClient()) {
+						continue;
+					}
+
+					vector<Future<Void>> onProxyFailureVec;
+					bool skipWaitForProxyFail = false;
+					for (const auto& proxy : ni.proxies) {
+						if (proxy.provisional) {
+							skipWaitForProxyFail = true;
+							break;
+						}
+
+						onProxyFailureVec.push_back(
+						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+						        proxy.getConsistentReadVersion.getEndpoint()) ||
+						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(proxy.commit.getEndpoint()) ||
+						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+						        proxy.getKeyServersLocations.getEndpoint()) ||
+						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+						        proxy.getStorageServerRejoinInfo.getEndpoint()));
+					}
+					if (skipWaitForProxyFail) continue;
+
+					leaderMon = Void();
+					wait(waitForAny(onProxyFailureVec));
+					leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
 				}
 				when( wait( clusterInterface->onChange() ) ) {
 					if(clusterInterface->get().present())
@@ -638,12 +671,10 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 			result.clear();
 			return false;
 		}
-		result.push_back( make_pair(r->range() & range, r->value()) );
-		if(result.size() == limit)
+		result.emplace_back(r->range() & range, r->value());
+		if (result.size() == limit || begin == end) {
 			break;
-
-		if(begin == end)
-			break;
+		}
 
 		if(reverse)
 			--end;
@@ -747,6 +778,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 		case FDBDatabaseOptions::TRANSACTION_MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			transactionMaxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+		case FDBDatabaseOptions::TRANSACTION_SIZE_LIMIT:
+			validateOptionValue(value, true);
+			transactionMaxSize = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 			break;
 		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
 			validateOptionValue(value, false);
@@ -852,7 +887,6 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
 		}
 
-		leaderMon = monitorLeader( connFile, clusterInterface, connectedCoordinatorsNum );
 		failMon = failureMonitorClient( clusterInterface, false );
 	}
 }
@@ -967,6 +1001,21 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
+			enableBuggify(true, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_DISABLE:
+			enableBuggify(false, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
+			validateOptionValue(value, true);
+			clearBuggifySections(BuggifyType::Client);
+			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
+			break;
+		case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
+			validateOptionValue(value, true);
+			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100))/100.0;
+			break;
 		case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
 			validateOptionValue(value, false);
 			networkOptions.logClientInfo = false;
@@ -1005,10 +1054,6 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if( g_network )
 		throw network_already_setup();
 
-	g_random = new DeterministicRandom( platform::getRandomSeed() );
-	trace_random = new DeterministicRandom( platform::getRandomSeed() );
-	g_nondeterministic_random = trace_random;
-	g_debug_random = trace_random;
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
@@ -1242,7 +1287,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 				state int shard = 0;
 				for (; shard < rep.results.size(); shard++) {
 					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
-					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
+					results.emplace_back(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
 					wait(yield());
 				}
 
@@ -1330,10 +1375,10 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 		state uint64_t startTime;
 		state double startTimeD;
 		try {
-			//GetValueReply r = wait( g_random->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
+			//GetValueReply r = wait( deterministicRandom()->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
 			//return r.value;
 			if( info.debugID.present() ) {
-				getValueID = g_nondeterministic_random->randomUniqueID();
+				getValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1347,7 +1392,13 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			startTime = timer_int();
 			startTimeD = now();
 			++cx->transactionPhysicalReads;
-			state GetValueReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			if (CLIENT_BUGGIFY) {
+				throw deterministicRandom()->randomChoice(
+					std::vector<Error>{ transaction_too_old(), future_version() });
+			}
+			state GetValueReply reply = wait(
+			    loadBalance(ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID),
+			                TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 			double latency = now() - startTimeD;
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
@@ -1468,7 +1519,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
 			if( info.debugID.present() ) {
-				watchValueID = g_nondeterministic_random->randomUniqueID();
+				watchValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1837,6 +1888,11 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
+				if (CLIENT_BUGGIFY) {
+					throw deterministicRandom()->randomChoice(std::vector<Error>{
+							transaction_too_old(), future_version()
+								});
+				}
 				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 
 				if( info.debugID.present() ) {
@@ -1872,7 +1928,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 					if( BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) ) {
 						output.more = true;
-						output.resize(output.arena(), g_random->randomInt(std::max(1,originalLimits.minRows),output.size()));
+						output.resize(output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows),output.size()));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 						return output;
 					}
@@ -2240,7 +2296,7 @@ void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {
 void Transaction::makeSelfConflicting() {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
-	wr << g_random->randomUniqueID();
+	wr << deterministicRandom()->randomUniqueID();
 	auto r = singleKeyRange( wr.toValue(), tr.arena );
 	tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
 	tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
@@ -2288,6 +2344,45 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 		t.write_conflict_ranges.push_back( req.arena, r );
 
 	TEST(true); //NativeAPI atomic operation
+}
+
+ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayload, Optional<UID> debugID) {
+	try {
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
+		}
+
+		state ExecRequest req(execPayload, debugID);
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.Inside loop");
+		}
+		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::execReq, req, cx->taskID));
+		if (debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+									"NativeAPI.executeCoordinators.After");
+		return Void();
+	} catch (Error& e) {
+		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
+		throw;
+	}
+}
+
+void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayload) {
+	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayload.toString());
+
+	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
+	if (cmdPayload.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
+
+	auto& req = tr;
+
+	// Helps with quickly finding the exec op in a tlog batch
+	setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+
+	auto& t = req.transaction;
+	auto r = singleKeyRange(cmdType, req.arena);
+	auto v = ValueRef(req.arena, cmdPayload);
+	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
 }
 
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
@@ -2355,7 +2450,7 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 }
 
 double Transaction::getBackoff(int errCode) {
-	double b = backoff * g_random->random01();
+	double b = backoff * deterministicRandom()->random01();
 	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
 				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
@@ -2363,6 +2458,7 @@ double Transaction::getBackoff(int errCode) {
 
 TransactionOptions::TransactionOptions(Database const& cx) {
 	maxBackoff = cx->transactionMaxBackoff;
+	sizeLimit = cx->transactionMaxSize;
 	reset(cx);
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
@@ -2372,12 +2468,15 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 TransactionOptions::TransactionOptions() {
 	memset(this, 0, sizeof(*this));
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 }
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
+	uint32_t oldSizeLimit = sizeLimit;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	sizeLimit = oldSizeLimit;
 	lockAware = cx->lockAware;
 }
 
@@ -2458,7 +2557,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		return;
 	}
 
-	wait( delay( g_random->random01() ) ); // delay between 0 and 1 seconds
+	wait( delay( deterministicRandom()->random01() ) ); // delay between 0 and 1 seconds
 
 	//Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
@@ -2569,6 +2668,14 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
+	if(CLIENT_BUGGIFY) {
+		throw deterministicRandom()->randomChoice(std::vector<Error>{
+				not_committed(),
+				transaction_too_old(),
+				proxy_memory_limit_exceeded(),
+				commit_unknown_result()});
+	}
+
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -2576,7 +2683,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 		if(info.debugID.present()) {
-			commitID = g_nondeterministic_random->randomUniqueID();
+			commitID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", info.debugID.get().first(), commitID.get().first());
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
 		}
@@ -2623,6 +2730,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
+					if (CLIENT_BUGGIFY) {
+						throw commit_unknown_result();
+					}
 					return Void();
 				} else {
 					if (info.debugID.present())
@@ -2657,7 +2767,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
+			if (e.code() != error_code_transaction_too_old
+				&& e.code() != error_code_not_committed
+				&& e.code() != error_code_database_locked
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_transaction_not_permitted
+				&& e.code() != error_code_cluster_not_fully_recovered
+				&& e.code() != error_code_txn_exec_log_anti_quorum)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2692,20 +2808,22 @@ Future<Void> Transaction::commitMutations() {
 				.detail("Size", transactionSize)
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("ReadConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
-				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize());
+				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
+				.detail("DebugIdentifier", trLogInfo ? trLogInfo->identifier : "");
 		}
 
 		if(!apiVersionAtLeast(300)) {
 			transactionSize = tr.transaction.mutations.expectedSize(); // Old API versions didn't account for conflict ranges when determining whether to throw transaction_too_large
 		}
 
-		if (transactionSize > (options.customTransactionSizeLimit == 0 ? (uint64_t)CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT : (uint64_t)options.customTransactionSizeLimit))
+		if (transactionSize > options.sizeLimit) {
 			return transaction_too_large();
+		}
 
 		if( !readVersion.isValid() )
 			getReadVersion( GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY ); // sets up readVersion field.  We had no reads, so no need for (expensive) full causal consistency.
 
-		bool isCheckingWrites = options.checkWritesEnabled && g_random->random01() < 0.01;
+		bool isCheckingWrites = options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
 			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first < extraConflictRanges[i].get().second )
 				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
@@ -2719,7 +2837,7 @@ Future<Void> Transaction::commitMutations() {
 		}
 
 		if ( options.debugDump ) {
-			UID u = g_nondeterministic_random->randomUniqueID();
+			UID u = nondeterministicRandom()->randomUniqueID();
 			TraceEvent("TransactionDump", u);
 			for(auto i=tr.transaction.mutations.begin(); i!=tr.transaction.mutations.end(); ++i)
 				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", i->param1).detail("P2", i->param2);
@@ -2844,15 +2962,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 			if (trLogInfo) {
 				if (trLogInfo->identifier.empty()) {
-					trLogInfo->identifier = printable(value.get());
+					trLogInfo->identifier = value.get().printable();
 				}
-				else if (trLogInfo->identifier != printable(value.get())) {
+				else if (trLogInfo->identifier != value.get().printable()) {
 					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", value.get());
 					throw client_invalid_operation();
 				}
 			}
 			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::DONT_LOG));
+				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
 			}
 			break;
 
@@ -2870,6 +2988,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
 			options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+
+		case FDBTransactionOptions::SIZE_LIMIT:
+			validateOptionValue(value, true);
+			options.sizeLimit = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 			break;
 
 		case FDBTransactionOptions::LOCK_AWARE:
@@ -2944,7 +3067,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
 				if (req.second.present()) {
 					if (!debugID.present())
-						debugID = g_nondeterministic_random->randomUniqueID();
+						debugID = nondeterministicRandom()->randomUniqueID();
 					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
 				}
 				requests.push_back(req.first);
@@ -3035,7 +3158,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind)
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_cluster_not_fully_recovered)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
@@ -3045,6 +3169,9 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsResourceConstrained++;
 		if (e.code() == error_code_process_behind)
 			cx->transactionsProcessBehind++;
+		if (e.code() == error_code_cluster_not_fully_recovered) {
+			cx->transactionWaitsForFullRecovery++;
+		}
 
 		double backoff = getBackoff(e.code());
 		reset();
@@ -3250,7 +3377,7 @@ void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
 	if(!cx->isError()) {
 		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && deterministicRandom()->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
 			return Reference<TransactionLogInfo>(new TransactionLogInfo(TransactionLogInfo::DATABASE));
 		}
 	}
@@ -3262,4 +3389,103 @@ void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+}
+
+ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
+	state Transaction tr(inputCx);
+	state DatabaseContext* cx = inputCx.getPtr();
+	// remember the client ID before the snap operation
+	state UID preSnapClientUID = cx->clientInfo->get().id;
+
+	TraceEvent("SnapCreateEnter")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
+
+	StringRef snapCmdArgs = snapCmd;
+	StringRef snapCmdPart = snapCmdArgs.eat(":");
+	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+		.withSuffix(LiteralStringRef(":uid="))
+		.withSuffix(snapUIDRef)
+		.withSuffix(LiteralStringRef(","))
+		.withSuffix(snapCmdArgs);
+	state Standalone<StringRef>
+		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
+	// disable popping of TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
+			wait(timeoutError(tr.commit(), 10));
+			break;
+		} catch (Error& e) {
+			TraceEvent("DisableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
+
+	// snap the storage and Tlogs
+	// if we retry the below command in failure cases with the same snapUID
+	// then the snapCreate can end up creating multiple snapshots with
+	// the same name which needs additional handling, hence we fail in
+	// failure cases and let the caller retry with different snapUID
+	tr.reset();
+	try {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.execute(execSnap, snapPayloadRef);
+		wait(tr.commit());
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErroSnapTLogStorage").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
+
+	if (BUGGIFY) {
+		int32_t toDelay = deterministicRandom()->randomInt(1, 30);
+		wait(delay(toDelay));
+	}
+
+	// enable popping of the TLog
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent("EnableTLogPopFailed").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("SnapCreateAfterUnlockingTLogs").detail("UID", snapUID);
+
+	// snap the coordinators
+	try {
+		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
+		wait(timeoutError(exec, 5.0));
+	} catch (Error& e) {
+		TraceEvent("SnapCreateErrorSnapCoords").error(e);
+		throw;
+	}
+
+	TraceEvent("SnapCreateAfterSnappingCoords").detail("UID", snapUID);
+
+	// if the client IDs did not change then we have a clean snapshot
+	UID postSnapClientUID = cx->clientInfo->get().id;
+	if (preSnapClientUID != postSnapClientUID) {
+		TraceEvent("UID mismatch")
+		    .detail("SnapPreSnapClientUID", preSnapClientUID)
+		    .detail("SnapPostSnapClientUID", postSnapClientUID);
+		throw coordinators_changed();
+	}
+
+	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
+	return Void();
 }

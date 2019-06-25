@@ -108,13 +108,13 @@ public:
 			open_filename = filename + ".part";
 		}
 
-		int fd = ::open( open_filename.c_str(), openFlags(flags) | O_DIRECT, mode );
+		int fd = ::open( open_filename.c_str(), openFlags(flags), mode );
 		if (fd<0) {
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below
 			TraceEvent ev("AsyncFileKAIOOpenFailed");
 			ev.error(e).detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
+			  .detailf("OSFlags", "%x", openFlags(flags)).detailf("Mode", "0%o", mode).GetLastError();
 			if(ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
@@ -281,7 +281,7 @@ public:
 			result = ftruncate(fd, size);
 
 		double end = timer_monotonic();
-		if(g_nondeterministic_random->random01() < end-begin) {
+		if(nondeterministicRandom()->random01() < end-begin) {
 			TraceEvent("SlowKAIOTruncate")
 				.detail("TruncateTime", end - begin)
 				.detail("TruncateBytes", size - lastFileSize);
@@ -402,7 +402,7 @@ public:
 				ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
 				ctx.slowAioSubmitMetric->log();
 
-				if(g_nondeterministic_random->random01() < end-begin) {
+				if(nondeterministicRandom()->random01() < end-begin) {
 					TraceEvent("SlowKAIOLaunch")
 						.detail("IOSubmitTime", end-truncateComplete)
 						.detail("TruncateTime", truncateComplete-begin)
@@ -635,7 +635,7 @@ private:
 	}
 
 	static int openFlags(int flags) {
-		int oflags = 0;
+		int oflags = O_DIRECT | O_CLOEXEC;
 		ASSERT( bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE) );  // readonly xor readwrite
 		if( flags & OPEN_EXCLUSIVE ) oflags |= O_EXCL;
 		if( flags & OPEN_CREATE )    oflags |= O_CREAT;
@@ -765,13 +765,13 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 
 	for(; iteration < numIterations; ++iteration) {
 		state std::vector<Future<Void>> futures;
-		state int numOps = g_random->randomInt(1, 20);
+		state int numOps = deterministicRandom()->randomInt(1, 20);
 		for(; numOps > 0; --numOps) {
-			if(g_random->coinflip()) {
-				futures.push_back(success(f->read(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096)));
+			if(deterministicRandom()->coinflip()) {
+				futures.push_back(success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096)));
 			}
 			else {
-				futures.push_back(f->write(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096));
+				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096));
 			}
 		}
 		state int fIndex = 0;

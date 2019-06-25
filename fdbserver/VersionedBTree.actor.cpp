@@ -2910,7 +2910,7 @@ IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) 
 }
 
 int randomSize(int max) {
-	int n = pow(g_random->random01(), 3) * max;
+	int n = pow(deterministicRandom()->random01(), 3) * max;
 	return n;
 }
 
@@ -2918,7 +2918,7 @@ StringRef randomString(Arena &arena, int len, char firstChar = 'a', char lastCha
 	++lastChar;
 	StringRef s = makeString(len, arena);
 	for(int i = 0; i < len; ++i) {
-		*(uint8_t *)(s.begin() + i) = (uint8_t)g_random->randomInt(firstChar, lastChar);
+		*(uint8_t *)(s.begin() + i) = (uint8_t)deterministicRandom()->randomInt(firstChar, lastChar);
 	}
 	return s;
 }
@@ -2937,12 +2937,12 @@ KeyValue randomKV(int maxKeySize = 10, int maxValueSize = 5) {
 
 	kv.key = randomString(kv.arena(), kLen, 'a', 'm');
 	for(int i = 0; i < kLen; ++i)
-		mutateString(kv.key)[i] = (uint8_t)g_random->randomInt('a', 'm');
+		mutateString(kv.key)[i] = (uint8_t)deterministicRandom()->randomInt('a', 'm');
 
 	if(vLen > 0) {
 		kv.value = randomString(kv.arena(), vLen, 'n', 'z');
 		for(int i = 0; i < vLen; ++i)
-			mutateString(kv.value)[i] = (uint8_t)g_random->randomInt('o', 'z');
+			mutateString(kv.value)[i] = (uint8_t)deterministicRandom()->randomInt('o', 'z');
 	}
 
 	return kv;
@@ -2961,10 +2961,10 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start cur=%p\n", v, start.toString().c_str(), end.toString().c_str(), cur.getPtr());
 
 	// Randomly use the cursor for something else first.
-	if(g_random->coinflip()) {
+	if(deterministicRandom()->coinflip()) {
 		state Key randomKey = randomKV().key;
 		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.toString().c_str(), end.toString().c_str(), randomKey.toString().c_str());
-		wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
+		wait(deterministicRandom()->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
 
 	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.toString().c_str(), end.toString().c_str());
@@ -3045,7 +3045,7 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	debug_printf("VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.toString().c_str(), end.toString().c_str());
 
 	// Randomly use a new cursor for the reverse range read but only if version history is available
-	if(!btree->isSingleVersion() && g_random->coinflip()) {
+	if(!btree->isSingleVersion() && deterministicRandom()->coinflip()) {
 		cur = btree->readAtVersion(v);
 	}
 
@@ -3158,7 +3158,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 				if(serial) {
 					wait(success(vall));
 				}
-				vrange = verifyRange(btree, randomKV().key, randomKV().key, g_random->randomInt(1, v + 1), written, pErrorCount);
+				vrange = verifyRange(btree, randomKV().key, randomKV().key, deterministicRandom()->randomInt(1, v + 1), written, pErrorCount);
 				if(serial) {
 					wait(success(vrange));
 				}
@@ -3183,17 +3183,17 @@ ACTOR Future<Void> randomReader(VersionedBTree *btree) {
 	state Reference<IStoreCursor> cur;
 	loop {
 		wait(yield());
-		if(!cur || g_random->random01() > .1) {
+		if(!cur || deterministicRandom()->random01() > .1) {
 			Version v = btree->getLastCommittedVersion();
 			if(!btree->isSingleVersion()) {
-				 v = g_random->randomInt(1, v + 1);
+				 v = deterministicRandom()->randomInt(1, v + 1);
 			}
 			cur = btree->readAtVersion(v);
 		}
 
 		state KeyValue kv = randomKV(10, 0);
 		wait(cur->findFirstEqualOrGreater(kv.key, true, 0));
-		state int c = g_random->randomInt(0, 100);
+		state int c = deterministicRandom()->randomInt(0, 100);
 		while(cur->isValid() && c-- > 0) {
 			wait(success(cur->next(true)));
 			wait(yield());
@@ -3312,15 +3312,15 @@ Standalone<RedwoodRecordRef> randomRedwoodRecordRef(int maxKeySize = 3, int maxV
 	KeyValue kv = randomKV(3, 10);
 	rec.key = kv.key;
 
-	if(g_random->random01() < .9) {
+	if(deterministicRandom()->random01() < .9) {
 		rec.value = kv.value;
 	}
 
-	rec.version = g_random->coinflip() ? 0 : g_random->randomInt64(0, std::numeric_limits<Version>::max());
+	rec.version = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
 
-	if(g_random->coinflip()) {
-		rec.chunk.total = g_random->randomInt(1, 100000);
-		rec.chunk.start = g_random->randomInt(0, rec.chunk.total);
+	if(deterministicRandom()->coinflip()) {
+		rec.chunk.total = deterministicRandom()->randomInt(1, 100000);
+		rec.chunk.start = deterministicRandom()->randomInt(0, rec.chunk.total);
 	}
 
 	return Standalone<RedwoodRecordRef>(rec, kv.arena());
@@ -3527,16 +3527,16 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	Arena arena;
 	std::vector<RedwoodRecordRef> items;
 	for(int i = 0; i < N; ++i) {
-		std::string k = g_random->randomAlphaNumeric(30);
-		std::string v = g_random->randomAlphaNumeric(30);
+		std::string k = deterministicRandom()->randomAlphaNumeric(30);
+		std::string v = deterministicRandom()->randomAlphaNumeric(30);
 		RedwoodRecordRef rec;
 		rec.key = StringRef(arena, k);
-		rec.version = g_random->coinflip() ? g_random->randomInt64(0, std::numeric_limits<Version>::max()) : invalidVersion;
-		if(g_random->coinflip()) {
+		rec.version = deterministicRandom()->coinflip() ? deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max()) : invalidVersion;
+		if(deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
-			if(g_random->coinflip()) {
-				rec.chunk.start = g_random->randomInt(0, 100000);
-				rec.chunk.total = rec.chunk.start + v.size() + g_random->randomInt(0, 100000);
+			if(deterministicRandom()->coinflip()) {
+				rec.chunk.start = deterministicRandom()->randomInt(0, 100000);
+				rec.chunk.total = rec.chunk.start + v.size() + deterministicRandom()->randomInt(0, 100000);
 			}
 		}
 		items.push_back(rec);
@@ -3582,7 +3582,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	DeltaTree<RedwoodRecordRef>::Cursor c = r.getCursor();
 
 	for(int i = 0; i < 20000000; ++i) {
-		const RedwoodRecordRef &query = items[g_random->randomInt(0, items.size())];
+		const RedwoodRecordRef &query = items[deterministicRandom()->randomInt(0, items.size())];
 		if(!c.seekLessThanOrEqual(query)) {
 			printf("Not found!  query=%s\n", query.toString().c_str());
 			ASSERT(false);
@@ -3645,7 +3645,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	double start = timer();
 	for(int i = 0; i < 20000000; ++i) {
-		IntIntPair p({g_random->randomInt(0, items.size() * 10), 0});
+		IntIntPair p({deterministicRandom()->randomInt(0, items.size() * 10), 0});
 		if(!c.seekLessThanOrEqual(p)) {
 			printf("Not found!  query=%s\n", p.toString().c_str());
 			ASSERT(false);
@@ -3687,8 +3687,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state std::string pagerFile = "unittest_pageFile";
 	IPager *pager;
 
-	state bool serialTest = g_random->coinflip();
-	state bool shortTest = g_random->coinflip();
+	state bool serialTest = deterministicRandom()->coinflip();
+	state bool shortTest = deterministicRandom()->coinflip();
 	state bool singleVersion = true; // Multi-version mode is broken / not finished
 	state double startTime = now();
 
@@ -3705,18 +3705,18 @@ TEST_CASE("!/redwood/correctness/btree") {
 		pager = createMemoryPager();
 
 	printf("Initializing...\n");
-	state int pageSize = shortTest ? 200 : (g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400));
+	state int pageSize = shortTest ? 200 : (deterministicRandom()->coinflip() ? pager->getUsablePageSize() : deterministicRandom()->randomInt(200, 400));
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, singleVersion, pageSize);
 	wait(btree->init());
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
 	// TODO:  Handle arbitrarily large keys
-	state int maxKeySize = g_random->randomInt(4, pageSize * 2);
-	state int maxValueSize = g_random->randomInt(0, pageSize * 4);
+	state int maxKeySize = deterministicRandom()->randomInt(4, pageSize * 2);
+	state int maxValueSize = deterministicRandom()->randomInt(0, pageSize * 4);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(10e6);
 	state int mutationBytesTarget = shortTest ? 5000 : randomSize(50e6);
-	state double clearChance = g_random->random01() * .1;
+	state double clearChance = deterministicRandom()->random01() * .1;
 
 	printf("Using page size %d, max key size %d, max value size %d, clearchance %f, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
 
@@ -3751,23 +3751,23 @@ TEST_CASE("!/redwood/correctness/btree") {
 		}
 
 		// Sometimes advance the version
-		if(g_random->random01() < 0.10) {
+		if(deterministicRandom()->random01() < 0.10) {
 			++version;
 			btree->setWriteVersion(version);
 		}
 
 		// Sometimes do a clear range
-		if(g_random->random01() < clearChance) {
+		if(deterministicRandom()->random01() < clearChance) {
 			Key start = randomKV(maxKeySize, 1).key;
-			Key end = (g_random->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
+			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
 
 			// Sometimes replace start and/or end with a close actual (previously used) value
-			if(g_random->random01() < .10) {
+			if(deterministicRandom()->random01() < .10) {
 				auto i = keys.upper_bound(start);
 				if(i != keys.end())
 					start = *i;
 			}
-			if(g_random->random01() < .10) {
+			if(deterministicRandom()->random01() < .10) {
 				auto i = keys.upper_bound(end);
 				if(i != keys.end())
 					end = *i;
@@ -3815,7 +3815,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 			// Set a key
 			KeyValue kv = randomKV(maxKeySize, maxValueSize);
 			// Sometimes change key to a close previously used key
-			if(g_random->random01() < .01) {
+			if(deterministicRandom()->random01() < .01) {
 				auto i = keys.upper_bound(kv.key);
 				if(i != keys.end())
 					kv.key = StringRef(kv.arena(), *i);
@@ -3870,7 +3870,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if(!serialTest && useDisk && g_random->random01() < .02) {
+			if(!serialTest && useDisk && deterministicRandom()->random01() < .02) {
 				printf("Recovering from disk.\n");
 
 				// Wait for outstanding commit
@@ -3976,17 +3976,17 @@ TEST_CASE("!/redwood/performance/set") {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
 		btree->setWriteVersion(version);
-		int changes = g_random->randomInt(0, maxChangesPerVersion);
+		int changes = deterministicRandom()->randomInt(0, maxChangesPerVersion);
 
 		while(changes > 0) {
 			KeyValue kv;
-			kv.key = randomString(kv.arena(), g_random->randomInt(sizeof(uint32_t), maxKeyPrefixSize + sizeof(uint32_t) + 1), 'a', 'b');
-			int32_t index = g_random->randomInt(0, nodeCount);
-			int runLength = g_random->randomInt(1, maxConsecutiveRun + 1);
+			kv.key = randomString(kv.arena(), deterministicRandom()->randomInt(sizeof(uint32_t), maxKeyPrefixSize + sizeof(uint32_t) + 1), 'a', 'b');
+			int32_t index = deterministicRandom()->randomInt(0, nodeCount);
+			int runLength = deterministicRandom()->randomInt(1, maxConsecutiveRun + 1);
 
 			while(runLength > 0 && changes > 0) {
 				*(uint32_t *)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
-				kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
+				kv.value = StringRef((uint8_t *)value.data(), deterministicRandom()->randomInt(0, value.size()));
 
 				btree->set(kv);
 
@@ -4022,7 +4022,7 @@ TEST_CASE("!/redwood/performance/set") {
 	}
 
 	wait(commit);
-	printf("Cumulative %lld kvBytes written at %.2f MB/s\n", kvBytesTotal, kvBytesTotal / (timer() - start) / 1e6);
+	printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n", kvBytesTotal / 1e6, kvBytesTotal / (timer() - start) / 1e6);
 
 	state int reads = 30000;
 	wait(randomSeeks(btree, reads) && randomSeeks(btree, reads) && randomSeeks(btree, reads));

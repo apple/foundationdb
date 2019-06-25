@@ -17,6 +17,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
+  FDBExecHelper.actor.cpp
+  FDBExecHelper.actor.h
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
@@ -105,6 +107,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
+  workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
@@ -126,9 +129,11 @@ set(FDBSERVER_SRCS
   workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
+  workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
@@ -151,6 +156,7 @@ set(FDBSERVER_SRCS
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
+  workloads/SnapTest.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp

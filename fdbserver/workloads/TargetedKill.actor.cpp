@@ -90,7 +90,7 @@ struct TargetedKillWorkload : TestWorkload {
 		}
 		else if( self->machineToKill == "masterproxy" ) {
 			auto proxies = cx->getMasterProxies(false);
-			int o = g_random->randomInt(0, proxies->size());
+			int o = deterministicRandom()->randomInt(0, proxies->size());
 			for( int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
@@ -101,7 +101,7 @@ struct TargetedKillWorkload : TestWorkload {
 		}
 		else if( self->machineToKill == "tlog" ) {
 			auto tlogs = self->dbInfo->get().logSystemConfig.allPresentLogs();
-			int o = g_random->randomInt(0, tlogs.size());
+			int o = deterministicRandom()->randomInt(0, tlogs.size());
 			for( int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
@@ -111,7 +111,7 @@ struct TargetedKillWorkload : TestWorkload {
 			}
 		}
 		else if( self->machineToKill == "storage" || self->machineToKill == "ss"  || self->machineToKill == "storageserver" ) {
-			int o = g_random->randomInt(0,storageServers.size());
+			int o = deterministicRandom()->randomInt(0,storageServers.size());
 			for( int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();

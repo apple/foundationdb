@@ -1,6 +1,6 @@
 FROM centos:6
-LABEL version=0.1.4
-ENV DOCKER_IMAGEVER=0.1.4
+LABEL version=0.1.6
+ENV DOCKER_IMAGEVER=0.1.6
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
@@ -10,7 +10,7 @@ RUN yum install -y yum-utils &&\
 	yum -y install devtoolset-8 java-1.8.0-openjdk-devel \
 		rh-python36-python-devel devtoolset-8-valgrind-devel \
 		mono-core rh-ruby24 golang python27 rpm-build debbuild \
-		python-pip npm dos2unix valgrind-devel &&\
+		python-pip npm dos2unix valgrind-devel ccache &&\
 	pip install boto3==1.1.1
 
 USER root
@@ -42,4 +42,6 @@ RUN curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz >
     rm -rf /tmp/libressl-2.8.2 /tmp/libressl.tar.gz
 
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
+ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
+ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
 CMD scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash

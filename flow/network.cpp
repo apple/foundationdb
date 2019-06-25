@@ -143,7 +143,7 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
-		NetworkAddress addr = addresses[g_random->randomInt(0, addresses.size())];
+		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
 		if(useTLS)
 			addr.flags = NetworkAddress::FLAG_TLS;
 		return addr;

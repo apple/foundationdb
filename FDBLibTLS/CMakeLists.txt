@@ -6,8 +6,7 @@ set(SRCS
   FDBLibTLSSession.cpp
   FDBLibTLSSession.h
   FDBLibTLSVerify.cpp
-  FDBLibTLSVerify.h
-  ReferenceCounted.h)
+  FDBLibTLSVerify.h)
 
 add_library(FDBLibTLS ${SRCS})
-target_link_libraries(FDBLibTLS PUBLIC LibreSSL boost_target)
+target_link_libraries(FDBLibTLS PUBLIC LibreSSL boost_target PRIVATE flow)

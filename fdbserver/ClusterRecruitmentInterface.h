@@ -50,6 +50,17 @@ struct ClusterControllerFullInterface {
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterControllerFullInterface const& r) const { return id() != r.id(); }
 
+	bool hasMessage() {
+		return clientInterface.hasMessage() ||
+				recruitFromConfiguration.getFuture().isReady() ||
+				recruitRemoteFromConfiguration.getFuture().isReady() ||
+				recruitStorage.getFuture().isReady() ||
+				registerWorker.getFuture().isReady() || 
+				getWorkers.getFuture().isReady() || 
+				registerMaster.getFuture().isReady() ||
+				getServerDBInfo.getFuture().isReady();
+	}
+
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		recruitFromConfiguration.getEndpoint( TaskClusterController );
@@ -64,7 +75,7 @@ struct ClusterControllerFullInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
 		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
@@ -233,7 +244,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
 		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
