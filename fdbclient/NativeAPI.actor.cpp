@@ -2023,7 +2023,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), numRetries(0), trLogInfo(createTrLogInfoProbabilistically(cx))
+	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
 }
@@ -2046,7 +2046,6 @@ void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	info = r.info;
 	backoff = r.backoff;
 	numErrors = r.numErrors;
-	numRetries = r.numRetries;
 	committedVersion = r.committedVersion;
 	versionstampPromise = std::move(r.versionstampPromise);
 	watches = r.watches;
@@ -2464,10 +2463,6 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	if (BUGGIFY) {
 		commitOnFirstProxy = true;
 	}
-	maxRetries = cx->transactionMaxRetries;
-	if (maxRetries == -1) {
-		maxRetries = 10;
-	}
 }
 
 TransactionOptions::TransactionOptions() {
@@ -2478,19 +2473,11 @@ TransactionOptions::TransactionOptions() {
 
 void TransactionOptions::reset(Database const& cx) {
 	double oldMaxBackoff = maxBackoff;
-	double oldMaxRetries = maxRetries;
 	uint32_t oldSizeLimit = sizeLimit;
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
 	sizeLimit = oldSizeLimit;
-	maxRetries = oldMaxRetries;
 	lockAware = cx->lockAware;
-}
-
-void Transaction::onErrorReset() {
-	int32_t oldNumRetires = numRetries;
-	reset();
-	numRetries = oldNumRetires;
 }
 
 void Transaction::reset() {
@@ -2899,7 +2886,6 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 			}
 
 			self->versionstampPromise.sendError(transaction_invalid_version());
-			//self->onErrorReset();
 			self->reset();
 		}
 
@@ -3164,9 +3150,6 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 Future<Void> Transaction::onError( Error const& e ) {
-	if (numRetries < std::numeric_limits<int>::max()) {
-		numRetries++;
-	}
 	if (e.code() == error_code_success)
 	{
 		return client_invalid_operation();
@@ -3188,13 +3171,10 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsProcessBehind++;
 		if (e.code() == error_code_cluster_not_fully_recovered) {
 			cx->transactionWaitsForFullRecovery++;
-			if (numRetries > options.maxRetries) {
-				return e;
-			}
 		}
 
 		double backoff = getBackoff(e.code());
-		onErrorReset();
+		reset();
 		return delay( backoff, info.taskID );
 	}
 	if (e.code() == error_code_transaction_too_old ||
@@ -3206,7 +3186,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 			cx->transactionsFutureVersions++;
 
 		double maxBackoff = options.maxBackoff;
-		onErrorReset();
+		reset();
 		return delay( std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID );
 	}
 
