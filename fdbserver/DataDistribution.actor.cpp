@@ -2289,20 +2289,21 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	
 	loop {
 		wait( delay(1.0) || self->removeWrongStoreTypeServer.onTrigger() );
-		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size());
+		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size()).detail("SysRestoreType", self->configuration.storageServerStoreType);
 		serversToRemove.clear();
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
 			NetworkAddress a = server->second->lastKnownInterface.address();
 			AddressExclusion addr( a.ip, a.port );
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
-				.detail("Addr", addr.toString());
+				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType);
 			if ( !server->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 				serversToRemove.push_back(server->second);
 				//break;
 			}
 		}
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
-			 self->restartTeamBuilder.trigger();
+			self->doBuildTeams = true;
+			self->restartTeamBuilder.trigger();
 		}
 		for ( auto& s : serversToRemove ) {
 			if ( s.isValid() ) {
@@ -3323,7 +3324,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state RecruitStorageRequest lastRequest;
 	state bool hasWrongStoreType;
 	state bool hasHealthyTeam;
-	state int numRecuitSSPending = 0; // when we hasWrongStoreType
+	state int numRecuitSSPending = 0;
 	loop {
 		try {
 			hasWrongStoreType = false;
@@ -3365,26 +3366,28 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
 			}
 
-			if ( (hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
+			if ( ((hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType) && numRecuitSSPending < 5 ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
 				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 					lastRequest = rsr;
 					fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+					numRecuitSSPending++;
 				}
 			} else { // hasWrongStoreType && hasHealthyTeam
 				TraceEvent("StorageRecruiterStop").detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
 				fCandidateWorker = Never();
 			}
 
-			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
+			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam).detail("SysStoreType", self->configuration.storageServerStoreType);
 			self->traceAllInfo(true);
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
 					// Once initializeStorage() runs, it opens a file for the storeType even if TCServerInfo may not be created
-					if ( hasWrongStoreType ) {
-						numRecuitSSPending++;
-						TraceEvent("RecruitSSWhenWrongStoreTypeExist", self->distributorId).detail("NumRecuitSSPending", numRecuitSSPending);
-					}
+					// if ( hasWrongStoreType ) {
+					// 	numRecuitSSPending++;
+					// 	TraceEvent("RecruitSSWhenWrongStoreTypeExist", self->distributorId).detail("NumRecuitSSPending", numRecuitSSPending);
+					// }
+					--numRecuitSSPending;
 					self->addActor.send(initializeStorage(self, candidateWorker));
 					fCandidateWorker = Never();
 					if ( !hasHealthyTeam ) {
