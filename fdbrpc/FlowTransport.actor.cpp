@@ -734,7 +734,8 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 }
 
 // Given unprocessed buffer [begin, end), check if next packet size is known and return
-// enough size for the next packet, whose format is: {size, optional_checksum, data}.
+// enough size for the next packet, whose format is: {size, optional_checksum, data} +
+// next_packet_size.
 static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
 	const int len = end - begin;
 	if (len < sizeof(uint32_t)) {
@@ -746,7 +747,7 @@ static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const Netw
 		throw platform_error();
 	}
 	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
-	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 1 : 2));
+	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
 }
 
 ACTOR static Future<Void> connectionReader(
@@ -777,7 +778,7 @@ ACTOR static Future<Void> connectionReader(
 		loop {
 			loop {
 				state int readAllBytes = buffer_end - unprocessed_end;
-				if (readAllBytes < 4096) {
+				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
 					const int unproc_len = unprocessed_end - unprocessed_begin;
 					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
