@@ -18,15 +18,16 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/fdbrpc.h"
-#include "flow/DeterministicRandom.h"
-#include "bindings/flow/Tuple.h"
-#include "bindings/flow/FDBLoanerTypes.h"
-
 #include "Tester.actor.h"
 #ifdef  __linux__
 #include <string.h>
 #endif
+
+#include "bindings/flow/Tuple.h"
+#include "bindings/flow/FDBLoanerTypes.h"
+#include "fdbrpc/fdbrpc.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;

@@ -271,13 +271,15 @@ ThreadFuture< Void > ThreadSafeTransaction::commit() {
 
 Version ThreadSafeTransaction::getCommittedVersion() {
 	// This should be thread safe when called legally, but it is fragile
-	Version v = tr->getCommittedVersion();
-	return v;
+	return tr->getCommittedVersion();
+}
+
+uint32_t ThreadSafeTransaction::getApproximateSize() {
+	return tr->getApproximateSize();
 }
 
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
-	ReadYourWritesTransaction *tr = this->tr;
-	return onMainThread([tr]() -> Future < Standalone<StringRef> > {
+	return onMainThread([this]() -> Future < Standalone<StringRef> > {
 		return tr->getVersionstamp();
 	});
 }

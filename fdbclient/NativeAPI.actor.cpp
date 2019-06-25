@@ -3176,6 +3176,11 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
+uint32_t Transaction::getApproximateSize() {
+	return tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
+	       tr.transaction.write_conflict_ranges.expectedSize();
+}
+
 Future<Void> Transaction::onError( Error const& e ) {
 	if (e.code() == error_code_success) {
 		return client_invalid_operation();

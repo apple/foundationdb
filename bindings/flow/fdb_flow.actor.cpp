@@ -20,11 +20,12 @@
 
 #include "fdb_flow.h"
 
-#include "flow/DeterministicRandom.h"
-#include "flow/SystemMonitor.h"
-
 #include <stdio.h>
 #include <cinttypes>
+
+#include "flow/DeterministicRandom.h"
+#include "flow/SystemMonitor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace FDB;
 
@@ -147,6 +148,7 @@ namespace FDB {
 
 		void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
+		uint32_t getApproximateSize() override;
 		Future<Void> onError(Error const& e) override;
 
 		void cancel() override;
@@ -408,6 +410,12 @@ namespace FDB {
 		}
 	}
 
+	uint32_t TransactionImpl::getApproximateSize() {
+		uint32_t size;
+		throw_on_error(fdb_transaction_get_approximate_size(tr, &size));
+		return size;
+	}
+
 	Future<Void> TransactionImpl::onError(Error const& e) {
 		return backToFuture< Void >( fdb_transaction_on_error( tr, e.code() ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
@@ -422,4 +430,5 @@ namespace FDB {
 	void TransactionImpl::reset() {
 		fdb_transaction_reset( tr );
 	}
-}
+
+}  // namespace FDB

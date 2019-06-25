@@ -98,6 +98,7 @@ public:
 
 	Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
+	uint32_t getApproximateSize() { return tr.getApproximateSize(); }
 	Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );

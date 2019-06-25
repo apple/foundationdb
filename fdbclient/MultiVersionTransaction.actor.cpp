@@ -195,6 +195,12 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+uint32_t DLTransaction::getApproximateSize() {
+	int32_t size;
+	throwIfError(api->transactionGetApproximateSize(tr, &size));
+	return size;
+}
+
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
@@ -287,6 +293,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
+	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size");
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
@@ -593,6 +600,14 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	}
 
 	return invalidVersion;
+}
+
+uint32_t MultiVersionTransaction::getApproximateSize() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getApproximateSize();
+	}
+	return 0;
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
