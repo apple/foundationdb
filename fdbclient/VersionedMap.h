@@ -511,7 +511,7 @@ public:
 		oldestVersion = newOldestVersion;
 	}
 
-	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = 7000 ) {
+	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
 		roots[newOldestVersion] = getRoot(newOldestVersion);
 
