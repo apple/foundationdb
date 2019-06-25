@@ -159,12 +159,14 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		wait(unlockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_UnlockedExtraDB");
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
-		if (watchFuture.isError()) {
-			TraceEvent(SevError, "DifferentClusters_WatchFutureError").error(watchFuture.getError());
-		}
 		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ LiteralStringRef("") }));
 		TraceEvent("DifferentClusters_WaitingForWatch");
-		wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));
+		try {
+			wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));
+		} catch (Error& e) {
+			TraceEvent("DifferentClusters_WatchError").error(e);
+			wait(tr.onError(e));
+		}
 		TraceEvent("DifferentClusters_Done");
 		self->switchComplete = true;
 		wait(unlockDatabase(self->originalDB, lockUid)); // So quietDatabase can finish
