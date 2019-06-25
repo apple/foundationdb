@@ -63,6 +63,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0 && !switchComplete) {
 			TraceEvent(SevError, "DifferentClustersSwitchNotComplete");
+			return false;
 		}
 		return true;
 	}
