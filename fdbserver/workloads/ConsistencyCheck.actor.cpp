@@ -1115,7 +1115,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 					    .detail("Address", workers[i].interf.address())
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
-					missingStorage.insert(workers[i].interf.locality.dcId());
+					if ( workers[i].processClass == ProcessClass::StorageClass ) {
+						missingStorage.insert(workers[i].interf.locality.dcId());
+					}
 				}
 			}
 		}
