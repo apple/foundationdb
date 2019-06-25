@@ -57,11 +57,12 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	AsyncTrigger wrongStoreTypeRemoved; //wrongStoreTypeRemoved
+	int toRemove; // 0: not remove, >0: to remove due to wrongStoreType
 	// A storage server's StoreType does not change. To change storeType for an ip:port, we destroy the old one and create a new one. 
 	KeyValueStoreType storeType;  //In storageServerTracker, we always update this value by asking storageServerInterface
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : 
-					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END) {
+					id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC), storeType(KeyValueStoreType::END), toRemove(0) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 
@@ -2310,6 +2311,8 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			if ( s.isValid() ) {
 				s->wrongStoreTypeRemoved.trigger();
 			}
+			ASSERT(s->toRemove >= 0);
+			s->toRemove++;
 		}
 	}
 }
@@ -2870,10 +2873,6 @@ bool inCorrectDC(DDTeamCollection* self, TCServerInfo *server) {
 	return (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 }
 
-bool isCorrectStoreType(DDTeamCollection* self, KeyValueStoreType type) {
-	return type == self->configuration.storageServerStoreType;
-}
-
 ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
 	state Transaction tr(cx);
 	loop {
@@ -2907,6 +2906,14 @@ ACTOR Future<Void> storageServerFailureTracker(
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
+		if ( server->toRemove >= 1 ) {
+			TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
+					.detail("StoreType", server->storeType).detail("ConfigStoreType", self->configuration.storageServerStoreType)
+					.detail("ToRemove", server->toRemove);
+			status->isUndesired = true;
+			status->isWrongConfiguration = true;
+			//self->restartRecruiting.trigger();
+		}
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
 		if(inHealthyZone) {
 			status->isFailed = false;
@@ -3326,8 +3333,14 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state bool hasWrongStoreType;
 	state bool hasHealthyTeam;
 	state int numRecuitSSPending = 0;
+	// TODO: ask CC to cancel outstanding recruitments
+	RecruitStorageRequest cancelOutstandingRecruit;
+	cancelOutstandingRecruit.cancelOutstandingRecruit = true;
+	RecruitStorageReply waitForOutstandingReq = wait( db->get().clusterInterface.recruitStorage.getReply( cancelOutstandingRecruit, TaskDataDistribution ) );
+	//wait( waitForOutstandingReq );
 	loop {
 		try {
+			//self->removeWrongStoreTypeServer.trigger();
 			hasWrongStoreType = false;
 			hasHealthyTeam = (self->healthyTeamCount != 0);
 			RecruitStorageRequest rsr;
@@ -3500,6 +3513,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->redundantTeamRemover = teamRemover(self);
 			self->addActor.send(self->redundantTeamRemover);
 		}
+
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
 		
 		self->traceTeamCollectionInfo();
 
@@ -3514,11 +3532,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers( self ));
 		self->addActor.send(monitorHealthyTeams( self ));
 		self->addActor.send(waitHealthyZoneChange( self ));
-
-		if (self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
 
 		if (self->serversOnSameAddrChecker.isReady()) {
 			self->serversOnSameAddrChecker = checkServerOnSameAddress(self);
@@ -3741,8 +3754,8 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
 				if( isDDConfigurationChanged(self, &conf) ) { // Check primaryDD and remoteDD's configuration
 					// Throw errors?
-					//throw please_reboot(); // We need to cancel the trackers on the old data distributor that was rebooted
-					updateDDConfiguration(self, &conf);
+					throw please_reboot(); // We need to cancel the trackers on the old data distributor that was rebooted
+					//updateDDConfiguration(self, &conf);
 					// self->configuration = conf; 
 					//// self->registrationTrigger.trigger(); //TODO
 				}
