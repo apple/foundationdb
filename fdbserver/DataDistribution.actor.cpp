@@ -3949,7 +3949,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
-			self->addActor.send( configurationMonitor(self) );
+			//self->addActor.send( configurationMonitor(self) );
 
 			wait( waitForAll( actors ) );
 			return Void();

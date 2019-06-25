@@ -433,6 +433,9 @@ const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/prim
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
+// Whenever configuration changes or DD related system keyspace is changed(e.g.., serverList), actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey
+// This prevents concurrent write to the same system keyspace.
+// When the owner of the DD related system keyspace changes, DD will reboot
 const KeyRef moveKeysLockOwnerKey = LiteralStringRef("\xff/moveKeysLock/Owner");
 const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 
