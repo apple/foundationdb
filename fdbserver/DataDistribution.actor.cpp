@@ -2317,31 +2317,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	}
 }
 
-// Check if there exist more than one server on the same address (ip:port); if yes, wake up the servers' tracker
-ACTOR Future<Void> checkServerOnSameAddress(DDTeamCollection* self) {
-	state std::map<AddressExclusion, vector<Reference<TCServerInfo>>> servers;
-	state std::map<AddressExclusion, vector<Reference<TCServerInfo>>>::iterator serversIter;
-	state std::map<UID, Reference<TCServerInfo>>::iterator server;
-
-	loop {
-		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
-			NetworkAddress a = server->second->lastKnownInterface.address();
-			AddressExclusion addr( a.ip, a.port );
-			servers[addr].push_back(server->second);
-		}
-
-		for ( serversIter = servers.begin(); serversIter != servers.end(); serversIter++ ) {
-			if ( serversIter->second.size() > 1 ) {
-				for ( auto& tcServer : serversIter->second ) {
-					if( !tcServer->wakeUpTracker.isSet() )
-						tcServer->wakeUpTracker.send(Void());
-				}
-			}
-		}
-		wait( delay(30.0) );
-	}
-}
-
 ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 	state int numMachineTeamRemoved = 0;
 	loop {
@@ -3532,11 +3507,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers( self ));
 		self->addActor.send(monitorHealthyTeams( self ));
 		self->addActor.send(waitHealthyZoneChange( self ));
-
-		if (self->serversOnSameAddrChecker.isReady()) {
-			self->serversOnSameAddrChecker = checkServerOnSameAddress(self);
-			self->addActor.send(self->serversOnSameAddrChecker);
-		}
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
