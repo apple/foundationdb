@@ -1,6 +1,6 @@
 testTitle=DifferentClustersSameRV
    testName=DifferentClustersSameRV
-   testDuration=100
+   testDuration=150
    switchAfter=50
    keyToRead=someKey
    keyToWatch=anotherKey
