@@ -37,12 +37,9 @@ endif()
 
 include(CompileBoost)
 include(CompileFlatBuffers)
-#include(CompileFMT)
+#include(CompileFMT) #already included in SPDLOG
 include(DownloadSPDLOG)
-#add_subdirectory(unittests)
 find_package(Threads REQUIRED)
-#set(FLATBUFFERS_LIBS ${CMAKE_CURRENT_BINARY_DIR}/external/flatbuffers/include)
-
 
 add_custom_command(PRE_BUILD
   OUTPUT ConsumerAdapterProtocol_generated.h
@@ -53,9 +50,6 @@ add_custom_command(PRE_BUILD
 add_custom_target(ConsumerAdapterGen DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ConsumerAdapterProtocol_generated.h)
 
 
-#add_library(ConsumerAdapterGenLib STATIC ${CMAKE_CURRENT_BINARY_DIR}/ConsumerAdapterProtocol_generated.h) 
-
-#include(${CMAKE_CURRENT_BINARY_DIR}/ConsumerAdapterProtocol_generated.h)
 
 # (Finally) get files to find and include generated .h files
 include_directories(${CMAKE_CURRENT_BINARY_DIR}) 
@@ -65,8 +59,6 @@ include_directories(${SPDLOG_INCLUDE})
 set(SRCS
   ConsumerAdapter.h
   ConsumerAdapter.cpp
-  FakeSnowCannon.h
-  FakeSnowCannon.cpp
   ConsumerAdapterUtils.h
   ConsumerAdapterUtils.cpp
   ConsumerClient.h
@@ -74,9 +66,12 @@ set(SRCS
   ConsumerClientFDB6.cpp
   Crc32.h
   Crc32.cpp
-  SCLoadGenerator.h
-  SCLoadGenerator.cpp
-  Log.h)
+  EndpointLoadGenerator.h
+  EndpointLoadGenerator.cpp
+  Log.h
+  ProducerFuzz.h
+  ProducerFuzz.cpp
+)
 
 set(PROTOTEST_SRCS
   ${SRCS}

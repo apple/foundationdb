@@ -38,11 +38,12 @@ message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
 
 include(GenerateExportHeader)
 include(CompileFlatBuffers)
+include(CompileFMT)
 
 add_custom_command(PRE_BUILD
   OUTPUT ConsumerAdapterProtocol_generated.h
-  COMMAND ${FLATC} --cpp --gen-mutable ${CMAKE_CURRENT_SOURCE_DIR}/ConsumerAdapterProtocol.fbs
-  DEPENDS  ${CMAKE_CURRENT_SOURCE_DIR}/ConsumerAdapterProtocol.fbs
+  COMMAND ${FLATC} --cpp --gen-mutable ${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter/ConsumerAdapterProtocol.fbs
+  DEPENDS  ${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter/ConsumerAdapterProtocol.fbs
   DEPENDS flatbuffers)
 add_custom_target(ConsumerAdapterGen DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ConsumerAdapterProtocol_generated.h)
 
@@ -58,6 +59,7 @@ target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb
+  ${fmt_PREFIX}/include
   ${flatbuffers_PREFIX}/include
   test/workloads/IngestAdapter)
 if(WIN32)
@@ -97,9 +99,12 @@ set(c_workloads_srcs
   test/workloads/workloads.cpp
   test/workloads/workloads.h
   test/workloads/SimpleWorkload.cpp
-  test/workloads/FakeSnowCannonWorkload.cpp
-  test/workloads/IngestAdapter/SCLoadGenerator.cpp
-  test/workloads/IngestAdapter/SCLoadGenerator.h
+  test/workloads/IngestAdapterWorkload.cpp
+  test/workloads/IngestAdapter/SimLog.h
+  test/workloads/IngestAdapter/ConsumerAdapterUtils.cpp
+  test/workloads/IngestAdapter/ConsumerAdapterUtils.h
+  test/workloads/IngestAdapter/EndpointLoadGenerator.cpp
+  test/workloads/IngestAdapter/EndpointLoadGenerator.h
   test/workloads/IngestAdapter/ConsumerClient.h
   test/workloads/IngestAdapter/ConsumerClientFDB6.cpp
   )
@@ -112,6 +117,8 @@ endif()
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(c_workloads PUBLIC fdb_c)
+add_dependencies(c_workloads ConsumerAdapterGen)
+target_compile_options(c_workloads PUBLIC -DINGEST_ADAPTER_SIM_TEST=true)
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"

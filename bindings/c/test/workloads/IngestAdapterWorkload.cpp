@@ -2,18 +2,19 @@
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"
-#include "IngestAdapter/SCLoadGenerator.h"
+#include "IngestAdapter/EndpointLoadGenerator.h"
 #include "IngestAdapter/ConsumerClient.h"
 
 namespace {
 
-struct SimpleWorkload : FDBWorkload {
+struct IngestAdapterWorkload : FDBWorkload {
 	static const std::string name;
-	SCLoadGenerator snowcannonGen;
+	bool success = true;
+	EndpointLoadGenerator requestGen;
 	std::shared_ptr<ConsumerClientIF> consumerClient;
 
 	std::string description() const override { return name; }
-	bool init(FDBWorkloadContext* context) override {}
+	bool init(FDBWorkloadContext* context) override { return true; }
 	void setup(FDBDatabase* db, GenericPromise<bool> done) override {}
 
 	void start(FDBDatabase* db, GenericPromise<bool> done) override {}
@@ -22,8 +23,8 @@ struct SimpleWorkload : FDBWorkload {
 	void getMetrics(std::vector<FDBPerfMetric>& out) const override {}
 };
 
-const std::string SimpleWorkload::name = "SimpleWorkload";
+const std::string IngestAdapterWorkload::name = "IngestAdapterWorkload";
 
 } // namespace
 
-FDBWorkloadFactoryT<SimpleWorkload> simpleWorkload(SimpleWorkload::name);
+FDBWorkloadFactoryT<IngestAdapterWorkload> ingestAdapterWorkload(IngestAdapterWorkload::name);
