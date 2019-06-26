@@ -67,7 +67,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
 				expectedRateLimit = 0.0;
 			} else if (durabilityLag > SERVER_KNOBS->TARGET_VERSIONS_PER_STORAGE_SERVER) {
-				expectedRateLimit = 1.0 - double(durabilityLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX);
+				expectedRateLimit = 1.0 - double(durabilityLag-SERVER_KNOBS->TARGET_VERSIONS_PER_STORAGE_SERVER) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX-SERVER_KNOBS->TARGET_VERSIONS_PER_STORAGE_SERVER);
 			}
 			if (expectedRateLimit < metrics.localRateLimit - 0.01 || expectedRateLimit > metrics.localRateLimit + 0.01) {
 				self->testFailed = true;
