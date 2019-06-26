@@ -1589,9 +1589,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return totalHealthyMachineCount;
 	}
 
-	std::pair<int, int> calculateMinMaxServerTeamNumOnServer() {
-		int minTeamNumber = std::numeric_limits<int>::max();
-		int maxTeamNumber = std::numeric_limits<int>::min();
+	std::pair<uint32_t, uint32_t> calculateMinMaxServerTeamNumOnServer() {
+		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
+		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& server : server_info ) {
 			if ( server.second->teams.size() < minTeamNumber ) {
 				minTeamNumber = server.second->teams.size();
@@ -1603,9 +1603,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::make_pair(minTeamNumber, maxTeamNumber);
 	}
 
-	std::pair<int, int> calculateMinMaxMachineTeamNumOnMachine() {
-		int minTeamNumber = std::numeric_limits<int>::max();
-		int maxTeamNumber = std::numeric_limits<int>::min();
+	std::pair<uint32_t, uint32_t> calculateMinMaxMachineTeamNumOnMachine() {
+		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
+		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& machine : machine_info) {
 			if ( machine.second->machineTeams.size() < minTeamNumber ) {
 				minTeamNumber = machine.second->machineTeams.size();
