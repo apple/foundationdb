@@ -1591,6 +1591,34 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return totalHealthyMachineCount;
 	}
 
+	std::pair<int, int> calculateMinMaxServerTeamNumOnServer() {
+		int minTeamNumber = std::numeric_limits<int>::max();
+		int maxTeamNumber = std::numeric_limits<int>::min();
+		for (auto& server : server_info ) {
+			if ( server.second->teams.size() < minTeamNumber ) {
+				minTeamNumber = server.second->teams.size();
+			}
+			if ( server.second->teams.size() > maxTeamNumber ) {
+				maxTeamNumber = server.second->teams.size();
+			}
+		}
+		return std::make_pair(minTeamNumber, maxTeamNumber);
+	}
+
+	std::pair<int, int> calculateMinMaxMachineTeamNumOnMachine() {
+		int minTeamNumber = std::numeric_limits<int>::max();
+		int maxTeamNumber = std::numeric_limits<int>::min();
+		for (auto& machine : machine_info) {
+			if ( machine.second->machineTeams.size() < minTeamNumber ) {
+				minTeamNumber = machine.second->machineTeams.size();
+			}
+			if ( machine.second->machineTeams.size() > maxTeamNumber ) {
+				maxTeamNumber = machine.second->machineTeams.size();
+			}
+		}
+		return std::make_pair(minTeamNumber, maxTeamNumber);
+	}
+
 	// Sanity check
 	bool isServerTeamNumberCorrect(Reference<TCMachineTeamInfo>& mt) {
 		int num = 0;
@@ -1762,6 +1790,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		healthyMachineTeamCount = getHealthyMachineTeamCount();
 
+		std::pair<int, int>  minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
+		std::pair<int, int>  minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
+
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
@@ -1775,6 +1806,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+			.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+			.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+			.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+			.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 		    .trackLatest("TeamCollectionInfo");
 
 		return addedTeams;
@@ -1791,6 +1826,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int healthyMachineTeamCount = getHealthyMachineTeamCount();
 
+		std::pair<int, int>  minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
+		std::pair<int, int>  minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
+
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", 0)
@@ -1804,6 +1842,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+			.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+			.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+			.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+			.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 		    .trackLatest("TeamCollectionInfo");
 
 		// Debug purpose
@@ -1901,6 +1943,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 				int healthyMachineTeamCount = self->getHealthyMachineTeamCount();
 
+				std::pair<int, int>  minMaxTeamNumberOnServer = self->calculateMinMaxServerTeamNumOnServer();
+				std::pair<int, int>  minMaxMachineTeamNumberOnMachine = self->calculateMinMaxMachineTeamNumOnMachine();
+
 				TraceEvent("TeamCollectionInfo", self->distributorId)
 				    .detail("Primary", self->primary)
 				    .detail("AddedTeamNumber", 0)
@@ -1914,6 +1959,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("MaxMachineTeams", maxMachineTeams)
 				    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+					.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+					.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+					.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+					.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 				    .trackLatest("TeamCollectionInfo");
 			}
 		}
