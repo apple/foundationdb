@@ -1667,6 +1667,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return healthyTeamCount;
 	}
 
+	// Each machine is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
+    // remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+	int getRemainingMachineTeamBudget() {
+		 int remainingMachineTeamBudget = 0;
+		for ( auto& m : machine_info ) {
+			// A machine team does not have the healthness property
+			remainingMachineTeamBudget += std::max(0, (int) (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - m.second->machineTeams.size()));
+		}
+		ASSERT(configuration.storageTeamSize > 0);
+		remainingMachineTeamBudget = remainingMachineTeamBudget / configuration.storageTeamSize;
+
+		return remainingMachineTeamBudget;
+	}
+
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
@@ -1683,14 +1697,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
 		int healthyMachineTeamCount = getHealthyMachineTeamCount();
 		int totalMachineTeamCount = machineTeams.size();
-
 		int totalHealthyMachineCount = calculateHealthyMachineCount();
+		int remainingMachineTeamBudget = getRemainingMachineTeamBudget();
 
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
 		int machineTeamsToBuild =
 		    std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
+		machineTeamsToBuild = std::max(machineTeamsToBuild, remainingMachineTeamBudget);
 
 		TraceEvent("BuildMachineTeams")
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
@@ -1898,10 +1913,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					totalTeamCount++;
 				}
 			}
+			// Each server is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
+			// remainingTeamBudget is the number of teams needed to ensure every server has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+			int remainingTeamBudget = 0;
+			for ( auto& s : self->server_info ) {
+				int numValidTeams = 0;
+				for ( auto& team : s.second->teams ) {
+					if ( !team->isWrongConfiguration() && team->isHealthy() ) {
+						++numValidTeams;
+					}
+				}
+				remainingTeamBudget += std::max(0, (int) (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - numValidTeams));
+			}
+			ASSERT(self->configuration.storageTeamSize > 0);
+			remainingTeamBudget = remainingTeamBudget / self->configuration.storageTeamSize;
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
 			state int teamsToBuild = std::min(desiredTeams - teamCount, maxTeams - totalTeamCount);
+			teamsToBuild = std::max(teamsToBuild, remainingTeamBudget);
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
