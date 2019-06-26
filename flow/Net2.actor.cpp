@@ -168,7 +168,6 @@ public:
 
 	double lastPriorityTrackTime;
 	int lastMinTaskID;
-	double priorityTimer[NetworkMetrics::PRIORITY_BINS];
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
@@ -577,7 +576,8 @@ void Net2::run() {
 
 		if (runFunc) {
 			tsc_begin = __rdtsc();
-			taskBegin = timer_monotonic();
+			taskBegin = nnow;
+			trackMinPriority(TaskRunCycleFunction, taskBegin);
 			runFunc();
 			checkForSlowTask(tsc_begin, __rdtsc(), timer_monotonic() - taskBegin, TaskRunCycleFunction);
 		}
@@ -591,8 +591,11 @@ void Net2::run() {
 			++countWontSleep;
 		if (b) {
 			sleepTime = 1e99;
-			if (!timers.empty())
-				sleepTime = timers.top().at - timer_monotonic();  // + 500e-6?
+			double sleepStart = timer_monotonic();
+			if (!timers.empty()) {
+				sleepTime = timers.top().at - sleepStart;  // + 500e-6?
+			}
+			trackMinPriority(0, sleepStart);
 		}
 
 		awakeMetric = false;
@@ -607,7 +610,6 @@ void Net2::run() {
 		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
-		if (sleepTime) trackMinPriority( 0, now );
 		while (!timers.empty() && timers.top().at < now) {
 			++countTimers;
 			ready.push( timers.top() );
@@ -641,7 +643,7 @@ void Net2::run() {
 			if (check_yield(TaskMaxPriority, true)) { ++countYields; break; }
 		}
 
-		nnow = timer_monotonic();
+		trackMinPriority(minTaskID, now);
 
 #if defined(__linux__)
 		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
@@ -685,11 +687,10 @@ void Net2::run() {
 			net2liveness.fetch_add(1);
 		}
 #endif
+		nnow = timer_monotonic();
 
 		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
-
-		trackMinPriority( minTaskID, nnow );
 	}
 
 	#ifdef WIN32
@@ -698,17 +699,22 @@ void Net2::run() {
 }
 
 void Net2::trackMinPriority( int minTaskID, double now ) {
-	if (minTaskID != lastMinTaskID)
+	if (minTaskID != lastMinTaskID) {
 		for(int c=0; c<NetworkMetrics::PRIORITY_BINS; c++) {
 			int64_t pri = networkMetrics.priorityBins[c];
-			if (pri >= minTaskID && pri < lastMinTaskID) {  // busy -> idle
-				double busyFor = lastPriorityTrackTime - priorityTimer[c];
-				networkMetrics.secSquaredPriorityBlocked[c] += busyFor*busyFor;
+			if (pri > minTaskID && pri <= lastMinTaskID) {  // busy -> idle
+				double busyFor = lastPriorityTrackTime - networkMetrics.priorityTimer[c];
+				networkMetrics.priorityBlocked[c] = false;
+				networkMetrics.priorityBlockedDuration[c] += busyFor;
+				networkMetrics.secSquaredPriorityBlocked[c] += busyFor * busyFor;
 			}
-			if (pri < minTaskID && pri >= lastMinTaskID) {  // idle -> busy
-				priorityTimer[c] = now;
+			if (pri <= minTaskID && pri > lastMinTaskID) {  // idle -> busy
+				networkMetrics.priorityBlocked[c] = true;
+				networkMetrics.priorityTimer[c] = now;
 			}
 		}
+	}
+
 	lastMinTaskID = minTaskID;
 	lastPriorityTrackTime = now;
 }
