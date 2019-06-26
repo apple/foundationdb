@@ -2460,6 +2460,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
+				if ( self->server_info.find(uid) != self->server_info.end() ) {
+					change.push_back( self->server_info[uid]->wrongStoreTypeRemoved.onTrigger() );
+				}
 				auto& status = self->server_status.get(uid);
 				if (!status.isFailed) {
 					serversLeft++;
@@ -2894,6 +2897,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 					.detail("ToRemove", server->toRemove);
 			status->isUndesired = true;
 			status->isWrongConfiguration = true;
+			//status->toRemove = server->toRemove; // Everytime toRemove changes, status->toRemove change will trigger trackers (e..g, serverTracker and teamTracker) to recheck // NOTE: Not working! Stuck in the middle of changeConfig
 			//self->restartRecruiting.trigger();
 		}
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
