@@ -2937,6 +2937,9 @@ ACTOR Future<Void> storageServerFailureTracker(
 					self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
 					self->healthyZone.set(Optional<Key>());
 				}
+				if ( status->isFailed ) { // A failed SS storeType will be marked as invalid
+					server->storeType = KeyValueStoreType::INVALID;
+				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
@@ -3371,7 +3374,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 					lastRequest = rsr;
 					fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
-					numRecuitSSPending++;
+					//numRecuitSSPending++;
 				}
 			} else { // hasWrongStoreType && hasHealthyTeam
 				TraceEvent("StorageRecruiterStop").detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
@@ -3388,7 +3391,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					// 	numRecuitSSPending++;
 					// 	TraceEvent("RecruitSSWhenWrongStoreTypeExist", self->distributorId).detail("NumRecuitSSPending", numRecuitSSPending);
 					// }
-					--numRecuitSSPending;
+					//--numRecuitSSPending;
 					self->addActor.send(initializeStorage(self, candidateWorker));
 					fCandidateWorker = Never();
 					//if ( !hasHealthyTeam ) {

@@ -554,11 +554,14 @@ struct Traceable<RangeResultRef> : std::true_type {
 struct KeyValueStoreType {
 	constexpr static FileIdentifier file_identifier = 6560359;
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	// SS storeType is END before the storageServerInterface is initialized. 
+	// SS storeType is INVALID if the storageServerInterface is dead, i.e., the serverStatus is marked as failed
 	enum StoreType {
 		SSD_BTREE_V1,
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		INVALID,
 		END
 	};
 
@@ -578,6 +581,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case INVALID: return "invalid";
 			default: return "unknown";
 		}
 	}
