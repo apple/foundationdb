@@ -3320,6 +3320,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state bool hasWrongStoreType;
 	state bool hasHealthyTeam;
 	state int numRecuitSSPending = 0;
+	state std::map<AddressExclusion, int> numSSPerAddr;
 	// TODO: ask CC to cancel outstanding recruitments
 	// RecruitStorageRequest cancelOutstandingRecruit;
 	// cancelOutstandingRecruit.cancelOutstandingRecruit = true;
@@ -3328,6 +3329,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	loop {
 		try {
 			//self->removeWrongStoreTypeServer.trigger();
+			numSSPerAddr.clear();
 			hasWrongStoreType = false;
 			hasHealthyTeam = (self->healthyTeamCount != 0);
 			RecruitStorageRequest rsr;
@@ -3337,7 +3339,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				if( serverStatus.excludeOnRecruit() && s->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
-					exclusions.insert( AddressExclusion( addr.ip, addr.port ) );
+					AddressExclusion addrExcl( addr.ip, addr.port );
+					exclusions.insert( addrExcl );
+					numSSPerAddr[addrExcl]++; // increase from 0
 				}
 				if ( !s->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 					hasWrongStoreType = true;
@@ -3373,16 +3377,16 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			// 	numRecuitSSPending++;
 			// }
 
-			if ( ((hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType) && numRecuitSSPending < 5 ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
+			//if ( ((hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType) && numRecuitSSPending < 5 ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
 				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 					lastRequest = rsr;
 					fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
 					//numRecuitSSPending++;
 				}
-			} else { // hasWrongStoreType && hasHealthyTeam
-				TraceEvent("StorageRecruiterStop").detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
-				fCandidateWorker = Never();
-			}
+			// } else { // hasWrongStoreType && hasHealthyTeam
+			// 	TraceEvent("StorageRecruiterStop").detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
+			// 	fCandidateWorker = Never();
+			// }
 
 			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam).detail("SysStoreType", self->configuration.storageServerStoreType);
 			self->traceAllInfo(true);
@@ -3395,12 +3399,18 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					// 	TraceEvent("RecruitSSWhenWrongStoreTypeExist", self->distributorId).detail("NumRecuitSSPending", numRecuitSSPending);
 					// }
 					//--numRecuitSSPending;
-					self->addActor.send(initializeStorage(self, candidateWorker));
-					fCandidateWorker = Never();
-					//if ( !hasHealthyTeam ) {
-						self->doBuildTeams = true;
-						self->restartTeamBuilder.trigger();
-					//}
+					AddressExclusion candidateSSAddr(candidateWorker.worker.address().ip, candidateWorker.worker.address().port);
+					int numExistingSS = numSSPerAddr[candidateSSAddr];
+					if ( numExistingSS <= 2 ) {
+						self->addActor.send(initializeStorage(self, candidateWorker));
+						fCandidateWorker = Never();
+						//if ( !hasHealthyTeam ) {
+							self->doBuildTeams = true;
+							self->restartTeamBuilder.trigger();
+						//}
+					} else {
+						TraceEvent("StorageRecruiterMX", self->distributorId).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
+					}
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
