@@ -1,11 +1,10 @@
 #define FDB_API_VERSION 610
 #include "foundationdb/fdb_c.h"
-#undef DLLEXPORT
-#include "workloads.h"
 #include "IngestAdapter/EndpointLoadGenerator.h"
 #include "IngestAdapter/ConsumerClient.h"
-
 #include "IngestAdapter/ConsumerAdapterUtils.h"
+#undef DLLEXPORT
+#include "workloads.h"
 
 #include <random>
 

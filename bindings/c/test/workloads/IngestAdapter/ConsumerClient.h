@@ -56,6 +56,7 @@ private:
 
 class ConsumerClientFDB6 : public ConsumerClientIF {
 private:
+  static ConsumerClientFDB6* g_FDB6Client;
 	Log log;
 	pthread_t network_thread;
 	std::string clusterFile;
@@ -75,6 +76,7 @@ public:
 public:
 	ConsumerClientFDB6(std::string clusterFile);
 	~ConsumerClientFDB6();
+  static  ConsumerClientFDB6* instance();
 	int beginTxn(MessageBuffer* msgBuf) override;
 	int startNetwork() override;
 	int stopNetwork() override;
@@ -97,7 +99,5 @@ private:
 	void pushBatch(MessageBuffer* reqBuffer);
 	void verifyRange(MessageBuffer* reqBuffer);
 };
-
-extern ConsumerClientFDB6* g_FDB6Client;
 
 #endif

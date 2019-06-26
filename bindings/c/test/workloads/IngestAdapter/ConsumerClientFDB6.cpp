@@ -5,10 +5,11 @@ using namespace std;
 using namespace ConsAdapter::serialization;
 
 std::string ConsumerClientFDB6::repStateKey = "snowCannonProxy/ReplicatorState";
+ConsumerClientFDB6 *ConsumerClientFDB6::g_FDB6Client = NULL; 
 
 ConsumerClientFDB6::ConsumerClientFDB6(std::string clusterFile) : clusterFile(clusterFile) {
 	log.trace("ConsumerClientFDB6Create");
-	assert(g_FDB6Client == NULL);
+	// assert(g_FDB6Client == NULL);
 	g_FDB6Client = this;
 
 	fdb_error_t err;
