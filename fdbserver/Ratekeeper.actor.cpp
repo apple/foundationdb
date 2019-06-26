@@ -440,7 +440,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			if (lim < limitTps) {
 				limitTps = lim;
 				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
-					ssLimitReason = versionLimited ? limitReasons_t::storage_server_durability_lag : limitReason_t::storage_server_write_queue_size;
+					ssLimitReason = versionLimited ? limitReason_t::storage_server_durability_lag : limitReason_t::storage_server_write_queue_size;
 				}
 			}
 		}
