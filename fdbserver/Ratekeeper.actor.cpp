@@ -41,7 +41,7 @@ enum limitReason_t {
 	storage_server_min_free_space_ratio,  // a storage server's normal limits are being reduced by a low free space ratio
 	log_server_min_free_space,
 	log_server_min_free_space_ratio,
-	storage_server_read_load,
+	storage_server_durability_lag,
 	limitReason_t_end
 };
 
@@ -58,7 +58,7 @@ const char* limitReasonName[] = {
 	"storage_server_min_free_space_ratio",
 	"log_server_min_free_space",
 	"log_server_min_free_space_ratio",
-	"storage_server_read_load"
+	"storage_server_durability_lag"
 };
 static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
 
@@ -128,10 +128,12 @@ struct RatekeeperLimits {
 	int64_t logTargetBytes;
 	int64_t logSpringBytes;
 	double maxVersionDifference;
+	Version storageTargetVersions;
+	Version storageSpringVersions;
 
 	std::string context;
 
-	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference) :
+	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference, Version storageTargetVersions, Version storageSpringVersions) :
 		tpsLimit(std::numeric_limits<double>::infinity()),
 		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 		reasonMetric(StringRef("Ratekeeper.Reason" + context)),
@@ -140,6 +142,8 @@ struct RatekeeperLimits {
 		logTargetBytes(logTargetBytes),
 		logSpringBytes(logSpringBytes),
 		maxVersionDifference(maxVersionDifference),
+		storageTargetVersions(storageTargetVersions),
+		storageSpringVersions(storageSpringVersions),
 		context(context)
 	{}
 };
@@ -173,8 +177,8 @@ struct RatekeeperData {
 	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
 		lastWarning(0),
-		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE),
-		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH)
+		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE, SERVER_KNOBS->TARGET_VERSIONS_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_VERSIONS_STORAGE_SERVER),
+		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_VERSIONS_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_VERSIONS_STORAGE_SERVER_BATCH)
 	{}
 };
 
@@ -396,8 +400,10 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
-		int64_t b = storageQueue - targetBytes;
-		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
+		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
+		double versionTargetRateRatio = std::min(( storageDurabilityLag - limits->storageTargetVersions + limits->storageSpringVersions ) / (double)limits->storageSpringVersions, 2.0);
+		bool versionLimited = versionTargetRateRatio < targetRateRatio;
+		targetRateRatio = std::min(targetRateRatio, versionTargetRateRatio);
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
@@ -433,16 +439,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			double lim = actualTps * x;
 			if (lim < limitTps) {
 				limitTps = lim;
-				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc)
-					ssLimitReason = limitReason_t::storage_server_write_queue_size;
-			}
-		}
-
-		if (ss.localRateLimit < 0.99) {
-			auto lim = double(self->actualTpsMetric) * ss.localRateLimit;
-			if (lim < limitTps) {
-				limitTps = lim;
-				ssLimitReason = limitReason_t::storage_server_read_load;
+				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
+					ssLimitReason = versionLimited ? limitReasons_t::storage_server_durability_lag : limitReason_t::storage_server_write_queue_size;
+				}
 			}
 		}
 
