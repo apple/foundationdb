@@ -2864,6 +2864,7 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
+				TraceEvent("WaitForAllDataRemoved").detail("Server", serverID).detail("CanRemove", canRemove).detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 					return Void();
 				}
@@ -2939,6 +2940,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 				}
 				if ( status->isFailed ) { // A failed SS storeType will be marked as invalid
 					server->storeType = KeyValueStoreType::INVALID;
+					status->isUndesired = true;
+					status->isWrongConfiguration = true;
 				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
