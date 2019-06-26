@@ -402,8 +402,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 		double versionTargetRateRatio = std::min(( storageDurabilityLag - limits->storageTargetVersions + limits->storageSpringVersions ) / (double)limits->storageSpringVersions, 2.0);
-		bool versionLimited = versionTargetRateRatio < targetRateRatio;
-		targetRateRatio = std::min(targetRateRatio, versionTargetRateRatio);
+		bool versionLimited = versionTargetRateRatio > targetRateRatio;
+		targetRateRatio = std::max(targetRateRatio, versionTargetRateRatio);
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
