@@ -195,6 +195,8 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	log.trace("Client6BeginTxnGetRepState", { { "arg", statePassed.toStr() }, { "buffer", reqBuffer->toStr() } });
 
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, NULL, 0);
+	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
+	                                 debugTxnID.size());
 	CHECK(err, "TxnSetOptionAccessSystemKeys");
 
 	// Get operation
@@ -213,7 +215,6 @@ void ConsumerClientFDB6::checkReplicatorStateCB(FDBFuture* fut, void* arg) {
 	log.trace("Client6GetRepStateCB", { { "buffer", reqBuffer->toStr() } });
 
 	fdb_error_t err = 0;
-	int64_t rv = 0;
 	char* val;
 	int valLen;
 	int out_present;

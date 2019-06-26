@@ -63,6 +63,8 @@ private:
 	std::map<uint64_t, FDBTransaction*> txnMap;
 	boost::function<void(MessageBuffer* reqBuffer, bool freeBuffer)> consumerTxnResponseCB;
 	bool doNetworkTrace = 1;
+
+	std::string debugTxnID = "TXN1234";
 	std::string networkTracePath = "";
 	std::string networkKnobJson = "knob_trace_json=1";
 	mutable std::shared_mutex txnMutex;

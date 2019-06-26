@@ -20,7 +20,7 @@
   replies or verifies- ensuring that waiting endpoints aren't reused and a new
   push batch doesn't overwrite a waiting verify range.  Its up to the caller to
   update EndpointLoadGenerator with the responses.
-  Finally, it
+
  */
 
 class EndpointLoadGenerator {
