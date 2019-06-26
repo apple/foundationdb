@@ -17,7 +17,7 @@ Fixes
 Status
 ------
 
-* Added ``run_loop_busy`` to the ``processes`` section to record the fraction of time the run loop is busy. `(PR #) <https://github.com/apple/foundationdb/pull/>`_.
+* Added ``run_loop_busy`` to the ``processes`` section to record the fraction of time the run loop is busy. `(PR #1760) <https://github.com/apple/foundationdb/pull/1760>`_.
 
 Bindings
 --------
