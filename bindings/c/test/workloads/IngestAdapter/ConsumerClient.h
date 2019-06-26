@@ -98,6 +98,6 @@ private:
 	void verifyRange(MessageBuffer* reqBuffer);
 };
 
-static ConsumerClientFDB6* g_FDB6Client = NULL;
+extern ConsumerClientFDB6* g_FDB6Client;
 
 #endif

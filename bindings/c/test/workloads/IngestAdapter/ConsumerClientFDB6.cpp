@@ -197,6 +197,8 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, NULL, 0);
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
 	                                 debugTxnID.size());
+	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_LOG_TRANSACTION, NULL, 0);
+
 	CHECK(err, "TxnSetOptionAccessSystemKeys");
 
 	// Get operation

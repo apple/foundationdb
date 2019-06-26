@@ -177,6 +177,10 @@ std::string printObj(const GlobalVersionExt& v);
 
 std::string printObj(const ReplicatorStateExt& s);
 
+std::string printRequestType(MessageBufferType type);
+
+std::string printResponseType(MessageResponseType type);
+
 // todo: create macro for logging
 // todo: create 'detail' abstraction for json input to logger
 

@@ -14,8 +14,12 @@ namespace {
 struct IngestAdapterWorkload : FDBWorkload {
 	static const std::string name;
 	bool success = true;
-	std::mt19937 random;
-	GenericPromise<bool> cbDone;
+	FDBWorkloadContext* cxt;
+	struct ActorRunner {
+		GenericPromise<bool> done;
+		IngestAdapterWorkload* self;
+	};
+	std::unique_ptr<ActorRunner> runner;
 
 	EndpointLoadGenerator requestGen;
 	std::shared_ptr<ConsumerClientIF> consumerClient;
@@ -41,11 +45,14 @@ struct IngestAdapterWorkload : FDBWorkload {
 	int requestsToServe;
 	int maxRequestsWaiting;
 
+	uint32_t random() { return cxt->rnd(); }
+
 	std::string description() const override { return name; }
 	bool init(FDBWorkloadContext* context) override {
-
-		random = decltype(random)(context->rnd());
+		cxt = context;
 		consumerClient->registerTxnResponseCallback(boost::bind(&IngestAdapterWorkload::txnResponseCB, this, _1, _2));
+		requestsToServe = context->getOption("requestsToServe", 100000ul);
+		maxRequestsWaiting = context->getOption("maxRequestsWaiting", 100ul);
 		requestGen.init(1000000 /* total key range */, 10000 /* max value size*/, 100 /* max mutations in batch */,
 		                10 /* max keyRange size*/, 3 /* max ranges in verifyRange request */,
 		                10 /* max waiting verifyRanges */);
@@ -54,7 +61,7 @@ struct IngestAdapterWorkload : FDBWorkload {
 	void setup(FDBDatabase* db, GenericPromise<bool> done) override { done.send(true); }
 
 	void start(FDBDatabase* db, GenericPromise<bool> done) override {
-		cbDone = done;
+		runner.reset(new ActorRunner{ std::move(done), this });
 		// set the replicator state first
 		sendRequest(MessageBufferType::T_SetReplicatorStateReq);
 	}
@@ -72,8 +79,10 @@ struct IngestAdapterWorkload : FDBWorkload {
 	}
 
 	void sendRequests() {
+
+		cxt->trace(FDBSeverity::Info, "IngestWorkloadSendRequests", {});
 		while (requestGen.endpointsWaitingForSet() == 0 && requestGen.endpointsWaitingForReply() < maxRequestsWaiting) {
-			int chooseReq = random(random);
+			auto chooseReq = random();
 			if (chooseReq < 10) {
 				sendRequest(MessageBufferType::T_GetReplicatorStateReq);
 			} else if (chooseReq < 90 || requestGen.verifyReqsWaitingToSend() == 0) {
@@ -85,6 +94,8 @@ struct IngestAdapterWorkload : FDBWorkload {
 	}
 
 	void sendRequest(MessageBufferType reqType) {
+
+		cxt->trace(FDBSeverity::Info, "IngestWorkloadSendRequest", { { "type", printRequestType(reqType) } });
 		std::shared_ptr<MessageBuffer> reqBuffer = std::make_shared<MessageBuffer>();
 		int ep;
 		switch (reqType) {
@@ -106,12 +117,12 @@ struct IngestAdapterWorkload : FDBWorkload {
 		}
 		activeReqBuffers[ep] = reqBuffer;
 		requestsServed++;
-		consumerClient->beginTxn(reqBuffer);
+		consumerClient->beginTxn(reqBuffer.get());
 	}
 
 	void endTestOrSendMoreRequests() {
 		if (requestsServed >= requestsToServe) {
-			cbDone.send(true);
+			runner->done.send(true);
 		} else {
 			// send another batch of requests
 			// someday: choose to change the replicator registration
@@ -120,12 +131,15 @@ struct IngestAdapterWorkload : FDBWorkload {
 	}
 
 	void txnResponseCB(MessageBuffer* reqBuffer, bool freeBuffer) {
+		cxt->trace(FDBSeverity::Info, "IngestWorkloadTxnCB",
+		           { { "buffer", reqBuffer->toStr() }, { "free", STR(freeBuffer) } });
 		handleResponse(reqBuffer); // handle response directly
 
 		// simulate createAndQueueResponse in ConsumerAdapter
 		if (freeBuffer) {
 			activeReqBuffers.erase(reqBuffer->id);
 		}
+		endTestOrSendMoreRequests();
 		// end test or send more requests?
 	}
 	// update stats and endpoint tracker
