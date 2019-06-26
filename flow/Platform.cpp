@@ -2721,7 +2721,7 @@ std::string exePath() {
 			return std::string(buf.get());
 		}
 	}
-#elif defined(__WIN32__)
+#elif defined(_WIN32)
 	DWORD bufSize = 1024;
 	std::unique_ptr<char[]> buf(new char[bufSize]);
 	while (true) {
