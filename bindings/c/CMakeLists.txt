@@ -55,13 +55,14 @@ else()
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb
-  ${fmt_PREFIX}/include
-  ${flatbuffers_PREFIX}/include
-  test/workloads/IngestAdapter)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>
+  $<BUILD_INTERFACE:${fmt_PREFIX}/include>
+  $<BUILD_INTERFACE:${flatbuffers_PREFIX}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter>)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
