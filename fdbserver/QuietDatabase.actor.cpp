@@ -305,10 +305,10 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
 			if (healthyMachineTeamCount > desiredMachineTeamNumber ||
-				minServerTeamOnServer < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ||
-				minMachineTeamOnMachine < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ||
-				maxServerTeamOnServer > SERVER_KNOBS->MAX_TEAMS_PER_SERVER ||
-				maxMachineTeamOnMachine > SERVER_KNOBS->MAX_TEAMS_PER_SERVER) {
+				minServerTeamOnServer <= 0 ||
+				minMachineTeamOnMachine <= 0 ||
+				( maxServerTeamOnServer > SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER && minServerTeamOnServer < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ) ||
+				( maxMachineTeamOnMachine > SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER && minMachineTeamOnMachine < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ) ) {
 				TraceEvent("GetTeamCollectionValid")
 				    .detail("CurrentTeamNumber", currentTeamNumber)
 				    .detail("DesiredTeamNumber", desiredTeamNumber)
