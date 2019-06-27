@@ -1727,7 +1727,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
 	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber, int remainingTeamBudget) {
-		ASSERT(teamsToBuild > 0);
+		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 
 		int addedMachineTeams = 0;
@@ -1852,6 +1852,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
 		    .detail("AimToBuildTeamNumber", teamsToBuild)
+			.detail("RemainingTeamBudget", remainingTeamBudget)
 		    .detail("CurrentTeamNumber", teams.size())
 		    .detail("DesiredTeamNumber", desiredTeamNumber)
 		    .detail("MaxTeamNumber", maxTeamNumber)
@@ -1889,6 +1890,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", 0)
 		    .detail("AimToBuildTeamNumber", 0)
+			.detail("RemainingTeamBudget", 0)
 		    .detail("CurrentTeamNumber", teams.size())
 		    .detail("DesiredTeamNumber", desiredServerTeams)
 		    .detail("MaxTeamNumber", maxServerTeams)
@@ -1965,7 +1967,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
-			state int teamsToBuild = std::min(desiredTeams - teamCount, maxTeams - totalTeamCount);
+			state int teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
@@ -1982,7 +1984,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 
-			if (teamsToBuild > 0) {
+			if (teamsToBuild > 0 || remainingTeamBudget > 0) {
 				state vector<std::vector<UID>> builtTeams;
 
 				// addTeamsBestOf() will not add more teams than needed.
@@ -2011,6 +2013,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("Primary", self->primary)
 				    .detail("AddedTeamNumber", 0)
 				    .detail("AimToBuildTeamNumber", teamsToBuild)
+					.detail("RemainingTeamBudget", remainingTeamBudget)
 				    .detail("CurrentTeamNumber", self->teams.size())
 				    .detail("DesiredTeamNumber", desiredTeams)
 				    .detail("MaxTeamNumber", maxTeams)
