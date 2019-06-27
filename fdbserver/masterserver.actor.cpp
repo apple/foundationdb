@@ -675,12 +675,6 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
-	if(self->lastEpochEnd > 0) {
-		for(int i = 0; i < oldLogSystem->getLogSystemConfig().tLogs[0].tLogs.size(); i++) {
-			self->allTags.push_back(Tag(tagLocalityTxs, i));
-		}
-		self->allTags.push_back(txsTag);
-	}
 
 	if(self->forceRecovery) {
 		self->safeLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;

@@ -1764,8 +1764,37 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<Tag> localTags = getLocalTags(remoteLocality, allTags);
 		LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
+		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
+		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		logSet->updateLocalitySet(localities);
+
 		state vector<Future<TLogInterface>> remoteTLogInitializationReplies;
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
+
+		if(oldLogSystem->logRouterTags == 0) {
+			std::vector<int> locations;
+			for( Tag tag : localTags ) {
+				locations.clear();
+				logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				for(int loc : locations)
+					remoteTLogReqs[ loc ].recoverTags.push_back( tag );
+			}
+
+			if(oldLogSystem->tLogs.size()) {
+				for(int i = -1; i < oldLogSystem->tLogs[0]->logServers.size(); i++) {
+					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+					locations.clear();
+					logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+					for(int loc : locations)
+						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
+				}
+				for(int i = 0; i < self->tLogs[0]->logServers.size(); i++) {
+					localTags.push_back(Tag(tagLocalityTxs, i));
+				}
+				localTags.push_back(txsTag);
+			}
+		}
+
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = self->recruitmentID;
@@ -1783,20 +1812,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.startVersion = logSet->startVersion;
 			req.logRouterTags = 0;
 			req.txsTags = self->tLogs[0]->logServers.size();
-		}
-
-		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
-		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		logSet->updateLocalitySet(localities);
-
-		if(oldLogSystem->logRouterTags == 0) {
-			std::vector<int> locations;
-			for( Tag tag : localTags ) {
-				locations.clear();
-				logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-				for(int loc : locations)
-					remoteTLogReqs[ loc ].recoverTags.push_back( tag );
-			}
 		}
 
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
@@ -1940,6 +1955,36 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state vector<Future<TLogInterface>> initializationReplies;
 		vector< InitializeTLogRequest > reqs( recr.tLogs.size() );
+
+		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
+		logSystem->tLogs[0]->logServers.resize( recr.tLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		logSystem->tLogs[0]->updateLocalitySet(localities);
+
+		std::vector<int> locations;
+		for( Tag tag : localTags ) {
+			locations.clear();
+			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+			for(int loc : locations)
+				reqs[ loc ].recoverTags.push_back( tag );
+		}
+		for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
+			Tag tag = Tag(tagLocalityLogRouter, i);
+			reqs[ logSystem->tLogs[0]->bestLocationFor( tag ) ].recoverTags.push_back( tag );
+		}
+		if(oldLogSystem->tLogs.size()) {
+			for(int i = -1; i < oldLogSystem->tLogs[0]->logServers.size(); i++) {
+				Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+				locations.clear();
+				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				for(int loc : locations)
+					reqs[ loc ].recoverTags.push_back( tag );
+			}
+			for(int i = 0; i < recr.tLogs.size(); i++) {
+				localTags.push_back(Tag(tagLocalityTxs, i));
+			}
+			localTags.push_back(txsTag);
+		}
+
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
@@ -1959,36 +2004,37 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.txsTags = recr.tLogs.size();
 		}
 
-		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
-		logSystem->tLogs[0]->logServers.resize( recr.tLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		logSystem->tLogs[0]->updateLocalitySet(localities);
-
-		for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
-			Tag tag = Tag(tagLocalityLogRouter, i);
-			reqs[ logSystem->tLogs[0]->bestLocationFor( tag ) ].recoverTags.push_back( tag );
-		}
-		std::vector<int> locations;
-		for( Tag tag : localTags ) {
-			locations.clear();
-			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-			for(int loc : locations)
-				reqs[ loc ].recoverTags.push_back( tag );
-		}
-
 		for( int i = 0; i < recr.tLogs.size(); i++ )
 			initializationReplies.push_back( transformErrors( throwErrorOr( recr.tLogs[i].tLog.getReplyUnlessFailedFor( reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 		state std::vector<Future<Void>> recoveryComplete;
 
 		if(region.satelliteTLogReplicationFactor > 0) {
-			std::vector<Tag> satelliteTags;
-			for(int i = 0; i < recr.tLogs.size(); i++) {
-				satelliteTags.push_back(Tag(tagLocalityTxs, i));
-			}
-			satelliteTags.push_back(txsTag);
-
 			state vector<Future<TLogInterface>> satelliteInitializationReplies;
 			vector< InitializeTLogRequest > sreqs( recr.satelliteTLogs.size() );
+			std::vector<Tag> satelliteTags;
+			
+			for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
+				Tag tag = Tag(tagLocalityLogRouter, i);
+				locations.clear();
+				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				for(int loc : locations)
+					sreqs[ loc ].recoverTags.push_back( tag );
+			}
+			if(oldLogSystem->tLogs.size()) {
+				for(int i = -1; i < oldLogSystem->tLogs[0]->logServers.size(); i++) {
+					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+					locations.clear();
+					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+					for(int loc : locations)
+						sreqs[ loc ].recoverTags.push_back( tag );
+				}
+				for(int i = 0; i < recr.tLogs.size(); i++) {
+					satelliteTags.push_back(Tag(tagLocalityTxs, i));
+				}
+				satelliteTags.push_back(txsTag);
+			}
+			
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
 				InitializeTLogRequest &req = sreqs[i];
 				req.recruitmentID = logSystem->recruitmentID;
@@ -2006,22 +2052,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 				req.logRouterTags = logSystem->logRouterTags;
 				req.txsTags = recr.tLogs.size();
-			}
-
-			for(int i = -1; i < oldLogSystem->logRouterTags; i++) {
-				Tag tag = i == -1 ? txsTag : Tag(tagLocalityLogRouter, i);
-				locations.clear();
-				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-				for(int loc : locations)
-					sreqs[ loc ].recoverTags.push_back( tag );
-			}
-
-			for(int i = 0; i < recr.tLogs.size(); i++) {
-				Tag tag = Tag(tagLocalityTxs, i);
-				locations.clear();
-				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-				for(int loc : locations)
-					sreqs[ loc ].recoverTags.push_back( tag );
 			}
 
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )
