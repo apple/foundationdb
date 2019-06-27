@@ -1507,7 +1507,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Only pick healthy server, which is not failed or excluded.
 			if (server_status.get(server.first).isUnhealthy()) continue;
 
-			int numTeams = server.second->teams.size();
+			int numTeams = 0;
+			for (auto& t : server.second->teams) {
+				 if (!t->isWrongConfiguration() && t->isHealthy()) {
+					 ++numTeams;
+				 }
+			}
 			if (numTeams < minTeamNumber) {
 				minTeamNumber = numTeams;
 				leastUsedServers.clear();
@@ -3056,7 +3061,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			if ( lastIsUnhealthy && !status.isUnhealthy() && server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ) {
 				self->doBuildTeams = true;
-				self->restartTeamBuilder.trigger();
+				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
 			lastIsUnhealthy = status.isUnhealthy();
 
