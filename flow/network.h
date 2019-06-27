@@ -65,6 +65,8 @@ enum {
 	TaskDefaultOnMainThread = 7500,
 	TaskDefaultDelay = 7010,
 	TaskDefaultYield = 7000,
+	TaskDiskWrite = 5030,
+	TaskStorage = 5020,
 	TaskDiskRead = 5010,
 	TaskDefaultEndpoint = 5000,
 	TaskUnknownEndpoint = 4000,
@@ -72,11 +74,9 @@ enum {
 	TaskDataDistributionLaunch = 3530,
 	TaskRatekeeper = 3510,
 	TaskDataDistribution = 3500,
-	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
 	TaskTLogSpilledPeekReply = 2800,
 	TaskLowPriority = 2000,
-
 	TaskMinPriority = 1000
 };
 
