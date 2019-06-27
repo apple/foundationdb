@@ -2865,11 +2865,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (g_network->isSimulated()) {
 			double endTime = g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
 			if(endTime > now()) {
-				wait(delay(endTime - now(), TaskUpdateStorage));
+				wait(delay(endTime - now(), TaskStorage));
 			}
 		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
-		wait( delay(0, TaskUpdateStorage) );
+		wait( delay(0, TaskStorage) );
 
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
@@ -2882,10 +2882,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
 			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskUpdateStorage );
+			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskStorage );
 			data->oldestVersion.set( newOldestVersion );
 			wait( finishedForgetting );
-			wait( yield(TaskUpdateStorage) );
+			wait( yield(TaskStorage) );
 			if (done) break;
 		}
 
@@ -2896,8 +2896,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
-		if (bytesLeft > 0)
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL);
+		if (bytesLeft > 0) {
+			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskStorage);
+		} else {
+			durableDelay = delay(0, TaskUpdateStorage) || delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskStorage);
+		}
 
 		wait( durable );
 
@@ -2916,7 +2919,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait( delay(0, TaskUpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+		wait( delay(0, TaskStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
 		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
@@ -2925,9 +2928,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
-			if(g_network->check_yield(TaskUpdateStorage)) {
+			if(g_network->check_yield(TaskStorage)) {
 				data->durableVersionLock.release();
-				wait(delay(0, TaskUpdateStorage));
+				wait(delay(0, TaskStorage));
 				wait( data->durableVersionLock.take() );
 			}
 		}
