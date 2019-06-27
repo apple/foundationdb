@@ -2696,7 +2696,7 @@ void closeLibrary(void* handle) {
 #ifdef __unixish__
 	dlclose(handle);
 #else
-	FreeLibrary(handle);
+	FreeLibrary(reinterpret_cast<HMODULE>(handle));
 #endif
 }
 
@@ -2725,7 +2725,7 @@ std::string exePath() {
 	DWORD bufSize = 1024;
 	std::unique_ptr<char[]> buf(new char[bufSize]);
 	while (true) {
-		auto s = GetModuleFileName(nullptr, buffer.get(), bufSize);
+		auto s = GetModuleFileName(nullptr, buf.get(), bufSize);
 		if (s >= 0) {
 			if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
 				bufSize *= 2;
