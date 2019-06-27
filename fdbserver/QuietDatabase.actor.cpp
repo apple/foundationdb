@@ -289,11 +289,15 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
 			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
 			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
-			
-			int64_t minServerTeamOnServer = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamNumberOnServer"));
-			int64_t maxServerTeamOnServer = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumberOnServer"));
-			int64_t minMachineTeamOnMachine = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
-			int64_t maxMachineTeamOnMachine = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
+
+			int64_t minServerTeamOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamNumberOnServer"));
+			int64_t maxServerTeamOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumberOnServer"));
+			int64_t minMachineTeamOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
+			int64_t maxMachineTeamOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
@@ -304,8 +308,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber ||
-				minMachineTeamOnMachine <= 0 ) {
+			if (healthyMachineTeamCount > desiredMachineTeamNumber || minMachineTeamOnMachine <= 0) {
 				TraceEvent("GetTeamCollectionValid")
 				    .detail("CurrentTeamNumber", currentTeamNumber)
 				    .detail("DesiredTeamNumber", desiredTeamNumber)
@@ -314,12 +317,12 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
 				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
 				    .detail("MaxMachineTeams", maxMachineTeamNumber)
-					.detail("MinTeamNumberOnServer", minServerTeamOnServer)
-					.detail("MaxTeamNumberOnServer", maxServerTeamOnServer)
-					.detail("MinMachineTeamNumberOnMachine", minMachineTeamOnMachine)
-					.detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
-					.detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
-					.detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
+				    .detail("MinTeamNumberOnServer", minServerTeamOnServer)
+				    .detail("MaxTeamNumberOnServer", maxServerTeamOnServer)
+				    .detail("MinMachineTeamNumberOnMachine", minMachineTeamOnMachine)
+				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
+				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
 				return false;
 			} else {
 				return true;
