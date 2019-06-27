@@ -4019,7 +4019,7 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 
 	delete(collection);
 
-	ASSERT(result == 10);
+	ASSERT(result >= 10);
 
 	return Void();
 }
@@ -4037,7 +4037,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 
 	int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams, 8);
 
-	ASSERT(result == 8);
+	ASSERT(result >= 8);
 
 	for(auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
 		auto teamCount = process->second->teams.size();
