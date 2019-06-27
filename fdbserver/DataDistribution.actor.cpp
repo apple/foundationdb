@@ -1367,6 +1367,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (leastUsedMachines.size()) {
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = g_random->randomChoice(leastUsedMachines);
+				TraceEvent("MXDEBUG", distributorId).detail("MachineID", tcMachineInfo->machineID.contents().toString()).detail("Servers", tcMachineInfo->getServersIDStr());
 				ASSERT(!tcMachineInfo->serversOnMachine.empty());
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
@@ -1384,8 +1385,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// that have the least-utilized server
 				team.clear();
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
-				if (!success) {
+				if (!success && configuration.storageTeamSize > 1) { // NOTE: selectReplicas() returns false always when storageTeamSize == 1
+					TraceEvent("MXDEBUG", distributorId).detail("TeamSize", configuration.storageTeamSize);
 					break;
+				}
+				if ( !success &&  configuration.storageTeamSize == 1 && forcedAttributes.size() > 0 ) {
+					TraceEvent(SevError, "MXDEBUG", distributorId).detail("TeamSize", configuration.storageTeamSize).detail("Success", success);
 				}
 				ASSERT(forcedAttributes.size() > 0);
 				team.push_back((UID*)machineLocalityMap.getObject(forcedAttributes[0]));
@@ -2043,7 +2048,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
 				    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
 				    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
-					.detail("DoBuildTeams", doBuildTeams)
+					.detail("DoBuildTeams", self->doBuildTeams)
 				    .trackLatest("TeamCollectionInfo");
 			}
 		}
@@ -3215,7 +3220,9 @@ ACTOR Future<Void> storageServerTracker(
 					//Restart the storeTracker for the new interface
 					storeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongStoreTypeOrDC = false;
+					self->doBuildTeams = true;
 					self->restartTeamBuilder.trigger();
+					self->traceTeamCollectionInfo();
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
 				}
