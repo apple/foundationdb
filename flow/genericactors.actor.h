@@ -198,7 +198,21 @@ Future<T> timeoutError( Future<T> what, double time, TaskPriority taskID = TaskP
 	}
 }
 
+
 ACTOR template <class T>
+Future<T> timeoutError( Future<ErrorOr<T>> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay ) {
+	Future<Void> end = delay( time, taskID );
+	choose {
+		when( ErrorOr<T> t = wait( what ) ) {
+			if (t.isError()) {
+				throw t.getError();
+			}
+			return t.get();
+		}
+		when( wait( end ) ) { throw timed_out(); }
+	}
+}
+
 Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
 	try {
 		state T t = wait( what );
