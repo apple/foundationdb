@@ -1342,7 +1342,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
 				// so that the invariant will not be violated.
-				int teamCount = machine.second->machineTeams.size();
+				int teamCount = 0;
+				for (auto& mt : machine.second->machineTeams) {
+					if ( isMachineTeamHealthy(mt) ) {
+						++teamCount;
+					}
+				}
 
 				if (teamCount < minTeamCount) {
 					leastUsedMachines.clear();
