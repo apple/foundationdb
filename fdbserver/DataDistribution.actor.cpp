@@ -1669,6 +1669,26 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::pair<Reference<TCMachineTeamInfo>, int>(retMT, minNumProcessTeams);
 	}
 
+	// Find the machine team with the largest number of server teams
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostProcessTeams() {
+		Reference<TCMachineTeamInfo> retMT;
+		int maxNumProcessTeams = std::numeric_limits<int>::min();
+
+		for (auto& mt : machineTeams) {
+			if (EXPENSIVE_VALIDATION) {
+				ASSERT(isServerTeamNumberCorrect(mt));
+			}
+			int size = mt->serverTeams.size();
+			if ( size > maxNumProcessTeams) {
+				maxNumProcessTeams = mt->serverTeams.size();
+				retMT = mt;
+			}
+		}
+
+		return std::pair<Reference<TCMachineTeamInfo>, int>(retMT, maxNumProcessTeams);
+	}
+
+
 	int getHealthyMachineTeamCount() {
 		int healthyTeamCount = 0;
 		for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
@@ -1864,6 +1884,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
 		    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
 		    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+			.detail("DoBuildTeams", doBuildTeams)
 		    .trackLatest("TeamCollectionInfo");
 
 		return addedTeams;
@@ -1900,6 +1921,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
 		    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
 		    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+			.detail("DoBuildTeams", doBuildTeams)
 		    .trackLatest("TeamCollectionInfo");
 
 		// Debug purpose
@@ -2021,6 +2043,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
 				    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
 				    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+					.detail("DoBuildTeams", doBuildTeams)
 				    .trackLatest("TeamCollectionInfo");
 			}
 		}
@@ -2417,6 +2440,14 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			for (teamIndex = 0; teamIndex < mt->serverTeams.size(); ++teamIndex) {
 				team = mt->serverTeams[teamIndex];
 				ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
+
+				// Check if a server will have 0 team after the team is removed
+				for (auto& s : team->getServers()) {
+					if ( s->teams.size() == 0 ) {
+						TraceEvent(SevError, "TeamRemoverTooAggressive").detail("Server", s->id).detail("Team", team->getServerIDsStr());
+						self->traceAllInfo(true);
+					}
+				}
 
 				// The team will be marked as a bad team
 				bool foundTeam = self->removeTeam(team);
