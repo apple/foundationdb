@@ -1680,7 +1680,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Each machine is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
-    // remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+	// remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
 	int getRemainingMachineTeamBudget() {
 		 int remainingMachineTeamBudget = 0;
 		for ( auto& m : machine_info ) {
