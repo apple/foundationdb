@@ -350,7 +350,11 @@ struct SimpleWorkload : FDBWorkload {
 
 	template <class Vec>
 	double accumulateMetric(const Vec& v) const {
-		return std::accumulate(v.begin(), v.end(), 0.0) / double(v.size());
+		double res = 0.0;
+		for (auto val : v) {
+			res += val;
+		}
+		return res / double(v.size());
 	}
 
 	void getMetrics(std::vector<FDBPerfMetric>& out) const override {

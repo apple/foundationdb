@@ -270,8 +270,8 @@ struct JVM {
 			char* name = charArrays.back();
 			charArrays.push_back(new char[sigStr.size() + 1]);
 			char* sig = charArrays.back();
-			memcpy(name, nameStr.begin(), nameStr.size());
-			memcpy(sig, sigStr.begin(), sigStr.size());
+			memcpy(name, nameStr.data(), nameStr.size());
+			memcpy(sig, sigStr.data(), sigStr.size());
 			name[nameStr.size()] = '\0';
 			sig[sigStr.size()] = '\0';
 			w.name = name;
