@@ -1302,6 +1302,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
 				}
 
+				if (knownCommittedVersion > results[new_safe_range_begin].end) {
+					knownCommittedVersion = results[new_safe_range_begin].end;
+				}
+
 				TraceEvent("GetDurableResult", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState)
 					.detail("RecoveryVersion", ((safe_range_end > 0) && (safe_range_end-1 < results.size())) ? results[ safe_range_end-1 ].end : -1)
 					.detail("EndVersion", results[ new_safe_range_begin ].end).detail("SafeBegin", safe_range_begin).detail("SafeEnd", safe_range_end)
@@ -1588,17 +1592,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->logSystemType = prevState.logSystemType;
 				logSystem->rejoins = rejoins;
 				logSystem->lockResults = lockResults;
-				logSystem->recoverAt = minEnd;
 				if (knownCommittedVersion > minEnd) {
-					// FIXME: Remove the Sev40 once disk snapshot v2 feature is enabled, in all other
-					// code paths we should never be here.
-					TraceEvent(SevError, "KCVIsInvalid")
-						.detail("KnownCommittedVersion", knownCommittedVersion)
-						.detail("MinEnd", minEnd);
-					logSystem->knownCommittedVersion = minEnd;
-				} else {
-					logSystem->knownCommittedVersion = knownCommittedVersion;
+					knownCommittedVersion =  minEnd;
 				}
+				logSystem->recoverAt = minEnd;
+				logSystem->knownCommittedVersion = knownCommittedVersion;
+				TraceEvent("RecoveryInfoFixed")
+					.detail("KCV", knownCommittedVersion)
+					.detail("MinEnd", minEnd);
 				logSystem->remoteLogsWrittenToCoreState = true;
 				logSystem->stopped = true;
 				logSystem->pseudoLocalities = prevState.pseudoLocalities;
