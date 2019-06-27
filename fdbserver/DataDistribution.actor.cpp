@@ -1342,7 +1342,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// so that the invariant will not be violated.
 				int teamCount = 0;
 				for (auto& mt : machine.second->machineTeams) {
-					if ( isMachineTeamHealthy(mt) ) {
+					if (isMachineTeamHealthy(mt)) {
 						++teamCount;
 					}
 				}
@@ -1435,7 +1435,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				addMachineTeam(machines);
 				addedMachineTeams++;
-				// Update the remaining machine team budget because the budget may decrease by any value between 1 and storageTeamSize
+				// Update the remaining machine team budget because the budget may decrease by any value between 1 and
+				// storageTeamSize
 				remainingMachineTeamBudget = getRemainingMachineTeamBudget();
 			} else {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
@@ -1507,9 +1508,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			int numTeams = 0;
 			for (auto& t : server.second->teams) {
-				 if (!t->isWrongConfiguration() && t->isHealthy()) {
-					 ++numTeams;
-				 }
+				if (!t->isWrongConfiguration() && t->isHealthy()) {
+					++numTeams;
+				}
 			}
 			if (numTeams < minTeamNumber) {
 				minTeamNumber = numTeams;
@@ -1604,11 +1605,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::pair<uint32_t, uint32_t> calculateMinMaxServerTeamNumOnServer() {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
-		for (auto& server : server_info ) {
-			if ( server.second->teams.size() < minTeamNumber ) {
+		for (auto& server : server_info) {
+			if (server.second->teams.size() < minTeamNumber) {
 				minTeamNumber = server.second->teams.size();
 			}
-			if ( server.second->teams.size() > maxTeamNumber ) {
+			if (server.second->teams.size() > maxTeamNumber) {
 				maxTeamNumber = server.second->teams.size();
 			}
 		}
@@ -1619,10 +1620,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& machine : machine_info) {
-			if ( machine.second->machineTeams.size() < minTeamNumber ) {
+			if (machine.second->machineTeams.size() < minTeamNumber) {
 				minTeamNumber = machine.second->machineTeams.size();
 			}
-			if ( machine.second->machineTeams.size() > maxTeamNumber ) {
+			if (machine.second->machineTeams.size() > maxTeamNumber) {
 				maxTeamNumber = machine.second->machineTeams.size();
 			}
 		}
@@ -1680,41 +1681,43 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Each machine is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
-	// remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+	// remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has
+	// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
 	int getRemainingMachineTeamBudget() {
-		 int remainingMachineTeamBudget = 0;
-		for ( auto& m : machine_info ) {
+		int remainingMachineTeamBudget = 0;
+		for (auto& m : machine_info) {
 			int healthyMTCount = 0;
-			for ( auto& mt : m.second->machineTeams ) {
-				if ( isMachineTeamHealthy(mt) ) {
+			for (auto& mt : m.second->machineTeams) {
+				if (isMachineTeamHealthy(mt)) {
 					++healthyMTCount;
 				}
 			}
-			remainingMachineTeamBudget += std::max(0, (int) (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - healthyMTCount));
+			remainingMachineTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - healthyMTCount));
 		}
 
-		// We over-provision the remainingMachineTeamBudget because we do not know when a new machine team is built, how many times it can be counted into the budget
-		// For example, when a new machine is added, a new machine team only consume 1 such budget
+		// We over-provision the remainingMachineTeamBudget because we do not know, when a new machine team is built,
+		// how many times it can be counted into the budget. For example, when a new machine is added,
+		// a new machine team only consume 1 such budget
 		return remainingMachineTeamBudget;
 	}
 
 	// Each server is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
 	int getRemainingServerTeamBudget() {
-		// remainingTeamBudget is the number of teams needed to ensure every server has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+		// remainingTeamBudget is the number of teams needed to ensure every server has
+		// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
 		int remainingTeamBudget = 0;
-		for ( auto& s : server_info ) {
+		for (auto& s : server_info) {
 			int numValidTeams = 0;
-			for ( auto& team : s.second->teams ) {
-				if ( !team->isWrongConfiguration() && team->isHealthy() ) {
+			for (auto& team : s.second->teams) {
+				if (!team->isWrongConfiguration() && team->isHealthy()) {
 					++numValidTeams;
 				}
 			}
-			remainingTeamBudget += std::max(0, (int) (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - numValidTeams));
+			remainingTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - numValidTeams));
 		}
 
 		return remainingTeamBudget;
 	}
-		
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
@@ -1747,7 +1750,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
-			.detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
+		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
@@ -1839,8 +1842,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-		std::pair<int, int>  minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
-		std::pair<int, int>  minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
+		std::pair<int, int> minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
+		std::pair<int, int> minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
 
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
@@ -1855,10 +1858,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
-			.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
-			.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
-			.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
-			.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+		    .detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+		    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+		    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+		    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 		    .trackLatest("TeamCollectionInfo");
 
 		return addedTeams;
@@ -1875,8 +1878,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-		std::pair<int, int>  minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
-		std::pair<int, int>  minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
+		std::pair<int, int> minMaxTeamNumberOnServer = calculateMinMaxServerTeamNumOnServer();
+		std::pair<int, int> minMaxMachineTeamNumberOnMachine = calculateMinMaxMachineTeamNumOnMachine();
 
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
@@ -1891,10 +1894,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
-			.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
-			.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
-			.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
-			.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+		    .detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+		    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+		    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+		    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 		    .trackLatest("TeamCollectionInfo");
 
 		// Debug purpose
@@ -1950,7 +1953,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 			// Each server is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
-			// remainingTeamBudget is the number of teams needed to ensure every server has  SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+			// remainingTeamBudget is the number of teams needed to ensure every server has
+			// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
 			int remainingTeamBudget = self->getRemainingServerTeamBudget();
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
@@ -1994,8 +1998,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 				int healthyMachineTeamCount = self->getHealthyMachineTeamCount();
 
-				std::pair<int, int>  minMaxTeamNumberOnServer = self->calculateMinMaxServerTeamNumOnServer();
-				std::pair<int, int>  minMaxMachineTeamNumberOnMachine = self->calculateMinMaxMachineTeamNumOnMachine();
+				std::pair<int, int> minMaxTeamNumberOnServer = self->calculateMinMaxServerTeamNumOnServer();
+				std::pair<int, int> minMaxMachineTeamNumberOnMachine = self->calculateMinMaxMachineTeamNumOnMachine();
 
 				TraceEvent("TeamCollectionInfo", self->distributorId)
 				    .detail("Primary", self->primary)
@@ -2010,10 +2014,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("MaxMachineTeams", maxMachineTeams)
 				    .detail("TotalHealthyMachine", totalHealthyMachineCount)
-					.detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
-					.detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
-					.detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
-					.detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
+				    .detail("MinTeamNumberOnServer", minMaxTeamNumberOnServer.first)
+				    .detail("MaxTeamNumberOnServer", minMaxTeamNumberOnServer.second)
+				    .detail("MinMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.first)
+				    .detail("MaxMachineTeamNumberOnMachine", minMaxMachineTeamNumberOnMachine.second)
 				    .trackLatest("TeamCollectionInfo");
 			}
 		}
@@ -3056,7 +3060,8 @@ ACTOR Future<Void> storageServerTracker(
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
-			if ( lastIsUnhealthy && !status.isUnhealthy() && server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER ) {
+			if (lastIsUnhealthy && !status.isUnhealthy() &&
+			    server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER) {
 				self->doBuildTeams = true;
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
