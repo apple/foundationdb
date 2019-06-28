@@ -1897,7 +1897,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Advance time so that we will not have multiple TeamCollectionInfo at the same time, otherwise
 		// simulation test will randomly pick one TeamCollectionInfo trace, which could be the one before build teams
-		wait(delay(0.01));
+		//wait(delay(0.01));
 
 		// Debug purpose
 //		if (healthyMachineTeamCount > desiredMachineTeams || machineTeams.size() > maxMachineTeams) {
