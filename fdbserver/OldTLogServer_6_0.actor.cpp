@@ -401,7 +401,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered) {
-		if(tag.locality != tagLocalityLogRouter && allTags.size() && !allTags.count(tag) && popped <= recoveredAt) {
+		if(tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && allTags.size() && !allTags.count(tag) && popped <= recoveredAt) {
 			popped = recoveredAt + 1;
 		}
 		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, nothingPersistent, poppedRecently, unpoppedRecovered) );

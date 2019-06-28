@@ -61,7 +61,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		state std::vector<Future<GetValueReply>> requests;
 		requests.reserve(100);
 		loop {
-			state StorageQueuingMetricsReply metrics = wait(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{}));
+			state StorageQueuingMetricsReply metrics = wait(brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{})));
 			auto durabilityLag = metrics.version - metrics.durableVersion;
 			double expectedRateLimit = 1.0;
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
