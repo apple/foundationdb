@@ -3190,7 +3190,7 @@ ACTOR Future<Void> storageServerTracker(
 							self->badTeamRemover = removeBadTeams(self);
 							self->addActor.send(self->badTeamRemover);
 							// The team number changes, so we need to update the team number info
-							//self->traceTeamCollectionInfo();
+							self->traceTeamCollectionInfo();
 						}
 					}
 
@@ -3458,6 +3458,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->redundantTeamRemover = teamRemover(self);
 			self->addActor.send(self->redundantTeamRemover);
 		}
+		self->traceTeamCollectionInfo();
 
 		if(self->includedDCs.size()) {
 			//start this actor before any potential recruitments can happen
@@ -3470,8 +3471,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers( self ));
 		self->addActor.send(monitorHealthyTeams( self ));
 		self->addActor.send(waitHealthyZoneChange( self ));
-
-		self->traceTeamCollectionInfo();
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
