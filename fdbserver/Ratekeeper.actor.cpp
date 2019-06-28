@@ -40,7 +40,7 @@ enum limitReason_t {
 	storage_server_min_free_space,  // a storage server's normal limits are being reduced by low free space
 	storage_server_min_free_space_ratio,  // a storage server's normal limits are being reduced by a low free space ratio
 	log_server_min_free_space,
-	log_server_min_free_space_ratio
+	log_server_min_free_space_ratio,
 	limitReason_t_end
 };
 
