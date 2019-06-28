@@ -264,6 +264,7 @@ def transactional(*tr_args, **tr_kwargs):
                 # last = start
 
                 while not committed:
+                    ret = None
                     try:
                         ret = func(*largs, **kwargs)
                         tr.commit().wait()
