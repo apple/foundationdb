@@ -305,18 +305,16 @@ struct Peer : NonCopyable {
 	int peerReferences;
 	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
-	double lastSentTime;
+	double lastDataPacketSentTime;
 
-	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), 
-		  compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastSentTime(now())
-	{
+	explicit Peer(TransportData* transport, NetworkAddress const& destination)
+	  : transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0),
+	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true),
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {
 		connect = connectionKeeper(this);
 	}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
-		if (rp)
-			lastSentTime = now();
 		unsent.setWriteBuffer(pb);
 		if (rp) reliable.insert(rp);
 		if (firstUnsent) dataToSend.trigger();
@@ -408,7 +406,8 @@ struct Peer : NonCopyable {
 				if (lastBytesReceived < peer->bytesReceived) {
 					lastRefreshed = now();
 					lastBytesReceived = peer->bytesReceived;
-				} else if (lastRefreshed < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT*2.5) {
+				} else if (lastRefreshed < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT *
+				                                       FLOW_KNOBS->CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER) {
 					throw connection_idle();
 				}
 			}
@@ -417,27 +416,13 @@ struct Peer : NonCopyable {
 		state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 		loop {
 			const bool pendingPacketsEmpty = peer->reliable.empty() && peer->unsent.empty();
-
-			if (peer->peerReferences == 0 && pendingPacketsEmpty) {
-				throw connection_unreferenced();
+			if (pendingPacketsEmpty && (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
+			    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
+				if (peer->peerReferences == 0)
+					throw connection_unreferenced();
+				else if (peer->destination.isPublic())
+					throw connection_idle();
 			}
-
-			// TODO: Investigate connection idling at server-side peer too.
-			const bool monitorStateActive = peer->destination.isPublic() &&
-				(peer->lastSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
-				(peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT);
-			if (!monitorStateActive) {
-				choose {
-					when(wait(peer->dataToSend.onTrigger())){
-						peer->lastSentTime = now();
-					}
-					when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT))) {
-						throw connection_idle();
-					}
-				}
-			}
-
-			wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
 
 			// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 			state ReplyPromise<Void> reply;
@@ -447,8 +432,6 @@ struct Peer : NonCopyable {
 			loop {
 				choose {
 					when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
-						// TODO: Since server will not ping clients (but will respond to incoming pings), is this
-						//   a safe metric, or instead we should fail after multiple timeouts?
 						if(startingBytes == peer->bytesReceived) {
 							TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
 							throw connection_failed();
@@ -470,6 +453,8 @@ struct Peer : NonCopyable {
 					}
 				}
 			}
+
+			wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
 		}
 	}
 
@@ -1262,7 +1247,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 #endif
 
 		peer->send(pb, rp, firstUnsent);
-
+		if (destination.token != WLTOKEN_PING_PACKET) {
+			peer->lastDataPacketSentTime = now();
+		}
 		return (PacketID)rp;
 	}
 }
