@@ -72,8 +72,7 @@ const char* limitReasonDesc[] = {
 	"Storage server running out of space (approaching 100MB limit).",
 	"Storage server running out of space (approaching 5% limit).",
 	"Log server running out of space (approaching 100MB limit).",
-	"Log server running out of space (approaching 5% limit).",
-	"Storage server is overwhelmed by read workload",
+	"Log server running out of space (approaching 5% limit)."
 };
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
