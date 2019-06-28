@@ -542,9 +542,8 @@ class Transaction(TransactionRead):
         return version.value
 
     def get_approximate_size(self):
-        size = ctypes.c_int()
-        self.capi.fdb_transaction_get_approximate_size(self.tpointer, ctypes.byref(size))
-        return size.value
+        """Get the approximate commit size of the transaction."""
+        return FutureVersion(self.capi.fdb_transaction_get_approximate_size(self.tpointer))
 
     def get_versionstamp(self):
         return Key(self.capi.fdb_transaction_get_versionstamp(self.tpointer))
@@ -1458,9 +1457,8 @@ def init_c_api():
     _capi.fdb_transaction_get_committed_version.restype = ctypes.c_int
     _capi.fdb_transaction_get_committed_version.errcheck = check_error_code
 
-    _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
-    _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_int
-    _capi.fdb_transaction_get_approximate_size.errcheck = check_error_code
+    _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p

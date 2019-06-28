@@ -195,10 +195,18 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
-uint32_t DLTransaction::getApproximateSize() {
-	int32_t size;
-	throwIfError(api->transactionGetApproximateSize(tr, &size));
-	return size;
+ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
+	if(!api->transactionGetApproximateSize) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->transactionGetApproximateSize(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t size;
+		FdbCApi::fdb_error_t error = api->futureGetVersion(f, &size);
+		ASSERT(!error);
+		return size;
+	});
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -293,7 +301,8 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
-	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size");
+	// TODO: change to 620 for 6.2 release
+	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 610);
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
@@ -602,12 +611,10 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	return invalidVersion;
 }
 
-uint32_t MultiVersionTransaction::getApproximateSize() {
+ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
 	auto tr = getTransaction();
-	if (tr.transaction) {
-		return tr.transaction->getApproximateSize();
-	}
-	return 0;
+	auto f = tr.transaction ? tr.transaction->getApproximateSize() : ThreadFuture<int64_t>(Never());
+	return abortableFuture(f, tr.onChange);
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {

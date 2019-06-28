@@ -274,8 +274,8 @@ Version ThreadSafeTransaction::getCommittedVersion() {
 	return tr->getCommittedVersion();
 }
 
-uint32_t ThreadSafeTransaction::getApproximateSize() {
-	return tr->getApproximateSize();
+ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
+	return onMainThread([this]() -> Future<int64_t> { return tr->getApproximateSize(); });
 }
 
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {

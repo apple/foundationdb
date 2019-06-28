@@ -2314,6 +2314,7 @@ void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {
 	}
 
 	tr.transaction.read_conflict_ranges.push_back_deep( tr.arena, r );
+	printf("%x read_conflict_ranges size: %d, %d\n", this, tr.transaction.read_conflict_ranges.size(), tr.transaction.read_conflict_ranges.expectedSize());
 }
 
 void Transaction::makeSelfConflicting() {
@@ -2337,6 +2338,7 @@ void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflic
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, value );
 	t.mutations.push_back( req.arena, MutationRef( MutationRef::SetValue, r.begin, v ) );
+	printf("%x set mutation size: %d, %d\n", this, t.mutations.size(), t.mutations.expectedSize());
 
 	if( addConflictRange ) {
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2470,6 +2472,7 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 	}
 
 	t.write_conflict_ranges.push_back_deep( req.arena, r );
+	printf("%x write_conflict_ranges size: %d, %d\n", this, t.write_conflict_ranges.size(), t.write_conflict_ranges.expectedSize());
 }
 
 double Transaction::getBackoff(int errCode) {
@@ -2824,7 +2827,7 @@ Future<Void> Transaction::commitMutations() {
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
 
-		size_t transactionSize = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() + tr.transaction.write_conflict_ranges.expectedSize();
+		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
 				.suppressFor(1.0)
@@ -3176,9 +3179,11 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
-uint32_t Transaction::getApproximateSize() {
-	return tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
+uint32_t Transaction::getSize() {
+	auto s = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
 	       tr.transaction.write_conflict_ranges.expectedSize();
+	printf("%x approximate size: %d, mutation size: %d\n", this, s, tr.transaction.mutations.size());
+	return s;
 }
 
 Future<Void> Transaction::onError( Error const& e ) {

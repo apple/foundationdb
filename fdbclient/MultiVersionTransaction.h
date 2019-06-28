@@ -84,7 +84,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	
 	FDBFuture* (*transactionCommit)(FDBTransaction *tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction *tr, int64_t *outVersion);
-	fdb_error_t (*transactionGetApproximateSize)(FDBTransaction *tr, int32_t *outSize);
+	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction *tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength);
 	FDBFuture* (*transactionOnError)(FDBTransaction *tr, fdb_error_t error);
 	void (*transactionReset)(FDBTransaction *tr);
@@ -144,7 +144,7 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	uint32_t getApproximateSize() override;
+	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value=Optional<StringRef>()) override;
 
@@ -241,7 +241,7 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	uint32_t getApproximateSize() override;
+	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value=Optional<StringRef>()) override;
 

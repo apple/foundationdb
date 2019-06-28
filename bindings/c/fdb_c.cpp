@@ -585,8 +585,8 @@ fdb_error_t fdb_transaction_get_committed_version( FDBTransaction* tr,
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_transaction_get_approximate_size(FDBTransaction* tr, uint32_t* out_size) {
-	CATCH_AND_RETURN(*out_size = TXN(tr)->getApproximateSize(););
+FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getApproximateSize().extractPtr();
 }
 
 extern "C" DLLEXPORT

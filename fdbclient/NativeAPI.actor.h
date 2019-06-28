@@ -284,7 +284,7 @@ public:
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
-	uint32_t getApproximateSize();
+	uint32_t getSize();
 	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 

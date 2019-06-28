@@ -27,6 +27,9 @@
 #include "fdbclient/RYWIterator.h"
 #include <list>
 
+// Estimated number of overhead bytes per mutation.
+#define RYW_TRANSACTION_SIZE_OVERHEAD  30
+
 //SOMEDAY: Optimize getKey to avoid using getRange
 
 struct ReadYourWritesTransactionOptions {
@@ -98,7 +101,7 @@ public:
 
 	Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
-	uint32_t getApproximateSize() { return tr.getApproximateSize(); }
+	int64_t getApproximateSize() { return approximateSize; }
 	Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
@@ -141,6 +144,7 @@ private:
 	Promise<Void> resetPromise;
 	AndFuture reading;
 	int retries;
+	int64_t approximateSize;
 	Future<Void> timeoutActor;
 	double creationTime;
 	bool commitStarted;

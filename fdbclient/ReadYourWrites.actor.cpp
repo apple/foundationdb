@@ -1366,6 +1366,7 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 		return;
 	}
 
+	approximateSize += r.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 	if(options.readYourWritesDisabled) {
 		tr.addReadConflictRange(r);
 		return;
@@ -1605,6 +1606,7 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 		throw key_outside_legal_range();
 
 	if(options.readYourWritesDisabled ) {
+		approximateSize += key.expectedSize() + value.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 		return tr.set(key, value, addWriteConflict);
 	}
 
@@ -1616,6 +1618,7 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 	
 	KeyRef k = KeyRef( arena, key );
 	ValueRef v = ValueRef( arena, value );
+	approximateSize += k.expectedSize() + v.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 
 	writes.mutate(k, MutationRef::SetValue, v, addWriteConflict);
 	RYWImpl::triggerWatches(this, key, value);
@@ -1633,6 +1636,7 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 		throw key_outside_legal_range();
 
 	if( options.readYourWritesDisabled ) {
+		approximateSize += range.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 		return tr.clear(range, addWriteConflict);
 	}
 	
@@ -1653,6 +1657,7 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 	}
 
 	r = KeyRangeRef( arena, r );
+	approximateSize += r.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 
 	writes.clear(r, addWriteConflict);
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
@@ -1676,6 +1681,7 @@ void ReadYourWritesTransaction::clear( const KeyRef& key ) {
 	}
 	
 	KeyRangeRef r = singleKeyRange( key, arena );
+	approximateSize += r.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 
 	//SOMEDAY: add an optimized single key clear to write map
 	writes.clear(r, addWriteConflict);
@@ -1700,6 +1706,7 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if (key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
 		return key_too_large();
 
+	approximateSize += key.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 	return RYWImpl::watch(this, key);
 }
 
@@ -1730,6 +1737,7 @@ void ReadYourWritesTransaction::addWriteConflictRange( KeyRangeRef const& keys )
 		return;
 	}
 
+	approximateSize += r.expectedSize() + RYW_TRANSACTION_SIZE_OVERHEAD;
 	if(options.readYourWritesDisabled) {
 		tr.addWriteConflictRange(r);
 		return;
@@ -1855,6 +1863,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	r.resetPromise = Promise<Void>();
 	deferredError = std::move( r.deferredError );
 	retries = r.retries;
+	approximateSize = r.approximateSize;
 	timeoutActor = r.timeoutActor;
 	creationTime = r.creationTime;
 	commitStarted = r.commitStarted;
@@ -1871,6 +1880,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	arena( std::move(r.arena) ), 
 	reading( std::move(r.reading) ),
 	retries( r.retries ), 
+	approximateSize(0),
 	creationTime( r.creationTime ), 
 	deferredError( std::move(r.deferredError) ), 
 	timeoutActor( std::move(r.timeoutActor) ),
@@ -1922,6 +1932,7 @@ void ReadYourWritesTransaction::resetRyow() {
 	readConflicts = CoalescedKeyRefRangeMap<bool>();
 	watchMap.clear();
 	reading = AndFuture();
+	approximateSize = 0;
 	commitStarted = false;
 
 	deferredError = Error();
@@ -1942,6 +1953,7 @@ void ReadYourWritesTransaction::cancel() {
 
 void ReadYourWritesTransaction::reset() {
 	retries = 0;
+	approximateSize = 0;
 	creationTime = now();
 	timeoutActor.cancel();
 	persistentOptions.clear();

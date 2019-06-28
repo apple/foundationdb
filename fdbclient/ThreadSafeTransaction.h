@@ -87,7 +87,7 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	uint32_t getApproximateSize() override;
+	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() ) override;
 
