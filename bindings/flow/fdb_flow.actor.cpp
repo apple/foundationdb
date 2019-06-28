@@ -148,7 +148,7 @@ namespace FDB {
 
 		void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
-		uint32_t getApproximateSize() override;
+		Future<int64_t> getApproximateSize() override;
 		Future<Void> onError(Error const& e) override;
 
 		void cancel() override;
@@ -410,10 +410,12 @@ namespace FDB {
 		}
 	}
 
-	uint32_t TransactionImpl::getApproximateSize() {
-		uint32_t size;
-		throw_on_error(fdb_transaction_get_approximate_size(tr, &size));
-		return size;
+	Future<int64_t> TransactionImpl::getApproximateSize() {
+		return backToFuture<int64_t>(fdb_transaction_get_approximate_size(tr), [](Reference<CFuture> f) {
+			int64_t size;
+			throw_on_error(fdb_future_get_version(f->f, &size));
+			return size;
+		});
 	}
 
 	Future<Void> TransactionImpl::onError(Error const& e) {
