@@ -381,8 +381,13 @@ private:
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
 		// SOMEDAY: Make this value variable? Dependent on buggification status?
-		wait( delay( 20.0 ) );
-		TraceEvent(SevError, "LeakedConnection", self->dbgid).error(connection_leaked()).detail("MyAddr", self->process->address).detail("PeerAddr", self->peerEndpoint).detail("PeerId", self->peerId).detail("Opened", self->opened);
+		wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 4 ) );
+		TraceEvent(SevError, "LeakedConnection", self->dbgid)
+		    .error(connection_leaked())
+		    .detail("MyAddr", self->process->address)
+		    .detail("PeerAddr", self->peerEndpoint)
+		    .detail("PeerId", self->peerId)
+		    .detail("Opened", self->opened);
 		return Void();
 	}
 };
