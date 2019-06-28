@@ -44,15 +44,16 @@ ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Ve
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
-	OldLogData() : epochEnd(0), logRouterTags(0) {}
+	OldLogData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template<class T>
 	explicit OldLogData(const T& conf)
-		: logRouterTags(conf.logRouterTags), epochEnd(conf.epochEnd),
+		: logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochEnd(conf.epochEnd),
 		  pseudoLocalities(conf.pseudoLocalities)
 	{
 		tLogs.resize(conf.tLogs.size());
@@ -123,7 +124,7 @@ TLogSet::TLogSet(const LogSet& rhs) :
 }
 
 OldTLogConf::OldTLogConf(const OldLogData& oldLogData) :
-	logRouterTags(oldLogData.logRouterTags), epochEnd(oldLogData.epochEnd),
+	logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochEnd(oldLogData.epochEnd),
 	pseudoLocalities(oldLogData.pseudoLocalities)
 {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
@@ -146,7 +147,7 @@ CoreTLogSet::CoreTLogSet(const LogSet& logset) :
 }
 
 OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData) :
-	logRouterTags(oldData.logRouterTags), epochEnd(oldData.epochEnd),
+	logRouterTags(oldData.logRouterTags), txsTags(oldData.txsTags), epochEnd(oldData.epochEnd),
 	pseudoLocalities(oldData.pseudoLocalities)
 {
 	for (const Reference<LogSet>& logSet : oldData.tLogs) {
@@ -162,6 +163,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<Reference<LogSet>> tLogs;
 	int expectedLogSets;
 	int logRouterTags;
+	int txsTags;
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
@@ -188,7 +190,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(LogSystemType::empty), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
+	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -264,6 +266,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs.reserve(lsConf.tLogs.size());
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->logRouterTags = lsConf.logRouterTags;
+		logSystem->txsTags = lsConf.txsTags;
 		logSystem->recruitmentID = lsConf.recruitmentID;
 		logSystem->stopped = lsConf.stopped;
 		if(useRecoveredAt) {
@@ -294,6 +297,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->tLogs.emplace_back(new LogSet(tLogSet));
 			}
 			logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
+			logSystem->txsTags = lsConf.oldTLogs[0].txsTags;
 			//logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
 
 			for (int i = 1; i < lsConf.oldTLogs.size(); i++ ) {
@@ -316,6 +320,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		newState.tLogs.clear();
 		newState.logRouterTags = logRouterTags;
+		newState.txsTags = txsTags;
 		newState.pseudoLocalities = pseudoLocalities;
 		for (const auto &t : tLogs) {
 			if (t->logServers.size()) {
@@ -746,10 +751,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		TraceEvent("TLogPeekTxs", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
 
-		int maxTxsTags = tLogs[0]->logServers.size();
+		int maxTxsTags = txsTags;
+		bool needsOldTxs = txsTags==0;
 		for(auto& it : oldLogData) {
-			maxTxsTags = std::max<int>(maxTxsTags, it.tLogs[0]->logServers.size());
+			maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
+			needsOldTxs = needsOldTxs || it.txsTags==0;
 		}
+		
 
 		if(peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
@@ -757,7 +765,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
 			}
 			//SOMEDAY: remove once upgrades from 6.2 are no longer supported
-			cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
+			if(needsOldTxs) {
+				cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
+			}
 
 			return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false) );
 		}
@@ -769,7 +779,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					cursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, end, true, peekLocality));
 				}
 				//SOMEDAY: remove once upgrades from 6.2 are no longer supported
-				cursors.push_back(peekLocal(dbgid, txsTag, begin, end, true, peekLocality));
+				if(needsOldTxs) {
+					cursors.push_back(peekLocal(dbgid, txsTag, begin, end, true, peekLocality));
+				}
 
 				return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false) );
 			}
@@ -786,8 +798,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				allCursors.push_back(peekAll(dbgid, localEnd, end, Tag(tagLocalityTxs, i), true));
 			}
 			//SOMEDAY: remove once upgrades from 6.2 are no longer supported
-			localCursors.push_back(peekLocal(dbgid, txsTag, begin, localEnd, true, peekLocality));
-			allCursors.push_back(peekAll(dbgid, localEnd, end, txsTag, true));
+			if(needsOldTxs) {
+				localCursors.push_back(peekLocal(dbgid, txsTag, begin, localEnd, true, peekLocality));
+				allCursors.push_back(peekAll(dbgid, localEnd, end, txsTag, true));
+			}
 
 			cursors[1] = Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(localCursors, begin, localEnd, false) );
 			cursors[0] = Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(allCursors, localEnd, end, false) );
@@ -801,7 +815,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
 				}
 				//SOMEDAY: remove once upgrades from 6.2 are no longer supported
-				cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
+				if(needsOldTxs) {
+					cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
+				}
 
 				return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false) );
 			}
@@ -952,13 +968,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual void popTxs( Version upTo, int8_t popLocality ) {
-		if(tLogs.size()) {
-			for(int i = 0; i < tLogs[0]->logServers.size(); i++) {
+		if(txsTags == 0) {
+			pop(upTo, txsTag, 0, popLocality);
+		} else {
+			for(int i = 0; i < txsTags; i++) {
 				pop(upTo, Tag(tagLocalityTxs, i), 0, popLocality);
 			}
 		}
-		//SOMEDAY: remove once upgrades from 6.2 are no longer supported
-		pop(upTo, txsTag, 0, popLocality);
 	}
 
 	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) {
@@ -1086,6 +1102,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.logSystemType = logSystemType;
 		logSystemConfig.expectedLogSets = expectedLogSets;
 		logSystemConfig.logRouterTags = logRouterTags;
+		logSystemConfig.txsTags = txsTags;
 		logSystemConfig.recruitmentID = recruitmentID;
 		logSystemConfig.stopped = stopped;
 		logSystemConfig.recoveredAt = recoveredAt;
@@ -1179,8 +1196,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Tag getRandomTxsTag() {
-		ASSERT(tLogs.size());
-		return Tag(tagLocalityTxs, deterministicRandom()->randomInt(0, tLogs[0]->logServers.size()));
+		if(txsTags==0) {
+			return txsTag;
+		}
+		return Tag(tagLocalityTxs, deterministicRandom()->randomInt(0, txsTags));
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
@@ -1529,6 +1548,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				lastEnd = minEnd;
 				logSystem->tLogs = logServers;
 				logSystem->logRouterTags = prevState.logRouterTags;
+				logSystem->txsTags = prevState.txsTags;
 				logSystem->oldLogData = oldLogData;
 				logSystem->logSystemType = prevState.logSystemType;
 				logSystem->rejoins = rejoins;
@@ -1786,21 +1806,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 
 			if(oldLogSystem->tLogs.size()) {
-				int maxTxsTags = oldLogSystem->tLogs[0]->logServers.size();
+				int maxTxsTags = oldLogSystem->txsTags;
+				bool needsOldTxs = oldLogSystem->txsTags==0;
 				for(auto& it : oldLogSystem->oldLogData) {
-					maxTxsTags = std::max<int>(maxTxsTags, it.tLogs[0]->logServers.size());
+					maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
+					needsOldTxs = needsOldTxs || it.txsTags==0;
 				}
-				for(int i = -1; i < maxTxsTags; i++) {
+				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 					locations.clear();
 					logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
-				for(int i = 0; i < self->tLogs[0]->logServers.size(); i++) {
-					localTags.push_back(Tag(tagLocalityTxs, i));
+				if(self->txsTags == 0) {
+					localTags.push_back(txsTag);
+				} else {
+					for(int i = 0; i < self->txsTags; i++) {
+						localTags.push_back(Tag(tagLocalityTxs, i));
+					}
 				}
-				localTags.push_back(txsTag);
 			}
 		}
 
@@ -1820,7 +1845,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.allTags = localTags;
 			req.startVersion = logSet->startVersion;
 			req.logRouterTags = 0;
-			req.txsTags = self->tLogs[0]->logServers.size();
+			req.txsTags = self->txsTags;
 		}
 
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
@@ -1858,6 +1883,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->recoveredAt = oldLogSystem->recoverAt;
 		logSystem->repopulateRegionAntiQuorum = configuration.repopulateRegionAntiQuorum;
 		logSystem->recruitmentID = deterministicRandom()->randomUniqueID();
+		logSystem->txsTags = recr.tLogs.size();
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
 		if(configuration.usableRegions > 1) {
@@ -1876,12 +1902,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state RegionInfo region = configuration.getRegion(recr.dcId);
 
-		state int maxTxsTags = 0;
-		if(oldLogSystem->tLogs.size()) {
-			maxTxsTags = oldLogSystem->tLogs[0]->logServers.size();
-			for(auto& it : oldLogSystem->oldLogData) {
-				maxTxsTags = std::max<int>(maxTxsTags, it.tLogs[0]->logServers.size());
-			}
+		state int maxTxsTags = oldLogSystem->txsTags;
+		state bool needsOldTxs = oldLogSystem->txsTags==0;
+		for(auto& it : oldLogSystem->oldLogData) {
+			maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
+			needsOldTxs = needsOldTxs || it.txsTags==0;
 		}
 
 		if(region.satelliteTLogReplicationFactor > 0) {
@@ -1908,7 +1933,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			logSystem->tLogs[1]->logServers.resize( recr.satelliteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 			logSystem->tLogs[1]->updateLocalitySet(logSystem->tLogs[1]->tLogLocalities);
-			logSystem->tLogs[1]->populateSatelliteTagLocations(logSystem->logRouterTags,oldLogSystem->logRouterTags,recr.tLogs.size(),maxTxsTags);
+			logSystem->tLogs[1]->populateSatelliteTagLocations(logSystem->logRouterTags,oldLogSystem->logRouterTags,logSystem->txsTags,maxTxsTags);
 			logSystem->expectedLogSets++;
 		}
 
@@ -1989,17 +2014,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			reqs[ logSystem->tLogs[0]->bestLocationFor( tag ) ].recoverTags.push_back( tag );
 		}
 		if(oldLogSystem->tLogs.size()) {
-			for(int i = -1; i < maxTxsTags; i++) {
+			for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 				Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 				locations.clear();
 				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 				for(int loc : locations)
 					reqs[ loc ].recoverTags.push_back( tag );
 			}
-			for(int i = 0; i < recr.tLogs.size(); i++) {
-				localTags.push_back(Tag(tagLocalityTxs, i));
+			if(logSystem->txsTags == 0) {
+				localTags.push_back(txsTag);
+			} else {
+				for(int i = 0; i < logSystem->txsTags; i++) {
+					localTags.push_back(Tag(tagLocalityTxs, i));
+				}
 			}
-			localTags.push_back(txsTag);
 		}
 
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
@@ -2018,7 +2046,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.allTags = localTags;
 			req.startVersion = logSystem->tLogs[0]->startVersion;
 			req.logRouterTags = logSystem->logRouterTags;
-			req.txsTags = recr.tLogs.size();
+			req.txsTags = logSystem->txsTags;
 		}
 
 		for( int i = 0; i < recr.tLogs.size(); i++ )
@@ -2039,17 +2067,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					sreqs[ loc ].recoverTags.push_back( tag );
 			}
 			if(oldLogSystem->tLogs.size()) {
-				for(int i = -1; i < maxTxsTags; i++) {
+				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 					locations.clear();
 					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}
-				for(int i = 0; i < recr.tLogs.size(); i++) {
-					satelliteTags.push_back(Tag(tagLocalityTxs, i));
+				if(logSystem->txsTags == 0) {
+					satelliteTags.push_back(txsTag);
+				} else {
+					for(int i = 0; i < logSystem->txsTags; i++) {
+						satelliteTags.push_back(Tag(tagLocalityTxs, i));
+					}
 				}
-				satelliteTags.push_back(txsTag);
 			}
 			
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
@@ -2068,7 +2099,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.allTags = satelliteTags;
 				req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 				req.logRouterTags = logSystem->logRouterTags;
-				req.txsTags = recr.tLogs.size();
+				req.txsTags = logSystem->txsTags;
 			}
 
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )

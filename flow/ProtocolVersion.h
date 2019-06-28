@@ -86,6 +86,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, IPv6);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

@@ -76,14 +76,15 @@ struct CoreTLogSet {
 struct OldTLogCoreData {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
-	OldTLogCoreData() : epochEnd(0), logRouterTags(0) {}
+	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator == (OldTLogCoreData const& rhs) const { 
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
+		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	template <class Archive>
@@ -97,7 +98,7 @@ struct OldTLogCoreData {
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
 		if (ar.protocolVersion().hasPseudoLocalities()) {
-			serializer(ar, pseudoLocalities);
+			serializer(ar, pseudoLocalities, txsTags);
 		}
 	}
 };
@@ -105,12 +106,13 @@ struct OldTLogCoreData {
 struct DBCoreState {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
 	
-	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
+	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -130,7 +132,7 @@ struct DBCoreState {
 	}
 
 	bool isEqual(DBCoreState const& r) const {
-		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags && pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
 
@@ -146,7 +148,7 @@ struct DBCoreState {
 		if(ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
 			if (ar.protocolVersion().hasPseudoLocalities()) {
-				serializer(ar, pseudoLocalities);
+				serializer(ar, pseudoLocalities, txsTags);
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
