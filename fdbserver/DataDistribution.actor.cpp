@@ -1510,12 +1510,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Only pick healthy server, which is not failed or excluded.
 			if (server_status.get(server.first).isUnhealthy()) continue;
 
-			int numTeams = 0;
-			for (auto& t : server.second->teams) {
-				if (!t->isWrongConfiguration() && t->isHealthy()) {
-					++numTeams;
-				}
-			}
+			int numTeams = server.second->teams.size();
 			if (numTeams < minTeamNumber) {
 				minTeamNumber = numTeams;
 				leastUsedServers.clear();
@@ -1610,9 +1605,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& server : server_info) {
-			if ( server_status.get(server.first).isUnhealthy() ) {
-				continue;
-			}
+			// if ( server_status.get(server.first).isUnhealthy() ) {
+			// 	continue;
+			// }
 			if (server.second->teams.size() < minTeamNumber) {
 				minTeamNumber = server.second->teams.size();
 			}
@@ -1623,13 +1618,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::make_pair(minTeamNumber, maxTeamNumber);
 	}
 
-	std::pair<uint32_t, uint32_t> calculateMinMaxMachineTeamNumOnMachine() {
-		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
-		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
+	std::pair<int, int> calculateMinMaxMachineTeamNumOnMachine() {
+		int minTeamNumber = std::numeric_limits<int>::max();
+		int maxTeamNumber = 0;
 		for (auto& machine : machine_info) {
-			if ( !isMachineHealthy(machine.second) ) {
-				continue;
-			}
+			// if ( !isMachineHealthy(machine.second) ) {
+			// 	continue;
+			// }
 			if (machine.second->machineTeams.size() < minTeamNumber) {
 				minTeamNumber = machine.second->machineTeams.size();
 			}
