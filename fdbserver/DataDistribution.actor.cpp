@@ -1610,6 +1610,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& server : server_info) {
+			if ( server_status.get(server.first).isUnhealthy() ) {
+				continue;
+			}
 			if (server.second->teams.size() < minTeamNumber) {
 				minTeamNumber = server.second->teams.size();
 			}
@@ -1624,6 +1627,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& machine : machine_info) {
+			if ( !isMachineHealthy(machine.second) ) {
+				continue;
+			}
 			if (machine.second->machineTeams.size() < minTeamNumber) {
 				minTeamNumber = machine.second->machineTeams.size();
 			}
