@@ -1804,8 +1804,8 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 
 		case FDBTransactionOptions::TIMEOUT:
 			options.timeoutInSeconds = extractIntOption(value, 0, std::numeric_limits<int>::max())/1000.0;
-		    resetTimeout();
-		    break;
+			resetTimeout();
+			break;
 
 		case FDBTransactionOptions::RETRY_LIMIT:
 			options.maxRetries = (int)extractIntOption(value, -1, std::numeric_limits<int>::max());
@@ -1902,6 +1902,9 @@ void ReadYourWritesTransaction::applyPersistentOptions() {
 		}
 	}
 
+	// Setting a timeout can immediately cause a transaction to fail. The only timeout 
+	// that matters is the one most recently set, so we ignore any earlier set timeouts
+	// that might inadvertently fail the transaction.
 	if(timeout.present()) {
 		setOptionImpl(FDBTransactionOptions::TIMEOUT, timeout);
 	}

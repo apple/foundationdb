@@ -435,6 +435,9 @@ void MultiVersionTransaction::updateTransaction() {
 			}
 		}
 	
+		// Setting a timeout can immediately cause a transaction to fail. The only timeout 
+		// that matters is the one most recently set, so we ignore any earlier set timeouts
+		// that might inadvertently fail the transaction.
 		if(timeout.present()) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
@@ -843,7 +846,7 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
 	ASSERT(MultiVersionApi::api->apiVersion != 0);
-	return MultiVersionApi::api->apiVersion >= minVersion;
+	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
 }
 
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.

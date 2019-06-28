@@ -38,6 +38,7 @@ struct FDBOptionInfo {
 	bool persistent;
 
 	// If non-negative, this specifies the code for the transaction option that this option is the default value for.
+	// Options that have a defaultFor will only retain the value from time they were most recently set (i.e. there can be no cumulative effects from calling multiple times).
 	int defaultFor;
 
 	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden, bool persistent, int defaultFor) 
@@ -62,6 +63,8 @@ public:
 	FDBOptionInfoMap() { T::init(); }
 };
 
+// An ordered list of options where each option is represented only once. Subsequent insertions will remove the option from its
+// original location and add it to the end with the new value.
 template<class T>
 class UniqueOrderedOptionList {
 public:
