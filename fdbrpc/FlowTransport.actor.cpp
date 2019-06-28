@@ -18,22 +18,25 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
 #include "fdbrpc/FlowTransport.h"
-#include "fdbrpc/genericactors.actor.h"
-#include "fdbrpc/fdbrpc.h"
-#include "flow/Net2Packet.h"
-#include "flow/ActorCollection.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/ObjectSerializer.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/crc32c.h"
-#include "fdbrpc/simulator.h"
-#include <unordered_map>
 
+#include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
 #endif
+
+#include "fdbrpc/crc32c.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/simulator.h"
+#include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/flow.h"
+#include "flow/Net2Packet.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
@@ -339,7 +342,7 @@ struct Peer : NonCopyable {
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
-		PacketWriter wr( pb_first, NULL, Unversioned() );
+		PacketWriter wr( pb_first, nullptr, Unversioned() );
 		pkt.serialize(wr);
 		unsent.prependWriteBuffer(pb_first, wr.finish());
 	}
@@ -351,7 +354,7 @@ struct Peer : NonCopyable {
 		// If there are reliable packets, compact reliable packets into a new unsent range
 		if(!reliable.empty()) {
 			PacketBuffer* pb = unsent.getWriteBuffer();
-			pb = reliable.compact(pb, NULL);
+			pb = reliable.compact(pb, nullptr);
 			unsent.setWriteBuffer(pb);
 		}
 	}
@@ -444,7 +447,7 @@ struct Peer : NonCopyable {
 			loop {
 				lastWriteTime = now();
 
-				int sent = conn->write( self->unsent.getUnsent() );
+				int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 				if (sent) {
 					self->transport->bytesSent += sent;
 					self->unsent.sent(sent);
@@ -637,18 +640,14 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 		g_network->setCurrentTask( TaskReadSocket );
 }
 
-static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
+static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, const uint8_t* e, Arena& arena,
                         NetworkAddress const& peerAddress, ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
 	uint8_t* p = unprocessed_begin;
 
-	bool checksumEnabled = true;
-	if (peerAddress.isTLS()) {
-		checksumEnabled = false;
-	}
-
+	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
 		uint32_t packetLen, packetChecksum;
 
@@ -734,6 +733,23 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, u
 	}
 }
 
+// Given unprocessed buffer [begin, end), check if next packet size is known and return
+// enough size for the next packet, whose format is: {size, optional_checksum, data} +
+// next_packet_size.
+static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
+	const int len = end - begin;
+	if (len < sizeof(uint32_t)) {
+		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
+	}
+	const uint32_t packetLen = *(uint32_t*)begin;
+	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
+		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+		throw platform_error();
+	}
+	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
+	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
+}
+
 ACTOR static Future<Void> connectionReader(
 		TransportData* transport,
 		Reference<IConnection> conn,
@@ -741,12 +757,12 @@ ACTOR static Future<Void> connectionReader(
 		Promise<Peer*> onConnected)
 {
 	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
-	// For incoming connections conn is set and peer is initially NULL; for outgoing connections it is the reverse
+	// For incoming connections conn is set and peer is initially nullptr; for outgoing connections it is the reverse
 
 	state Arena arena;
-	state uint8_t* unprocessed_begin = NULL;
-	state uint8_t* unprocessed_end = NULL;
-	state uint8_t* buffer_end = NULL;
+	state uint8_t* unprocessed_begin = nullptr;
+	state uint8_t* unprocessed_end = nullptr;
+	state uint8_t* buffer_end = nullptr;
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
 	state bool incompatiblePeerCounted = false;
@@ -761,12 +777,12 @@ ACTOR static Future<Void> connectionReader(
 	try {
 		loop {
 			loop {
-				int readAllBytes = buffer_end - unprocessed_end;
-				if (readAllBytes < 4096) {
+				state int readAllBytes = buffer_end - unprocessed_end;
+				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
-					int unproc_len = unprocessed_end - unprocessed_begin;
-					int len = std::max( 65536, unproc_len*2 );
-					uint8_t* newBuffer = new (newArena) uint8_t[ len ];
+					const int unproc_len = unprocessed_end - unprocessed_begin;
+					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
+					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
 					memcpy( newBuffer, unprocessed_begin, unproc_len );
 					arena = newArena;
 					unprocessed_begin = newBuffer;
@@ -775,13 +791,21 @@ ACTOR static Future<Void> connectionReader(
 					readAllBytes = buffer_end - unprocessed_end;
 				}
 
-				int readBytes = conn->read( unprocessed_end, buffer_end );
-				if(peer) {
-					peer->bytesReceived += readBytes;
+				state int totalReadBytes = 0;
+				while (true) {
+					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+					if (len == 0) break;
+					state int readBytes = conn->read(unprocessed_end, unprocessed_end + len);
+					if (readBytes == 0) break;
+					wait(yield(TaskReadSocket));
+					totalReadBytes += readBytes;
+					unprocessed_end += readBytes;
 				}
-				if (!readBytes) break;
-				state bool readWillBlock = readBytes != readAllBytes;
-				unprocessed_end += readBytes;
+				if (peer) {
+					peer->bytesReceived += totalReadBytes;
+				}
+				if (totalReadBytes == 0) break;
+				state bool readWillBlock = totalReadBytes != readAllBytes;
 
 				if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
@@ -946,7 +970,7 @@ Peer* TransportData::getPeer( NetworkAddress const& address, bool openConnection
 		return peer->second;
 	}
 	if(!openConnection) {
-		return NULL;
+		return nullptr;
 	}
 	Peer* newPeer = new Peer(this, address);
 	peers[address] = newPeer;
@@ -1100,13 +1124,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		ASSERT(copy.size() > 0);
 		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
 
-		return (PacketID)NULL;
+		return (PacketID)nullptr;
 	} else {
-		bool checksumEnabled = true;
-		if (destination.getPrimaryAddress().isTLS()) {
-			checksumEnabled = false;
-		}
-
+		const bool checksumEnabled = !destination.getPrimaryAddress().isTLS();
 		++self->countPacketsGenerated;
 
 		Peer* peer = self->getPeer(destination.getPrimaryAddress(), openConnection);
@@ -1114,7 +1134,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 		if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) || (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
 			TEST(true);  // Can't send to private address without a compatible open connection
-			return (PacketID)NULL;
+			return (PacketID)nullptr;
 		}
 
 		bool firstUnsent = peer->unsent.empty();
