@@ -323,7 +323,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
 				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
-				wait(delay(5.0));
+				return false;
 			} else {
 				return true;
 			}
