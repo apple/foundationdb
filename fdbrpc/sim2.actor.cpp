@@ -1698,7 +1698,7 @@ void startNewSimulator(bool objSerializer) {
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
-	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriority::DefaultDelay", TaskPriority::DefaultDelay);
+	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
 	wait( g_sim2.delay( 0, TaskPriority::DefaultDelay, p ) ); // Switch to the machine in question
 
