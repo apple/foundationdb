@@ -676,7 +676,7 @@ bool validateRange( StorageServer::VersionedData::ViewAtVersion const& view, Key
 	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
 	// * Old mutations are erased: All items in versionedData.atLatest() have insertVersion() > durableVersion()
 
-	TraceEvent("ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
+	//TraceEvent("ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
 	KeyRef k;
 	bool ok = true;
 	bool kIsClear = false;

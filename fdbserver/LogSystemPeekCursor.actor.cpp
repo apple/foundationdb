@@ -1008,7 +1008,11 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 	}
 	self->messageIndex = 0;
 	self->hasNextMessage = self->messages.size() > 0;
-	self->messageVersion = LogMessageVersion(targetVersion);
+	Version minVersion = self->end;
+	for(auto& cursor : self->cursors) {
+		minVersion = std::min(minVersion, cursor->version().version);
+	}
+	self->messageVersion = LogMessageVersion(minVersion);
 
 	if(self->collectTags) {
 		self->combineMessages();
