@@ -959,7 +959,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		// Trace and record the current number of teams for correctness test
-		wait( self->traceTeamCollectionInfo(self) );
+		wait(self->traceTeamCollectionInfo(self));
 
 		return Void();
 	}
@@ -1381,7 +1381,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				team.clear();
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
 				// NOTE: selectReplicas() should always return success when storageTeamSize = 1
-				ASSERT_WE_THINK ( configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success) );
+				ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
 				if (!success && configuration.storageTeamSize > 1) {
 					break;
 				}
@@ -1601,7 +1601,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& server : server_info) {
-			if ( server_status.get(server.first).isUnhealthy() ) {
+			if (server_status.get(server.first).isUnhealthy()) {
 				continue;
 			}
 			if (server.second->teams.size() < minTeamNumber) {
@@ -1618,7 +1618,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int minTeamNumber = std::numeric_limits<int>::max();
 		int maxTeamNumber = 0;
 		for (auto& machine : machine_info) {
-			if ( !isMachineHealthy(machine.second) ) {
+			if (!isMachineHealthy(machine.second)) {
 				continue;
 			}
 			if (machine.second->machineTeams.size() < minTeamNumber) {
@@ -1840,7 +1840,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
 		    .detail("AimToBuildTeamNumber", teamsToBuild)
-			.detail("RemainingTeamBudget", remainingTeamBudget)
+		    .detail("RemainingTeamBudget", remainingTeamBudget)
 		    .detail("CurrentTeamNumber", teams.size())
 		    .detail("DesiredTeamNumber", desiredTeamNumber)
 		    .detail("MaxTeamNumber", maxTeamNumber)
@@ -1878,7 +1878,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", self->primary)
 		    .detail("AddedTeamNumber", 0)
 		    .detail("AimToBuildTeamNumber", 0)
-			.detail("RemainingTeamBudget", 0)
+		    .detail("RemainingTeamBudget", 0)
 		    .detail("CurrentTeamNumber", self->teams.size())
 		    .detail("DesiredTeamNumber", desiredServerTeams)
 		    .detail("MaxTeamNumber", maxServerTeams)
@@ -1897,7 +1897,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Advance time so that we will not have multiple TeamCollectionInfo at the same time, otherwise
 		// simulation test will randomly pick one TeamCollectionInfo trace, which could be the one before build teams
-		wait( delay(0.01) );
+		wait(delay(0.01));
 
 		// Debug purpose
 //		if (healthyMachineTeamCount > desiredMachineTeams || machineTeams.size() > maxMachineTeams) {
@@ -2006,7 +2006,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("Primary", self->primary)
 				    .detail("AddedTeamNumber", 0)
 				    .detail("AimToBuildTeamNumber", teamsToBuild)
-					.detail("RemainingTeamBudget", remainingTeamBudget)
+				    .detail("RemainingTeamBudget", remainingTeamBudget)
 				    .detail("CurrentTeamNumber", self->teams.size())
 				    .detail("DesiredTeamNumber", desiredTeams)
 				    .detail("MaxTeamNumber", maxTeams)
@@ -2467,7 +2467,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
 				    .detail("DesiredMachineTeam", desiredMachineTeams)
 				    .detail("NumMachineTeamRemoved", numMachineTeamRemoved);
-				wait( self->traceTeamCollectionInfo(self) );
+				wait(self->traceTeamCollectionInfo(self));
 			}
 		}
 	}
@@ -3222,8 +3222,8 @@ ACTOR Future<Void> storageServerTracker(
 				}
 			}
 
-			if ( recordTeamCollectionInfo ) {
-				wait( self->traceTeamCollectionInfo(self) );
+			if (recordTeamCollectionInfo) {
+				wait(self->traceTeamCollectionInfo(self));
 			}
 		}
 	} catch( Error &e ) {
@@ -3459,7 +3459,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->redundantTeamRemover = teamRemover(self);
 			self->addActor.send(self->redundantTeamRemover);
 		}
-		wait( self->traceTeamCollectionInfo(self) );
+		wait(self->traceTeamCollectionInfo(self));
 
 		if(self->includedDCs.size()) {
 			//start this actor before any potential recruitments can happen
