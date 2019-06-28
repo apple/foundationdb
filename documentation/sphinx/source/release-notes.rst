@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.11
+======
+
+Fixes
+-----
+
+* Ensure new added machines are used to build teams and host data from existing machines when a cluster is expanded. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
+
 6.1.10
 ======
 

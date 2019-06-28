@@ -1343,12 +1343,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
 				// so that the invariant will not be violated.
-				int teamCount = 0;
-				for (auto& mt : machine.second->machineTeams) {
-					if (isMachineTeamHealthy(mt)) {
-						++teamCount;
-					}
-				}
+				int teamCount = machine.second->machineTeams.size();
 
 				if (teamCount < minTeamCount) {
 					leastUsedMachines.clear();
@@ -1385,7 +1380,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// that have the least-utilized server
 				team.clear();
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
-				// NOTE: selectReplicas() returns false always when storageTeamSize == 1
+				// NOTE: selectReplicas() should always return success when storageTeamSize = 1
+				ASSERT_WE_THINK ( configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success) );
 				if (!success && configuration.storageTeamSize > 1) {
 					break;
 				}
@@ -1605,9 +1601,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		uint32_t minTeamNumber = std::numeric_limits<uint32_t>::max();
 		uint32_t maxTeamNumber = std::numeric_limits<uint32_t>::min();
 		for (auto& server : server_info) {
-			// if ( server_status.get(server.first).isUnhealthy() ) {
-			// 	continue;
-			// }
+			if ( server_status.get(server.first).isUnhealthy() ) {
+				continue;
+			}
 			if (server.second->teams.size() < minTeamNumber) {
 				minTeamNumber = server.second->teams.size();
 			}
@@ -1622,9 +1618,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int minTeamNumber = std::numeric_limits<int>::max();
 		int maxTeamNumber = 0;
 		for (auto& machine : machine_info) {
-			// if ( !isMachineHealthy(machine.second) ) {
-			// 	continue;
-			// }
+			if ( !isMachineHealthy(machine.second) ) {
+				continue;
+			}
 			if (machine.second->machineTeams.size() < minTeamNumber) {
 				minTeamNumber = machine.second->machineTeams.size();
 			}
@@ -1691,12 +1687,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int getRemainingMachineTeamBudget() {
 		int remainingMachineTeamBudget = 0;
 		for (auto& m : machine_info) {
-			int healthyMTCount = 0;
-			for (auto& mt : m.second->machineTeams) {
-				if (isMachineTeamHealthy(mt)) {
-					++healthyMTCount;
-				}
-			}
+			int healthyMTCount = m.second->machineTeams.size();
 			remainingMachineTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - healthyMTCount));
 		}
 
@@ -1712,12 +1703,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
 		int remainingTeamBudget = 0;
 		for (auto& s : server_info) {
-			int numValidTeams = 0;
-			for (auto& team : s.second->teams) {
-				if (!team->isWrongConfiguration() && team->isHealthy()) {
-					++numValidTeams;
-				}
-			}
+			int numValidTeams = s.second->teams.size();
 			remainingTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - numValidTeams));
 		}
 
@@ -1757,7 +1743,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
 		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
 		// Pre-build all machine teams until we have the desired number of machine teams
-		if (machineTeamsToBuild > 0) {
+		if (machineTeamsToBuild > 0 || remainingMachineTeamBudget > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
