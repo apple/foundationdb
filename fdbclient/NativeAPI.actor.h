@@ -90,6 +90,8 @@ public:
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
 
+	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
+
 private:
 	Reference<DatabaseContext> db;
 };

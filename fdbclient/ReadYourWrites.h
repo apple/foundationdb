@@ -44,7 +44,6 @@ struct ReadYourWritesTransactionOptions {
 	ReadYourWritesTransactionOptions() {}
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
 	void reset(Transaction const& tr);
-	void fullReset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();
 };
 
@@ -160,6 +159,10 @@ private:
 
 	void debugLogRetries(Optional<Error> error = Optional<Error>());
 
+	void setOptionImpl( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void applyPersistentOptions();
+
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 	ReadYourWritesTransactionOptions options;
 };
 

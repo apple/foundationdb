@@ -53,6 +53,8 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
+
+	// ThreadSafeDatabase is not allowed to do anything with options except pass them through to RYW.
 	onMainThreadVoid( [db, option, passValue](){ 
 		db->checkDeferredError();
 		db->setOption(option, passValue.contents()); 
@@ -274,6 +276,8 @@ ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
+
+	// ThreadSafeTransaction is not allowed to do anything with options except pass them through to RYW.
 	onMainThreadVoid( [tr, option, passValue](){ tr->setOption(option, passValue.contents()); }, &tr->deferredError );
 }
 

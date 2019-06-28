@@ -48,6 +48,8 @@ from cancellation_timeout_tests import test_retry_limits
 from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
+from size_limit_tests import test_size_limit_option
+
 random.seed(0)
 
 if len(sys.argv) == 4:
@@ -556,6 +558,8 @@ class Tester:
                         test_combinations(db)
                         test_locality(db)
                         test_predicates()
+
+                        test_size_limit_option(db)
 
                     except fdb.FDBError as e:
                         print("Unit tests failed: %s" % e.description)
