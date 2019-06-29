@@ -317,6 +317,7 @@ inline _Unversioned Unversioned() { return _Unversioned(); }
 class BinaryWriter : NonCopyable {
 public:
 	static const int isDeserializing = 0;
+	static constexpr bool isSerializing = true;
 	typedef BinaryWriter WRITER;
 
 	void serializeBytes( StringRef bytes ) {
@@ -518,6 +519,7 @@ private:
 class ArenaReader {
 public:
 	static const int isDeserializing = 1;
+	static constexpr bool isSerializing = false;
 	typedef ArenaReader READER;
 
 	const void* readBytes( int bytes ) {
@@ -583,6 +585,7 @@ private:
 class BinaryReader {
 public:
 	static const int isDeserializing = 1;
+	static constexpr bool isSerializing = false;
 	typedef BinaryReader READER;
 
 	const void* readBytes( int bytes );
@@ -682,6 +685,7 @@ struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 
 struct PacketWriter {
 	static const int isDeserializing = 0;
+	static constexpr bool isSerializing = 1;
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
