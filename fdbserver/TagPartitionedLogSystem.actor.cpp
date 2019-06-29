@@ -1355,6 +1355,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 							modifiedState.tLogs.push_back(coreSet);
 							modifiedState.tLogs[0].isLocal = true;
 							modifiedState.logRouterTags = 0;
+							modifiedState.txsTags = modifiedState.oldTLogData[0].txsTags;
 							modifiedLogSets++;
 							break;
 						}
@@ -1396,11 +1397,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
 			for(int i = 0; i < prevState.tLogs.size(); i++) {
-				TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("Log", ::describe(prevState.tLogs[i].tLogs)).detail("Loc", prevState.tLogs[i].locality);
+				TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("Log", ::describe(prevState.tLogs[i].tLogs)).detail("Loc", prevState.tLogs[i].locality).detail("Txs", prevState.txsTags);
 			}
 			for(int i = 0; i < prevState.oldTLogData.size(); i++) {
 				for(int j = 0; j < prevState.oldTLogData[i].tLogs.size(); j++) {
-					TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("J",j).detail("Log", ::describe(prevState.oldTLogData[i].tLogs[j].tLogs)).detail("Loc", prevState.oldTLogData[i].tLogs[j].locality);
+					TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("J",j).detail("Log", ::describe(prevState.oldTLogData[i].tLogs[j].tLogs)).detail("Loc", prevState.oldTLogData[i].tLogs[j].locality).detail("Txs", prevState.oldTLogData[i].txsTags);
 				}
 			}
 		}
