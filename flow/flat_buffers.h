@@ -542,6 +542,7 @@ private:
 
 struct InsertVTableLambda {
 	static constexpr bool isDeserializing = false;
+	static constexpr bool isSerializing = false;
 	static constexpr bool is_fb_visitor = true;
 	std::set<const VTable*>& vtables;
 	std::set<std::type_index>& known_types;
@@ -665,6 +666,7 @@ private:
 template <class Writer>
 struct SaveVisitorLambda {
 	static constexpr bool isDeserializing = false;
+	static constexpr bool isSerializing = true;
 	static constexpr bool is_fb_visitor = true;
 	const VTableSet* vtableset;
 	Writer& writer;
@@ -738,6 +740,7 @@ struct SaveVisitorLambda {
 template <class Context>
 struct LoadMember {
 	static constexpr bool isDeserializing = true;
+	static constexpr bool isSerializing = false;
 	const uint16_t* const vtable;
 	const uint8_t* const message;
 	const uint16_t vtable_length;
@@ -852,6 +855,7 @@ struct LoadSaveHelper {
 	template <class Context>
 	struct SerializeFun {
 		static constexpr bool isDeserializing = true;
+		static constexpr bool isSerializing = false;
 		static constexpr bool is_fb_visitor = true;
 
 		const uint16_t* vtable;
