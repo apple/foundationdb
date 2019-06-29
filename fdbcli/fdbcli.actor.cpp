@@ -1647,6 +1647,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
 				conf.get().old_logs == conf.get().auto_logs &&
 				conf.get().old_proxies == conf.get().auto_proxies &&
+				conf.get().old_read_proxies == conf.get().auto_read_proxies &&
 				conf.get().old_resolvers == conf.get().auto_resolvers &&
 				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
 				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
@@ -1654,6 +1655,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			bool noDesiredChanges = noChanges &&
 				conf.get().old_logs == conf.get().desired_logs &&
 				conf.get().old_proxies == conf.get().desired_proxies &&
+				conf.get().old_read_proxies == conf.get().desired_read_proxies &&
 				conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
@@ -1673,6 +1675,8 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
 			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
 			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| read-proxies                | %16d | %16d |", conf.get().old_read_proxies, conf.get().auto_read_proxies);
+			outputString += conf.get().auto_read_proxies != conf.get().desired_read_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_read_proxies) : "\n";
 			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
 			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers) : "\n";
 			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
@@ -2320,7 +2324,11 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {
+		"new",   "single",     "double", "triple",   "three_data_hall", "three_datacenter", "ssd",
+		"ssd-1", "ssd-2",      "memory", "memory-1", "memory-2",        "proxies=",         "read_proxies=",
+		"logs=", "resolvers=", NULL
+	};
 	array_generator(text, line, opts, lc);
 }
 

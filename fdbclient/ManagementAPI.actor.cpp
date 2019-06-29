@@ -67,7 +67,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "satellite_logs" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "read_proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "satellite_logs" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -645,6 +645,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	std::set<std::string> machinesWithStorage;
 	int totalTransactionProcesses = 0;
 	int existingProxyCount = 0;
+	int existingReadProxyCount = 0;
 	int existingResolverCount = 0;
 	int existingStatelessCount = 0;
 	for( auto& it : machine_processes ) {
@@ -658,6 +659,9 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			}
 			if(proc.second == ProcessClass::ProxyClass) {
 				existingProxyCount++;
+			}
+			if(proc.second == ProcessClass::ReadProxyClass) {
+				existingReadProxyCount++;
 			}
 			if(proc.second == ProcessClass::ResolutionClass) {
 				existingResolverCount++;
@@ -698,6 +702,18 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		proxyCount = result.old_proxies;
 	}
 
+	result.desired_read_proxies = std::min( 12, processCount / 15 );
+	int readProxyCount;
+	if (!statusObjConfig.get("read_proxies", result.old_read_proxies)) {
+		result.old_proxies = CLIENT_KNOBS->DEFAULT_AUTO_READ_PROXIES;
+		statusObjConfig.get("auto_read_proxies", result.old_read_proxies);
+		result.auto_read_proxies = result.desired_read_proxies;
+		readProxyCount = result.auto_read_proxies;
+	} else {
+		result.auto_read_proxies = result.old_read_proxies;
+		readProxyCount = result.old_read_proxies;
+	}
+
 	result.desired_logs = std::min( 12, processCount / 20 );
 	result.desired_logs = std::max( result.desired_logs, log_replication + 1 );
 	result.desired_logs = std::min<int>( result.desired_logs, machine_processes.size() );
@@ -716,6 +732,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 
 	totalTransactionProcesses += std::min(existingProxyCount, proxyCount);
 	totalTransactionProcesses += std::min(existingResolverCount, resolverCount);
+	totalTransactionProcesses += std::min(existingReadProxyCount, readProxyCount);
 	totalTransactionProcesses += existingStatelessCount;
 
 	//if one process on a machine is transaction class, make them all transaction class
