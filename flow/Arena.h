@@ -431,6 +431,13 @@ public:
 		if (!present()) return false;
 		return get() < o.get();
 	}
+
+	void reset() {
+		if (valid) {
+			valid = false;
+			((T*)&value)->~T();
+		}
+	}
 private:
 	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
 	bool valid;

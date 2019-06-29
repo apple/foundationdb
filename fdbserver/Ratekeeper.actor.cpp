@@ -41,7 +41,6 @@ enum limitReason_t {
 	storage_server_min_free_space_ratio,  // a storage server's normal limits are being reduced by a low free space ratio
 	log_server_min_free_space,
 	log_server_min_free_space_ratio,
-	storage_server_read_load,
 	limitReason_t_end
 };
 
@@ -57,8 +56,7 @@ const char* limitReasonName[] = {
 	"storage_server_min_free_space",
 	"storage_server_min_free_space_ratio",
 	"log_server_min_free_space",
-	"log_server_min_free_space_ratio",
-	"storage_server_read_load"
+	"log_server_min_free_space_ratio"
 };
 static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
 
@@ -74,8 +72,7 @@ const char* limitReasonDesc[] = {
 	"Storage server running out of space (approaching 100MB limit).",
 	"Storage server running out of space (approaching 5% limit).",
 	"Log server running out of space (approaching 100MB limit).",
-	"Log server running out of space (approaching 5% limit).",
-	"Storage server is overwhelmed by read workload",
+	"Log server running out of space (approaching 5% limit)."
 };
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
@@ -396,8 +393,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
-		int64_t b = storageQueue - targetBytes;
-		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
+		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
@@ -433,16 +429,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			double lim = actualTps * x;
 			if (lim < limitTps) {
 				limitTps = lim;
-				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc)
+				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
 					ssLimitReason = limitReason_t::storage_server_write_queue_size;
-			}
-		}
-
-		if (ss.localRateLimit < 0.99) {
-			auto lim = double(self->actualTpsMetric) * ss.localRateLimit;
-			if (lim < limitTps) {
-				limitTps = lim;
-				ssLimitReason = limitReason_t::storage_server_read_load;
+				}
 			}
 		}
 

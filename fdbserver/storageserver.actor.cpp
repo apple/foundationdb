@@ -315,7 +315,7 @@ public:
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
 			res = 0.0;
 		} else if (versionLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
-			res = 1.0 - (double(versionLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX));
+			res = 1.0 - (double(versionLag - SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX-SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX));
 		} else {
 			res = 1.0;
 		}
@@ -642,7 +642,7 @@ public:
 	template<class Request, class HandleFunction>
 	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
 		auto rate = currentRate();
-		if (rate < 0.8 && deterministicRandom()->random01() > rate) {
+		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD) {
 			//request.error = future_version();
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			return Void();
@@ -2865,11 +2865,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (g_network->isSimulated()) {
 			double endTime = g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
 			if(endTime > now()) {
-				wait(delay(endTime - now(), TaskPriority::UpdateStorage));
+				wait(delay(endTime - now(), TaskPriority::Storage));
 			}
 		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
-		wait( delay(0, TaskPriority::UpdateStorage) );
+		wait( delay(0, TaskPriority::Storage) );
 
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
@@ -2878,17 +2878,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version newOldestVersion = data->storageVersion();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
+
+		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
 			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
+			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::Storage );
 			data->oldestVersion.set( newOldestVersion );
 			wait( finishedForgetting );
-			wait( yield(TaskPriority::UpdateStorage) );
+			wait( yield(TaskPriority::Storage) );
 			if (done) break;
 		}
 
+		// Set the new durable version as part of the outstanding change set, before commit
 		if (startOldestVersion != newOldestVersion)
 			data->storage.makeVersionDurable( newOldestVersion );
 
@@ -2896,8 +2899,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
-		if (bytesLeft > 0)
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL);
+		if (bytesLeft > 0) {
+			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::Storage);
+		} else {
+			durableDelay = delay(0, TaskPriority::UpdateStorage) || delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::Storage);
+		}
 
 		wait( durable );
 
@@ -2916,7 +2922,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+		wait( delay(0, TaskPriority::Storage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
 		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
@@ -2925,9 +2931,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
-			if(g_network->check_yield(TaskPriority::UpdateStorage)) {
+			if(g_network->check_yield(TaskPriority::Storage)) {
 				data->durableVersionLock.release();
-				wait(delay(0, TaskPriority::UpdateStorage));
+				wait(delay(0, TaskPriority::Storage));
 				wait( data->durableVersionLock.take() );
 			}
 		}
