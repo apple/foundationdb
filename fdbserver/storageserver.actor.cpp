@@ -3642,16 +3642,11 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 				tr.reset();
 				TraceEvent("RemoveStorageServerRetrying").detail("Count", noCanRemoveCount++).detail("ServerID", id).detail("CanRemove", canRemove);
 			} else {
-				wait(tr.commit());
 				return Void();
 			}
 		} catch (Error& e) {
 			state Error err = e;
-			try {
-			    wait( tr.onError(e));
-			} catch (Error& e2) {
-			    return Never();
-			}
+			wait(tr.onError(e));
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
