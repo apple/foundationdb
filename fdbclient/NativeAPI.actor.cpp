@@ -29,6 +29,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
@@ -3452,7 +3453,7 @@ ACTOR Future<Void> snapCreateVersion1(Database inputCx, StringRef snapCmd, UID s
 
 	StringRef snapCmdArgs = snapCmd;
 	StringRef snapCmdPart = snapCmdArgs.eat(":");
-	state Standalone<StringRef> snapUIDRef(snapUID.toString());
+	Standalone<StringRef> snapUIDRef(snapUID.toString());
 	state Standalone<StringRef> snapPayloadRef = snapCmdPart
 		.withSuffix(LiteralStringRef(":uid="))
 		.withSuffix(snapUIDRef)
@@ -3547,7 +3548,7 @@ ACTOR Future<Void> snapshotDatabase(DatabaseContext* cx, StringRef snapPayload, 
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.snapshotDatabase.Before");
 		}
 
-		state ProxySnapRequest req(snapPayload, snapUID, debugID);
+		ProxySnapRequest req(snapPayload, snapUID, debugID);
 		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, req, cx->taskID, true /*atmostOnce*/ ));
 		if (debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
@@ -3583,8 +3584,7 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 
 	try {
 		Future<Void> exec = snapshotDatabase(cx, snapPayloadRef, snapUID, snapUID);
-		wait(timeoutError(exec, g_network->isSimulated() ? 80 : 600)); // dependent on SERVER_KNOBS->SNAP_CRATE_MAX_TIMEOUT
-																	   // FIXME: remove the timeoutError and hard-coded time limits
+		wait(exec);
 	} catch (Error& e) {
 		TraceEvent("SnapshotDatabaseErrorVersion2")
 			.detail("SnapCmd", snapCmd.toString())
@@ -3609,11 +3609,19 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 	return Void();
 }
 
-ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID, int version) {
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID, int version) {
 	if (version == 1) {
-		wait(snapCreateVersion1(inputCx, snapCmd, snapUID));
+		wait(snapCreateVersion1(cx, snapCmd, snapUID));
 		return Void();
 	}
-	wait(snapCreateVersion2(inputCx, snapCmd, snapUID));
+	state int oldMode = wait( setDDMode( cx, 0 ) );
+	try {
+		wait(snapCreateVersion2(cx, snapCmd, snapUID));
+	} catch (Error& e) {
+		state Error err = e;
+		wait(success( setDDMode( cx, oldMode ) ));
+		throw err;
+	}
+	wait(success( setDDMode( cx, oldMode ) ));
 	return Void();
 }
