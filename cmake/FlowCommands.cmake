@@ -180,12 +180,12 @@ function(add_flow_target)
       list(APPEND generated_files ${CMAKE_CURRENT_BINARY_DIR}/${generated})
       if(WIN32)
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags}
+          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
           DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
           COMMENT "Compile actor: ${src}")
       else()
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags} > /dev/null
+          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
           DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
           COMMENT "Compile actor: ${src}")
       endif()
