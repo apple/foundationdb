@@ -59,31 +59,44 @@ extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION, OPT_TRACE_FORMAT };
+enum {
+	OPT_CONNFILE,
+	OPT_DATABASE,
+	OPT_HELP,
+	OPT_TRACE,
+	OPT_TRACE_DIR,
+	OPT_TIMEOUT,
+	OPT_EXEC,
+	OPT_NO_STATUS,
+	OPT_STATUS_FROM_JSON,
+	OPT_VERSION,
+	OPT_TRACE_FORMAT,
+	OPT_USE_OBJECT_SERIALIZER
+};
 
-CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
-	{ OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
-	{ OPT_DATABASE, "-d", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
-	{ OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
-	{ OPT_EXEC, "--exec", SO_REQ_SEP },
-	{ OPT_NO_STATUS, "--no-status", SO_NONE },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
+	                                  { OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
+	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
+	                                  { OPT_TRACE, "--log", SO_NONE },
+	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
+	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
+	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_HELP, "-?", SO_NONE },
+	                                  { OPT_HELP, "-h", SO_NONE },
+	                                  { OPT_HELP, "--help", SO_NONE },
+	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
+	                                  { OPT_VERSION, "--version", SO_NONE },
+	                                  { OPT_VERSION, "-v", SO_NONE },
+	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	                                  { OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	                                  { OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
+	                                  TLS_OPTION_FLAGS
 #endif
 
-	SO_END_OF_OPTIONS
-};
+	                                      SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
@@ -401,21 +414,25 @@ static void printProgramUsage(const char* name) {
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-		   "  --log-dir PATH Specifes the output directory for trace files. If\n"
-		   "                 unspecified, defaults to the current directory. Has\n"
-		   "                 no effect unless --log is specified.\n"
-		   "  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json\n"
-		   "                 are supported. Has no effect unless --log is specified.\n"
-		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
-		   "                 and then exits.\n"
-		   "  --no-status    Disables the initial status check done when starting\n"
-		   "                 the CLI.\n"
+	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --trace_format FORMAT\n"
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported. Has no effect unless --log is specified.\n"
+	       "  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n"
+	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
+	       "                 and then exits.\n"
+	       "  --no-status    Disables the initial status check done when starting\n"
+	       "                 the CLI.\n"
 #ifndef TLS_DISABLED
-		   TLS_HELP
+	       TLS_HELP
 #endif
-		   "  -v, --version  Print FoundationDB CLI version information and exit.\n"
-		   "  -h, --help     Display this help and exit.\n");
+	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
+	       "  -h, --help     Display this help and exit.\n");
 }
 
 
@@ -2332,6 +2349,7 @@ struct CLIOptions {
 	bool trace;
 	std::string traceDir;
 	std::string traceFormat;
+	bool useObjectSerializer = false;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2403,41 +2421,55 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-			case TLSOptions::OPT_TLS_PLUGIN:
-				args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_CERTIFICATES:
-				tlsCertPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_CA_FILE:
-				tlsCAPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_KEY:
-				tlsKeyPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_PASSWORD:
-				tlsPassword = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_VERIFY_PEERS:
-				tlsVerifyPeers = args.OptionArg();
-				break;
+		    case TLSOptions::OPT_TLS_PLUGIN:
+			    args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_CERTIFICATES:
+			    tlsCertPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_CA_FILE:
+			    tlsCAPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_KEY:
+			    tlsKeyPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_PASSWORD:
+			    tlsPassword = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_VERIFY_PEERS:
+			    tlsVerifyPeers = args.OptionArg();
+			    break;
 #endif
-			case OPT_HELP:
-				printProgramUsage(program_name.c_str());
-				return 0;
-			case OPT_STATUS_FROM_JSON:
-				return printStatusFromJSON(args.OptionArg());
-			case OPT_TRACE_FORMAT:
-				if (!validateTraceFormat(args.OptionArg())) {
-					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-				}
-				traceFormat = args.OptionArg();
-				break;
-			case OPT_VERSION:
-				printVersion();
-				return FDB_EXIT_SUCCESS;
-		}
-		return -1;
+		    case OPT_HELP:
+			    printProgramUsage(program_name.c_str());
+			    return 0;
+		    case OPT_STATUS_FROM_JSON:
+			    return printStatusFromJSON(args.OptionArg());
+		    case OPT_TRACE_FORMAT:
+			    if (!validateTraceFormat(args.OptionArg())) {
+				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+			    }
+			    traceFormat = args.OptionArg();
+			    break;
+		    case OPT_USE_OBJECT_SERIALIZER: {
+			    std::string s = args.OptionArg();
+			    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+			    if (s == "on" || s == "true" || s == "1") {
+				    useObjectSerializer = true;
+			    } else if (s == "off" || s == "false" || s == "0") {
+				    useObjectSerializer = false;
+			    } else {
+				    fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+				    printProgramUsage(program_name.c_str());
+				    flushAndExit(FDB_EXIT_ERROR);
+			    }
+			    break;
+		    }
+		    case OPT_VERSION:
+			    printVersion();
+			    return FDB_EXIT_SUCCESS;
+		    }
+		    return -1;
 	}
 };
 
@@ -3490,6 +3522,9 @@ int main(int argc, char **argv) {
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
+	setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
+	                 opt.useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
+	                                         : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
 
 	initHelp();
 
