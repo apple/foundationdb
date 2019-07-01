@@ -778,7 +778,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 		}
 	}
 }
-
+// Q: What is the conditation that a SS can be removed?
 ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 	Standalone<RangeResultRef> keys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, 2 ) );
 

@@ -325,6 +325,14 @@ public:
 	virtual void setWrongConfiguration(bool wrongConfiguration) { this->wrongConfiguration = wrongConfiguration; }
 	virtual bool isHealthy() { return healthy; }
 	virtual void setHealthy(bool h) { healthy = h; }
+	virtual bool isCorrectStoreType(KeyValueStoreType configType) {
+		for (auto &server : servers) {
+			if ( !server->isCorrectStoreType(configType) ) {
+				return false;
+			}
+		}
+		return true;
+	};
 	virtual int getPriority() { return priority; }
 	virtual void setPriority(int p) { priority = p; }
 	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
@@ -738,6 +746,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			//   shardsAffectedByTeamFailure or we could be dropping a shard on the floor (since team
 			//   tracking is "edge triggered")
 			// SOMEDAY: Account for capacity, load (when shardMetrics load is high)
+			// Q: How do we enforce the above statement?
 
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
@@ -762,7 +771,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					if( self->server_info.count( req.sources[i] ) ) {
 						auto& teamList = self->server_info[ req.sources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
-							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
+							if( teamList[j]->isHealthy() && teamList[j]->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
 								int sharedMembers = 0;
 								for( const UID& id : teamList[j]->getServerIDs() )
 									if( sources.count( id ) )
@@ -808,7 +817,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if( self->teams[i]->isHealthy() && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
+					if( self->teams[i]->isHealthy() && self->teams[i]->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
 						int64_t loadBytes = NONE_SHARED * self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 							bestLoadBytes = loadBytes;
@@ -822,7 +831,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+					bool ok = dest->isHealthy() && dest->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
 					for(int i=0; ok && i<randomTeams.size(); i++)
 						if (randomTeams[i].second->getServerIDs() == dest->getServerIDs())
 							ok = false;
@@ -1229,6 +1238,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
+				.detail("CorrectStoreType", team->isCorrectStoreType(configuration.storageServerStoreType))
 			    .detail("ServerNumber", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
@@ -1879,7 +1889,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int teamCount = 0;
 			int totalTeamCount = 0;
 			for (int i = 0; i < self->teams.size(); ++i) {
-				if (!self->teams[i]->isWrongConfiguration()) {
+				if (!self->teams[i]->isWrongConfiguration() && self->teams[i]->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 					if( self->teams[i]->isHealthy() ) {
 						teamCount++;
 					}
@@ -2309,8 +2319,8 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
 			TraceEvent("WrongStoreTypeRemover").detail("KickTeamBuilder", "Start");
+			self->restartRecruiting.trigger();
 			self->doBuildTeams = true;
-			self->restartTeamBuilder.trigger();
 		}
 		for ( auto& s : serversToRemove ) {
 			if ( s.isValid() ) {
@@ -2594,7 +2604,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 					for(int i=0; i<shards.size(); i++) {
 						int maxPriority = team->getPriority();
-						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
+						// Q: this if statement seems to correct/double-check the team's priority. Why is the team->priority() is not the max one?
+						if(maxPriority < PRIORITY_TEAM_0_LEFT) { // Q: When will maxPriority >= PRIORITY_TEAM_0_LEFT
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
@@ -2935,7 +2946,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		self->server_status.set( interf.id(), *status );
-		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id());
+		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id()).detail("Unhealthy", status->isUnhealthy());
 		// if ( !server->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 		// 	self->restartRemoveWrongStoreType.trigger();
 		// }
