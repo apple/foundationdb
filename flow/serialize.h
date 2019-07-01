@@ -685,7 +685,7 @@ struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 
 struct PacketWriter {
 	static const int isDeserializing = 0;
-	static constexpr bool isSerializing = 1;
+	static constexpr bool isSerializing = true;
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
