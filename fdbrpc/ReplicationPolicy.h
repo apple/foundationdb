@@ -285,11 +285,11 @@ template <>
 struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
 private:
 	using T = Reference<IReplicationPolicy>;
-	static BinaryWriter writer{ IncludeVersion() };
 
 public:
 	static size_t size(const T& value) {
 		if (value.getPtr() == nullptr) {
+			BinaryWriter writer{ IncludeVersion() };
 			return writer.getLength();
 		}
 		if (!value->alreadyWritten) {
@@ -303,6 +303,7 @@ public:
 	// Guaranteed to be called only once during serialization
 	static void save(uint8_t* out, const T& value) {
 		if (value.getPtr() == nullptr) {
+			BinaryWriter writer{ IncludeVersion() };
 			memcpy(out, writer.getData(), writer.getLength());
 		} else {
 			ASSERT(value->alreadyWritten)

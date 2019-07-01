@@ -69,6 +69,17 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 	return result;
 }
 
+static auto* writeToOffsetsMemory = new std::vector<int>;
+
+PrecomputeSize::PrecomputeSize() {
+	writeToOffsets.swap(*writeToOffsetsMemory);
+	writeToOffsets.clear();
+}
+
+PrecomputeSize::~PrecomputeSize() {
+	writeToOffsets.swap(*writeToOffsetsMemory);
+}
+
 } // namespace detail
 
 namespace unit_tests {

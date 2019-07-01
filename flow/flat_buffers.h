@@ -307,6 +307,8 @@ struct _SizeOf {
 };
 
 struct PrecomputeSize {
+	PrecomputeSize();
+	~PrecomputeSize();
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
@@ -362,9 +364,9 @@ struct WriteToBuffer {
 		current_buffer_size = std::max(current_buffer_size, offset);
 	}
 
-	WriteToBuffer(int buffer_length, int vtable_start, uint8_t* buffer, std::vector<int> writeToOffsets)
+	WriteToBuffer(int buffer_length, int vtable_start, uint8_t* buffer, std::vector<int>::iterator writeToOffsetsIter)
 	  : buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
-	    writeToOffsets(std::move(writeToOffsets)) {}
+	    writeToOffsetsIter(writeToOffsetsIter) {}
 
 	struct MessageWriter {
 		template <class T>
@@ -388,7 +390,7 @@ struct WriteToBuffer {
 	};
 
 	MessageWriter getMessageWriter(int size) {
-		MessageWriter m{ *this, writeToOffsets[writeToIndex++], size };
+		MessageWriter m{ *this, *writeToOffsetsIter++, size };
 		return m;
 	}
 
@@ -409,8 +411,7 @@ private:
 	void copy_memory(const void* src, int offset, int len) {
 		memcpy(static_cast<void*>(&buffer[buffer_length - offset]), src, len);
 	}
-	std::vector<int> writeToOffsets;
-	int writeToIndex = 0;
+	std::vector<int>::iterator writeToOffsetsIter;
 	uint8_t* buffer;
 };
 
@@ -1023,7 +1024,7 @@ uint8_t* save(Allocator& allocator, const Root& root, FileIdentifier file_identi
 	uint8_t* out = allocator(precompute_size.current_buffer_size);
 	memset(out, 0, precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ precompute_size.current_buffer_size, vtable_start, out,
-		                         std::move(precompute_size.writeToOffsets) };
+		                         precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier);
 	return out;
 }
