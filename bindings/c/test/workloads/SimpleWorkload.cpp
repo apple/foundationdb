@@ -279,7 +279,7 @@ struct SimpleWorkload : FDBWorkload {
 				if (done->error) {
 					success = false;
 				}
-				for (int i = 0; i < actors.size(); ++i) {
+				for (size_t i = 0; i < actors.size(); ++i) {
 					if (actors[i] == done) {
 						actors[i] = actors.back();
 						delete done;
@@ -318,7 +318,7 @@ struct SimpleWorkload : FDBWorkload {
 
 			void operator()(ClientActor* actor) {
 				double now = self->context->now();
-				for (int i = 0; i < actors.size(); ++i) {
+				for (size_t i = 0; i < actors.size(); ++i) {
 					if (actors[i] == actor) {
 						actors[i] = actors.back();
 						actors.pop_back();
