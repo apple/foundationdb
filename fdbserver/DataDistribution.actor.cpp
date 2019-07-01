@@ -2533,9 +2533,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
 							.detail("SignallingTeam", team->getDesc())
 							.detail("Primary", self->primary);
+						self->traceAllInfo(true);
 						// Create a new team
 						self->doBuildTeams = true;
-						self->restartTeamBuilder.trigger;
+						self->restartTeamBuilder.trigger();
 						self->restartRecruiting.trigger();
 					}
 
@@ -3009,7 +3010,8 @@ ACTOR Future<Void> storageServerTracker(
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
-					if ( !self->server_status.get( i.second->id ).isUnhealthy() && server->toRemove == 0 ) {
+					// When a wrongStoreType server colocate with a correct StoreType server, we should not mark the correct one as unhealthy
+					if ( !self->server_status.get( i.second->id ).isUnhealthy() && i.second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3021,7 +3023,7 @@ ACTOR Future<Void> storageServerTracker(
 
 							status.isUndesired = true;
 						}
-						else
+						else if ( server->isCorrectStoreType(self->configuration.storageServerStoreType) )
 							wakeUpTrackers.push_back(i.second->wakeUpTracker);
 					}
 				}
