@@ -3522,6 +3522,8 @@ int main(int argc, char **argv) {
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
+	// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as zero =
+	// false, non-zero = true.
 	setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
 	                 opt.useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
 	                                         : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
