@@ -44,7 +44,13 @@ public:
 	~UnsentPacketQueue() { discardAll(); }
 
 	// Get a PacketBuffer to write new packets into
-	PacketBuffer* getWriteBuffer() { if (!unsent_last) { ASSERT( !unsent_first ); unsent_first = unsent_last = new PacketBuffer; }; return unsent_last; }
+	PacketBuffer* getWriteBuffer() {
+		if (!unsent_last) {
+			ASSERT(!unsent_first);
+			unsent_first = unsent_last = PacketBuffer::create();
+		};
+		return unsent_last;
+	}
 	// Call after potentially adding to the chain returned by getWriteBuffer()
 	void setWriteBuffer(PacketBuffer* pb) { unsent_last = pb; }
 

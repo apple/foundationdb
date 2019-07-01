@@ -341,7 +341,7 @@ struct Peer : NonCopyable {
 		}
 		pkt.connectionId = transport->transportId;
 
-		PacketBuffer* pb_first = new PacketBuffer;
+		PacketBuffer* pb_first = PacketBuffer::create();
 		PacketWriter wr( pb_first, nullptr, Unversioned() );
 		pkt.serialize(wr);
 		unsent.prependWriteBuffer(pb_first, wr.finish());
@@ -1165,15 +1165,16 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			// Find the correct place to start calculating checksum
 			uint32_t checksumUnprocessedLength = len;
 			prevBytesWritten += packetInfoSize;
-			if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
-				prevBytesWritten -= PacketBuffer::DATA_SIZE;
+			if (prevBytesWritten >= checksumPb->bytes_written) {
+				prevBytesWritten -= checksumPb->bytes_written;
 				checksumPb = checksumPb->nextPacketBuffer();
 			}
 
 			// Checksum calculation
 			while (checksumUnprocessedLength > 0) {
-				uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
-				checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
+				uint32_t processLength =
+				    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
+				checksum = crc32c_append(checksum, checksumPb->data() + prevBytesWritten, processLength);
 				checksumUnprocessedLength -= processLength;
 				checksumPb = checksumPb->nextPacketBuffer();
 				prevBytesWritten = 0;
