@@ -292,8 +292,8 @@ struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
 			                  writer.getLength());
 		}
 		if (!value->alreadyWritten) {
-			value->alreadyWritten = true;
 			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
+			value->alreadyWritten = true;
 		}
 		return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(value->writer.getData())),
 		                  value->writer.getLength());
