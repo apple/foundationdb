@@ -236,6 +236,8 @@ auto test_serialization_done(int) -> sfinae_true<decltype(T::serialization_done)
 template <class T>
 auto test_serialization_done(long) -> std::false_type;
 
+// int is a better match for 0 than long. If substituting T::serialization_done succeeds the true_type overload is
+// selected.
 template <class T>
 struct has_serialization_done : decltype(test_serialization_done<T>(0)) {};
 
