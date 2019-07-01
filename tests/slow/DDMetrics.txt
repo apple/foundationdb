@@ -1,0 +1,7 @@
+testTitle=DDMetrics_test
+    testName=DDMetrics
+	numWorkers=20
+	transactionsPerWorker=100
+	writesPerTransaction=1000
+    excludeIp=127.0.0.1
+	excludePort=4500
