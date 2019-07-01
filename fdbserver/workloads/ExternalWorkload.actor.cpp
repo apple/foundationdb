@@ -215,7 +215,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		Promise<bool> promise;
 		auto f = promise.getFuture();
 		keepAlive(f, database);
-		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.getPtr()),
+		workloadImpl->check(reinterpret_cast<FDBDatabase*>(database.getPtr()),
 		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return f;
 	}
