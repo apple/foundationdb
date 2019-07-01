@@ -56,7 +56,7 @@ fdb_error_t getSize(struct ResultSet* rs, FDBTransaction* tr, int64_t* out_size)
 }
 
 void runTests(struct ResultSet *rs) {
-	uint64_t sizes[numKeys];
+	int64_t sizes[numKeys];
 	int i = 0, j = 0;
 	FDBDatabase *db = openDatabase(rs, &netThread);
 	FDBTransaction *tr = NULL;
