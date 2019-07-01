@@ -114,6 +114,7 @@ module FDB
       attach_function :fdb_transaction_watch, [ :pointer, :pointer, :int ], :pointer
       attach_function :fdb_transaction_commit, [ :pointer ], :pointer
       attach_function :fdb_transaction_get_committed_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_transaction_get_approximate_size, [ :pointer ], :pointer
       attach_function :fdb_transaction_get_versionstamp, [ :pointer ], :pointer
       attach_function :fdb_transaction_on_error, [ :pointer, :fdb_error ], :pointer
       attach_function :fdb_transaction_reset, [ :pointer ], :void
@@ -902,6 +903,10 @@ module FDB
       version = FFI::MemoryPointer.new :int64
       FDBC.check_error FDBC.fdb_transaction_get_committed_version(@tpointer, version)
       version.read_long_long
+    end
+
+    def get_approximate_size
+      Version.new(FDBC.fdb_transaction_get_approximate_size @tpointer)
     end
 
     def get_versionstamp

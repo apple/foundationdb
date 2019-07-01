@@ -805,19 +805,13 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)version;
 }
 
-JNIEXPORT uint32_t JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getApproximateSize(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getApproximateSize(JNIEnv *jenv, jobject, jlong tPtr) {
 	if (!tPtr) {
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
-	uint32_t size;
-	fdb_error_t err = fdb_transaction_get_approximate_size(tr, &size);
-	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return 0;
-	}
-	return size;
+	FDBFuture* f = fdb_transaction_get_approximate_size((FDBTransaction*)tPtr);
+	return (jlong)f;
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getVersionstamp(JNIEnv *jenv, jobject, jlong tPtr) {

@@ -138,6 +138,7 @@ class Tester
     @stack = Stack.new
     @tr_name = prefix
     @last_version = nil
+    @approximate_size = nil
 
     @threads = []
     @directory_extension = DirectoryExtension::DirectoryTester.new
@@ -381,6 +382,9 @@ class Tester
         when "GET_COMMITTED_VERSION"
           @last_version = inst.tr.get_committed_version
           inst.push("GOT_COMMITTED_VERSION")
+        when "GET_APPROXIMATE_SIZE"
+          @approximate_size = inst.tr.get_approximate_size.to_i
+          inst.push("GOT_APPROXIMATE_SIZE")
         when "GET_VERSIONSTAMP"
           inst.push(inst.tr.get_versionstamp)
         when "TUPLE_PACK"

@@ -156,6 +156,7 @@ class ApiTest(Test):
         resets = ['ON_ERROR', 'RESET', 'CANCEL']
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
+        txn_sizes = ['GET_APPROXIMATE_SIZE']
 
         op_choices += reads
         op_choices += mutations
@@ -168,6 +169,7 @@ class ApiTest(Test):
         op_choices += read_conflicts
         op_choices += write_conflicts
         op_choices += resets
+        op_choices += txn_sizes
 
         idempotent_atomic_ops = [u'BIT_AND', u'BIT_OR', u'MAX', u'MIN', u'BYTE_MIN', u'BYTE_MAX']
         atomic_ops = idempotent_atomic_ops + [u'ADD', u'BIT_XOR', u'APPEND_IF_FITS']
@@ -433,6 +435,10 @@ class ApiTest(Test):
                         self.can_get_commit_version = False
                         self.can_set_version = True
                         self.can_use_key_selectors = True
+
+            elif op == 'GET_APPROXIMATE_SIZE':
+                instructions.append(op)
+                self.add_strings(1)
 
             elif op == 'TUPLE_PACK' or op == 'TUPLE_RANGE':
                 tup = self.random.random_tuple(10)

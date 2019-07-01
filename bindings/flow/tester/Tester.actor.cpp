@@ -704,6 +704,19 @@ struct GetCommittedVersionFunc : InstructionFunc {
 const char* GetCommittedVersionFunc::name = "GET_COMMITTED_VERSION";
 REGISTER_INSTRUCTION_FUNC(GetCommittedVersionFunc);
 
+// GET_APPROXIMATE_SIZE
+struct GetApproximateSizeFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		int64_t size = wait(instruction->tr->getApproximateSize());
+		data->stack.pushTuple(LiteralStringRef("GOT_APPROXIMATE_SIZE"));
+		return Void();
+	}
+};
+const char* GetApproximateSizeFunc::name = "GET_APPROXIMATE_SIZE";
+REGISTER_INSTRUCTION_FUNC(GetApproximateSizeFunc);
+
 // GET_VERSIONSTAMP
 struct GetVersionstampFunc : InstructionFunc {
 	static const char* name;

@@ -261,6 +261,10 @@ public class StackTester {
 				inst.context.lastVersion = inst.tr.getCommittedVersion();
 				inst.push("GOT_COMMITTED_VERSION".getBytes());
 			}
+			else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
+				inst.context.approximateSize = inst.tr.getApproximateSize().join();
+				inst.push("GOT_APPROXIMATE_SIZE".getBytes());
+			}
 			else if(op == StackOperation.GET_VERSIONSTAMP) {
 				inst.push(inst.tr.getVersionstamp());
 			}
