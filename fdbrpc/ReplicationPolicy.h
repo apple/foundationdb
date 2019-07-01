@@ -317,4 +317,6 @@ struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
 	}
 };
 
+static_assert(detail::has_serialization_done<dynamic_size_traits<Reference<IReplicationPolicy>>>::value);
+
 #endif
