@@ -661,26 +661,50 @@ private:
 };
 
 struct SendBuffer {
-	int bytes_written, bytes_sent;
 	uint8_t const* data;
 	SendBuffer* next;
+	int bytes_written, bytes_sent;
 };
 
-struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
+struct PacketBuffer : SendBuffer {
+private:
 	int reference_count;
-	enum { DATA_SIZE = 4096 - 28 }; //28 is the size of the PacketBuffer fields
-	uint8_t data[ DATA_SIZE ];
+	uint32_t size_;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
 
-	PacketBuffer() : reference_count(1) {
+public:
+	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
+	size_t size() { return size_; }
+
+private:
+	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
 		next = 0;
 		bytes_written = bytes_sent = 0;
-		((SendBuffer*)this)->data = data;
-		static_assert( sizeof(PacketBuffer) == 4096, "PacketBuffer size mismatch" );
+		((SendBuffer*)this)->data = reinterpret_cast<uint8_t*>(this + 1);
+		static_assert(sizeof(PacketBuffer) == PACKET_BUFFER_OVERHEAD);
+	}
+
+public:
+	static PacketBuffer* create(size_t size = 0) {
+		size = std::max(size, 4096 - PACKET_BUFFER_OVERHEAD);
+		if (size == 4096 - PACKET_BUFFER_OVERHEAD) {
+			return new (FastAllocator<4096>::allocate()) PacketBuffer{ size };
+		}
+		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
+		return new (mem) PacketBuffer{ size };
 	}
 	PacketBuffer* nextPacketBuffer() { return (PacketBuffer*)next; }
 	void addref() { ++reference_count; }
-	void delref() { if (!--reference_count) delete this; }
-	int bytes_unwritten() const { return DATA_SIZE-bytes_written; }
+	void delref() {
+		if (!--reference_count) {
+			if (size_ == 4096 - PACKET_BUFFER_OVERHEAD) {
+				FastAllocator<4096>::release(this);
+			} else {
+				delete[] this;
+			}
+		}
+	}
+	int bytes_unwritten() const { return size_ - bytes_written; }
 };
 
 struct PacketWriter {
@@ -700,7 +724,7 @@ struct PacketWriter {
 
 	void serializeBytes(const void* data, int bytes) {
 		if (bytes <= buffer->bytes_unwritten()) {
-			memcpy(buffer->data + buffer->bytes_written, data, bytes);
+			memcpy(buffer->data() + buffer->bytes_written, data, bytes);
 			buffer->bytes_written += bytes;
 		} else {
 			serializeBytesAcrossBoundary(data, bytes);
@@ -718,7 +742,7 @@ struct PacketWriter {
 	template <class T>
 	void serializeBinaryItem( const T& t ) {
 		if (sizeof(T) <= buffer->bytes_unwritten()) {
-			*(T*)(buffer->data + buffer->bytes_written) = t;
+			*(T*)(buffer->data() + buffer->bytes_written) = t;
 			buffer->bytes_written += sizeof(T);
 		} else {
 			serializeBytesAcrossBoundary(&t, sizeof(T));
