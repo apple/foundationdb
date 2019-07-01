@@ -87,7 +87,7 @@ int EndpointLoadGenerator::getVerifyRangesReq(flatbuffers::FlatBufferBuilder& se
 		auto kr = CreateKeyRange(serializer, k1, k2);
 		keyRangeVector.push_back(kr);
 		checksumsVector.push_back(krInfoIt->checksum);
-		log->trace(LogLevel::Debug, "EndpointLoadGenVerifyReq", { { "kr", krInfoIt->toStr() } });
+		log->trace(LogLevel::Debug, "EndpointLoadGenVerifyReq", { { "KeyRange", krInfoIt->toStr() } });
 
 		epToVerifyRangesWaitingForResponse[endpoint].push_back(*krInfoIt);
 		verifyRangesWaitingToSend.erase(krInfoIt);
@@ -114,7 +114,7 @@ MessageStats EndpointLoadGenerator::waitingEPGotReply(int endpoint, int error) {
 	if (epToVerifyRangeWaitingForPush.find(endpoint) != epToVerifyRangeWaitingForPush.end() && !error) {
 		auto vrInfo = epToVerifyRangeWaitingForPush[endpoint];
 		log->trace("EndpointLoadGenEPWaitingForReply_VerifyWaitingForPushFinished",
-		           { { "Endpoint", STR(endpoint) }, { "kr", vrInfo.toStr() } });
+		           { { "Endpoint", STR(endpoint) }, { "KeyRange", vrInfo.toStr() } });
 		verifyRangesWaitingToSend.insert(vrInfo);
 		epToVerifyRangeWaitingForPush.erase(endpoint);
 	}
@@ -137,7 +137,7 @@ MessageStats EndpointLoadGenerator::waitingEPGotVerifyFinish(int endpoint) {
 	}
 	for (auto krInfo : epToVerifyRangesWaitingForResponse[endpoint]) {
 		log->trace("EndpointLoadGenEPWaitingForVerifyFinished",
-		           { { "Endpoint", STR(endpoint) }, { "kr", krInfo.toStr() } });
+		           { { "Endpoint", STR(endpoint) }, { "KeyRange", krInfo.toStr() } });
 		verifyRangesWaitingForResponse.erase(krInfo);
 	}
 	epToVerifyRangesWaitingForResponse.erase(endpoint);
@@ -206,7 +206,7 @@ int EndpointLoadGenerator::getPushBatchReq(flatbuffers::FlatBufferBuilder& seria
 		}
 		checksum = crc.sum();
 		VerifyRangeInfo vrInfo(keyIdxStart, keyIdx, checksum);
-		log->trace("EndpointLoadGenerateAddBatchToVerifyQueue", { { "verifyInfo", vrInfo.toStr() } });
+		log->trace("EndpointLoadGenerateAddBatchToVerifyQueue", { { "VerifyInfo", vrInfo.toStr() } });
 		verifyRangesWaitingForResponse.insert(vrInfo);
 		epToVerifyRangeWaitingForPush[endpoint] = vrInfo;
 
@@ -259,8 +259,8 @@ void EndpointLoadGenerator::init(std::shared_ptr<Log> l, int kRange, int vRange,
 
 void EndpointLoadGenerator::printMutVector(const flatbuffers::Vector<flatbuffers::Offset<Mutation>>* mutations) {
 	for (auto i = 0; i < mutations->Length(); i++) {
-		log->trace("PrintMutation", { { "mutation", printObj(*mutations->Get(i)) },
-		                              { "size", STR(mutations->Get(i)->param1()->str().size()) } });
+		log->trace("PrintMutation", { { "Mutation", printObj(*mutations->Get(i)) },
+		                              { "Size", STR(mutations->Get(i)->param1()->str().size()) } });
 	}
 }
 void EndpointLoadGenerator::printRangesVector(const flatbuffers::Vector<flatbuffers::Offset<KeyRange>>* keyRanges) {

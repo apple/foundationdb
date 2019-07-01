@@ -115,14 +115,13 @@ std::string MessageBuffer::toStr() {
 }
 
 bool MessageBuffer::checkReplicatorIDRegistry(std::shared_ptr<Log> log) {
-
-    //auto reqState = getRepState();
-    ///if (replyRepState.id == reqState.id) {
-		//return true;
-    //	} else {
-      //log->trace("ReplicatorIDDoesntMatchError", { { "cur", replyRepState.toStr() }, { "req", reqState.toStr() } });
+	auto reqState = getRepState();
+	if (replyRepState.id == reqState.id) {
+		return true;
+	} else {
+		log->trace("ReplicatorIDDoesntMatchError", { { "cur", replyRepState.toStr() }, { "req", reqState.toStr() } });
 		return false;
-    //}
+	}
 }
 
 #ifndef INGEST_ADAPTER_SIM_TEST

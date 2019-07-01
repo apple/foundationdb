@@ -88,7 +88,6 @@ struct IngestAdapterWorkload : public FDBWorkload {
 		out.emplace_back(FDBPerfMetric{ "bytesPushed", bytesPushed, false });
 	}
 
-	~IngestAdapterWorkload() {}
 	void sendRequests() {
 
 		cxt->trace(FDBSeverity::Info, "IngestWorkloadSendRequests", {});
@@ -146,8 +145,8 @@ struct IngestAdapterWorkload : public FDBWorkload {
 
 	void endTestOrSendMoreRequests() {
 		cxt->trace(FDBSeverity::Info, "IngestWorkloadResponse",
-		           { { "epsWaitingForReply", STR(requestGen.endpointsWaitingForReply()) },
-		             { "epsWaitingForVerifyFinish", STR(requestGen.endpointsWaitingForVerifyFinish()) } });
+		           { { "EpsWaitingForReply", STR(requestGen.endpointsWaitingForReply()) },
+		             { "EpsWaitingForVerifyFinish", STR(requestGen.endpointsWaitingForVerifyFinish()) } });
 		if (requestsServed < requestsToServe) {
 			// send another batch of requests
 			// someday: choose to change the replicator registration

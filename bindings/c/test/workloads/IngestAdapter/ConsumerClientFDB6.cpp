@@ -4,7 +4,7 @@
 using namespace std;
 using namespace ConsAdapter::serialization;
 
-std::string ConsumerClientFDB6::repStateKey = "snowCannonProxy/ReplicatorState";
+std::string ConsumerClientFDB6::repStateKey = "\xff/snowCannonProxy/ReplicatorState";
 ConsumerClientFDB6* ConsumerClientFDB6::g_FDB6Client = NULL;
 
 #ifndef INGEST_ADAPTER_SIM_TEST
@@ -48,7 +48,7 @@ int ConsumerClientFDB6::startNetwork() {
 	fdb_error_t err;
 
 	if (doNetworkTrace) {
-		log->trace("Client6EnableNetworkTracing", { { "path", networkTracePath } });
+		log->trace("Client6EnableNetworkTracing", { { "Path", networkTracePath } });
 		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_ENABLE, (uint8_t*)networkTracePath.c_str(),
 		                             networkTracePath.size());
 		if (err) {
@@ -114,15 +114,15 @@ int ConsumerClientFDB6::startNetwork() {
 #define CHECK_TXN_FUTURE_CB(fut, tag)                                                                                  \
 	{                                                                                                                  \
 		auto ferr = fdb_future_get_error(fut);                                                                         \
-		log->trace(fmt::format("Client6_{}_TxnFutCBCheck", tag), { { "err", STR(fdb_get_error(ferr)) } });             \
+		log->trace(fmt::format("Client6_{}_TxnFutCBCheck", tag), { { "Error", STR(fdb_get_error(ferr)) } });             \
 		if (ferr) {                                                                                                    \
 			log->trace(fmt::format("Client6_{}_TxnRetryOnError", tag),                                                 \
-			           { { "err", STR(fdb_get_error(ferr)) }, { "Buffer", reqBuffer->toStr() } });                     \
+			           { { "Error", STR(fdb_get_error(ferr)) }, { "Buffer", reqBuffer->toStr() } });                     \
 			FDBFuture* futErr = fdb_transaction_on_error(txn, ferr);                                                   \
 			fdb_error_t err2 = fdb_future_set_callback(futErr, &ConsumerClientFDB6::retryTxnCB, reqBuffer);            \
 			if (err2) {                                                                                                \
 				log->trace(LogLevel::Error, fmt::format("Client6_{}_TxnRetryFAIL", tag),                               \
-				           { { "err", STR(fdb_get_error(err2)) } });                                                   \
+				           { { "Error", STR(fdb_get_error(err2)) } });                                                   \
 				fdb_future_destroy(futErr);                                                                            \
 				reqBuffer->error = err2;                                                                               \
 				g_FDB6Client->cleanTransaction(reqBuffer);                                                             \
@@ -138,7 +138,7 @@ int ConsumerClientFDB6::startNetwork() {
 #define CHECK(err, tag)                                                                                                \
 	if (err) {                                                                                                         \
 		log->trace(LogLevel::Error, fmt::format("Client6_{}_UnexpectedError", tag),                                    \
-		           { { "err", STR(fdb_get_error(err)) } }),                                                            \
+		           { { "Error", STR(fdb_get_error(err)) } }),                                                            \
 		    assert(0);                                                                                                 \
 	}
 
@@ -146,7 +146,7 @@ FDBTransaction* ConsumerClientFDB6::createTransaction(MessageBuffer* buffer, fdb
 	std::unique_lock lock(txnMutex);
 	log->trace("Client6CreateTxn", { { "Buffer", buffer->toStr() } });
 	if (txnMap.find(buffer->id) != txnMap.end()) {
-		log->trace(LogLevel::Error, "Client6CreateTxnAlreadyExistsError", { { "id", STR(buffer->id) } });
+		log->trace(LogLevel::Error, "Client6CreateTxnAlreadyExistsError", { { "ID", STR(buffer->id) } });
 		assert(0);
 	}
 	FDBTransaction* txn;
@@ -159,7 +159,7 @@ FDBTransaction* ConsumerClientFDB6::getTransaction(MessageBuffer* buffer) {
 	std::shared_lock lock(txnMutex);
 	log->trace("Client6GetTxn", { { "Buffer", buffer->toStr() } });
 	if (txnMap.find(buffer->id) == txnMap.end()) {
-		log->trace(LogLevel::Error, "Client6NoTxnAssociatedWithBuffer", { { "id", STR(buffer->id) } });
+		log->trace(LogLevel::Error, "Client6NoTxnAssociatedWithBuffer", { { "ID", STR(buffer->id) } });
 		assert(0);
 	}
 	return txnMap[buffer->id];
@@ -172,7 +172,7 @@ void ConsumerClientFDB6::cleanTransaction(MessageBuffer* buffer) {
 		fdb_transaction_destroy(txnMap[buffer->id]);
 		txnMap.erase(buffer->id);
 	} else {
-		log->trace(LogLevel::Error, "Client6CleanNoTxnAssociatedWithBuffer", { { "id", STR(buffer->id) } });
+		log->trace(LogLevel::Error, "Client6CleanNoTxnAssociatedWithBuffer", { { "ID", STR(buffer->id) } });
 		assert(0);
 	}
 }
@@ -208,7 +208,7 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	auto txn = createTransaction(reqBuffer, err);
 	ReplicatorStateExt statePassed(reqBuffer->getRepState());
 
-	log->trace("Client6BeginTxnGetRepState", { { "arg", statePassed.toStr() }, { "Buffer", reqBuffer->toStr() } });
+	log->trace("Client6BeginTxnGetRepState", { { "Arg", statePassed.toStr() }, { "Buffer", reqBuffer->toStr() } });
 
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, NULL, 0);
 	//err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
@@ -220,7 +220,7 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	// Get operation
 	FDBFuture* f = fdb_transaction_get(txn, (uint8_t*)ConsumerClientFDB6::repStateKey.c_str(),
 	                                   ConsumerClientFDB6::repStateKey.size(), false);
-	log->trace("GETKEY", { { "key", ConsumerClientFDB6::repStateKey } });
+	log->trace("GETKEY", { { "Key", ConsumerClientFDB6::repStateKey } });
 	err = fdb_future_set_callback(f, &ConsumerClientFDB6::checkReplicatorStateCB, reqBuffer);
 	CHECK(err, "BeginTxnSetCB");
 	return err;
@@ -243,7 +243,7 @@ void ConsumerClientFDB6::checkReplicatorStateCB(FDBFuture* fut, void* arg) {
 	if (out_present) {
 		reqBuffer->replyRepState = ReplicatorStateExt(*repState);
 
-		log->trace("Client6GetRepStateCBState", { { "repState", reqBuffer->replyRepState.toStr() } });
+		log->trace("Client6GetRepStateCBState", { { "RepState", reqBuffer->replyRepState.toStr() } });
 	} else {
 		log->trace("Client6GetRepStateCBStateNotFound");
 	}
@@ -286,9 +286,9 @@ void ConsumerClientFDB6::setReplicatorState(MessageBuffer* reqBuffer) {
 	ReplicatorStateExt setState = reqBuffer->replyRepState;
 	setState.id = reqBuffer->getRepState().id;
 	log->trace("Client6SetRepState", { { "Buffer", reqBuffer->toStr() },
-	                                   { "arg", reqBuffer->getRepState().toStr() },
-	                                   { "cur", reqBuffer->replyRepState.toStr() },
-	                                   { "new", setState.toStr() } });
+	                                   { "Arg", reqBuffer->getRepState().toStr() },
+	                                   { "Cur", reqBuffer->replyRepState.toStr() },
+	                                   { "New", setState.toStr() } });
 
 	reqBuffer->setStateObj = setState.serialize();
 
@@ -319,18 +319,18 @@ void ConsumerClientFDB6::pushBatch(MessageBuffer* reqBuffer) {
 
 	for (int i = 0; i < reqBuffer->getMutations()->Length(); i++) {
 		auto m = reqBuffer->getMutations()->Get(i);
-		log->trace(LogLevel::Debug, "Client6PushBatchTraceMutation", { { "mut", printObj(*m) } });
+		log->trace(LogLevel::Debug, "Client6PushBatchTraceMutation", { { "Mut", printObj(*m) } });
 		if (m->type() == 0) { // FDBMutationType == SetValue
-			log->trace(LogLevel::Debug, "Client6PushBatchTraceMutKey", { { "key", m->param1()->str() } });
+			log->trace(LogLevel::Debug, "Client6PushBatchTraceMutKey", { { "Key", m->param1()->str() } });
 			fdb_transaction_set(txn, (uint8_t*)m->param1()->c_str(), m->param1()->str().size(),
 			                    (uint8_t*)m->param2()->c_str(), m->param2()->str().size());
 		} else if (m->type() == 1) { // FDBMutationType == ClearRange
 			log->trace(LogLevel::Debug, "Client6PushBatchTraceMutClearRange",
-			           { { "key1", m->param1()->str() }, { "key2", m->param2()->str() } });
+			           { { "Key1", m->param1()->str() }, { "Key2", m->param2()->str() } });
 			fdb_transaction_clear_range(txn, (uint8_t*)m->param1()->c_str(), m->param1()->str().size(),
 			                            (uint8_t*)m->param2()->c_str(), m->param2()->str().size());
 		} else {
-			log->trace(LogLevel::Error, "Client6PushBatchMutationTypeNotSupported", { { "msgType", STR(m->type()) } });
+			log->trace(LogLevel::Error, "Client6PushBatchMutationTypeNotSupported", { { "MsgType", STR(m->type()) } });
 		}
 	}
 	FDBFuture* fut = fdb_transaction_commit(txn);
@@ -354,15 +354,15 @@ void ConsumerClientFDB6::verifyRange(MessageBuffer* reqBuffer) {
 	auto txn = getTransaction(reqBuffer);
 
 	log->trace("Client6VerifyRange", { { "Buffer", reqBuffer->toStr() },
-	                                   { "rangeCount", STR(reqBuffer->getRanges()->Length()) },
-	                                   { "currentRange", STR(reqBuffer->curVerifyRange) } });
+	                                   { "RangeCount", STR(reqBuffer->getRanges()->Length()) },
+	                                   { "CurrentRange", STR(reqBuffer->curVerifyRange) } });
 	if (reqBuffer->curVerifyRange >= reqBuffer->getRanges()->Length()) {
 		log->trace("Client6VerifyRangeComplete");
 		g_FDB6Client->sendResponse(reqBuffer, true);
 		return;
 	}
 	auto range = reqBuffer->getRanges()->Get(reqBuffer->curVerifyRange);
-	log->trace("Client6VerifyRangeGetRange", { { "range", printObj(*range) } });
+	log->trace("Client6VerifyRangeGetRange", { { "Range", printObj(*range) } });
 
 	fut = fdb_transaction_get_range(
 	    txn, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)range->begin()->c_str(), range->begin()->str().size()),
@@ -393,7 +393,7 @@ void ConsumerClientFDB6::verifyRangeCB(FDBFuture* fut, void* arg) {
 	reqBuffer->respType = MessageResponseType::T_FinishResp; // change response type
 
 	err = fdb_future_get_keyvalue_array(fut, &out_kv, &out_count, &out_more);
-	log->trace("Client6VerifyRangeCB", { { "Buffer", reqBuffer->toStr() }, { "outCount", STR(out_count) } });
+	log->trace("Client6VerifyRangeCB", { { "Buffer", reqBuffer->toStr() }, { "OutCount", STR(out_count) } });
 
 	CHECK(err, "VerifyRangeCB_ReadKeyValueArray");
 	if (out_more) {
@@ -416,7 +416,7 @@ void ConsumerClientFDB6::verifyRangeCB(FDBFuture* fut, void* arg) {
 			endValue = value;
 		}
 
-		log->trace(LogLevel::Debug, "Client6VerifyRangeCheckKV", { { "key", key }, { "value", value } });
+		log->trace(LogLevel::Debug, "Client6VerifyRangeCheckKV", { { "Key", key }, { "Value", value } });
 		crc.block(out_kv[i].key, out_kv[i].key_length);
 		crc.block(out_kv[i].value, out_kv[i].value_length);
 		totalSize += out_kv[i].key_length;
@@ -425,21 +425,21 @@ void ConsumerClientFDB6::verifyRangeCB(FDBFuture* fut, void* arg) {
 	checksum = crc.sum();
 	if (checksum != argChecksum) {
 		log->trace(LogLevel::Error, "Client6VerifyRangeFAILChecksumMismatch",
-		           { { "bKey", beginKey },
-		             { "eKey", endValue },
-		             { "calculated", STR(checksum) },
-		             { "expected", STR(argChecksum) },
-		             { "kvSize", STR(totalSize) },
-		             { "index", STR(reqBuffer->curVerifyRange) } });
+		           { { "BeginKey", beginKey },
+		             { "EndKey", endValue },
+		             { "Calculated", STR(checksum) },
+		             { "Expected", STR(argChecksum) },
+		             { "KVSize", STR(totalSize) },
+		             { "Index", STR(reqBuffer->curVerifyRange) } });
 		g_FDB6Client->sendResponse(reqBuffer, true);
 		return;
 	} else {
-		log->trace("Client6VerifyRangeSUCCESSTrace", { { "bKey", beginKey },
-		                                               { "eKey", endValue },
-		                                               { "calculated", STR(checksum) },
-		                                               { "expected", STR(argChecksum) },
-		                                               { "kvSize", STR(totalSize) },
-		                                               { "index", STR(reqBuffer->curVerifyRange) } });
+		log->trace("Client6VerifyRangeSUCCESSTrace", { { "BeginKey", beginKey },
+		                                               { "EndKey", endValue },
+		                                               { "Calculated", STR(checksum) },
+		                                               { "Expected", STR(argChecksum) },
+		                                               { "KVSize", STR(totalSize) },
+		                                               { "Index", STR(reqBuffer->curVerifyRange) } });
 	}
 
 	reqBuffer->curVerifyRange++;
