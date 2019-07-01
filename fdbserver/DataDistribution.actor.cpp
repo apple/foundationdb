@@ -2308,6 +2308,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 		prevHasWrongStoreTypeServer = !serversToRemove.empty();
 
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
+			TraceEvent("WrongStoreTypeRemover").detail("KickTeamBuilder", "Start");
 			self->doBuildTeams = true;
 			self->restartTeamBuilder.trigger();
 		}
@@ -2847,12 +2848,28 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
-	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
-	server->storeType = type; // Update server's storeType, especially when it was created
-	if( type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
+	try {
+		// Update server's storeType, especially when it was created
+		KeyValueStoreType type = wait( server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution) );
+		if ( type == KeyValueStoreType::END ) {
+			server->storeType = KeyValueStoreType::INVALID;
+		} else {
+			server->storeType = type;
+		}
+		if( server->storeType == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) ) {
+			wait(Future<Void>(Never()));
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			server->storeType = KeyValueStoreType::INVALID;
+			TraceEvent("ServerFailedToGetStoreTypeMX").detail("Server", server->id);
+		} else {
+			throw e;
+		}
 		wait(Future<Void>(Never()));
+	}
 
-	return type;
+	return server->storeType;
 }
 
 bool inCorrectDC(DDTeamCollection* self, TCServerInfo *server) {
@@ -2931,6 +2948,9 @@ ACTOR Future<Void> storageServerFailureTracker(
 			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
 		} else if(!inHealthyZone) {
 			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);
+			server->storeType = KeyValueStoreType::INVALID;
+			status->isUndesired = true;
+			status->isWrongConfiguration = true;
 		}
 		choose {
 			when ( wait(healthChanged) ) {
