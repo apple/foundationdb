@@ -85,7 +85,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				req.version = readVersion;
 				// we don't care about the value
 				req.key = LiteralStringRef("/lkfs");
-				requests.emplace_back(ssi.getValue.getReply(req));
+				requests.emplace_back(brokenPromiseToNever(ssi.getValue.getReply(req)));
 			}
 			wait(waitForAllReady(requests));
 			int failedRequests = 0;
