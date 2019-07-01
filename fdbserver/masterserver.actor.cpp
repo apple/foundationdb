@@ -1126,7 +1126,7 @@ ACTOR Future<Void> rejoinRequestHandler( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems, Promise<Void> remoteRecovered ) {
+ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems ) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	loop {
@@ -1169,10 +1169,6 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			self->recruitmentStalled->set(true);
 		}
 		self->registrationTrigger.trigger();
-
-		if(allLogs && remoteRecovered.canBeSet()) {
-			remoteRecovered.send(Void());
-		}
 
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
@@ -1386,8 +1382,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between our
 	//     first commit and the next new TLogs
 
-	state Promise<Void> remoteRecovered;
-	self->addActor.send( trackTlogRecovery(self, oldLogSystems, remoteRecovered) );
+	self->addActor.send( trackTlogRecovery(self, oldLogSystems) );
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
