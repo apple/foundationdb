@@ -1679,13 +1679,6 @@ ACTOR Future<vector<TLogInterface>> requireAll( vector<Future<Optional<vector<TL
 
 void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest req ) {
 	try {
-		// if ( req.cancelOutstandingRecruit ) {
-		// 	TraceEvent("RecruitStorageCancelOutstandingRequests", self->id);
-		// 	self->outstandingStorageRequests.clear();
-		// 	RecruitStorageReply rep;
-		// 	req.reply.send( rep );
-		// 	return;
-		// }
 		if(!self->gotProcessClasses && !req.criticalRecruitment)
 			throw no_more_servers();
 		auto worker = self->getStorageWorker(req);
@@ -2529,7 +2522,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 			self->db.clearInterf(ProcessClass::DataDistributorClass);
 			// Clear the outstanding storage recruitment request
 			TraceEvent("CC_DataDistributorDied", self->id).detail("ClearOutstandingStorageRequest", self->outstandingStorageRequests.size());
-			self->outstandingStorageRequests.clear();
+			//self->outstandingStorageRequests.clear();
 		} else {
 			self->recruitingDistributor = true;
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );

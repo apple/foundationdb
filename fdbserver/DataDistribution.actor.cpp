@@ -375,7 +375,6 @@ struct ServerStatus {
 	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
 	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; } 
-	bool isUnhealthyOrWrongStoreType() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" :  "Healthy"; }
 
 	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
@@ -583,7 +582,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> initializationDoneActor;
 	Promise<Void> serverTrackerErrorOut;
 	AsyncVar<int> recruitingStream;
-	AsyncTrigger removeWrongStoreTypeServer; // Remove the storage server with wrong store type
+	AsyncTrigger restartRemoveWrongStoreType; // Remove the storage server with wrong store type
 	Debouncer restartRecruiting;
 
 	int healthyTeamCount;
@@ -902,7 +901,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
 			for(const auto& server : self->badTeams[idx]->getServers()) {
-				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthyOrWrongStoreType()) {
+				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
 					servers.push_back(server);
 				}
 			}
@@ -1009,7 +1008,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		std::map<Optional<Standalone<StringRef>>, int> machineTeams;
 		for(auto s = server_info.begin(); s != server_info.end(); ++s) {
-			if(!server_status.get(s->first).isUnhealthyOrWrongStoreType()) {
+			if(!server_status.get(s->first).isUnhealthy()) {
 				int stc = s->second->teams.size();
 				minTeams = std::min(minTeams, stc);
 				maxTeams = std::max(maxTeams, stc);
@@ -1183,7 +1182,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int constructMachinesFromServers() {
 		int totalServerIndex = 0;
 		for(auto i = server_info.begin(); i != server_info.end(); ++i) {
-			if (!server_status.get(i->first).isUnhealthyOrWrongStoreType()) {
+			if (!server_status.get(i->first).isUnhealthy()) {
 				checkAndCreateMachine(i->second);
 				totalServerIndex++;
 			}
@@ -1500,7 +1499,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Healthy machine has at least one healthy server
 		for (auto& server : machine->serversOnMachine) {
-			if (!server_status.get(server->id).isUnhealthyOrWrongStoreType()) {
+			if (!server_status.get(server->id).isUnhealthy()) {
 				return true;
 			}
 		}
@@ -1514,7 +1513,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int minTeamNumber = std::numeric_limits<int>::max();
 		for (auto& server : server_info) {
 			// Only pick healthy server, which is not failed or excluded.
-			if (server_status.get(server.first).isUnhealthyOrWrongStoreType()) continue;
+			if (server_status.get(server.first).isUnhealthy()) continue;
 
 			int numTeams = server.second->teams.size();
 			if (numTeams < minTeamNumber) {
@@ -1593,7 +1592,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int calculateHealthyServerCount() {
 		int serverCount = 0;
 		for (auto i = server_info.begin(); i != server_info.end(); ++i) {
-			if (!server_status.get(i->first).isUnhealthyOrWrongStoreType()) {
+			if (!server_status.get(i->first).isUnhealthy()) {
 				++serverCount;
 			}
 		}
@@ -1737,7 +1736,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					} else {
 						std::vector<Reference<TCServerInfo>> healthyProcesses;
 						for (auto it : machine->serversOnMachine) {
-							if (!server_status.get(it->id).isUnhealthyOrWrongStoreType()) {
+							if (!server_status.get(it->id).isUnhealthy()) {
 								healthyProcesses.push_back(it);
 							}
 						}
@@ -2290,7 +2289,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state vector<Reference<TCServerInfo>> serversToRemove;
 	
 	loop {
-		wait( delay(1.0) || self->removeWrongStoreTypeServer.onTrigger() );
+		wait( delay(1.0) || self->restartRemoveWrongStoreType.onTrigger() );
 		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size()).detail("SysRestoreType", self->configuration.storageServerStoreType);
 		serversToRemove.clear();
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
@@ -2300,7 +2299,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType);
 			if ( !server->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 				serversToRemove.push_back(server->second);
-				//break;
 			}
 		}
 		if ( prevHasWrongStoreTypeServer && serversToRemove.empty() ) {
@@ -2316,6 +2314,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 		for ( auto& s : serversToRemove ) {
 			if ( s.isValid() ) {
 				s->wrongStoreTypeRemoved.trigger();
+				//wait( delay(10) );
 			}
 			ASSERT(s->toRemove >= 0);
 			s->toRemove++;
@@ -2535,6 +2534,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 							.detail("SignallingTeam", team->getDesc())
 							.detail("Primary", self->primary);
 						// Create a new team
+						self->doBuildTeams = true;
+						self->restartTeamBuilder.trigger;
 						self->restartRecruiting.trigger();
 					}
 
@@ -2897,8 +2898,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 					.detail("ToRemove", server->toRemove);
 			status->isUndesired = true;
 			status->isWrongConfiguration = true;
-			//status->toRemove = server->toRemove; // Everytime toRemove changes, status->toRemove change will trigger trackers (e..g, serverTracker and teamTracker) to recheck // NOTE: Not working! Stuck in the middle of changeConfig
-			//self->restartRecruiting.trigger();
 		}
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
 		if(inHealthyZone) {
@@ -2919,9 +2918,9 @@ ACTOR Future<Void> storageServerFailureTracker(
 
 		self->server_status.set( interf.id(), *status );
 		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id());
-		if ( !server->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
-			self->removeWrongStoreTypeServer.trigger();
-		}
+		// if ( !server->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
+		// 	self->restartRemoveWrongStoreType.trigger();
+		// }
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2958,7 +2957,10 @@ ACTOR Future<Void> storageServerFailureTracker(
 					.detail("StoreType", server->storeType).detail("ConfigStoreType", self->configuration.storageServerStoreType);
 				status->isUndesired = true;
 				status->isWrongConfiguration = true;
+				// TODO: Do we really need to call this?
 				self->restartRecruiting.trigger();
+				self->doBuildTeams = true;
+				self->restartTeamBuilder.trigger();
 			}
 		}
 	}
@@ -2982,7 +2984,7 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
-	state bool hasWrongStoretype = false;
+	//state bool hasWrongStoretype = false;
 	state bool hasWrongDC = false;
 
 	try {
@@ -3007,7 +3009,7 @@ ACTOR Future<Void> storageServerTracker(
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
-					if ( !self->server_status.get( i.second->id ).isUnhealthy() && server->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
+					if ( !self->server_status.get( i.second->id ).isUnhealthy() && server->toRemove == 0 ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3047,30 +3049,6 @@ ACTOR Future<Void> storageServerTracker(
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
-			// if (hasWrongStoretype) {
-			// 	TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-			// 	try {
-			// 		// Q: If wrongStoreTypeRemoved is AsyncVar, is the AsyncVar.send() delivered? From what I observed: another actor sends it but the receiver didn't receive it and quit, it seems not.
-			// 		wait( server->wrongStoreTypeRemoved.onTrigger() ); // This can be a long wait
-			// 		// if ( server->wrongStoreTypeRemoved.canBeSet() ) {
-			// 		// 	TraceEvent("UndesiredStorageServer", self->distributorId).detail("State", "Wait to be marked as undesired").detail("Server", server->id);
-			// 		// 	self->removeWrongStoreTypeServer.trigger();
-			// 		// 	wait( server->wrongStoreTypeRemoved.getFuture() ); // This can be a long wait
-			// 		// }
-			// 	} catch (Error &e) {
-			// 		if (e.code() != error_code_broken_promise) {
-			// 			TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id).detail("Error", e.what());
-			// 		} else {
-			// 			TraceEvent("WrongStoreTypeServerRemovedEarlier").detail("Server", server->id);
-			// 		}
-			// 	}
-				
-			// 	TraceEvent(SevWarn, "UndesiredStorageServerToRemoveMX", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
-			// 	status.isUndesired = true;
-			// 	status.isWrongConfiguration = true;
-			// 	//storeTracker = keyValueStoreTypeTracker( self, server );
-			// 	self->restartRecruiting.trigger();
-			// }
 
 			// If the storage server is in the excluded servers list, it is undesired
 			NetworkAddress a = server->lastKnownInterface.address();
@@ -3209,10 +3187,9 @@ ACTOR Future<Void> storageServerTracker(
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
 
 					//Restart the storeTracker for the new interface
-					//storeTracker = hasWrongStoretype ? Never() : keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
 					storeTracker = keyValueStoreTypeTracker(self, server); // hasWrongStoretype server will be delayed to be deleted.
 					hasWrongDC = false;
-					hasWrongStoretype = false;
+					//hasWrongStoretype = false;
 					self->restartTeamBuilder.trigger();
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
@@ -3229,7 +3206,7 @@ ACTOR Future<Void> storageServerTracker(
 
 					storeTracker = Never();
 					hasWrongDC = !inCorrectDC(self, server);
-					hasWrongStoretype = !server->isCorrectStoreType(type);
+					//hasWrongStoretype = !server->isCorrectStoreType(type);
 				}
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
@@ -3325,22 +3302,16 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state bool hasHealthyTeam;
 	state int numRecuitSSPending = 0;
 	state std::map<AddressExclusion, int> numSSPerAddr;
-	// TODO: ask CC to cancel outstanding recruitments
-	// RecruitStorageRequest cancelOutstandingRecruit;
-	// cancelOutstandingRecruit.cancelOutstandingRecruit = true;
-	// RecruitStorageReply waitForOutstandingReq = wait( db->get().clusterInterface.recruitStorage.getReply( cancelOutstandingRecruit, TaskDataDistribution ) );
-	//wait( waitForOutstandingReq );
 	loop {
 		try {
-			//self->removeWrongStoreTypeServer.trigger();
 			numSSPerAddr.clear();
 			hasWrongStoreType = false;
-			hasHealthyTeam = (self->healthyTeamCount != 0);
+			hasHealthyTeam = (self->healthyTeamCount != 0); //MX: healthyTeamCount is incorrect! A healthy team may still be a team with wrongStoreType servers. Will those wrongStoreType team be used as dest. in moveShard()?
 			RecruitStorageRequest rsr;
 			std::set<AddressExclusion> exclusions;
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
 				auto serverStatus = self->server_status.get( s->second->lastKnownInterface.id() );
-				if( serverStatus.excludeOnRecruit() && s->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
+				if( serverStatus.excludeOnRecruit() && s->second->toRemove == 0 ) {
 					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
 					AddressExclusion addrExcl( addr.ip, addr.port );
@@ -3375,45 +3346,25 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
 			}
 
-			// if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
-			// 	lastRequest = rsr;
-			// 	fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
-			// 	numRecuitSSPending++;
-			// }
-
-			//if ( ((hasWrongStoreType && !hasHealthyTeam) || !hasWrongStoreType) && numRecuitSSPending < 5 ) { // Need wrongStoreTypeRemover to rekick the recruitment logic
-				if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
-					lastRequest = rsr;
-					fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
-					//numRecuitSSPending++;
-				}
-			// } else { // hasWrongStoreType && hasHealthyTeam
-			// 	TraceEvent("StorageRecruiterStop").detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam);
-			// 	fCandidateWorker = Never();
-			// }
+			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
+				lastRequest = rsr;
+				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+			}
 
 			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam).detail("SysStoreType", self->configuration.storageServerStoreType);
 			self->traceAllInfo(true);
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
-					// Once initializeStorage() runs, it opens a file for the storeType even if TCServerInfo may not be created
-					// if ( hasWrongStoreType ) {
-					// 	numRecuitSSPending++;
-					// 	TraceEvent("RecruitSSWhenWrongStoreTypeExist", self->distributorId).detail("NumRecuitSSPending", numRecuitSSPending);
-					// }
-					//--numRecuitSSPending;
 					AddressExclusion candidateSSAddr(candidateWorker.worker.address().ip, candidateWorker.worker.address().port);
 					int numExistingSS = numSSPerAddr[candidateSSAddr];
 					if ( numExistingSS <= 2 ) {
 						self->addActor.send(initializeStorage(self, candidateWorker));
 						fCandidateWorker = Never();
-						//if ( !hasHealthyTeam ) {
-							self->doBuildTeams = true;
-							self->restartTeamBuilder.trigger();
-						//}
+						self->doBuildTeams = true;
+						self->restartTeamBuilder.trigger();
 					} else {
-						TraceEvent("StorageRecruiterMX", self->distributorId).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
+						TraceEvent(SevWarnAlways, "StorageRecruiterMX", self->distributorId).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
 					}
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
@@ -3486,7 +3437,7 @@ ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
 			self->doBuildTeams = true;
 			wait( DDTeamCollection::checkBuildTeams(self) );
 		}
-		when ( wait(self->zeroHealthyTeams->onChange()) ) {} //Q: Is it possible we may suddently have no healthy team because storeType change and we neverl update this variable?
+		when ( wait(self->zeroHealthyTeams->onChange()) ) {} //Q: Is it possible we may suddently have no healthy team because storeType change and we never update this variable?
 	}
 }
 
@@ -3687,10 +3638,8 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
-	Reference<DDTeamCollection> primaryTeamCollection;
-	Reference<DDTeamCollection> remoteTeamCollection;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id), primaryTeamCollection(Reference<DDTeamCollection>()), remoteTeamCollection(Reference<DDTeamCollection>()) {}
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {
@@ -3708,68 +3657,6 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 					*lastLimited = now();
 				}
 			} 
-		}
-	}
-}
-
-// TODO: Only reboot when DD related conf parameters change
-// Reference<IReplicationPolicy> storagePolicy;
-// int32_t storageTeamSize;
-// KeyValueStoreType storageServerStoreType;
-bool isDDConfigurationChanged( Reference<DataDistributorData> self, const DatabaseConfiguration* conf ) {
-	if ( self->primaryTeamCollection.isValid() && self->primaryTeamCollection->configuration != *conf ) {
-		TraceEvent("PrimaryTeamCollectionConfChanged", self->ddId);
-		return true;
-	}
-
-	if ( self->remoteTeamCollection.isValid() && self->remoteTeamCollection->configuration != *conf ) {
-		TraceEvent("RemoteTeamCollectionConfChanged", self->ddId);
-		return true;
-	}
-
-	return false;
-}
-
-void updateDDConfiguration( Reference<DataDistributorData> self, const DatabaseConfiguration* conf ) {
-	if ( self->primaryTeamCollection.isValid() ) {
-		self->primaryTeamCollection->configuration = *conf;
-	}
-	if ( self->remoteTeamCollection.isValid() ) {
-		self->remoteTeamCollection->configuration = *conf;
-	}
-
-	return;
-}
-
-ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
-	loop {
-		state ReadYourWritesTransaction tr(cx);
-
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
-				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
-
-				DatabaseConfiguration conf;
-				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
-				if( isDDConfigurationChanged(self, &conf) ) { // Check primaryDD and remoteDD's configuration
-					// Throw errors?
-					throw please_reboot(); // We need to cancel the trackers on the old data distributor that was rebooted
-					//updateDDConfiguration(self, &conf);
-					// self->configuration = conf; 
-					//// self->registrationTrigger.trigger(); //TODO
-				}
-				state Future<Void> storeTypeWatch = tr.watch( storeTypeConfig );
-
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
-				wait(tr.commit());
-				wait(watchFuture || storeTypeWatch);
-				break;
-			} catch (Error& e) {
-				wait( tr.onError(e) );
-			}
 		}
 	}
 }
@@ -3938,11 +3825,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
-			self->primaryTeamCollection = primaryTeamCollection;
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
 				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
-				self->remoteTeamCollection = remoteTeamCollection;
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
@@ -3950,8 +3835,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
-
-			//self->addActor.send( configurationMonitor(self) );
 
 			wait( waitForAll( actors ) );
 			return Void();
@@ -3962,8 +3845,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
 			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled);
-			//self->primaryTeamCollection = Reference<DDTeamCollection>();
-			//self->remoteTeamCollection = Reference<DDTeamCollection>(); // We need to cancel the trackers on the old data distributor that was rebooted
 			if( ddEnabled )
 				throw err;
 		}

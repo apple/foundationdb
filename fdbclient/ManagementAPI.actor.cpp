@@ -485,6 +485,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			}
 
 			for(auto i=m.begin(); i!=m.end(); ++i) {
+				// Debug purpose
 				TraceEvent("ChangeConfigAPI").detail("Param1", i->first).detail("Param2", i->second);
 				tr.set( StringRef(i->first), StringRef(i->second) );
 			}
@@ -493,6 +494,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			tr.set( moveKeysLockOwnerKey, versionKey );
 
 			wait( tr.commit() );
+			// Debug purpose
 			TraceEvent("ChangeConfigAPI").detail("NewConfig", newConfig.toString()).detail("OldConfig", oldConfig.toString());
 			break;
 		} catch (Error& e) {
