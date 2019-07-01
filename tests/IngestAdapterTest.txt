@@ -2,5 +2,5 @@ testTitle=IngestAdapterTest
 testName=External
 libraryName=c_workloads
 workloadName=IngestAdapterWorkload
-requestsToServe=100
-maxRequestsWaiting=10
+requestsToServe=10000
+maxRequestsWaiting=100

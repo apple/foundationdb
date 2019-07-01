@@ -164,7 +164,7 @@ struct IngestAdapterWorkload : public FDBWorkload {
 
 		// simulate createAndQueueResponse in ConsumerAdapter
 		if (freeBuffer) {
-			activeReqBuffers.erase(reqBuffer->id);
+			activeReqBuffers.erase(reqBuffer->endpoint);
 		}
 		endTestOrSendMoreRequests();
 		// end test or send more requests?
