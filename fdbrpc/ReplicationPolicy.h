@@ -283,28 +283,32 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 
 template <>
 struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
-	static Block save(const Reference<IReplicationPolicy>& value) {
+private:
+	using T = Reference<IReplicationPolicy>;
+	static BinaryWriter writer{ IncludeVersion() };
+
+public:
+	static size_t size(const T& value) {
 		if (value.getPtr() == nullptr) {
-			static BinaryWriter writer{ IncludeVersion() };
-			writer = BinaryWriter{ IncludeVersion() };
-			serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
-			return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(writer.getData())),
-			                  writer.getLength());
+			return writer.getLength();
 		}
 		if (!value->alreadyWritten) {
+			value->writer = BinaryWriter{ IncludeVersion() };
 			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
 			value->alreadyWritten = true;
 		}
-		return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(value->writer.getData())),
-		                  value->writer.getLength());
+		return value->writer.getLength();
 	}
 
-	static void serialization_done(const Reference<IReplicationPolicy>& value) {
+	// Guaranteed to be called only once during serialization
+	static void save(uint8_t* out, const T& value) {
 		if (value.getPtr() == nullptr) {
-			return;
+			memcpy(out, writer.getData(), writer.getLength());
+		} else {
+			ASSERT(value->alreadyWritten)
+			memcpy(out, value->writer.getData(), value->writer.getLength());
+			value->alreadyWritten = false;
 		}
-		value->alreadyWritten = false;
-		value->writer = BinaryWriter{ IncludeVersion() };
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
@@ -316,7 +320,5 @@ struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
 		serializeReplicationPolicy(reader, value);
 	}
 };
-
-static_assert(detail::has_serialization_done<dynamic_size_traits<Reference<IReplicationPolicy>>>::value);
 
 #endif
