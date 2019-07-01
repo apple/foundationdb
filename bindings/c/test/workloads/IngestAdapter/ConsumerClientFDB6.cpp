@@ -211,9 +211,9 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	log->trace("Client6BeginTxnGetRepState", { { "arg", statePassed.toStr() }, { "Buffer", reqBuffer->toStr() } });
 
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, NULL, 0);
-	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
-	                                 debugTxnID.size());
-	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_LOG_TRANSACTION, NULL, 0);
+	//err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
+	//                                 debugTxnID.size());
+	//err = fdb_transaction_set_option(txn, FDB_TR_OPTION_LOG_TRANSACTION, NULL, 0);
 
 	CHECK(err, "TxnSetOptionAccessSystemKeys");
 
@@ -236,11 +236,6 @@ void ConsumerClientFDB6::checkReplicatorStateCB(FDBFuture* fut, void* arg) {
 	char* val;
 	int valLen;
 	int out_present;
-	/*err = fdb_future_get_version(fut, &rv);
-	CHECK(err, "GetVersion");
-	log->trace("Client6GetRepStateCBVersion",
-	          { { "version", STR(rv) }, { "present", STR(out_present) }, { "err", STR(fdb_get_error(err)) } });
-  */
 	err = fdb_future_get_value(fut, &out_present, (const uint8_t**)&val, &valLen);
 	CHECK(err, "GetValue");
 	auto repState = flatbuffers::GetRoot<ConsAdapter::serialization::ReplicatorState>(static_cast<const void*>(val));

@@ -82,7 +82,7 @@ public:
 	int getPushBatchReq(flatbuffers::FlatBufferBuilder& serializer);
 	int getVerifyRangesReq(flatbuffers::FlatBufferBuilder& serializer);
 
-	MessageStats waitingEPGotReply(int endpoint);
+	MessageStats waitingEPGotReply(int endpoint, int error);
 	MessageStats waitingEPGotVerifyFinish(int endpoint);
 	void updateEndpointSendTime(int endpoint);
 

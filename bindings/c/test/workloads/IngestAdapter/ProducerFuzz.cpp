@@ -169,7 +169,7 @@ void ProducerFuzz::handleResponse(const boost::system::error_code& error, // Res
 		auto resp = static_cast<const ReplyResp*>(polevaultResp->response());
 		trace->info("producerFuzz response Reply:{} Endpoint:{} Err:{}", printObj(*resp->repState()),
 		            polevaultResp->endpoint(), resp->error());
-		epStats = requestGen.waitingEPGotReply(polevaultResp->endpoint());
+		epStats = requestGen.waitingEPGotReply(polevaultResp->endpoint(), resp->error());
 		break;
 	}
 	case Response_FinishResp: {
