@@ -28,13 +28,7 @@ add_custom_target(fdb_c_generated DEPENDS ${asm_file}
 vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
 
-message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
-message("CMAKE CUR SOURCE DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
-message("CMAKE CUR BIN DIR: ${CMAKE_CURRENT_BINARY_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter/cmake")
-
-message("CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
-
 
 include(GenerateExportHeader)
 include(CompileFlatBuffers)
@@ -60,9 +54,7 @@ target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>
-  $<BUILD_INTERFACE:${fmt_PREFIX}/include>
-  $<BUILD_INTERFACE:${flatbuffers_PREFIX}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter>)
+)
 if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
@@ -95,13 +87,21 @@ if(NOT WIN32)
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
 endif()
+message(".........CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
+message(".........CMAKE CUR SOURCE DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
+message(".........CMAKE CUR BIN DIR: ${CMAKE_CURRENT_BINARY_DIR}")
+message(".........CMAKE MODULE PATH: ${CMAKE_MODULE_PATH}")
 
+message(".........CMAKE FMT path: ${fmt_PREFIX}")
+message(".........CMAKE Flatbuffers path: ${flatbuffers_PREFIX}")
 set(c_workloads_srcs
   test/workloads/workloads.cpp
   test/workloads/workloads.h
   test/workloads/SimpleWorkload.cpp
   test/workloads/IngestAdapterWorkload.cpp
   test/workloads/IngestAdapter/SimLog.h
+  test/workloads/IngestAdapter/Crc32.h
+  test/workloads/IngestAdapter/Crc32.cpp
   test/workloads/IngestAdapter/ConsumerAdapterUtils.cpp
   test/workloads/IngestAdapter/ConsumerAdapterUtils.h
   test/workloads/IngestAdapter/EndpointLoadGenerator.cpp
@@ -117,9 +117,16 @@ else()
 endif()
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
-target_link_libraries(c_workloads PUBLIC fdb_c)
+target_link_libraries(c_workloads PUBLIC fdb_c fmt)
+target_include_directories(c_workloads PUBLIC
+  $<BUILD_INTERFACE:${fmt_PREFIX}/include>
+  $<BUILD_INTERFACE:${flatbuffers_PREFIX}/include>
+  #$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/test/workloads/IngestAdapter>
+)
 add_dependencies(c_workloads ConsumerAdapterGen)
-target_compile_options(c_workloads PUBLIC -DINGEST_ADAPTER_SIM_TEST=true)
+target_compile_definitions(c_workloads PRIVATE INGEST_ADAPTER_SIM_TEST=true)
+#target_compile_options(c_workloads PUBLIC -Wall -Wextra -pedantic -Wcast-align -Wcast-qual -Wctor-dtor-privacy -Wdisabled-optimization -Wformat=2 -Winit-self -Wlogical-op -Wmissing-include-dirs -Wnoexcept -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo -Wstrict-null-sentinel -Wstrict-overflow=5 -Wundef -Wno-unused -Wno-variadic-macros -Wno-parentheses -fdiagnostics-show-option)
+
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"

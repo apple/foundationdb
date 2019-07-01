@@ -2,7 +2,9 @@
 #include "ConsumerAdapterUtils.h"
 #include <boost/lexical_cast.hpp>
 
+#ifndef INGEST_ADAPTER_SIM_TEST
 using boost::asio::ip::tcp;
+#endif
 using namespace std;
 using namespace ConsAdapter::serialization;
 
@@ -65,7 +67,7 @@ int64_t EndpointLoadGenerator::keyIdxFromKey(std::string key) {
 std::string EndpointLoadGenerator::valueFuzz() {
 	int size = rand64() % valueRange;
 	auto retStr = std::string((const char*)dataFuzz.get(), size);
-	log.trace(LogLevel::Debug, "EndpointLoadGenerateValue", { { "val", retStr } });
+	log->trace(LogLevel::Debug, "EndpointLoadGenerateValue", { { "val", retStr } });
 	return retStr;
 }
 
@@ -85,7 +87,7 @@ int EndpointLoadGenerator::getVerifyRangesReq(flatbuffers::FlatBufferBuilder& se
 		auto kr = CreateKeyRange(serializer, k1, k2);
 		keyRangeVector.push_back(kr);
 		checksumsVector.push_back(krInfoIt->checksum);
-		log.trace(LogLevel::Debug, "EndpointLoadGenVerifyReq", { { "kr", krInfoIt->toStr() } });
+		log->trace(LogLevel::Debug, "EndpointLoadGenVerifyReq", { { "kr", krInfoIt->toStr() } });
 
 		epToVerifyRangesWaitingForResponse[endpoint].push_back(*krInfoIt);
 		verifyRangesWaitingToSend.erase(krInfoIt);
@@ -104,19 +106,19 @@ int EndpointLoadGenerator::getVerifyRangesReq(flatbuffers::FlatBufferBuilder& se
 
 MessageStats EndpointLoadGenerator::waitingEPGotReply(int endpoint) {
 	if (epsWaitingForReply.find(endpoint) == epsWaitingForReply.end()) {
-		log.trace(LogLevel::Error, "EndpointLoadGenEPWaitingForReplyNotFound", { { "endpoint", STR(endpoint) } });
+		log->trace(LogLevel::Error, "EndpointLoadGenEPWaitingForReplyNotFound", { { "Endpoint", STR(endpoint) } });
 		assert(0);
 	}
 	epsWaitingForReply.erase(endpoint);
 	if (epToVerifyRangeWaitingForPush.find(endpoint) != epToVerifyRangeWaitingForPush.end()) {
 		auto vrInfo = epToVerifyRangeWaitingForPush[endpoint];
-		log.trace("EndpointLoadGenEPWaitingForReply_VerifyWaitingForPushFinished",
-		          { { "endpoint", STR(endpoint) }, { "kr", vrInfo.toStr() } });
+		log->trace("EndpointLoadGenEPWaitingForReply_VerifyWaitingForPushFinished",
+		          { { "Endpoint", STR(endpoint) }, { "kr", vrInfo.toStr() } });
 		verifyRangesWaitingToSend.insert(vrInfo);
 		epToVerifyRangeWaitingForPush.erase(endpoint);
 	}
 	if (epsWaitingForSet.find(endpoint) != epsWaitingForSet.end()) {
-		log.trace("EndpointLoadGenEPWaitingForReply_SetRepStateFinished", { { "endpoint", STR(endpoint) } });
+		log->trace("EndpointLoadGenEPWaitingForReply_SetRepStateFinished", { { "Endpoint", STR(endpoint) } });
 		epsWaitingForSet.erase(endpoint);
 	}
 	auto epStats = epToStats[endpoint];
@@ -129,12 +131,12 @@ MessageStats EndpointLoadGenerator::waitingEPGotReply(int endpoint) {
 MessageStats EndpointLoadGenerator::waitingEPGotVerifyFinish(int endpoint) {
 
 	if (epToVerifyRangesWaitingForResponse.find(endpoint) == epToVerifyRangesWaitingForResponse.end()) {
-		log.trace(LogLevel::Error, "EndpointLoadGenEPWaitingForVerifyNotFound", { { "endpoint", STR(endpoint) } });
+		log->trace(LogLevel::Error, "EndpointLoadGenEPWaitingForVerifyNotFound", { { "Endpoint", STR(endpoint) } });
 		assert(0);
 	}
 	for (auto krInfo : epToVerifyRangesWaitingForResponse[endpoint]) {
-		log.trace("EndpointLoadGenEPWaitingForVerifyFinished",
-		          { { "endpoint", STR(endpoint) }, { "kr", krInfo.toStr() } });
+		log->trace("EndpointLoadGenEPWaitingForVerifyFinished",
+		          { { "Endpoint", STR(endpoint) }, { "kr", krInfo.toStr() } });
 		verifyRangesWaitingForResponse.erase(krInfo);
 	}
 	epToVerifyRangesWaitingForResponse.erase(endpoint);
@@ -146,7 +148,7 @@ MessageStats EndpointLoadGenerator::waitingEPGotVerifyFinish(int endpoint) {
 int EndpointLoadGenerator::getGetRepStateReq(flatbuffers::FlatBufferBuilder& serializer) {
 	auto repState = replicatorStateFuzz();
 	auto endpoint = endpointFuzz();
-	log.trace("EndpointLoadGenerateRepStateReq", { { "state", printObj(repState) } });
+	log->trace("EndpointLoadGenerateRepStateReq", { { "State", printObj(repState) } });
 	auto repReq = CreateGetReplicatorStateReq(serializer, &repState);
 	auto req = CreateConsumerAdapterRequest(serializer, Request_GetReplicatorStateReq, repReq.Union(), endpoint);
 	serializer.Finish(req);
@@ -157,7 +159,7 @@ int EndpointLoadGenerator::getGetRepStateReq(flatbuffers::FlatBufferBuilder& ser
 int EndpointLoadGenerator::getSetRepStateReq(flatbuffers::FlatBufferBuilder& serializer) {
 	auto repState = registerReplicatorState();
 	auto endpoint = endpointFuzz();
-	log.trace("EndpointLoadGenerateRepStateReq", { { "state", printObj(repState) }, { "endpoint", STR(endpoint) } });
+	log->trace("EndpointLoadGenerateRepStateReq", { { "State", printObj(repState) }, { "Endpoint", STR(endpoint) } });
 	auto setReq = CreateSetReplicatorStateReq(serializer, &repState);
 	auto req = CreateConsumerAdapterRequest(serializer, Request_SetReplicatorStateReq, setReq.Union(), endpoint);
 	serializer.Finish(req);
@@ -190,7 +192,7 @@ int EndpointLoadGenerator::getPushBatchReq(flatbuffers::FlatBufferBuilder& seria
 			auto v = serializer.CreateString(vStr);
 			auto m = CreateMutation(serializer, 0, k, v);
 			mutationsVector.push_back(m);
-			log.trace(LogLevel::Debug, "EndpointLoadGenerateMutAddToVerifyQueue", { { "key", kStr } });
+			log->trace(LogLevel::Debug, "EndpointLoadGenerateMutAddToVerifyQueue", { { "key", kStr } });
 			//      trace->debug("EndpointLoadGenerator add push mut to verify queue: key:{}
 			//      val:{}", kStr,
 			//             vStr);
@@ -202,7 +204,7 @@ int EndpointLoadGenerator::getPushBatchReq(flatbuffers::FlatBufferBuilder& seria
 		}
 		checksum = crc.sum();
 		VerifyRangeInfo vrInfo(keyIdxStart, keyIdx, checksum);
-		log.trace("EndpointLoadGenerateAddBatchToVerifyQueue", { { "verifyInfo", vrInfo.toStr() } });
+		log->trace("EndpointLoadGenerateAddBatchToVerifyQueue", { { "verifyInfo", vrInfo.toStr() } });
 		verifyRangesWaitingForResponse.insert(vrInfo);
 		epToVerifyRangeWaitingForPush[endpoint] = vrInfo;
 
@@ -219,7 +221,7 @@ int EndpointLoadGenerator::getPushBatchReq(flatbuffers::FlatBufferBuilder& seria
 			epToStats[endpoint].bytes += kStr.size();
 			epToStats[endpoint].bytes += vStr.size();
 
-			log.trace(LogLevel::Debug, "EndpointLoadGenerateMutAddToBatch", { { "key", kStr } });
+			log->trace(LogLevel::Debug, "EndpointLoadGenerateMutAddToBatch", { { "key", kStr } });
 			// trace->debug("EndpointLoadGenerator add push to batch keyValue({}:{}) ", kStr, vStr);
 		}
 	}
@@ -237,7 +239,8 @@ void EndpointLoadGenerator::updateEndpointSendTime(int endpoint) {
 	epToStats[endpoint].sendTS = std::chrono::system_clock::now();
 }
 
-void EndpointLoadGenerator::init(int kRange, int vRange, int mCountMax, int mKRSize, int rCountMax, int maxOSVR) {
+void EndpointLoadGenerator::init(std::shared_ptr<Log> l, int kRange, int vRange, int mCountMax, int mKRSize, int rCountMax, int maxOSVR)  {
+  log = l;
 	keyRange = kRange;
 	valueRange = vRange;
 	mutationCountMax = mCountMax;
@@ -253,12 +256,12 @@ void EndpointLoadGenerator::init(int kRange, int vRange, int mCountMax, int mKRS
 
 void EndpointLoadGenerator::printMutVector(const flatbuffers::Vector<flatbuffers::Offset<Mutation>>* mutations) {
 	for (auto i = 0; i < mutations->Length(); i++) {
-		log.trace("PrintMutation", { { "mutation", printObj(*mutations->Get(i)) },
+		log->trace("PrintMutation", { { "mutation", printObj(*mutations->Get(i)) },
 		                             { "size", STR(mutations->Get(i)->param1()->str().size()) } });
 	}
 }
 void EndpointLoadGenerator::printRangesVector(const flatbuffers::Vector<flatbuffers::Offset<KeyRange>>* keyRanges) {
 	for (auto i = 0; i < keyRanges->Length(); i++) {
-		log.trace("PrintKeyRanges", { { "keyRange", printObj(*keyRanges->Get(i)) } });
+		log->trace("PrintKeyRanges", { { "keyRange", printObj(*keyRanges->Get(i)) } });
 	}
 }

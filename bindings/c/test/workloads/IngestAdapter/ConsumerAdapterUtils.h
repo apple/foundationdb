@@ -6,7 +6,6 @@
 #include "Crc32.h"
 #include "iostream"
 #include <boost/array.hpp>
-#include <boost/asio.hpp>
 
 #ifdef INGEST_ADAPTER_SIM_TEST
 #include "SimLog.h"
@@ -17,8 +16,7 @@
 
 #include <list>
 #include <string>
-
-typedef boost::array<char, 1024> Buffer;
+#include <chrono>
 
 uint64_t rand64();
 
@@ -118,20 +116,26 @@ struct MessageBuffer {
 	const ConsAdapter::serialization::ReplicatorState* getRepStateData();
 	const flatbuffers::Vector<flatbuffers::Offset<ConsAdapter::serialization::Mutation>>* getMutations();
 	const flatbuffers::Vector<flatbuffers::Offset<ConsAdapter::serialization::KeyRange>>* getRanges();
-	const uint32_t getChecksum(int index);
+	uint32_t getChecksum(int index);
 
 	const flatbuffers::Vector<unsigned>* getChecksums();
 
-	bool checkReplicatorIDRegistry(Log& log);
+  bool checkReplicatorIDRegistry(std::shared_ptr<Log> log);
 	// buffers
 	flatbuffers::FlatBufferBuilder serializer;
 	std::vector<char> readBuffer;
-	std::vector<boost::asio::const_buffer> writeBuffers;
 	ConsAdapter::serialization::ReplicatorState setStateObj;
 
 	static uint64_t nextUID;
 
+#ifndef INGEST_ADAPTER_SIM_TEST
+	std::vector<boost::asio::const_buffer> writeBuffers;
 	void prepareWrite();
+	std::vector<boost::asio::const_buffer> getWriteBuffers() {
+		assert(readyForWrite);
+		return writeBuffers;
+	}
+#endif
 	std::string toStr();
 	void resetReply() {
 		error = 0;
@@ -141,11 +145,6 @@ struct MessageBuffer {
 		replyChecksums.clear();
 	};
 	MessageBuffer();
-	MessageBuffer(MessageHeader h);
-	std::vector<boost::asio::const_buffer> getWriteBuffers() {
-		assert(readyForWrite);
-		return writeBuffers;
-	}
 	~MessageBuffer() {
 		std::cout << "delete message buffer endpoint:" << endpoint << " header:" << printObj(header) << std::endl;
 	}

@@ -6,21 +6,16 @@
 #include "fmt/format.h"
 
 typedef FDBSeverity LogLevel;
-/*enum LogLevel {
-    Debug = FDBSeverity::Debug,
-    Info = FDBSeverity::Info,
-    Warn = FDBSeverity::Warn,
-    WarnAlways = FDBSeverity::WarnAlways,
-    Error = FDBSeverity::Error
-  };*/
+
 
 #define STR(arg) fmt::format("{}", arg)
 
 class Log {
-	static FDBWorkloadContext* context;
+	FDBWorkloadContext* context = nullptr;
+    // DLL won't let me create a static singleton here.  Get 'variable <> has internal linkage but is not defined' error
+    // static std::shared_ptr<Log> m_log;
 
 public:
-	Log() { context = nullptr; }
 	Log(FDBWorkloadContext* c) { context = c; }
 	void trace(const std::string& name) { trace(LogLevel::Info, name, {}); }
 	void trace(const std::string& name, const std::vector<std::pair<std::string, std::string>>& details) {

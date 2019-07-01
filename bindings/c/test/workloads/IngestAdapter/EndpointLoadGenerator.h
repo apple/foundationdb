@@ -2,10 +2,6 @@
 #define POLEVAULTFUZZ_H
 #pragma once
 
-#include <boost/array.hpp>
-#include <boost/asio.hpp>
-#include <boost/bind.hpp>
-
 #include "ConsumerAdapterUtils.h"
 #include <string>
 
@@ -49,7 +45,7 @@ class EndpointLoadGenerator {
 	int maxOutstandingVerifyRanges = 100; // max key range verifies waiting for send and response
 	std::string keyPrefix = "some/key/path/";
 	std::unique_ptr<uint64_t[]> dataFuzz;
-	Log log;
+	std::shared_ptr<Log> log;
 
 	std::set<int> epsWaitingForSet; // remove on set req reply
 	std::set<int> epsWaitingForReply; // remove on req reply
@@ -95,7 +91,7 @@ public:
 	int endpointsWaitingForVerifyFinish() { return epToVerifyRangesWaitingForResponse.size(); }
 	int verifyReqsWaitingToSend() { return verifyRangesWaitingToSend.size(); }
 
-	void init(int kRange, int vRange, int mCountMax, int mKRSize, int rCountMax, int maxOSVR);
+	void init(std::shared_ptr<Log> log, int kRange, int vRange, int mCountMax, int mKRSize, int rCountMax, int maxOSVR);
 };
 
 #endif

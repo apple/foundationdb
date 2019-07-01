@@ -4,10 +4,6 @@ using namespace ConsAdapter::serialization;
 
 uint64_t MessageBuffer::nextUID = 0;
 
-// initialized for reading
-MessageBuffer::MessageBuffer(MessageHeader h) : serializer(0) {
-	id = ++nextUID;
-}
 // initialized for writing
 MessageBuffer::MessageBuffer() : serializer(1024) {
 	id = ++nextUID;
@@ -44,7 +40,7 @@ const flatbuffers::Vector<flatbuffers::Offset<KeyRange>>* MessageBuffer::getRang
 	return pushReq->ranges();
 }
 
-const uint32_t MessageBuffer::getChecksum(int index) {
+uint32_t MessageBuffer::getChecksum(int index) {
 	auto pushReq = getVerifyRangeReq();
 	return pushReq->checksums()->Get(index);
 }
@@ -118,17 +114,18 @@ std::string MessageBuffer::toStr() {
 	                   id, endpoint, printRequestType(type), printResponseType(respType), error, curVerifyRange);
 }
 
-bool MessageBuffer::checkReplicatorIDRegistry(Log& log) {
+bool MessageBuffer::checkReplicatorIDRegistry(std::shared_ptr<Log> log) {
 
-	auto reqState = getRepState();
-	if (replyRepState.id == reqState.id) {
-		return true;
-	} else {
-		log.trace("ReplicatorIDDoesntMatchError", { { "cur", replyRepState.toStr() }, { "req", reqState.toStr() } });
+    //auto reqState = getRepState();
+    ///if (replyRepState.id == reqState.id) {
+		//return true;
+    //	} else {
+      //log->trace("ReplicatorIDDoesntMatchError", { { "cur", replyRepState.toStr() }, { "req", reqState.toStr() } });
 		return false;
-	}
+    //}
 }
 
+#ifndef INGEST_ADAPTER_SIM_TEST
 void MessageBuffer::prepareWrite() {
 	Crc32 crc;
 	header = MessageHeader(serializer.GetSize(), crc.sum(serializer.GetBufferPointer(), serializer.GetSize()));
@@ -138,6 +135,7 @@ void MessageBuffer::prepareWrite() {
 	writeBuffers.push_back(boost::asio::buffer(serializer.GetBufferPointer(), serializer.GetSize()));
 	readyForWrite = true;
 }
+#endif
 
 uint64_t rand64() {
 	uint64_t ret = ((uint64_t)rand() << 32) + rand();

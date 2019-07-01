@@ -6,7 +6,6 @@
 
 #include "ConsumerAdapterProtocol_generated.h"
 #include "ConsumerAdapterUtils.h"
-#include <boost/asio.hpp>
 #include <boost/bind.hpp>
 
 #include <boost/function.hpp>
@@ -31,6 +30,7 @@ public:
 	virtual void registerTxnResponseCallback(boost::function<void(MessageBuffer* reqBuffer, bool freeBuffer)> cb) = 0;
 };
 
+#ifndef INGEST_ADAPTER_SIM_TEST
 class ConsumerClientTester : public ConsumerClientIF {
 private:
 	boost::asio::io_context& io_context;
@@ -53,12 +53,16 @@ private:
 	void verifyRange(MessageBuffer* reqBuffer);
 	void verifyRangeCB(MessageBuffer* reqBuffer);
 };
+#endif
 
 class ConsumerClientFDB6 : public ConsumerClientIF {
 private:
-  static ConsumerClientFDB6* g_FDB6Client;
-	Log log;
+	static ConsumerClientFDB6* g_FDB6Client;
+	std::shared_ptr<Log> log;
+
+#ifndef INGEST_ADAPTER_SIM_TEST
 	pthread_t network_thread;
+#endif
 	std::string clusterFile;
 	FDBDatabase* database;
 	std::map<uint64_t, FDBTransaction*> txnMap;
@@ -74,9 +78,16 @@ public:
 	static std::string repStateKey;
 
 public:
-	ConsumerClientFDB6(std::string clusterFile);
-	~ConsumerClientFDB6();
-  static  ConsumerClientFDB6* instance();
+#ifndef INGEST_ADAPTER_SIM_TEST
+	ConsumerClientFDB6(std::string clusterFile, std::shared_ptr<Log> log);
+#else
+	ConsumerClientFDB6(FDBDatabase* db, std::shared_ptr<Log> log);
+#endif
+	~ConsumerClientFDB6() {
+		log->trace("ConsumerClientFDB6Destroy");
+		g_FDB6Client = NULL;
+	};
+	static ConsumerClientFDB6* instance();
 	int beginTxn(MessageBuffer* msgBuf) override;
 	int startNetwork() override;
 	int stopNetwork() override;
