@@ -52,8 +52,14 @@ constexpr auto pack_size(pack<Ts...>) {
 	return sizeof...(Ts);
 }
 
-constexpr int RightAlign(int offset, int alignment) {
+inline constexpr int RightAlign(int offset, int alignment) {
 	return offset % alignment == 0 ? offset : ((offset / alignment) + 1) * alignment;
+}
+
+inline int RightAlign(int offset, int alignment, int* padding) {
+	auto aligned = RightAlign(offset, alignment);
+	*padding = aligned - offset;
+	return aligned;
 }
 
 template <class T>
@@ -332,7 +338,7 @@ struct PrecomputeSize {
 		int writeToIndex;
 	};
 
-	Noop getMessageWriter(int size) {
+	Noop getMessageWriter(int size, bool /*zeroed*/ = false) {
 		int writeToIndex = writeToOffsets.size();
 		writeToOffsets.push_back({});
 		return Noop{ size, writeToIndex };
@@ -389,18 +395,24 @@ struct WriteToBuffer {
 		int size;
 	};
 
-	MessageWriter getMessageWriter(int size) {
+	MessageWriter getMessageWriter(int size, bool zeroed = false) {
 		MessageWriter m{ *this, *writeToOffsetsIter++, size };
+		if (zeroed) {
+			memset(&buffer[buffer_length - m.finalLocation], 0, size);
+		}
 		return m;
 	}
 
 	template <class T>
 	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t);
-		int start = RightAlign(current_buffer_size + size + 4, 4);
+		int padding = 0;
+		int start = RightAlign(current_buffer_size + size + 4, 4, &padding);
 		write(&size, start, 4);
 		start -= 4;
 		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t);
+		start -= size;
+		memset(&buffer[buffer_length - start], 0, padding);
 	}
 
 	const int buffer_length;
@@ -567,6 +579,8 @@ const VTableSet* get_vtableset(const Root& root) {
 	return &result;
 }
 
+constexpr static std::array<uint8_t, 8> zeros{};
+
 template <class Root, class Writer>
 void save_with_vtables(const Root& root, const VTableSet* vtableset, Writer& writer, int* vtable_start,
                        FileIdentifier file_identifier) {
@@ -579,7 +593,9 @@ void save_with_vtables(const Root& root, const VTableSet* vtableset, Writer& wri
 	auto root_writer = writer.getMessageWriter(root_writer_size);
 	root_writer.write(&offset, 0, sizeof(offset));
 	root_writer.write(&file_identifier, sizeof(offset), sizeof(file_identifier));
-	root_writer.writeTo(writer, RightAlign(writer.current_buffer_size + root_writer_size, 8));
+	int padding = 0;
+	root_writer.writeTo(writer, RightAlign(writer.current_buffer_size + root_writer_size, 8, &padding));
+	writer.write(&zeros, writer.current_buffer_size - root_writer_size, padding);
 }
 
 template <class Writer, class UnionTraits>
@@ -650,7 +666,7 @@ struct SaveVisitorLambda {
 	template <class... Members>
 	void operator()(const Members&... members) {
 		const auto& vtable = *get_vtable<Members...>();
-		auto self = writer.getMessageWriter(vtable[1] /* length */);
+		auto self = writer.getMessageWriter(/*length*/ vtable[1], /*zeroed*/ true);
 		int i = 2;
 		for_each(
 		    [&](const auto& member) {
@@ -672,16 +688,22 @@ struct SaveVisitorLambda {
 						    RelativeOffset offset =
 						        (SaveAlternative<Writer, UnionTraits>{ writer, vtableset }).save(type_tag, *iter);
 						    offsetVectorWriter.write(&offset, i * sizeof(offset), sizeof(offset));
+					    } else {
+						    offsetVectorWriter.write(&zeros, i * sizeof(RelativeOffset), sizeof(RelativeOffset));
 					    }
 					    ++iter;
 				    }
-				    int start = RightAlign(writer.current_buffer_size + num_entries, 4) + 4;
+				    int padding = 0;
+				    int start = RightAlign(writer.current_buffer_size + num_entries, 4, &padding) + 4;
 				    writer.write(&num_entries, start, sizeof(uint32_t));
 				    typeVectorWriter.writeTo(writer, start - sizeof(uint32_t));
+				    writer.write(&zeros, start - 4 - num_entries, padding);
 				    auto typeVectorOffset = RelativeOffset{ writer.current_buffer_size };
-				    start = RightAlign(writer.current_buffer_size + num_entries * sizeof(RelativeOffset), 4) + 4;
+				    start =
+				        RightAlign(writer.current_buffer_size + num_entries * sizeof(RelativeOffset), 4, &padding) + 4;
 				    writer.write(&num_entries, start, sizeof(uint32_t));
 				    offsetVectorWriter.writeTo(writer, start - sizeof(uint32_t));
+				    writer.write(&zeros, start - 4 - num_entries * sizeof(RelativeOffset), padding);
 				    auto offsetVectorOffset = RelativeOffset{ writer.current_buffer_size };
 				    self.write(&typeVectorOffset, vtable[i++], sizeof(typeVectorOffset));
 				    self.write(&offsetVectorOffset, vtable[i++], sizeof(offsetVectorOffset));
@@ -695,6 +717,7 @@ struct SaveVisitorLambda {
 					        (SaveAlternative<Writer, UnionTraits>{ writer, vtableset }).save(type_tag, member);
 					    self.write(&offset, vtable[i++], sizeof(offset));
 				    } else {
+					    // Don't need to zero memory here since we already zeroed all of |self|
 					    ++i;
 				    }
 			    } else if constexpr (_SizeOf<Member>::size == 0) {
@@ -706,10 +729,13 @@ struct SaveVisitorLambda {
 		    },
 		    members...);
 		int vtable_offset = writer.vtable_start - vtableset->offsets.at(&vtable);
-		int start = RightAlign(writer.current_buffer_size + vtable[1] - 4, std::max({ 1, fb_align<Members>... })) + 4;
+		int padding = 0;
+		int start =
+		    RightAlign(writer.current_buffer_size + vtable[1] - 4, std::max({ 4, fb_align<Members>... }), &padding) + 4;
 		int32_t relative = vtable_offset - start;
 		self.write(&relative, 0, sizeof(relative));
 		self.writeTo(writer, start);
+		writer.write(&zeros, start - vtable[1], padding);
 	}
 };
 
@@ -938,9 +964,11 @@ struct LoadSaveHelper {
 			self.write(&result, i * size, size);
 			++iter;
 		}
-		int start = RightAlign(writer.current_buffer_size + len, std::min(4, fb_align<T>)) + 4;
+		int padding = 0;
+		int start = RightAlign(writer.current_buffer_size + len, std::max(4, fb_align<T>), &padding) + 4;
 		writer.write(&num_entries, start, sizeof(uint32_t));
 		self.writeTo(writer, start - sizeof(uint32_t));
+		writer.write(&zeros, start - len - 4, padding);
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 };
@@ -966,12 +994,14 @@ struct LoadSaveHelper<std::vector<bool, Alloc>> {
 	template <class Writer>
 	RelativeOffset save(const std::vector<bool, Alloc>& members, Writer& writer, const VTableSet* vtables) {
 		uint32_t len = members.size();
-		int start = RightAlign(writer.current_buffer_size + sizeof(uint32_t) + len, sizeof(uint32_t));
+		int padding = 0;
+		int start = RightAlign(writer.current_buffer_size + sizeof(uint32_t) + len, sizeof(uint32_t), &padding);
 		writer.write(&len, start, sizeof(uint32_t));
 		int i = 0;
 		for (bool b : members) {
 			writer.write(&b, start - sizeof(uint32_t) - i++, 1);
 		}
+		writer.write(&zeros, start - sizeof(uint32_t) - i, padding);
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 };
@@ -1022,7 +1052,6 @@ uint8_t* save(Allocator& allocator, const Root& root, FileIdentifier file_identi
 	int vtable_start;
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier);
 	uint8_t* out = allocator(precompute_size.current_buffer_size);
-	memset(out, 0, precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ precompute_size.current_buffer_size, vtable_start, out,
 		                         precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier);
