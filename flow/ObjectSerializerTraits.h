@@ -62,16 +62,6 @@ struct index_impl<0, pack<T, Ts...>> {
 template <int i, class Pack>
 using index_t = typename index_impl<i, Pack>::type;
 
-struct Block {
-	const uint8_t* data;
-	size_t size;
-};
-
-template <class T>
-Block unownedPtr(T* t, size_t s) {
-	return Block{ t, s };
-}
-
 template <class T, typename = void>
 struct scalar_traits : std::false_type {
 	constexpr static size_t size = 0;
@@ -83,11 +73,13 @@ struct scalar_traits : std::false_type {
 	static void load(const uint8_t*, T&, Context&);
 };
 
-
 template <class T>
 struct dynamic_size_traits : std::false_type {
-	static Block save(const T&);
-	static void serialization_done(const T&); // Optional. Called after the last call to save.
+	// May be called multiple times during one serialization. Guaranteed not to be called after save.
+	static size_t size(const T&);
+
+	// Guaranteed to be called only once during serialization
+	static void save(uint8_t*, const T&);
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.

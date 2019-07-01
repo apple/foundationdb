@@ -765,9 +765,10 @@ inline void save( Archive& ar, const StringRef& value ) {
 	ar.serializeBytes( value.begin(), value.size() );
 }
 
-template<>
+template <>
 struct dynamic_size_traits<StringRef> : std::true_type {
-	static Block save(const StringRef& str) { return unownedPtr(str.begin(), str.size()); }
+	static size_t size(const StringRef& t) { return t.size(); }
+	static void save(uint8_t* out, const StringRef& t) { std::copy(t.begin(), t.end(), out); }
 
 	template <class Context>
 	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {

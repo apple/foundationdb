@@ -174,7 +174,8 @@ private:
 	using T = std::string;
 
 public:
-	static Block save(const T& t) { return unownedPtr(reinterpret_cast<const uint8_t*>(t.data()), t.size()); };
+	static size_t size(const T& t) { return t.size(); }
+	static void save(uint8_t* out, const T& t) { std::copy(t.begin(), t.end(), out); }
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -226,20 +227,6 @@ template <class T>
 constexpr bool use_indirection = !(is_scalar<T> || is_struct_like<T>);
 
 using VTable = std::vector<uint16_t>;
-
-template <class T>
-struct sfinae_true : std::true_type {};
-
-template <class T>
-auto test_serialization_done(int) -> sfinae_true<decltype(T::serialization_done)>;
-
-template <class T>
-auto test_serialization_done(long) -> std::false_type;
-
-// int is a better match for 0 than long. If substituting T::serialization_done succeeds the true_type overload is
-// selected.
-template <class T>
-struct has_serialization_done : decltype(test_serialization_done<T>(0)) {};
 
 template <class T>
 constexpr int fb_scalar_size = is_scalar<T> ? scalar_traits<T>::size : sizeof(RelativeOffset);
@@ -322,10 +309,17 @@ struct _SizeOf {
 struct PrecomputeSize {
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
-	void write(const void*, int offset, int len) { current_buffer_size = std::max(current_buffer_size, offset); }
+	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
+
+	template <class T>
+	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
+		uint32_t size = dynamic_size_traits<T>::size(t);
+		int start = RightAlign(current_buffer_size + size + 4, 4);
+		current_buffer_size = std::max(current_buffer_size, start);
+	}
 
 	struct Noop {
-		void write(const void* src, int offset, int len) {}
+		void write(const void* src, int offset, int /*len*/) {}
 		void writeTo(PrecomputeSize& writer, int offset) {
 
 			writer.write(nullptr, offset, size);
@@ -341,8 +335,6 @@ struct PrecomputeSize {
 		writeToOffsets.push_back({});
 		return Noop{ size, writeToIndex };
 	}
-
-	static constexpr bool finalPass = false;
 
 	int current_buffer_size = 0;
 
@@ -400,11 +392,18 @@ struct WriteToBuffer {
 		return m;
 	}
 
+	template <class T>
+	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
+		uint32_t size = dynamic_size_traits<T>::size(t);
+		int start = RightAlign(current_buffer_size + size + 4, 4);
+		write(&size, start, 4);
+		start -= 4;
+		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t);
+	}
+
 	const int buffer_length;
 	const int vtable_start;
 	int current_buffer_size = 0;
-
-	static constexpr bool finalPass = true;
 
 private:
 	void copy_memory(const void* src, int offset, int len) {
@@ -908,15 +907,7 @@ struct LoadSaveHelper {
 	template <class U, class Writer, typename = std::enable_if_t<is_dynamic_size<U>>>
 	RelativeOffset save(const U& message, Writer& writer, const VTableSet*,
 	                    std::enable_if_t<is_dynamic_size<U>, int> _ = 0) {
-		auto block = dynamic_size_traits<U>::save(message);
-		uint32_t size = block.size;
-		int start = RightAlign(writer.current_buffer_size + size + 4, 4);
-		writer.write(&size, start, 4);
-		start -= 4;
-		writer.write(block.data, start, block.size);
-		if constexpr (has_serialization_done<dynamic_size_traits<U>>::value && Writer::finalPass) {
-			dynamic_size_traits<U>::serialization_done(message);
-		}
+		writer.visitDynamicSize(message);
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
