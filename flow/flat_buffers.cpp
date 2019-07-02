@@ -30,10 +30,6 @@
 
 namespace detail {
 
-bool TraverseMessageTypes::vtableGeneratedBefore(const std::type_index& idx) {
-	return !f.known_types.insert(idx).second;
-}
-
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
