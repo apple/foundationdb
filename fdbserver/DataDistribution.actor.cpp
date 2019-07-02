@@ -592,6 +592,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> redundantMachineTeamRemover;
+	Future<Void> redundantServerTeamRemover;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -633,7 +634,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), configuration(configuration),
+	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
 	    initialFailureReactionDelay(
@@ -1626,6 +1627,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return std::pair<Reference<TCMachineTeamInfo>, int>(retMT, minNumProcessTeams);
 	}
 
+	// Find the server team whose members are on the most number of server teams
+	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
+		Reference<TCTeamInfo> retST;
+		int maxNumProcessTeams = 0;
+
+		for (auto& t : teams) {
+			int numProcessTeams = 0;
+			for (auto& server : t->getServers()) {
+				numProcessTeams += server->teams.size();
+			}
+			if (numProcessTeams > maxNumProcessTeams) {
+				maxNumProcessTeams = numProcessTeams;
+				retST = t;
+			}
+		}
+
+		return std::pair<Reference<TCTeamInfo>, int>(retST, maxNumProcessTeams);
+	}
+
 	int getHealthyMachineTeamCount() {
 		int healthyTeamCount = 0;
 		for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
@@ -2264,7 +2284,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 	state int numMachineTeamRemoved = 0;
 	loop {
 		// In case the machineTeamRemover cause problems in production, we can disable it
-		if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
+		if (SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER) {
 			return Void(); // Directly return Void()
 		}
 
@@ -2356,6 +2376,79 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
 				    .detail("DesiredMachineTeam", desiredMachineTeams)
 				    .detail("NumMachineTeamRemoved", numMachineTeamRemoved);
+				self->traceTeamCollectionInfo();
+			}
+		}
+	}
+}
+
+// Remove the server team whose members have the most number of process teams
+// until the total number of server teams is no larger than the desired number
+ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
+	state int numServerTeamRemoved = 0;
+	loop {
+		// In case the serverTeamRemover cause problems in production, we can disable it
+		if (SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER) {
+			return Void(); // Directly return Void()
+		}
+
+		wait(waitUntilHealthy(self));
+
+		// To avoid removing machine teams too fast, which is unlikely happen though
+		wait( delay(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY) );
+
+		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
+		// and remove bad team (cancel the team tracker).
+		wait(self->badTeamRemover);
+
+		state int healthyServerCount = self->calculateHealthyServerCount();
+		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
+		// Eventually, all servers will become healthy.
+		if (healthyServerCount != self->server_info.size()) {
+			continue;
+		}
+
+		// From this point, all server teams should be healthy, because we wait above
+		// until processingUnhealthy is done, and all machines are healthy
+
+		// In most cases, all machine teams should be healthy teams at this point.
+		int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * healthyServerCount;
+		int totalSTCount = self->teams.size();
+
+		if (totalSTCount > desiredServerTeams) {
+			// Pick the server team whose members are on the most number of server teams, and mark it undesired
+			state std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+			state Reference<TCTeamInfo> st = foundSTInfo.first;
+			state int maxNumProcessTeams = foundSTInfo.second;
+			ASSERT(st.isValid());
+			// The team will be marked as a bad team
+			bool foundTeam = self->removeTeam(st);
+			ASSERT(foundTeam == true);
+			self->addTeam(st->getServers(), true, true);
+			TEST(true);
+			
+			self->doBuildTeams = true;
+
+			if (self->badTeamRemover.isReady()) {
+				self->badTeamRemover = removeBadTeams(self);
+				self->addActor.send(self->badTeamRemover);
+			}
+
+			TraceEvent("ServerTeamRemover")
+			    .detail("ServerTeamToRemove", st->getServerIDsStr())
+			    .detail("NumProcessTeamsOnTheServerTeam", maxNumProcessTeams)
+			    .detail("CurrentServerTeamNumber", self->teams.size())
+			    .detail("DesiredTeam", desiredServerTeams);
+
+			numServerTeamRemoved++;
+		} else {
+			if (numServerTeamRemoved > 0) {
+				// Only trace the information when we remove a machine team
+				TraceEvent("ServerTeamRemoverDone")
+				    .detail("HealthyServerNumber", healthyServerCount)
+				    .detail("CurrentServerTeamNumber", self->teams.size())
+				    .detail("DesiredServerTeam", desiredServerTeams)
+				    .detail("NumServerTeamRemoved", numServerTeamRemoved);
 				self->traceTeamCollectionInfo();
 			}
 		}
@@ -3335,6 +3428,10 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		if (self->redundantMachineTeamRemover.isReady()) {
 			self->redundantMachineTeamRemover = machineTeamRemover(self);
 			self->addActor.send(self->redundantMachineTeamRemover);
+		}
+		if (self->redundantServerTeamRemover.isReady()) {
+			self->redundantServerTeamRemover = serverTeamRemover(self);
+			self->addActor.send(self->redundantServerTeamRemover);
 		}
 		self->traceTeamCollectionInfo();
 

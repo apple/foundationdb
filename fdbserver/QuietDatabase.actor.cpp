@@ -291,10 +291,12 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
 			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
+			// TODO: Get finer granularity check
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
-			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
+			if (SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER || SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER) {
 				TraceEvent("GetTeamCollectionValid")
-				    .detail("KnobsTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER);
+				    .detail("KnobsMachineTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER)
+					.detail("KnobsServerTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER);
 				return true;
 			}
 
