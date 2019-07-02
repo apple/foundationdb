@@ -51,6 +51,15 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
+	auto itr = FDBDatabaseOptions::optionInfo.find(option);
+	if(itr != FDBDatabaseOptions::optionInfo.end()) {
+		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
+	}
+	else {
+		TraceEvent("UnknownDatabaseOption").detail("Option", option);
+		throw invalid_option();
+	}
+
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
 

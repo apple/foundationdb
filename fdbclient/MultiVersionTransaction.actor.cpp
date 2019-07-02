@@ -665,10 +665,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	MutexHolder holder(dbState->optionLock);
 
 	auto itr = FDBDatabaseOptions::optionInfo.find(option);
-	if(itr != FDBDatabaseOptions::optionInfo.end()) {
-		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
-	}
-	else {
+	if(itr == FDBDatabaseOptions::optionInfo.end()) {
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}

@@ -779,7 +779,9 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
 				break;
-		    }
+			default:
+				break;
+		}
 	}
 }
 
