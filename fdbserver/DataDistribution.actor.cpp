@@ -3194,7 +3194,6 @@ ACTOR Future<Void> storageServerTracker(
 					//Restart the storeTracker for the new interface
 					storeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongStoreTypeOrDC = false;
-					self->doBuildTeams = true;
 					self->restartTeamBuilder.trigger();
 
 					if(restartRecruiting)
