@@ -279,7 +279,9 @@ futures must apply the following rules to the result:
 
 #### GET_APPROXIMATE_SIZE
 
-    Calls get_approximate_size and pushes the resulting future onto the stack.
+    Calls get_approximate_size and stores the size in the internal stack machine
+    state as the approximate size. Pushes the byte string "GOT_APPROXIMATE_SIZE"
+    onto the stack.
 
 #### WAIT_FUTURE
 
