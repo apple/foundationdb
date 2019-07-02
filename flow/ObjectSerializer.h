@@ -26,7 +26,6 @@
 template <class Ar>
 struct LoadContext {
 	Ar& ar;
-	std::vector<std::function<void()>> doAfter;
 	LoadContext(Ar& ar) : ar(ar) {}
 	Arena& arena() { return ar.arena(); }
 
@@ -41,11 +40,6 @@ struct LoadContext {
 		}
 	}
 
-	void done() const {
-		for (auto& f : doAfter) {
-			f();
-		}
-	}
 	void addArena(Arena& arena) { arena = ar.arena(); }
 };
 
@@ -58,7 +52,6 @@ public:
 		LoadContext<ReaderImpl> context(*static_cast<ReaderImpl*>(this));
 		ASSERT(read_file_identifier(data) == file_identifier);
 		load_members(data, context, items...);
-		context.done();
 	}
 
 	template <class Item>

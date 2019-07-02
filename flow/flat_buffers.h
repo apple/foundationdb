@@ -62,19 +62,6 @@ inline int RightAlign(int offset, int alignment, int* padding) {
 	return aligned;
 }
 
-template <class T>
-struct object_construction {
-	T obj;
-
-	object_construction() : obj() {}
-	object_construction(const T& o) : obj(o) {}
-	object_construction(T&& o) : obj(std::move(o)) {}
-
-	T& get() { return obj; }
-	const T& get() const { return obj; }
-	T move() { return std::move(obj); }
-};
-
 template <class... Ts>
 struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	using Member = std::tuple<Ts...>;
@@ -482,13 +469,8 @@ struct InsertVTableLambda;
 struct TraverseMessageTypes {
 	InsertVTableLambda& f;
 
-	bool vtableGeneratedBefore(const std::type_index&);
-
 	template <class Member>
 	std::enable_if_t<expect_serialize_member<Member>> operator()(const Member& member) {
-		if (vtableGeneratedBefore(typeid(Member))) {
-			return;
-		}
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(f, const_cast<Member&>(member));
 		} else {
@@ -506,8 +488,8 @@ struct TraverseMessageTypes {
 		// we don't need to check for recursion here because the next call
 		// to operator() will do that and we don't generate a vtable for the
 		// vector-like type itself
-		object_construction<T> t;
-		(*this)(t.get());
+		T t;
+		(*this)(t);
 	}
 
 	template <class UnionLike>
@@ -521,8 +503,8 @@ struct TraverseMessageTypes {
 private:
 	template <class T, class... Ts>
 	void union_helper(pack<T, Ts...>) {
-		object_construction<T> t;
-		(*this)(t.get());
+		T t;
+		(*this)(t);
 		union_helper(pack<Ts...>{});
 	}
 	void union_helper(pack<>) {}
@@ -533,7 +515,6 @@ struct InsertVTableLambda {
 	static constexpr bool isSerializing = false;
 	static constexpr bool is_fb_visitor = true;
 	std::set<const VTable*>& vtables;
-	std::set<std::type_index>& known_types;
 
 	template <class... Members>
 	void operator()(const Members&... members) {
@@ -550,8 +531,7 @@ int vec_bytes(const T& begin, const T& end) {
 template <class Root>
 VTableSet get_vtableset_impl(const Root& root) {
 	std::set<const VTable*> vtables;
-	std::set<std::type_index> known_types;
-	InsertVTableLambda vlambda{ vtables, known_types };
+	InsertVTableLambda vlambda{ vtables };
 	if constexpr (serializable_traits<Root>::value) {
 		serializable_traits<Root>::serialize(vlambda, const_cast<Root&>(root));
 	} else {
@@ -639,15 +619,15 @@ private:
 		if constexpr (Alternative < pack_size(typename UnionTraits::alternatives{})) {
 			if (type_tag == Alternative) {
 				using AlternativeT = index_t<Alternative, typename UnionTraits::alternatives>;
-				object_construction<AlternativeT> alternative;
+				AlternativeT alternative;
 				if constexpr (use_indirection<AlternativeT>) {
-					load_helper(alternative.get(), current, context);
+					load_helper(alternative, current, context);
 				} else {
 					uint32_t current_offset = interpret_as<uint32_t>(current);
 					current += current_offset;
-					load_helper(alternative.get(), current, context);
+					load_helper(alternative, current, context);
 				}
-				UnionTraits::template assign<Alternative>(member, std::move(alternative.move()));
+				UnionTraits::template assign<Alternative>(member, alternative);
 			} else {
 				load_<Alternative + 1>(type_tag, member);
 			}
@@ -836,9 +816,9 @@ struct LoadSaveHelper {
 		for_each_i<pack_size(types{})>([&](auto i_type) {
 			constexpr int i = decltype(i_type)::value;
 			using type = index_t<i, types>;
-			object_construction<type> t;
-			load_helper(t.get(), current + struct_offset<i>(types{}), context);
-			StructTraits::template assign<i>(member, t.move());
+			type t;
+			load_helper(t, current + struct_offset<i>(types{}), context);
+			StructTraits::template assign<i>(member, t);
 		});
 	}
 
@@ -1090,27 +1070,26 @@ struct EnsureTable {
 	static_assert(HasFileIdentifier<T>::value);
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 	EnsureTable() = default;
-	EnsureTable(const object_construction<T>& t) : t(t) {}
 	EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (is_fb_function<Archive>) {
 			if constexpr (detail::expect_serialize_member<T>) {
 				if constexpr (serializable_traits<T>::value) {
-					serializable_traits<T>::serialize(ar, t.get());
+					serializable_traits<T>::serialize(ar, t);
 				} else {
-					t.get().serialize(ar);
+					t.serialize(ar);
 				}
 			} else {
-				serializer(ar, t.get());
+				serializer(ar, t);
 			}
 		} else {
-			serializer(ar, t.get());
+			serializer(ar, t);
 		}
 	}
-	T& asUnderlyingType() { return t.get(); }
+	T& asUnderlyingType() { return t; }
 
 private:
-	object_construction<T> t;
+	T t;
 };
 
