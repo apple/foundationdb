@@ -218,6 +218,28 @@ public:
 			(*it)->setHealthy(h);
 		}
 	}
+
+	virtual bool isCorrectStoreType() {
+		return all([](Reference<IDataDistributionTeam> team) {
+			return team->isCorrectStoreType();
+		});
+	}
+
+	virtual void setCorrectStoreType(KeyValueStoreType configType) {
+		for (auto it = teams.begin(); it != teams.end(); it++) {
+			(*it)->setCorrectStoreType(configType);
+		}
+	}
+
+	virtual bool isCorrectStoreType(KeyValueStoreType configType) {
+		for (auto it = teams.begin(); it != teams.end(); it++) {
+			if ((*it)->isCorrectStoreType(configType)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	virtual int getPriority() {
 		int priority = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
@@ -904,7 +926,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 						foundTeams = false;
 						break;
 					}
-					if(!bestTeam.get()->isHealthy()) {
+					if(!bestTeam.get()->isHealthy() || !bestTeam.get()->isCorrectStoreType()) {
 						allHealthy = false;
 					} else {
 						anyHealthy = true;
@@ -961,7 +983,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					healthyDestinations.addTeam(bestTeams[i].first);
 				} else {
 					destIds.insert(destIds.end(), serverIds.begin(), serverIds.end());
-					if(bestTeams[i].first->isHealthy()) {
+					if(bestTeams[i].first->isHealthy() && bestTeams[i].first->isCorrectStoreType()) {
 						healthyIds.insert(healthyIds.end(), serverIds.begin(), serverIds.end());
 						healthyDestinations.addTeam(bestTeams[i].first);
 					}

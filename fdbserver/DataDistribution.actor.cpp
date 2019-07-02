@@ -196,6 +196,7 @@ public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 	bool healthy;
+	bool correctStoreType; // True if any of the servers in the team have the wrong store type
 	bool wrongConfiguration; //True if any of the servers in the team have the wrong configuration
 	int priority;
 
@@ -325,6 +326,8 @@ public:
 	virtual void setWrongConfiguration(bool wrongConfiguration) { this->wrongConfiguration = wrongConfiguration; }
 	virtual bool isHealthy() { return healthy; }
 	virtual void setHealthy(bool h) { healthy = h; }
+	virtual bool isCorrectStoreType() { return correctStoreType; }
+	virtual void setCorrectStoreType(bool type) { correctStoreType = type; }
 	virtual bool isCorrectStoreType(KeyValueStoreType configType) {
 		for (auto &server : servers) {
 			if ( !server->isCorrectStoreType(configType) ) {
@@ -2492,6 +2495,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
+			team->setCorrectStoreType( team->isCorrectStoreType(self->configuration.storageServerStoreType) ); // Team with wrong storeType storage servers will not be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 

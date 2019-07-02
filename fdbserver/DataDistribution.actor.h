@@ -82,6 +82,9 @@ struct IDataDistributionTeam {
 	virtual void delref() = 0;
 	virtual bool isHealthy() = 0;
 	virtual void setHealthy(bool) = 0;
+	virtual bool isCorrectStoreType() = 0;
+	virtual bool isCorrectStoreType(KeyValueStoreType configType) = 0;
+	virtual void setCorrectStoreType(bool type) = 0;
 	virtual int getPriority() = 0;
 	virtual void setPriority(int) = 0;
 	virtual bool isOptimal() = 0;
