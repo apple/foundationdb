@@ -280,7 +280,7 @@ struct TrInfoChunk {
 ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vector<TrInfoChunk> *chunks) {
 	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	state int retryCount = 0;
-	loop {
+	loop{
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -297,7 +297,8 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vecto
 		}
 		catch (Error& e) {
 			retryCount++;
-			if (retryCount == 10) throw;
+			if (retryCount == 10) 
+				throw;
 			wait(tr->onError(e));
 		}
 	}
