@@ -1649,7 +1649,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				op = op.substr(0, op.size() - 9);
 
 			// printf("[==========]%ld/%ld:%s:%s: isDatabase:%d, isSnapshot:%d, stack count:%ld\n",
-				// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(), printable(StringRef(data->instructions[idx].value)).c_str(),
+				// idx, data->instructions.size(), StringRef(data->instructions[idx].key).printable().c_str(), StringRef(data->instructions[idx].value).printable().c_str(),
 				// isDatabase, isSnapshot, data->stack.data.size());
 
 			//wait(printFlowTesterStack(&(data->stack)));
