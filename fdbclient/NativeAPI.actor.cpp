@@ -297,7 +297,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vecto
 		}
 		catch (Error& e) {
 			retryCount++;
-			if (retryCount == 10) 
+			if (retryCount == 10)
 				throw;
 			wait(tr->onError(e));
 		}
