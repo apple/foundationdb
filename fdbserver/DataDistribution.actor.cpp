@@ -591,7 +591,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> checkTeamDelay;
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
-	Future<Void> redundantTeamRemover;
+	Future<Void> redundantMachineTeamRemover;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -633,7 +633,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantTeamRemover(Void()), configuration(configuration),
+	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
 	    initialFailureReactionDelay(
@@ -2251,10 +2251,10 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
-ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
+ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 	state int numMachineTeamRemoved = 0;
 	loop {
-		// In case the teamRemover cause problems in production, we can disable it
+		// In case the machineTeamRemover cause problems in production, we can disable it
 		if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
 			return Void(); // Directly return Void()
 		}
@@ -2354,7 +2354,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 }
 
 // Track a team and issue RelocateShards when the level of degradation changes
-// A badTeam can be unhealthy or just a redundantTeam removed by teamRemover()
+// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
 	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
@@ -3323,9 +3323,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->addActor.send(self->badTeamRemover);
 		}
 
-		if (self->redundantTeamRemover.isReady()) {
-			self->redundantTeamRemover = teamRemover(self);
-			self->addActor.send(self->redundantTeamRemover);
+		if (self->redundantMachineTeamRemover.isReady()) {
+			self->redundantMachineTeamRemover = machineTeamRemover(self);
+			self->addActor.send(self->redundantMachineTeamRemover);
 		}
 		self->traceTeamCollectionInfo();
 
