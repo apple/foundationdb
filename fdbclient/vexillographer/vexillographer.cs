@@ -56,7 +56,7 @@ namespace vexillographer
         public bool hidden { get; set; }
         public bool persistent { get; set; }
         public int defaultFor { get; set; }
-		private string _comment;
+        private string _comment;
         public string comment {
             get {
                 return _comment == null ? "" : _comment;
@@ -136,8 +136,8 @@ namespace vexillographer
                         bool hidden = oDoc.AttributeOrNull("hidden") == "true";
                         bool persistent = oDoc.AttributeOrNull("persistent") == "true";
                         String defaultForString = oDoc.AttributeOrNull("defaultFor");
-						int defaultFor = defaultForString == null ? -1 : int.Parse(defaultForString);
-						string disableOn = oDoc.AttributeOrNull("disableOn");
+                        int defaultFor = defaultForString == null ? -1 : int.Parse(defaultForString);
+                        string disableOn = oDoc.AttributeOrNull("disableOn");
                         bool disabled = false;
                         if(disableOn != null)
                         {
