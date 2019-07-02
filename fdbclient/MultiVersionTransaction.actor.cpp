@@ -597,7 +597,8 @@ Version MultiVersionTransaction::getCommittedVersion() {
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	if(MultiVersionApi::apiVersionAtLeast(610) && FDBTransactionOptions::optionInfo[option].persistent) {
-		persistentOptions.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+
 	}
 	auto tr = getTransaction();
 	if(tr.transaction) {

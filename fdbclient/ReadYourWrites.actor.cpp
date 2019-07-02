@@ -1762,7 +1762,8 @@ void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option,
 	setOptionImpl(option, value);
 
 	if(FDBTransactionOptions::optionInfo[option].persistent) {
-		persistentOptions.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+
 	}
 }
 
