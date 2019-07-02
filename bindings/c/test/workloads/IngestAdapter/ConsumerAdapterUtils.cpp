@@ -119,7 +119,7 @@ bool MessageBuffer::checkReplicatorIDRegistry(std::shared_ptr<Log> log) {
 	if (replyRepState.id == reqState.id) {
 		return true;
 	} else {
-		log->trace("ReplicatorIDDoesntMatchError", { { "cur", replyRepState.toStr() }, { "req", reqState.toStr() } });
+		log->trace("ReplicatorIDDoesntMatchError", { { "Cur", replyRepState.toStr() }, { "Req", reqState.toStr() } });
 		return false;
 	}
 }

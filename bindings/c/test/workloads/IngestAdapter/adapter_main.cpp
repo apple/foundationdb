@@ -11,8 +11,8 @@
 using namespace std;
 
 void SIG_Handler(int sig) {
-	auto trace = spdlog::get("pvTrace");
-	trace->info("Consumer Adapter received SIGNAL:{}", sig);
+	auto log = Log::get("pvTrace");
+	log.trace("ConsumerAdapterMainReceivedSIGNAL", { { "Signal", STR(sig) } });
 }
 
 int main(int argc, char** argv, char** env) {
@@ -22,14 +22,7 @@ int main(int argc, char** argv, char** env) {
 	// seed random number generator
 	srand(time(NULL));
 
-	auto trace = spdlog::rotating_logger_mt("pvTrace", "adapter_trace.json", 1000000, 10);
-
-	trace->flush_on(spdlog::level::info);
-	trace->set_pattern("{\"Severity\": \"%l\", \"Time\": \"%E\", \"DateTime\": "
-	                   "\"%Y-%m-%dT%T\", \"ThreadID\": \"%t\" \"Type\": \"%v\"} ");
-
-	// get the cluster file
-	// default:
+	std::shared_ptr<Log> log(new Log("pvTrace", "test1_trace.json"));
 
 	// get the cluster file and port
 	// TODO: pass the log file name
@@ -47,14 +40,15 @@ int main(int argc, char** argv, char** env) {
 
 	try {
 
-		trace->info("Create Consumer Adapter");
+		log->trace("ConsumerAdapterCreate");
 		boost::asio::io_context io_context;
-		std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientFDB6>(clusterFile);
-		auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient);
+		std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientFDB6>(clusterFile, log);
+		auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient, log);
 
 		int err = consumerAdapter->start();
 		if (err) {
-			trace->error("Consumer Adapter failed to start fdb network err:{}", err);
+			log->trace(LogLevel::Error, "ConsumerAdapterFailure",
+			           { { "Reason", "FDB6 Client Failed To Start FDB Network" }, { "Error", STR(err) } });
 			return err;
 		}
 		consumerAdapter->connect();
@@ -62,12 +56,15 @@ int main(int argc, char** argv, char** env) {
 		io_context.run();
 		err = consumerAdapter->stop();
 		if (err) {
-			trace->error("Consumer Adapter failed to stop fdb network err:{}", err);
+			log->trace(LogLevel::Error, "ConsumerAdapterFailure",
+			           { { "Reason", "FDB6 Client Failed To Stop FDB Network" }, { "Error", STR(err) } });
+
 			return err;
 		}
-		trace->info("Consumer Adapter ended");
+
+		log->trace("ConsumerAdapterEnded");
 	} catch (std::exception& e) {
-		trace->error("Consumer Adapter main loop failure: ({})", e.what());
+		log->trace(LogLevel::Error, "ConsumerAdapterMainLoopFailure", { { "CaughtError", e.what() } });
 		return -1;
 	}
 	return 0;

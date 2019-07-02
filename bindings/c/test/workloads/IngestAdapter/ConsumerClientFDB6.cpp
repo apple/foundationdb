@@ -35,11 +35,11 @@ int ConsumerClientFDB6::stopNetwork() {
 
 /* FDB network thread */
 void* fdb_network_thread(void* args) {
-	Log log;
-	log->trace("ConsumerClientFDB6StartNetwork");
+	auto log = Log::get("pvTrace");
+	log.trace("ConsumerClientFDB6StartNetwork");
 	fdb_error_t err = fdb_run_network();
 	if (err) {
-		log->trace(LogLevel::Error, "ConsumerClientFDB6StartNetworkError", { { "Error", STR(fdb_get_error(err)) } });
+		log.trace(LogLevel::Error, "ConsumerClientFDB6StartNetworkError", { { "Error", STR(fdb_get_error(err)) } });
 	}
 	return NULL;
 }
@@ -82,7 +82,7 @@ int ConsumerClientFDB6::startNetwork() {
 	return err;
 }
 #else
-ConsumerClientFDB6::ConsumerClientFDB6(FDBDatabase *db, std::shared_ptr<Log> log) : database(db), log(log) {
+ConsumerClientFDB6::ConsumerClientFDB6(FDBDatabase* db, std::shared_ptr<Log> log) : database(db), log(log) {
 	log->trace("ConsumerClient6Create");
 	assert(g_FDB6Client == NULL);
 	g_FDB6Client = this;
@@ -114,15 +114,15 @@ int ConsumerClientFDB6::startNetwork() {
 #define CHECK_TXN_FUTURE_CB(fut, tag)                                                                                  \
 	{                                                                                                                  \
 		auto ferr = fdb_future_get_error(fut);                                                                         \
-		log->trace(fmt::format("Client6_{}_TxnFutCBCheck", tag), { { "Error", STR(fdb_get_error(ferr)) } });             \
+		log->trace(fmt::format("Client6_{}_TxnFutCBCheck", tag), { { "Error", STR(fdb_get_error(ferr)) } });           \
 		if (ferr) {                                                                                                    \
 			log->trace(fmt::format("Client6_{}_TxnRetryOnError", tag),                                                 \
-			           { { "Error", STR(fdb_get_error(ferr)) }, { "Buffer", reqBuffer->toStr() } });                     \
+			           { { "Error", STR(fdb_get_error(ferr)) }, { "Buffer", reqBuffer->toStr() } });                   \
 			FDBFuture* futErr = fdb_transaction_on_error(txn, ferr);                                                   \
 			fdb_error_t err2 = fdb_future_set_callback(futErr, &ConsumerClientFDB6::retryTxnCB, reqBuffer);            \
 			if (err2) {                                                                                                \
 				log->trace(LogLevel::Error, fmt::format("Client6_{}_TxnRetryFAIL", tag),                               \
-				           { { "Error", STR(fdb_get_error(err2)) } });                                                   \
+				           { { "Error", STR(fdb_get_error(err2)) } });                                                 \
 				fdb_future_destroy(futErr);                                                                            \
 				reqBuffer->error = err2;                                                                               \
 				g_FDB6Client->cleanTransaction(reqBuffer);                                                             \
@@ -138,7 +138,7 @@ int ConsumerClientFDB6::startNetwork() {
 #define CHECK(err, tag)                                                                                                \
 	if (err) {                                                                                                         \
 		log->trace(LogLevel::Error, fmt::format("Client6_{}_UnexpectedError", tag),                                    \
-		           { { "Error", STR(fdb_get_error(err)) } }),                                                            \
+		           { { "Error", STR(fdb_get_error(err)) } }),                                                          \
 		    assert(0);                                                                                                 \
 	}
 
@@ -211,9 +211,9 @@ int ConsumerClientFDB6::beginTxn(MessageBuffer* reqBuffer) {
 	log->trace("Client6BeginTxnGetRepState", { { "Arg", statePassed.toStr() }, { "Buffer", reqBuffer->toStr() } });
 
 	err = fdb_transaction_set_option(txn, FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, NULL, 0);
-	//err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
+	// err = fdb_transaction_set_option(txn, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, (uint8_t*)debugTxnID.c_str(),
 	//                                 debugTxnID.size());
-	//err = fdb_transaction_set_option(txn, FDB_TR_OPTION_LOG_TRANSACTION, NULL, 0);
+	// err = fdb_transaction_set_option(txn, FDB_TR_OPTION_LOG_TRANSACTION, NULL, 0);
 
 	CHECK(err, "TxnSetOptionAccessSystemKeys");
 

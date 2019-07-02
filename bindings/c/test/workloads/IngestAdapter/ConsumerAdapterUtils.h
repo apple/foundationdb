@@ -11,6 +11,7 @@
 #include "SimLog.h"
 #include "fmt/format.h"
 #else
+#include <boost/asio.hpp>
 #include "Log.h"
 #endif
 

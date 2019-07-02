@@ -12,8 +12,8 @@ using namespace ConsAdapter::serialization;
 
 // External Client Test Code
 
-ConsumerClientTester::ConsumerClientTester(boost::asio::io_context &io_context)
-    : io_context(io_context) {
+ConsumerClientTester::ConsumerClientTester(boost::asio::io_context &io_context, std::shared_ptr<Log> l)
+    : io_context(io_context), log(l) {
   // trace = spdlog::get("pvTrace");
   // log.trace("creating ConsumerClientTester");
 }

@@ -5,19 +5,13 @@
 #include <boost/array.hpp>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
-
-#include "ConsumerAdapterUtils.h"
 #include <boost/enable_shared_from_this.hpp>
-#include <string>
-
-#include <spdlog/spdlog.h>
 
 #include "ConsumerAdapter.h"
 #include "ConsumerAdapterProtocol_generated.h"
 #include "ConsumerClient.h"
+#include "ConsumerAdapterUtils.h"
 #include "EndpointLoadGenerator.h"
-#include <list>
-#include <set>
 
 class ProducerFuzz : public std::enable_shared_from_this<ProducerFuzz> {
 private:
@@ -25,7 +19,7 @@ private:
 	boost::asio::io_context& io_context;
 	boost::asio::ip::tcp::socket socket;
 	unsigned port;
-	std::shared_ptr<spdlog::logger> trace;
+	std::shared_ptr<Log> log;
 	boost::asio::ip::tcp::acceptor acceptor_;
 	boost::asio::signal_set signals;
 	boost::asio::io_context::strand writeQStrand;
@@ -58,8 +52,9 @@ private:
 
 public:
 	EndpointLoadGenerator requestGen;
-	static std::shared_ptr<ProducerFuzz> create(boost::asio::io_context& io_context, unsigned p) {
-		return std::shared_ptr<ProducerFuzz>(new ProducerFuzz(io_context, p));
+	static std::shared_ptr<ProducerFuzz> create(boost::asio::io_context& io_context, unsigned p,
+	                                            std::shared_ptr<Log> l) {
+		return std::shared_ptr<ProducerFuzz>(new ProducerFuzz(io_context, p, l));
 	}
 	~ProducerFuzz();
 
@@ -67,7 +62,7 @@ public:
 	void report();
 
 private:
-	ProducerFuzz(boost::asio::io_context& io_context, unsigned p);
+	ProducerFuzz(boost::asio::io_context& io_context, unsigned p, std::shared_ptr<Log> l);
 	int queueRequest(std::shared_ptr<MessageBuffer> reqBuffer, int endpoint);
 	void sendRequest();
 	void waitForResponses();

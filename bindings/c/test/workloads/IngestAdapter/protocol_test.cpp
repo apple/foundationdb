@@ -11,8 +11,8 @@
 using namespace std;
 
 void SIG_Handler(int sig) {
-	auto trace = spdlog::get("pvTrace");
-	trace->info("protocol test received SIGNAL:{}", sig);
+	auto log = Log::get("pvTrace");
+	log.trace("ProtocolTestReceivedSIGNAL", { { "Signal", STR(sig) } });
 }
 
 int main(int argc, char** argv) {
@@ -22,11 +22,7 @@ int main(int argc, char** argv) {
 	// seed random number generator
 	srand(time(NULL));
 
-	auto trace = spdlog::rotating_logger_mt("pvTrace", "test1_trace.json", 1000000, 10);
-
-	trace->flush_on(spdlog::level::info);
-	trace->set_pattern("{\"Severity\": \"%l\", \"Time\": \"%E\", \"DateTime\": "
-	                   "\"%Y-%m-%dT%T\", \"ThreadID\": \"%t\" \"Type\": \"%v\"} ");
+	std::shared_ptr<Log> log(new Log("pvTrace", "test1_trace.json"));
 	// trace->set_level(spdlog::level::debug);
 	// create and run fake producer
 	// fake producer forks and creates external consumer
@@ -43,24 +39,23 @@ int main(int argc, char** argv) {
 	/* protocol test */
 	if (test == 0) {
 		try {
-
-			trace->info("Protocol Test!");
+			log->trace("ProtocolTest0BeginTest");
 			boost::asio::io_context io_context;
-			auto prodFuzz = ProducerFuzz::create(io_context, 4613);
-			prodFuzz->requestGen.init(1000, 2550, 1000, 100, 3, 10);
+			auto prodFuzz = ProducerFuzz::create(io_context, 4613, log);
+			prodFuzz->requestGen.init(log, 1000, 2550, 1000, 100, 3, 10);
 			prodFuzz->start(10000, 100, 100);
 
-			std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientTester>(io_context);
-			auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient);
+			std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientTester>(io_context, log);
+			auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient, log);
 
 			consumerAdapter->connect();
 
-			trace->info("running SC io event handler");
+			log->trace("ProtocolTest0RunIOEventLoop");
 			io_context.run(); // blocks as long as there are async callbacks in epoll queue
-			trace->info("test complete");
+			log->trace("ProtocolTest0Complete");
 		} catch (std::exception& e) {
 
-			trace->error("test failure: ({})", e.what());
+			log->trace(LogLevel::Error, "ProtocolTestFailure", { { "Reason", e.what() } });
 			return -1;
 		}
 	}
@@ -68,40 +63,41 @@ int main(int argc, char** argv) {
 	if (test == 1) {
 		try {
 
-			trace->info("fdb6 client test start clusFile:'{}'", clusterFile);
+			log->trace("ProtocolTest1BeginTest", { { "ClusterFile", clusterFile } });
 			boost::asio::io_context io_context;
-			auto prodFuzz = ProducerFuzz::create(io_context, 4613);
-			prodFuzz->requestGen.init(1000000 /* total key range */, 10000 /* max value size*/,
+			auto prodFuzz = ProducerFuzz::create(io_context, 4613, log);
+			prodFuzz->requestGen.init(log, 1000000 /* total key range */, 10000 /* max value size*/,
 			                          100 /* max mutations in batch */, 10 /* max keyRange size*/,
 			                          3 /* max ranges in verifyRange request */, 10 /* max waiting verifyRanges */);
 			prodFuzz->start(100000, 100, 20);
 
-			std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientFDB6>(clusterFile);
-			auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient);
+			std::shared_ptr<ConsumerClientIF> consumerClient = std::make_shared<ConsumerClientFDB6>(clusterFile, log);
+			auto consumerAdapter = ConsumerAdapter::create(io_context, 4613, consumerClient, log);
 
 			int err = consumerAdapter->start();
 			if (err) {
-				trace->error("fdb6 client test failed to start fdb network err:{}", err);
+				log->trace(LogLevel::Error, "ProtocolTestFailure",
+				           { { "Reason", "FDB6 Client Failed To Start FDB Network" }, { "Error", STR(err) } });
 				return err;
 			}
 			consumerAdapter->connect();
-
+			log->trace("ProtocolTest1RunIOEventLoop");
 			io_context.run();
 			err = consumerAdapter->stop();
 			if (err) {
-				trace->error("fdb6 client test failed to stop fdb network err:{}", err);
+
+				log->trace(LogLevel::Error, "ProtocolTestFailure",
+				           { { "Reason", "FDB6 Client Failed To Stop FDB Network" }, { "Error", STR(err) } });
 				return err;
 			}
 
-			trace->info("fdb6 client test complete");
+			log->trace("ProtocolTest1Complete");
 		} catch (std::exception& e) {
-
-			trace->error("fdb6 client test failure: ({})", e.what());
+        log->trace(LogLevel::Error, "ProtocolTestFailure", { { "CaughtError", e.what() } });
 			return -1;
 		}
 	}
-
-	trace->info("test complete");
+	log->trace("ProtocolTestsComplete");
 
 	return 0;
 }

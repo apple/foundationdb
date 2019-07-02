@@ -34,11 +34,11 @@ public:
 class ConsumerClientTester : public ConsumerClientIF {
 private:
 	boost::asio::io_context& io_context;
-	Log log;
+	std::shared_ptr<Log> log;
 	boost::function<void(MessageBuffer* reqBuffer, bool freeBuffer)> consumerTxnResponseCB;
 
 public:
-	ConsumerClientTester(boost::asio::io_context& io_context);
+	ConsumerClientTester(boost::asio::io_context& io_context, std::shared_ptr<Log> log);
 	int beginTxn(MessageBuffer* msgBuf) override;
 	int startNetwork() override;
 	int stopNetwork() override;
