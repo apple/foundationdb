@@ -69,6 +69,7 @@
 //    // Retrieves the previously stored boolean
 //    bool getPrefixSource() const;
 //
+#pragma pack(push,1)
 template <typename T, typename DeltaT = typename T::Delta, typename OffsetT = uint16_t>
 struct DeltaTree {
 
@@ -76,35 +77,46 @@ struct DeltaTree {
 		return std::numeric_limits<OffsetT>::max();
 	};
 
-#pragma pack(push,1)
 	struct Node {
 		OffsetT leftChildOffset;
 		OffsetT rightChildOffset;
-		DeltaT delta[0];
+
+		inline DeltaT & delta() {
+			return *(DeltaT *)(this + 1);
+		};
+
+		inline const DeltaT & delta() const {
+			return *(const DeltaT *)(this + 1);
+		};
 
 		Node * rightChild() const {
-			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta->size());
-			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)delta + rightChildOffset);
+			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
+			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + rightChildOffset);
 		}
 
 		Node * leftChild() const {
-			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta->size());
-			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)delta + leftChildOffset);
+			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
+			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + leftChildOffset);
 		}
 
 		int size() const {
-			return sizeof(Node) + delta->size();
+			return sizeof(Node) + delta().size();
 		}
 	};
-#pragma pack(pop)
 
-#pragma pack(push,1)
 	struct {
 		OffsetT nodeBytes;     // Total size of all Nodes including the root
 		uint8_t initialDepth;  // Levels in the tree as of the last rebuild
-		Node root[0];
 	};
 #pragma pack(pop)
+
+	inline Node & root() {
+		return *(Node *)(this + 1);
+	}
+
+	inline const Node & root() const {
+		return *(const Node *)(this + 1);
+	}
 
 	int size() const {
 		return sizeof(DeltaTree) + nodeBytes; 
@@ -119,18 +131,18 @@ public:
 	struct DecodedNode {
 		DecodedNode(Node *raw, const T *prev, const T *next, Arena &arena)
 		  : raw(raw), parent(nullptr), left(nullptr), right(nullptr), prev(prev), next(next),
-		    item(raw->delta->apply(raw->delta->getPrefixSource() ? *prev : *next, arena))
+		    item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
-			//printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta->toString().c_str());
+			//printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
 		}
 		  
 		DecodedNode(Node *raw, DecodedNode *parent, bool left, Arena &arena)
 		  : parent(parent), raw(raw), left(nullptr), right(nullptr),
 		    prev(left ? parent->prev : &parent->item),
 		    next(left ? &parent->item : parent->next),
-		    item(raw->delta->apply(raw->delta->getPrefixSource() ? *prev : *next, arena))
+		    item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
-			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta->toString().c_str());
+			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
 		}
 
 		Node *raw;
@@ -175,7 +187,7 @@ public:
 			lower = new(arena) T(arena, *lower);
 			upper = new(arena) T(arena, *upper);
 
-			root = (tree->nodeBytes == 0) ? nullptr : new (arena) DecodedNode(tree->root, lower, upper, arena);
+			root = (tree->nodeBytes == 0) ? nullptr : new (arena) DecodedNode(&tree->root(), lower, upper, arena);
 		}
 
 		const T *lowerBound() const {
@@ -330,7 +342,7 @@ public:
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
-			nodeBytes = build(*root, begin, end, prev, next);
+			nodeBytes = build(root(), begin, end, prev, next);
 		}
 		else {
 			nodeBytes = 0;
@@ -341,7 +353,7 @@ public:
 private:
 	static OffsetT build(Node &root, const T *begin, const T *end, const T *prev, const T *next) {
 		//printf("build: %s to %s\n", begin->toString().c_str(), (end - 1)->toString().c_str());
-		//printf("build: root at %p  sizeof(Node) %d  delta at %p  \n", &root, sizeof(Node), root.delta);
+		//printf("build: root at %p  sizeof(Node) %d  delta at %p  \n", &root, sizeof(Node), &root.delta());
 		ASSERT(end != begin);
 		int count = end - begin;
 
@@ -370,12 +382,12 @@ private:
 			base = next;
 		}
 
-		int deltaSize = item.writeDelta(*root.delta, *base, commonPrefix);
-		root.delta->setPrefixSource(prefixSourcePrev);
-		//printf("Serialized %s to %p\n", item.toString().c_str(), root.delta);
+		int deltaSize = item.writeDelta(root.delta(), *base, commonPrefix);
+		root.delta().setPrefixSource(prefixSourcePrev);
+		//printf("Serialized %s to %p\n", item.toString().c_str(), &root.delta());
 
 		// Continue writing after the serialized Delta.
-		uint8_t *wptr = (uint8_t *)root.delta + deltaSize;
+		uint8_t *wptr = (uint8_t *)&root.delta() + deltaSize;
 
 		// Serialize left child
 		if(count > 1) {
@@ -388,7 +400,7 @@ private:
 
 		// Serialize right child
 		if(count > 2) {
-			root.rightChildOffset = wptr - (uint8_t *)root.delta;
+			root.rightChildOffset = wptr - (uint8_t *)&root.delta();
 			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next);
 		}
 		else {

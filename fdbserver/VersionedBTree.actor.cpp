@@ -431,7 +431,14 @@ struct RedwoodRecordRef {
 		};
 
 		uint8_t flags;
-		byte data[];
+
+		inline byte * data() {
+			return (byte *)(this + 1);
+		}
+
+		inline const byte * data() const {
+			return (const byte *)(this + 1);
+		}
 
 		void setPrefixSource(bool val) {
 			if(val) {
@@ -447,7 +454,7 @@ struct RedwoodRecordRef {
 		}
 
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
-			Reader r(data);
+			Reader r(data());
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
 			int prefixLen = r.readVarInt();
@@ -501,19 +508,19 @@ struct RedwoodRecordRef {
 		}
 
 		int size() const {
-			Reader r(data);
+			Reader r(data());
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
 			r.readVarInt();  // prefixlen
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
-			return sizeof(Delta) + r.rptr - data + intFieldSuffixLen + valueLen + keySuffixLen;
+			return sizeof(Delta) + r.rptr - data() + intFieldSuffixLen + valueLen + keySuffixLen;
 		}
 
 		// Delta can't be determined without the RedwoodRecordRef upon which the Delta is based.
 		std::string toString() const {
-			Reader r(data);
+			Reader r(data());
 
 			std::string flagString = " ";
 			if(flags & PREFIX_SOURCE) flagString += "prefixSource ";
@@ -638,7 +645,7 @@ struct RedwoodRecordRef {
 			commonPrefix = getCommonPrefixLen(base, 0);
 		}
 
-		Writer w(d.data);
+		Writer w(d.data());
 
 		// prefixLen
 		w.writeVarInt(commonPrefix);
@@ -688,7 +695,7 @@ struct RedwoodRecordRef {
 			w.writeString(value.get());
 		}
 
-		return w.wptr - d.data + sizeof(Delta);
+		return w.wptr - d.data() + sizeof(Delta);
 	}
 
 	template<typename StringRefT>
@@ -737,9 +744,16 @@ struct BTreePage {
 		uint16_t count;
 		uint32_t kvBytes;
 		uint8_t extensionPageCount;
-		LogicalPageID extensionPages[0];
 	};
 #pragma pack(pop)
+
+	inline LogicalPageID * extensionPages() {
+		return (LogicalPageID *)(this + 1);
+	}
+
+	inline const LogicalPageID * extensionPages() const {
+		return (const LogicalPageID *)(this + 1);
+	}
 
 	int size() const {
 		const BinaryTree *t = &tree();
@@ -751,15 +765,15 @@ struct BTreePage {
 	}
 
 	BinaryTree & tree() {
-		return *(BinaryTree *)(extensionPages + extensionPageCount);
+		return *(BinaryTree *)(extensionPages() + extensionPageCount);
 	}
 
 	const BinaryTree & tree() const {
-		return *(const BinaryTree *)(extensionPages + extensionPageCount);
+		return *(const BinaryTree *)(extensionPages() + extensionPageCount);
 	}
 
 	static inline int GetHeaderSize(int extensionPages = 0) {
-		return sizeof(BTreePage) + extensionPages + sizeof(LogicalPageID);
+		return sizeof(BTreePage) + (extensionPages * sizeof(LogicalPageID));
 	}
 
 	std::string toString(bool write, LogicalPageID id, Version ver, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) const {
@@ -1603,7 +1617,7 @@ private:
 				for(int e = 0, eEnd = extPages.size(); e < eEnd; ++e) {
 					LogicalPageID eid = m_pager->allocateLogicalPage();
 					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%" PRId64 " (%d of %lu) referencePageID=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
-					newPage->extensionPages[e] = bigEndian32(eid);
+					newPage->extensionPages()[e] = bigEndian32(eid);
 					// If replacing the primary page below (version == 0) then pass the primary page's ID as the reference page ID
 					m_pager->writePage(eid, extPages[e], version, (version == 0) ? id : invalidLogicalPageID);
 					++counts.extPageWrites;
@@ -1620,8 +1634,8 @@ private:
 
 		// Free the old extension pages now that all replacement pages have been written
 		for(int i = 0; i < originalPage->extensionPageCount; ++i) {
-			//debug_printf("%p: writePages(): Freeing old extension op=del id=%u @latest\n", actor_debug, bigEndian32(originalPage->extensionPages[i]));
-			//m_pager->freeLogicalPage(bigEndian32(originalPage->extensionPages[i]), version);
+			//debug_printf("%p: writePages(): Freeing old extension op=del id=%u @latest\n", actor_debug, bigEndian32(originalPage->extensionPages()[i]));
+			//m_pager->freeLogicalPage(bigEndian32(originalPage->extensionPages()[i]), version);
 		}
 
 		return primaryLogicalPageIDs;
@@ -1684,8 +1698,8 @@ private:
 			pageGets.push_back(std::move(result));
 
 			for(int i = 0; i < pTreePage->extensionPageCount; ++i) {
-				debug_printf("readPage() Reading extension page op=read id=%u @%" PRId64 " ext=%d/%d\n", bigEndian32(pTreePage->extensionPages[i]), snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
-				pageGets.push_back(snapshot->getPhysicalPage(bigEndian32(pTreePage->extensionPages[i])));
+				debug_printf("readPage() Reading extension page op=read id=%u @%" PRId64 " ext=%d/%d\n", bigEndian32(pTreePage->extensionPages()[i]), snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
+				pageGets.push_back(snapshot->getPhysicalPage(bigEndian32(pTreePage->extensionPages()[i])));
 			}
 
 			std::vector<Reference<const IPage>> pages = wait(getAll(pageGets));
@@ -3561,12 +3575,12 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	while(1) {
 		if(fwd.get() != items[i]) {
 			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
-			printf("Delta: %s\n", fwd.node->raw->delta->toString().c_str());
+			printf("Delta: %s\n", fwd.node->raw->delta().toString().c_str());
 			ASSERT(false);
 		}
 		if(rev.get() != items[items.size() - 1 - i]) {
 			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
-			printf("Delta: %s\n", rev.node->raw->delta->toString().c_str());
+			printf("Delta: %s\n", rev.node->raw->delta().toString().c_str());
 			ASSERT(false);
 		}
 		++i;
