@@ -920,7 +920,7 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 };
 
 ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
-	if (self->ignorePopRequest && inputTag.locality != tagLocalityTxs && inputTag != txsTag) {
+	if (self->ignorePopRequest) {
 		TraceEvent("IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
 
 		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
