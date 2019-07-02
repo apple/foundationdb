@@ -732,7 +732,7 @@ struct PacketWriter {
 	}
 	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void writeAhead( int bytes, struct SplitBuffer* );
-	void nextBuffer();
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
 	int size() { return length; }
 
@@ -750,7 +750,21 @@ struct PacketWriter {
 	}
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+
 private:
+	uint8_t* writeBytes(size_t size) {
+		if (size > buffer->bytes_unwritten()) {
+			nextBuffer(size);
+			ASSERT(buffer->size() >= size);
+		}
+		uint8_t* result = buffer->data() + buffer->bytes_written;
+		buffer->bytes_written += size;
+		return result;
+	}
+
+	template <class, class>
+	friend class MakeSerializeSource;
+
 	void init( PacketBuffer* buf, ReliablePacket* reliable );
 };
 
@@ -765,9 +779,8 @@ struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
 	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
 		if (useObjectSerializer) {
-			ObjectWriter writer;
-			writer.serialize(get());
-			w.serializeBytes(writer.toStringRef()); // TODO(atn34) Eliminate unnecessary memcpy
+			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); });
+			writer.serialize(get()); // Writes directly into buffer supplied by |w|
 		} else {
 			static_cast<T const*>(this)->serialize(w);
 		}

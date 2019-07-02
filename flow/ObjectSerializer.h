@@ -99,18 +99,24 @@ private:
 
 class ObjectWriter {
 public:
+	ObjectWriter() = default;
+	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator) : customAllocator(customAllocator) {}
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		int allocations = 0;
-		auto allocator = [this, &allocations](size_t size_) {
-			++allocations;
-			size = size_;
-			data = new (arena) uint8_t[size];
-			return data;
-		};
-		save_members(allocator, file_identifier, items...);
-		ASSERT(allocations == 1);
+		if (customAllocator) {
+			save_members(customAllocator, file_identifier, items...);
+		} else {
+			int allocations = 0;
+			auto allocator = [this, &allocations](size_t size_) {
+				++allocations;
+				size = size_;
+				data = new (arena) uint8_t[size];
+				return data;
+			};
+			save_members(allocator, file_identifier, items...);
+			ASSERT(allocations == 1);
+		}
 	}
 
 	template <class Item>
@@ -123,6 +129,7 @@ public:
 	}
 
 	Standalone<StringRef> toString() const {
+		ASSERT(!customAllocator);
 		return Standalone<StringRef>(toStringRef(), arena);
 	}
 
@@ -135,6 +142,7 @@ public:
 
 private:
 	Arena arena;
+	std::function<uint8_t*(size_t)> customAllocator;
 	uint8_t* data = nullptr;
 	int size = 0;
 };

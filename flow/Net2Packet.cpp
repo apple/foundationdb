@@ -53,11 +53,11 @@ void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
 	}
 }
 
-void PacketWriter::nextBuffer() {
+void PacketWriter::nextBuffer(size_t size) {
 	auto last_buffer_bytes_written = buffer->bytes_written;
 	length += last_buffer_bytes_written;
 
-	buffer->next = PacketBuffer::create();
+	buffer->next = PacketBuffer::create(size);
 	buffer = buffer->nextPacketBuffer();
 
 	if (reliable) {
