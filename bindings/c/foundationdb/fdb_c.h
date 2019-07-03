@@ -225,8 +225,8 @@ extern "C" {
     fdb_transaction_get_committed_version( FDBTransaction* tr,
                                            int64_t* out_version );
 
-	DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-	fdb_transaction_get_approximate_size(FDBTransaction* tr);
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 
