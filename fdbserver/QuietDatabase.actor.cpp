@@ -262,7 +262,7 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 			auto itr = workersMap.find(server.address());
 			if(itr == workersMap.end()) {
 				TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
-				continue;
+				throw operation_failed();
 			}
 			result.push_back(itr->second);
 		}
