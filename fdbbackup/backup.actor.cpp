@@ -26,7 +26,6 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
-#include "flow/SignalSafeUnwind.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -2454,7 +2453,6 @@ extern uint8_t *g_extra_memory;
 
 int main(int argc, char* argv[]) {
 	platformInit();
-	initSignalSafeUnwind();
 
 	int	status = FDB_EXIT_SUCCESS;
 

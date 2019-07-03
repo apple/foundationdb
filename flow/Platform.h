@@ -617,6 +617,11 @@ void registerCrashHandler();
 void setupSlowTaskProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
+// These return thread local counts
+int64_t getNumProfilesDeferred();
+int64_t getNumProfilesOverflowed();
+int64_t getNumProfilesCaptured();
+
 // Use _exit() or criticalError(), not exit()
 #define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [====]
 #define exit CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY(0)

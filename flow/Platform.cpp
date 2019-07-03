@@ -2802,39 +2802,59 @@ extern volatile void** net2backtraces;
 extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
-extern volatile int net2backtraces_count;
+extern volatile int64_t net2backtraces_count;
 extern std::atomic<int64_t> net2liveness;
-extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
-
-volatile thread_local bool profileThread = false;
 #endif
 
+volatile thread_local bool profileThread = false;
 volatile thread_local int profilingEnabled = 1;
 
-void setProfilingEnabled(int enabled) {
-	profilingEnabled = enabled;
+volatile thread_local int64_t numProfilesDeferred = 0;
+volatile thread_local int64_t numProfilesOverflowed = 0;
+volatile thread_local int64_t numProfilesCaptured = 0;
+volatile thread_local bool profileRequested = false;
+
+int64_t getNumProfilesDeferred() {
+	return numProfilesDeferred;
+}
+
+int64_t getNumProfilesOverflowed() {
+	return numProfilesOverflowed;
+}
+
+int64_t getNumProfilesCaptured() {
+	return numProfilesCaptured;
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread || !profilingEnabled) {
+	if(!profileThread) { 
 		return;
 	}
 
-	net2backtraces_count++;
+	if(!profilingEnabled) {
+		profileRequested = true;
+		++numProfilesDeferred;
+		return;
+	}
+
+	++net2backtraces_count;
+
 	if (!net2backtraces || net2backtraces_max - net2backtraces_offset < 50) {
+		++numProfilesOverflowed;
 		net2backtraces_overflow = true;
 		return;
 	}
+
+	++numProfilesCaptured;
 
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
 	ps->timestamp = timer();
 
-	// SOMEDAY: should we limit the maximum number of frames from
-	// backtrace beyond just available space?
+	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
@@ -2843,6 +2863,17 @@ void profileHandler(int sig) {
 #else
 	// No slow task profiling for other platforms!
 #endif
+}
+
+void setProfilingEnabled(int enabled) { 
+	if(profileThread && enabled && !profilingEnabled && profileRequested) {
+		profilingEnabled = true;
+		profileRequested = false;
+		pthread_kill(pthread_self(), SIGPROF);
+	}
+	else {
+		profilingEnabled = enabled;
+	}
 }
 
 void* checkThread(void *arg) {
@@ -2882,7 +2913,7 @@ void* checkThread(void *arg) {
 
 void setupSlowTaskProfiler() {
 #ifdef __linux__
-	if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
+	if (!profileThread && FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
 		TraceEvent("StartingSlowTaskProfilingThread").detail("Interval", FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;
