@@ -350,7 +350,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	limits->tpsLimit = self->durabilityLagLimit;
 	UID reasonID = UID();
-	limitReason_t limitReason = self->durabilityLagLimit == std::numeric_limits<double>::infinity() ? limitReason_t::unlimited : limitReasion_t::storage_server_durability_lag;
+	limitReason_t limitReason = self->durabilityLagLimit == std::numeric_limits<double>::infinity() ? limitReason_t::unlimited : limitReason_t::storage_server_durability_lag;
 
 	int sscount = 0;
 
