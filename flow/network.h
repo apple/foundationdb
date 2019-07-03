@@ -29,7 +29,6 @@
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "fdbrpc/crc32c.h"
 
 enum {
 	TaskMaxPriority = 1000000,
