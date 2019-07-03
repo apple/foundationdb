@@ -20,8 +20,9 @@
 
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "flow/ActorCollection.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -360,11 +361,11 @@ struct LeaderRegisterCollection {
 		return Void();
 	}
 
-	LeaderElectionRegInterface& getInterface(KeyRef key) {
+	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
 		auto i = registerInterfaces.find( key );
 		if (i == registerInterfaces.end()) {
 			Key k = key;
-			Future<Void> a = wrap(this, k, leaderRegister(registerInterfaces[k], k) );
+			Future<Void> a = wrap(this, k, leaderRegister(registerInterfaces[k], k), id);
 			if (a.isError()) throw a.getError();
 			ASSERT( !a.isReady() );
 			actors.add( a );
@@ -374,11 +375,15 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	ACTOR static Future<Void> wrap( LeaderRegisterCollection* self, Key key, Future<Void> actor ) {
+	ACTOR static Future<Void> wrap( LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id ) {
 		state Error e;
 		try { 
+			// FIXME: Get worker ID here
+			startRole(Role::COORDINATOR, id, UID());
 			wait(actor); 
+			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
+			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);
 			if (err.code() == error_code_actor_cancelled)
 				throw;
 			e = err;
@@ -392,7 +397,7 @@ struct LeaderRegisterCollection {
 
 // leaderServer multiplexes multiple leaderRegisters onto a single LeaderElectionRegInterface,
 // creating and destroying them on demand.
-ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore *pStore) {
+ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore *pStore, UID id) {
 	state LeaderRegisterCollection regs( pStore );
 	state ActorCollection forwarders(false);
 
@@ -404,21 +409,21 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if( forward.present() )
 				req.reply.send( forward.get() );
 			else
-				regs.getInterface(req.key).getLeader.send( req );
+				regs.getInterface(req.key, id).getLeader.send( req );
 		}
 		when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send( forward.get() );
 			else
-				regs.getInterface(req.key).candidacy.send(req);
+				regs.getInterface(req.key, id).candidacy.send(req);
 		}
 		when ( LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
 				req.reply.send( false );
 			else
-				regs.getInterface(req.key).leaderHeartbeat.send(req);
+				regs.getInterface(req.key, id).leaderHeartbeat.send(req);
 		}
 		when ( ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
@@ -426,7 +431,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				req.reply.send( Void() );
 			else {
 				forwarders.add( LeaderRegisterCollection::setForward( &regs, req.key, ClusterConnectionString(req.conn.toString()) ) );
-				regs.getInterface(req.key).forward.send(req);
+				regs.getInterface(req.key, id).forward.send(req);
 			}
 		}
 		when( wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
@@ -442,7 +447,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress()).detail("Folder", dataFolder);
 
 	try {
-		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
+		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID) || store.getError() );
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);
