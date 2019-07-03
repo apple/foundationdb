@@ -8,7 +8,7 @@ Release Notes
 Fixes
 -----
 
-* Ensure new added machines are used to build teams and host data from existing machines when a cluster is expanded. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
+* Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
 
 6.1.10
 ======
@@ -22,7 +22,6 @@ Fixes
 -----
 
 * The ``fdbrestore`` commands ``abort``, ``wait``, and ``status`` would use a default cluster file instead of the destination cluster file argument.  `(PR #1701) <https://github.com/apple/foundationdb/pull/1701>`_
-* Ensure new added machines are used to build teams and host data from existing machines when a cluster is expanded. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
 
 6.1.9
 =====
