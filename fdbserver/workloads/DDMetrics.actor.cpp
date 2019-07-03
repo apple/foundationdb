@@ -28,9 +28,6 @@
 
 struct DDMetricsWorkload : TestWorkload {
 	double ddDone;
-	int numWorkers;
-	int transactionsPerWorker;
-	int writesPerTransaction;
 	Value excludeIp;
 	int excludePort;
 	double peakMovingData;
@@ -41,9 +38,6 @@ struct DDMetricsWorkload : TestWorkload {
 	DDMetricsWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), ddDone(0.0), peakMovingData(0.0), peakInQueue(0.0), peakInFlight(0.0), movingDataPerSec(0.0)
 	{
-		numWorkers = getOption(options, LiteralStringRef("numWorkers"), 10);
-		transactionsPerWorker = getOption(options, LiteralStringRef("transactionsPerWorker"), 100);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1000);
 		excludeIp = getOption(options, LiteralStringRef("excludeIp"), Value(LiteralStringRef("127.0.0.1")));
 		excludePort = getOption(options, LiteralStringRef("excludePort"), 4500);
 	}
@@ -95,37 +89,8 @@ struct DDMetricsWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> populateDbWorker(Database cx, DDMetricsWorkload* self, int workerId) {
-		state int tNum;
-		for (tNum = 0; tNum < self->transactionsPerWorker; ++tNum) {
-			loop {
-				state ReadYourWritesTransaction tr(cx);
-				try {
-					state int i;
-					for (i = 0; i < self->writesPerTransaction; ++i) {
-						tr.set(StringRef(format("Key%d/%080d", workerId, tNum * self->writesPerTransaction + i)), getRandomValue());
-					}
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-		}
-		return Void();
-	}
-
-	ACTOR static Future<Void> _setup(Database cx, DDMetricsWorkload* self) {
-		state std::vector<Future<Void>> workers;
-		for (int i = 0; i < self->numWorkers; ++i) {
-			workers.push_back(populateDbWorker(cx, self, i));
-		}
-		wait(waitForAll(workers));
-		return Void();
-	}
-
 	virtual std::string description() { return "Data Distribution Metrics"; }
-	virtual Future<Void> setup( Database const& cx ) { return _setup(cx, this); }
+	virtual Future<Void> setup( Database const& cx ) { return Void(); }
 	virtual Future<Void> start( Database const& cx ) { return _start(cx, this); }
 	virtual Future<bool> check( Database const& cx ) {
 		movingDataPerSec = peakMovingData / ddDone;

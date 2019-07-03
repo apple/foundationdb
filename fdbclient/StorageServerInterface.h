@@ -179,12 +179,13 @@ struct GetKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
+	bool isFetchKeys;
 
-	GetKeyValuesRequest() {}
+	GetKeyValuesRequest() : isFetchKeys(false) {}
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, debugID, reply, arena, isFetchKeys);
 	}
 };
 

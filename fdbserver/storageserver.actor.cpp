@@ -1345,7 +1345,14 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, TaskPriority::DefaultEndpoint) );
+	TaskPriority taskType = TaskPriority::DefaultEndpoint;
+	if (req.isFetchKeys) {
+		taskType = TaskPriority::FetchKeys;
+	} else if (false) {
+		// Placeholder for up-prioritizing fetches for important requests
+		taskType = TaskPriority::DefaultDelay;
+	}
+	wait( delay(0, taskType));
 
 	try {
 		if( req.debugID.present() )
@@ -1836,6 +1843,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 		throw transaction_too_old();
 
 	tr.setVersion( version );
+	tr.info.taskID = TaskFetchKeys;
 	limits.minRows = 0;
 
 	try {
