@@ -1815,8 +1815,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+					Tag pushTag = (i==-1 || self->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%self->txsTags);
 					locations.clear();
-					logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+					logSet->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
@@ -2018,8 +2019,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(oldLogSystem->tLogs.size()) {
 			for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 				Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+				Tag pushTag = (i==-1 || logSystem->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 				locations.clear();
-				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
 				for(int loc : locations)
 					reqs[ loc ].recoverTags.push_back( tag );
 			}
@@ -2071,8 +2073,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(oldLogSystem->tLogs.size()) {
 				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
+					Tag pushTag = (i==-1 || logSystem->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 					locations.clear();
-					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}
