@@ -1403,3 +1403,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::COORDINATOR("Coordinator", "CD");
