@@ -1871,7 +1871,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
 			// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 			// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-			int numTeamsPerServerFactor = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->configuration.storageTeamSize) / 2;
+			int numTeamsPerServerFactor = std::max<int>(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER, (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->configuration.storageTeamSize) / 2);
 			ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 &&  self->configuration.storageTeamSize >= 1);
 			ASSERT(numTeamsPerServerFactor > 0);
 			desiredTeams = numTeamsPerServerFactor * serverCount;
