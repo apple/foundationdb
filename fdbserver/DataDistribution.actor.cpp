@@ -1628,11 +1628,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Find the server team whose members are on the most number of server teams
-	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
+	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams(bool chooseUnhealthyTeam) {
 		Reference<TCTeamInfo> retST;
 		int maxNumProcessTeams = 0;
 
 		for (auto& t : teams) {
+			if (chooseUnhealthyTeam && t->isHealthy()) {
+				continue;
+			}
 			int numProcessTeams = 0;
 			for (auto& server : t->getServers()) {
 				numProcessTeams += server->teams.size();
@@ -2401,7 +2404,8 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
 
-		state int healthyServerCount = self->calculateHealthyServerCount();
+		// Q: We may need to count the number of servers instead of only healthy servers, since healthyness can change quickly?
+		state int healthyServerCount = self->teams.size(); //self->calculateHealthyServerCount();
 		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all servers will become healthy.
 		if (healthyServerCount != self->server_info.size()) {
@@ -2417,7 +2421,10 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 
 		if (totalSTCount > desiredServerTeams) {
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
-			state std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+			state std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams(true);
+			if (!foundSTInfo.first.isValid()) {
+				foundSTInfo = self->getServerTeamWithMostProcessTeams(false);
+			}
 			state Reference<TCTeamInfo> st = foundSTInfo.first;
 			state int maxNumProcessTeams = foundSTInfo.second;
 			ASSERT(st.isValid());
