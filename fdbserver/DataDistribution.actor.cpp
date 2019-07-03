@@ -2843,12 +2843,18 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			if(val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
 				if(p.second > tr.getReadVersion().get()) {
-					healthyZoneTimeout = delay((p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND);
-					self->healthyZone.set(p.first);
-				} else {
+					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+					healthyZoneTimeout = delay(timeoutSeconds);
+					if(self->healthyZone.get() != p.first) {
+						TraceEvent("MaintenanceZoneStart", self->distributorId).detail("ZoneID", printable(p.first)).detail("EndVersion", p.second).detail("Duration", timeoutSeconds);
+						self->healthyZone.set(p.first);
+					}
+				} else if(self->healthyZone.get().present()) {
+					TraceEvent("MaintenanceZoneEnd", self->distributorId);
 					self->healthyZone.set(Optional<Key>());
 				}
-			} else {
+			} else if(self->healthyZone.get().present()) {
+				TraceEvent("MaintenanceZoneEnd", self->distributorId);
 				self->healthyZone.set(Optional<Key>());
 			}
 			
@@ -2949,6 +2955,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 				}
 				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
 					self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
+					TraceEvent("MaintenanceZoneCleared", self->distributorId);
 					self->healthyZone.set(Optional<Key>());
 				}
 
