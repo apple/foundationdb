@@ -3584,7 +3584,7 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 
 	try {
 		Future<Void> exec = snapshotDatabase(cx, snapPayloadRef, snapUID, snapUID);
-		wait(exec);
+		wait(timeoutError(exec, 80.0));
 	} catch (Error& e) {
 		TraceEvent("SnapshotDatabaseErrorVersion2")
 			.detail("SnapCmd", snapCmd.toString())
