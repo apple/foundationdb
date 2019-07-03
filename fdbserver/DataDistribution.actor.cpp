@@ -1842,8 +1842,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
 		if( uniqueMachines >= self->configuration.storageTeamSize ) {
-			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
-			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER*serverCount;
+			// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
+			// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
+			// The numTeamsPerServerFactor is calculated as
+			// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
+			// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
+			// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
+			int numTeamsPerServerFactor = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->configuration.storageTeamSize) / 2;
+			ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 &&  self->configuration.storageTeamSize >= 1);
+			ASSERT(numTeamsPerServerFactor > 0);
+			desiredTeams = numTeamsPerServerFactor * serverCount;
+			int maxTeams = numTeamsPerServerFactor * serverCount;
 
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
