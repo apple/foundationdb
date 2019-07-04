@@ -50,7 +50,7 @@ const uint64_t TOKEN_STREAM_FLAG = 1;
 class EndpointMap : NonCopyable {
 public:
 	EndpointMap();
-	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, uint32_t priority );
+	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
 	TaskPriority getPriority( Endpoint::Token const& token );
 	void remove( Endpoint::Token const& token, NetworkMessageReceiver* r );
@@ -86,12 +86,12 @@ void EndpointMap::realloc() {
 	firstFree = oldSize;
 }
 
-void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, uint32_t priority ) {
+void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
 	if (firstFree == uint32_t(-1)) realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
 	token = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | index );
-	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | priority );
+	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | static_cast<uint32_t>(priority) );
 	data[index].receiver = r;
 }
 
@@ -122,7 +122,7 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		//endpoints[WLTOKEN_ENDPOINT_NOT_FOUND] = this;
 		Endpoint::Token e = WLTOKEN_ENDPOINT_NOT_FOUND;
-		endpoints.insert(this, e, static_cast<uint32_t>(TaskPriority::DefaultEndpoint));
+		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
 		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
 	}
 	virtual void receive( ArenaReader& reader ) {
@@ -141,7 +141,7 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 struct PingReceiver : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		Endpoint::Token e = WLTOKEN_PING_PACKET;
-		endpoints.insert(this, e, static_cast<uint32_t>(TaskPriority::ReadSocket));
+		endpoints.insert(this, e, TaskPriority::ReadSocket);
 		ASSERT( e == WLTOKEN_PING_PACKET );
 	}
 	virtual void receive( ArenaReader& reader ) {
@@ -1087,7 +1087,7 @@ void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* rec
 		endpoint.addresses = NetworkAddressList();
 		endpoint.token = UID( endpoint.token.first() & ~TOKEN_STREAM_FLAG, endpoint.token.second() );
 	}
-	self->endpoints.insert( receiver, endpoint.token, static_cast<uint32_t>(taskID) );
+	self->endpoints.insert( receiver, endpoint.token, taskID );
 }
 
 void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
@@ -1098,7 +1098,7 @@ void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageRece
 	endpoint.addresses = self->localAddresses;
 	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
 	Endpoint::Token otoken = endpoint.token;
-	self->endpoints.insert( receiver, endpoint.token, static_cast<uint32_t>(taskID) );
+	self->endpoints.insert( receiver, endpoint.token, taskID );
 	ASSERT( endpoint.token == otoken );
 }
 

@@ -80,12 +80,18 @@ enum class TaskPriority {
 	Zero = 0
 };
 
+// These have been given long, annoying names to discourage their use.
+
 inline TaskPriority incrementPriority(TaskPriority p) {
 	return static_cast<TaskPriority>( static_cast<uint64_t>(p) + 1 );
 }
 
 inline TaskPriority decrementPriority(TaskPriority p) {
-	return static_cast<TaskPriority>( static_cast<uint64_t>(p) + 1 );
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) - 1 );
+}
+
+inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) | 1 );
 }
 
 class Void;
