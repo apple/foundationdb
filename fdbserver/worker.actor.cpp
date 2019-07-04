@@ -672,8 +672,12 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("ExecHelperError").error(e);
-		snapReq.reply.sendError(e);
+		TraceEvent("ExecHelperError").error(e, true /*includeCancelled*/);
+		if (e.code() == error_code_operation_cancelled) {
+			snapReq.reply.sendError(broken_promise());
+		} else {
+			snapReq.reply.sendError(e);
+		}
 	}
 	return Void();
 }
