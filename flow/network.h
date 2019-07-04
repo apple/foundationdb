@@ -29,7 +29,6 @@
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "fdbrpc/crc32c.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -65,8 +64,6 @@ enum class TaskPriority {
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,
 	DefaultYield = 7000,
-	DiskWrite = 5030,
-	Storage = 5020,
 	DiskRead = 5010,
 	DefaultEndpoint = 5000,
 	UnknownEndpoint = 4000,
@@ -74,6 +71,7 @@ enum class TaskPriority {
 	DataDistributionLaunch = 3530,
 	Ratekeeper = 3510,
 	DataDistribution = 3500,
+	DiskWrite = 3010,
 	UpdateStorage = 3000,
 	TLogSpilledPeekReply = 2800,
 	Low = 2000,

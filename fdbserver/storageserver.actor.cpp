@@ -31,6 +31,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/StatusClient.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1317,8 +1318,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 			ASSERT(returnKey != sel.getKey());
 
 			return returnKey;
-		}
-		else
+		} else
 			return forward ? range.end : range.begin;
 	}
 }
@@ -2865,11 +2865,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (g_network->isSimulated()) {
 			double endTime = g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
 			if(endTime > now()) {
-				wait(delay(endTime - now(), TaskPriority::Storage));
+				wait(delay(endTime - now(), TaskPriority::UpdateStorage));
 			}
 		}
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
-		wait( delay(0, TaskPriority::Storage) );
+		wait( delay(0, TaskPriority::UpdateStorage) );
 
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
@@ -2884,10 +2884,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
 			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::Storage );
+			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
 			data->oldestVersion.set( newOldestVersion );
 			wait( finishedForgetting );
-			wait( yield(TaskPriority::Storage) );
+			wait( yield(TaskPriority::UpdateStorage) );
 			if (done) break;
 		}
 
@@ -2900,9 +2900,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::Storage);
-		} else {
-			durableDelay = delay(0, TaskPriority::UpdateStorage) || delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::Storage);
+			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 		}
 
 		wait( durable );
@@ -2922,7 +2920,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait( delay(0, TaskPriority::Storage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+		wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
 		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
@@ -2931,9 +2929,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
-			if(g_network->check_yield(TaskPriority::Storage)) {
+			if(g_network->check_yield(TaskPriority::UpdateStorage)) {
 				data->durableVersionLock.release();
-				wait(delay(0, TaskPriority::Storage));
+				wait(delay(0, TaskPriority::UpdateStorage));
 				wait( data->durableVersionLock.take() );
 			}
 		}
@@ -3626,6 +3624,38 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
+ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterConnectionFile> connFile, UID id)
+{
+	if (store->getType() != KeyValueStoreType::MEMORY || connFile.getPtr() == nullptr) {
+		return Never();
+	}
+
+	// create a temp client connect to DB
+	Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST);
+
+	state Transaction tr( cx );
+	state int noCanRemoveCount = 0;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			state bool canRemove = wait( canRemoveStorageServer( &tr, id ) );
+			if (!canRemove) {
+				TEST(true); // it's possible that the caller had a transaction in flight that assigned keys to the server. Wait for it to reverse its mistake.
+				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::UpdateStorage) );
+				tr.reset();
+				TraceEvent("RemoveStorageServerRetrying").detail("Count", noCanRemoveCount++).detail("ServerID", id).detail("CanRemove", canRemove);
+			} else {
+				return Void();
+			}
+		} catch (Error& e) {
+			state Error err = e;
+			wait(tr.onError(e));
+			TraceEvent("RemoveStorageServerRetrying").error(err);
+		}
+	}
+}
+
 ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<InitializeStorageReply> recruitReply,
 	Reference<AsyncVar<ServerDBInfo>> db, std::string folder )
 {
@@ -3745,7 +3775,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 	return Void();
 }
 
-ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, Promise<Void> recovered )
+ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, Promise<Void> recovered, Reference<ClusterConnectionFile> connFile)
 {
 	state StorageServer self(persistentData, db, ssi);
 	self.folder = folder;
@@ -3753,8 +3783,19 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	try {
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
+
 		wait(self.storage.init());
-		wait(self.storage.commit()); //after a rollback there might be uncommitted changes.
+		choose {
+			//after a rollback there might be uncommitted changes.
+			//for memory storage engine type, wait until recovery is done before commit
+			when( wait(self.storage.commit()))  {}
+
+			when( wait(memoryStoreRecover (persistentData, connFile, self.thisServerID))) {
+				TraceEvent("DisposeStorageServer", self.thisServerID);
+				throw worker_removed();
+			}
+		}
+
 		bool ok = wait( self.storage.restoreDurableState() );
 		if (!ok) {
 			if(recovered.canBeSet()) recovered.send(Void());

@@ -369,6 +369,7 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
+	static const Role COORDINATOR;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -415,7 +416,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder);
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi,
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
-                                 Promise<Void> recovered); // changes pssi->id() to be the recovered ID
+                                 Promise<Void> recovered,
+                                 Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
