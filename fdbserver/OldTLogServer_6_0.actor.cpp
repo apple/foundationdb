@@ -1821,8 +1821,12 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").error(e);
-		snapReq.reply.sendError(e);
+		TraceEvent("TLogExecHelperError").error(e, true /*includeCancelled */);
+		if (e.code() == error_code_operation_cancelled) {
+			snapReq.reply.sendError(broken_promise());
+		} else {
+			snapReq.reply.sendError(e);
+		}
 	}
 	return Void();
 }
