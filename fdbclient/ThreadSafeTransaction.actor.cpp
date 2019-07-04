@@ -279,7 +279,8 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 }
 
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
-	return onMainThread([this]() -> Future < Standalone<StringRef> > {
+	ReadYourWritesTransaction *tr = this->tr;
+	return onMainThread([tr]() -> Future < Standalone<StringRef> > {
 		return tr->getVersionstamp();
 	});
 }

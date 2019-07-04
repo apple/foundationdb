@@ -220,6 +220,11 @@ fdb_error_t fdb_future_get_version( FDBFuture* f, int64_t* out_version ) {
 }
 
 extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_int64( FDBFuture* f, int64_t* out_version ) {
+	CATCH_AND_RETURN( *out_version = TSAV(Version, f)->get(); );
+}
+
+extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
 								int* out_key_length ) {
 	CATCH_AND_RETURN(

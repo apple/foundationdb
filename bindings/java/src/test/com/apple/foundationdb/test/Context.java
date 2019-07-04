@@ -46,7 +46,6 @@ abstract class Context implements Runnable, AutoCloseable {
 	int instructionIndex = 0;
 	KeySelector nextKey, endKey;
 	Long lastVersion = null;
-	Long approximateSize = null;
 
 	private String trName;
 	private List<Thread> children = new LinkedList<>();

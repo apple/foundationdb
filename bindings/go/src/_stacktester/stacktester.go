@@ -75,14 +75,13 @@ type stackEntry struct {
 }
 
 type StackMachine struct {
-	prefix          []byte
-	trName          string
-	stack           []stackEntry
-	lastVersion     int64
-	threads         sync.WaitGroup
-	verbose         bool
-	de              *DirectoryExtension
-	approximateSize int64
+	prefix      []byte
+	trName      string
+	stack       []stackEntry
+	lastVersion int64
+	threads     sync.WaitGroup
+	verbose     bool
+	de          *DirectoryExtension
 }
 
 func newStackMachine(prefix []byte, verbose bool) *StackMachine {
@@ -592,8 +591,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		}
 		sm.store(idx, []byte("GOT_COMMITTED_VERSION"))
 	case op == "GET_APPROXIMATE_SIZE":
-		sm.approximateSize = sm.currentTransaction().GetApproximateSize().MustGet()
-		sm.store(idx, []byte("GOT_APPROXIMATE_SIZE"))
+		approximateSize := sm.currentTransaction().GetApproximateSize().MustGet()
+		sm.store(idx, []byte(tuple.Tuple{approximateSize}.Pack()))
 	case op == "GET_VERSIONSTAMP":
 		sm.store(idx, sm.currentTransaction().GetVersionstamp())
 	case op == "GET_KEY":

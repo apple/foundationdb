@@ -45,7 +45,7 @@ fdb_error_t getSize(struct ResultSet* rs, FDBTransaction* tr, int64_t* out_size)
 		return e;
 	}
 
-	e = maybeLogError(fdb_future_get_version(future, out_size), "getting future value", rs);
+	e = maybeLogError(fdb_future_get_int64(future, out_size), "getting future value", rs);
 	if (e) {
 		fdb_future_destroy(future);
 		return e;

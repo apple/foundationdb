@@ -255,7 +255,6 @@ class Tester:
         self.tr_name = prefix
         Tester.tr_map[self.tr_name] = None
         self.last_version = 0
-        self.approximate_size = 0
 
         self.threads = []
         self.directory_extension = DirectoryExtension()
@@ -477,8 +476,8 @@ class Tester:
                     self.last_version = inst.tr.get_committed_version()
                     inst.push(b"GOT_COMMITTED_VERSION")
                 elif inst.op == six.u("GET_APPROXIMATE_SIZE"):
-                    self.approximate_size = inst.tr.get_approximate_size().wait()
-                    inst.push(b"GOT_APPROXIMATE_SIZE")
+                    approximate_size = inst.tr.get_approximate_size().wait()
+                    inst.push(fdb.tuple.pack((approximate_size,)))
                 elif inst.op == six.u("GET_VERSIONSTAMP"):
                     inst.push(inst.tr.get_versionstamp())
                 elif inst.op == six.u("TUPLE_PACK"):
