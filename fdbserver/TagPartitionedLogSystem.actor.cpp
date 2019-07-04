@@ -1122,6 +1122,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logRouterTags > 0 || pseudoLocalities.size() > 0;
 	}
 
+	virtual int getLogRouterTags() {
+		return logRouterTags;
+	}
+
 	virtual Tag getRandomRouterTag() {
 		return Tag(tagLocalityLogRouter, deterministicRandom()->randomInt(0, logRouterTags));
 	}

@@ -704,6 +704,8 @@ struct ILogSystem {
 
 	virtual bool hasRemoteLogs() = 0;
 
+	virtual int getLogRouterTags() = 0;
+
 	virtual Tag getRandomRouterTag() = 0;
 
 	virtual void stopRejoins() = 0;
@@ -766,11 +768,15 @@ struct LogPushData : NonCopyable {
 	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
-			if(logSystem->hasRemoteLogs()) {
-				prev_tags.push_back( logSystem->getRandomRouterTag() );
-			}
 			for(auto& tag : next_message_tags) {
 				prev_tags.push_back(tag);
+			}
+			if(logSystem->hasRemoteLogs()) {
+				int primaryLogs = logSystem->getLogSystemConfig().tLogs[0].tLogs.size();
+				int logRouterTags = logSystem->getLogRouterTags();
+				int nWays = logRouterTags / primaryLogs;
+				int newId = (deterministicRandom()->randomChoice(prev_tags).id % primaryLogs) * deterministicRandom()->randomInt(1, nWays+1);
+				prev_tags.push_back( Tag(tagLocalityLogRouter, newId) );
 			}
 			msg_locations.clear();
 			logSystem->getPushLocations( prev_tags, msg_locations );
@@ -788,11 +794,15 @@ struct LogPushData : NonCopyable {
 	template <class T>
 	void addTypedMessage(T const& item, bool allLocations = false) {
 		prev_tags.clear();
-		if(logSystem->hasRemoteLogs()) {
-			prev_tags.push_back( logSystem->getRandomRouterTag() );
-		}
 		for(auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
+		}
+		if(logSystem->hasRemoteLogs()) {
+			int primaryLogs = logSystem->getLogSystemConfig().tLogs[0].tLogs.size();
+			int logRouterTags = logSystem->getLogRouterTags();
+			int nWays = logRouterTags / primaryLogs;
+			int newId = (deterministicRandom()->randomChoice(prev_tags).id % primaryLogs) * deterministicRandom()->randomInt(1, nWays+1);
+			prev_tags.push_back( Tag(tagLocalityLogRouter, newId) );
 		}
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
