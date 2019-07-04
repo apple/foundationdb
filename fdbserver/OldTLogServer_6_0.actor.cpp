@@ -1827,6 +1827,43 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 	return Void();
 }
 
+ACTOR Future<Void>
+tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<LogData> logData) {
+	if (self->ignorePopUid != enablePopReq.snapUID.toString()) {
+		TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
+			.detail("IgnorePopUid", self->ignorePopUid)
+			.detail("UidStr", enablePopReq.snapUID.toString());
+		enablePopReq.reply.sendError(operation_failed());
+		return Void();
+	}
+	TraceEvent("EnableTLogPlayAllIgnoredPops2");
+	// use toBePopped and issue all the pops
+	std::map<Tag, Version>::iterator it;
+	state vector<Future<Void>> ignoredPops;
+	self->ignorePopRequest = false;
+	self->ignorePopDeadline = 0.0;
+	self->ignorePopUid = "";
+	for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+		TraceEvent("PlayIgnoredPop")
+			.detail("Tag", it->first.toString())
+			.detail("Version", it->second);
+		ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
+	}
+	TraceEvent("TLogExecCmdPopEnable")
+		.detail("UidStr", enablePopReq.snapUID.toString())
+		.detail("IgnorePopUid", self->ignorePopUid)
+		.detail("IgnporePopRequest", self->ignorePopRequest)
+		.detail("IgnporePopDeadline", self->ignorePopDeadline)
+		.detail("PersistentDataVersion", logData->persistentDataVersion)
+		.detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
+		.detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
+		.detail("Version", logData->version.get());
+	wait(waitForAll(ignoredPops));
+	self->toBePopped.clear();
+	enablePopReq.reply.send(Void());
+	return Void();
+}
+
 ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Reference<LogData> logData, PromiseStream<Void> warningCollectorInput ) {
 	state Future<Void> dbInfoChange = Void();
 
@@ -1898,43 +1935,16 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 					.detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
 					.detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
 					.detail("Version", logData->version.get());
+				req.reply.sendError(operation_failed());
+			} else {
+				//FIXME: As part of reverting snapshot V1, make ignorePopUid a UID instead of string
+				self->ignorePopUid = req.snapUID.toString();
+				self->ignorePopDeadline = g_network->now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
+				req.reply.send(Void());
 			}
-			//FIXME: As part of reverting snapshot V1, make ignorePopUid a UID instead of string
-			self->ignorePopUid = req.snapUID.toString();
-			self->ignorePopDeadline = g_network->now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
-			req.reply.send(Void());
 		}
 		when( state TLogEnablePopRequest enablePopReq = waitNext( tli.enablePopRequest.getFuture() ) ) {
-			if (self->ignorePopUid != enablePopReq.snapUID.toString()) {
-				TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
-					.detail("IgnorePopUid", self->ignorePopUid)
-					.detail("UidStr", enablePopReq.snapUID.toString());
-			}
-			TraceEvent("EnableTLogPlayAllIgnoredPops2");
-			// use toBePopped and issue all the pops
-			std::map<Tag, Version>::iterator it;
-			state vector<Future<Void>> ignoredPops;
-			self->ignorePopRequest = false;
-			self->ignorePopDeadline = 0.0;
-			self->ignorePopUid = "";
-			for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
-				TraceEvent("PlayIgnoredPop")
-					.detail("Tag", it->first.toString())
-					.detail("Version", it->second);
-				ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
-			}
-			TraceEvent("TLogExecCmdPopEnable")
-				.detail("UidStr", enablePopReq.snapUID.toString())
-				.detail("IgnorePopUid", self->ignorePopUid)
-				.detail("IgnporePopRequest", self->ignorePopRequest)
-				.detail("IgnporePopDeadline", self->ignorePopDeadline)
-				.detail("PersistentDataVersion", logData->persistentDataVersion)
-				.detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
-				.detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
-				.detail("Version", logData->version.get());
-			wait(waitForAll(ignoredPops));
-			self->toBePopped.clear();
-			enablePopReq.reply.send(Void());
+			logData->addActor.send( tLogEnablePopReq( enablePopReq, self, logData) );
 		}
 		when( TLogSnapRequest snapReq = waitNext( tli.snapRequest.getFuture() ) ) {
 			logData->addActor.send( tLogSnapCreate( snapReq, self, logData) );
