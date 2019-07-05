@@ -397,32 +397,38 @@ struct Peer : NonCopyable {
 	}
 
 	ACTOR static Future<Void> connectionMonitor( Peer *peer ) {
-		if (!peer->destination.isPublic()) {
-			// Don't send ping messages to clients. Instead monitor incoming client pings.
-			state double lastRefreshed = now();
-			state int64_t lastBytesReceived = peer->bytesReceived;
-			loop {
-				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
-				if (lastBytesReceived < peer->bytesReceived) {
-					lastRefreshed = now();
-					lastBytesReceived = peer->bytesReceived;
-				} else if (lastRefreshed < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT *
-				                                       FLOW_KNOBS->CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER) {
-					throw connection_idle();
-				}
-			}
-		}
-
 		state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 		loop {
+			if (!FlowTransport::transport().isClient() && !peer->destination.isPublic()) {
+				// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
+				state double lastRefreshed = now();
+				state int64_t lastBytesReceived = peer->bytesReceived;
+				loop {
+					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+					if (lastBytesReceived < peer->bytesReceived) {
+						lastRefreshed = now();
+						lastBytesReceived = peer->bytesReceived;
+					} else if (lastRefreshed < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT *
+							   FLOW_KNOBS->CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER) {
+						// If we have not received anything in this period, client must have closed
+						// connection by now. Break loop to check if it is still alive by sending a ping.
+						break;
+					}
+				}
+			}
+
 			const bool pendingPacketsEmpty = peer->reliable.empty() && peer->unsent.empty();
 			if (pendingPacketsEmpty && (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
 			    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
-				if (peer->peerReferences == 0)
+				if (peer->peerReferences == 0) {
 					throw connection_unreferenced();
-				else if (peer->destination.isPublic())
+				} else if (FlowTransport::transport().isClient() && peer->destination.isPublic()) {
+					// First condition is necessary because we may get here if we are server.
 					throw connection_idle();
+				}
 			}
+
+			wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
 
 			// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 			state ReplyPromise<Void> reply;
@@ -453,8 +459,6 @@ struct Peer : NonCopyable {
 					}
 				}
 			}
-
-			wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
 		}
 	}
 
