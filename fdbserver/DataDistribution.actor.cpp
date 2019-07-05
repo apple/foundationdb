@@ -2327,15 +2327,15 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 
 		if (totalMTCount > desiredMachineTeams) {
 			// Pick the machine team with the least number of server teams and mark it undesired
-			state std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = self->getMachineTeamWithLeastProcessTeams();
-			state Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
-			state int minNumProcessTeams = foundMTInfo.second;
+			std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = self->getMachineTeamWithLeastProcessTeams();
+			Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
+			int minNumProcessTeams = foundMTInfo.second;
 			ASSERT(mt.isValid());
 
 			// Pick one process team, and mark it as a bad team
 			// Remove the machine by removing its process team one by one
-			state Reference<TCTeamInfo> team;
-			state int teamIndex = 0;
+			Reference<TCTeamInfo> team;
+			int teamIndex = 0;
 			for (teamIndex = 0; teamIndex < mt->serverTeams.size(); ++teamIndex) {
 				team = mt->serverTeams[teamIndex];
 				ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
@@ -2357,7 +2357,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 				self->addActor.send(self->badTeamRemover);
 			}
 
-			TraceEvent("TeamRemover")
+			TraceEvent("MachineTeamRemover")
 			    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
 			    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
 			    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
@@ -2373,7 +2373,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		} else {
 			if (numMachineTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
-				TraceEvent("TeamRemoverDone")
+				TraceEvent("MachineTeamRemoverDone")
 				    .detail("HealthyMachineNumber", healthyMachineCount)
 				    // .detail("CurrentHealthyMachineTeamNumber", currentHealthyMTCount)
 				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
@@ -2405,7 +2405,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		wait(self->badTeamRemover);
 
 		// Q: We may need to count the number of servers instead of only healthy servers, since healthyness can change quickly?
-		state int healthyServerCount = self->teams.size(); //self->calculateHealthyServerCount();
+		int healthyServerCount = self->teams.size(); //self->calculateHealthyServerCount();
 		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all servers will become healthy.
 		if (healthyServerCount != self->server_info.size()) {
@@ -2421,12 +2421,12 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 
 		if (totalSTCount > desiredServerTeams) {
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
-			state std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams(true);
+			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams(true);
 			if (!foundSTInfo.first.isValid()) {
 				foundSTInfo = self->getServerTeamWithMostProcessTeams(false);
 			}
-			state Reference<TCTeamInfo> st = foundSTInfo.first;
-			state int maxNumProcessTeams = foundSTInfo.second;
+			Reference<TCTeamInfo> st = foundSTInfo.first;
+			int maxNumProcessTeams = foundSTInfo.second;
 			ASSERT(st.isValid());
 			// The team will be marked as a bad team
 			bool foundTeam = self->removeTeam(st);
@@ -2592,7 +2592,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
 						team->setPriority( PRIORITY_TEAM_2_LEFT );
-					else
+					else // Q: Does this assume the replica factor is no larger than 3?
 						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
 				}
 				else if ( badTeam || anyWrongConfiguration ) {
