@@ -19,18 +19,33 @@
 
 version: '3'
 services:
-  fdb:
-    image: foundationdb:5.2.5
-    environment:
-      FDB_COORDINATOR: fdb-coordinator
+  # Specify three fdbserver processes.
   fdb-coordinator:
-    image: foundationdb:5.2.5
+    image: foundationdb:6.1.8
     environment:
       FDB_COORDINATOR: fdb-coordinator
+  fdb-server-1:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb:6.1.8
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
+  fdb-server-2:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb:6.1.8
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
+
+  # Bring up the application so that it depends on the cluster.
   app:
+    depends_on:
+      - fdb-coordinator
+      - fdb-server-1
+      - fdb-server-2
     build:
       context: app
     ports:
-      - 5000:5000
+      - 5000:5000/tcp
     environment:
       FDB_COORDINATOR: fdb-coordinator
