@@ -643,7 +643,7 @@ public:
 	template<class Request, class HandleFunction>
 	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
 		auto rate = currentRate();
-		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD) {
+		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE, rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
 			//request.error = future_version();
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
 			return Void();
