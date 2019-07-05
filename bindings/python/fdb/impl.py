@@ -543,7 +543,7 @@ class Transaction(TransactionRead):
 
     def get_approximate_size(self):
         """Get the approximate commit size of the transaction."""
-        return FutureVersion(self.capi.fdb_transaction_get_approximate_size(self.tpointer))
+        return FutureInt64(self.capi.fdb_transaction_get_approximate_size(self.tpointer))
 
     def get_versionstamp(self):
         return Key(self.capi.fdb_transaction_get_versionstamp(self.tpointer))
@@ -697,6 +697,14 @@ class FutureVersion(Future):
         version = ctypes.c_int64()
         self.capi.fdb_future_get_version(self.fpointer, ctypes.byref(version))
         return version.value
+
+
+class FutureInt64(Future):
+    def wait(self):
+        self.block_until_ready()
+        size = ctypes.c_int64()
+        self.capi.fdb_future_get_version(self.fpointer, ctypes.byref(size))
+        return size.value
 
 
 class FutureKeyValueArray(Future):

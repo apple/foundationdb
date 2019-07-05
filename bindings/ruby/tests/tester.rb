@@ -382,9 +382,7 @@ class Tester
           @last_version = inst.tr.get_committed_version
           inst.push("GOT_COMMITTED_VERSION")
         when "GET_APPROXIMATE_SIZE"
-          approximate_size = inst.tr.get_approximate_size.to_i
-          puts(approximate_size.to_s)
-          inst.push(approximate_size.to_s)
+          inst.push(inst.tr.get_approximate_size.to_i)
         when "GET_VERSIONSTAMP"
           inst.push(inst.tr.get_versionstamp)
         when "TUPLE_PACK"

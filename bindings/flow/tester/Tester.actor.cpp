@@ -19,6 +19,7 @@
  */
 
 #include "Tester.actor.h"
+#include <cinttypes>
 #ifdef  __linux__
 #include <string.h>
 #endif
@@ -710,13 +711,9 @@ struct GetApproximateSizeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		int64_t size = wait(instruction->tr->getApproximateSize());
-		char buf[128];
-		memset(buf, 0, 128);
-		buf[0] = 1;  // String starts with \x01.
-		snprintf(buf+1, 127, "%d", size);
-		printf("C: %s\n", buf+1);
-		StringRef ref((uint8_t*)buf, strlen(buf)+1);
-		data->stack.push(Standalone<StringRef>(ref));
+		Tuple f;
+		f.append(size);
+		data->stack.push(f.pack());
 		return Void();
 	}
 };

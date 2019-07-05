@@ -279,7 +279,7 @@ futures must apply the following rules to the result:
 
 #### GET_APPROXIMATE_SIZE
 
-    Calls get_approximate_size and pushes the string `fdb.tuple.pack((<approximate_size>,))` onto the stack.
+    Calls get_approximate_size and pushes the integer size onto the stack.
 
 #### WAIT_FUTURE
 

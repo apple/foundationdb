@@ -592,7 +592,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		sm.store(idx, []byte("GOT_COMMITTED_VERSION"))
 	case op == "GET_APPROXIMATE_SIZE":
 		approximateSize := sm.currentTransaction().GetApproximateSize().MustGet()
-		sm.store(idx, []byte(strconv.FormatInt(approximateSize, 10)))
+		var x *big.Int = big.NewInt(approximateSize)
+		sm.store(idx, x)
 	case op == "GET_VERSIONSTAMP":
 		sm.store(idx, sm.currentTransaction().GetVersionstamp())
 	case op == "GET_KEY":

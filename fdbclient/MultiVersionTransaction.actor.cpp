@@ -202,7 +202,7 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 
 	FdbCApi::FDBFuture *f = api->transactionGetApproximateSize(tr);
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		int64_t size;
+		int64_t size = 0;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
 		ASSERT(!error);
 		return size;

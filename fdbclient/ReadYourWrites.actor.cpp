@@ -1123,7 +1123,7 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
+ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
 	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
 	applyPersistentOptions();
 }
@@ -1880,7 +1880,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	arena( std::move(r.arena) ), 
 	reading( std::move(r.reading) ),
 	retries( r.retries ), 
-	approximateSize(0),
+	approximateSize(r.approximateSize),
 	creationTime( r.creationTime ), 
 	deferredError( std::move(r.deferredError) ), 
 	timeoutActor( std::move(r.timeoutActor) ),
