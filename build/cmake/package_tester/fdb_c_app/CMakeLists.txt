@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 2.8.0)
+project(fdb_c_app C)
+find_package(FoundationDB-Client REQUIRED)
+add_executable(app app.c)
+target_link_libraries(app PRIVATE fdb_c)

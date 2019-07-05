@@ -464,7 +464,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 }
 
 ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILogSystem> logSystem ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Future<Void> trigger =  self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
@@ -1014,12 +1014,12 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 	state CoalescedKeyRangeMap<int> key_resolver;
 	key_resolver.insert(allKeys, 0);
 	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskResolutionMetrics));
+		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
 		while(self->resolverChanges.get().size())
 			wait(self->resolverChanges.onChange());
 		state std::vector<Future<int64_t>> futures;
 		for (auto& p : self->resolvers)
-			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskResolutionMetrics)));
+			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
 		wait( waitForAll(futures) );
 		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
 
@@ -1044,7 +1044,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 					req.offset = amount;
 					req.range = range.first;
 
-					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskResolutionMetrics)) );
+					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskPriority::ResolutionMetrics)) );
 					KeyRangeRef moveRange = range.second ? KeyRangeRef( range.first.begin, split.key ) : KeyRangeRef( split.key, range.first.end );
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
 					TraceEvent("MovingResolutionRange").detail("Src", src).detail("Dest", dest).detail("Amount", amount).detail("StartRange", range.first).detail("MoveRange", moveRange).detail("Used", split.used).detail("KeyResolverRanges", key_resolver.size());
@@ -1123,7 +1123,7 @@ ACTOR Future<Void> rejoinRequestHandler( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems, Promise<Void> remoteRecovered ) {
+ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems ) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	loop {
@@ -1167,10 +1167,6 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		}
 		self->registrationTrigger.trigger();
 
-		if(allLogs && remoteRecovered.canBeSet()) {
-			remoteRecovered.send(Void());
-		}
-
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);
@@ -1182,7 +1178,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 }
 
 ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 
@@ -1383,8 +1379,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between our
 	//     first commit and the next new TLogs
 
-	state Promise<Void> remoteRecovered;
-	self->addActor.send( trackTlogRecovery(self, oldLogSystems, remoteRecovered) );
+	self->addActor.send( trackTlogRecovery(self, oldLogSystems) );
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);

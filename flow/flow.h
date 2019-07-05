@@ -817,7 +817,7 @@ public:
 		return getReplyPromise(value).getFuture();
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, int taskID) const {
+	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		return getReplyPromise(value).getFuture();
 	}
@@ -827,7 +827,7 @@ public:
 		return getReply(Promise<X>());
 	}
 	template <class X>
-	Future<X> getReplyWithTaskID(int taskID) const {
+	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
 		Promise<X> reply;
 		reply.getEndpoint(taskID);
 		return getReply(reply);
@@ -908,11 +908,11 @@ struct ActorSingleCallback : SingleCallback<ValueType> {
 	}
 };
 inline double now() { return g_network->now(); }
-inline Future<Void> delay(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds, taskID); }
-inline Future<Void> delayUntil(double time, int taskID = TaskDefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
-inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
-inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
-inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
+inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds, taskID); }
+inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
+inline Future<Void> delayJittered(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
+inline Future<Void> yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->yield(taskID); }
+inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->check_yield(taskID); }
 
 #include "flow/genericactors.actor.h"
 #endif

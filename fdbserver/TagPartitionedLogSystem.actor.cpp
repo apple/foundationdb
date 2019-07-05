@@ -436,7 +436,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, data.getHasExecOp(), debugID ), TaskTLogCommitReply ) );
+					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, data.getHasExecOp(), debugID ), TaskPriority::TLogCommitReply ) );
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);
@@ -1029,7 +1029,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if( t->get().present() ) {
 				alive.push_back( brokenPromiseToNever(
 				    t->get().interf().confirmRunning.getReply( TLogConfirmRunningRequest(debugID),
-				                                               TaskTLogConfirmRunningReply ) ) );
+				                                               TaskPriority::TLogConfirmRunningReply ) ) );
 				numPresent++;
 			} else {
 				alive.push_back( Never() );
@@ -1555,7 +1555,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->rejoins = rejoins;
 				logSystem->lockResults = lockResults;
 				logSystem->recoverAt = minEnd;
-				logSystem->knownCommittedVersion = knownCommittedVersion;
+				if (knownCommittedVersion > minEnd) {
+					// FIXME: Remove the Sev40 once disk snapshot v2 feature is enabled, in all other
+					// code paths we should never be here.
+					TraceEvent(SevError, "KCVIsInvalid")
+						.detail("KnownCommittedVersion", knownCommittedVersion)
+						.detail("MinEnd", minEnd);
+					logSystem->knownCommittedVersion = minEnd;
+				} else {
+					logSystem->knownCommittedVersion = knownCommittedVersion;
+				}
 				logSystem->remoteLogsWrittenToCoreState = true;
 				logSystem->stopped = true;
 				logSystem->pseudoLocalities = prevState.pseudoLocalities;

@@ -22,11 +22,8 @@ package com.apple.foundationdb.testing;
 
 import com.apple.foundationdb.Database;
 
-import java.io.File;
-import java.io.IOException;
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.net.URLClassLoader;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -35,94 +32,45 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.Map;
 
 public abstract class AbstractWorkload {
-	private static final Class<?>[] parameters = new Class<?>[]{URL.class};
 	protected WorkloadContext context;
 	private ThreadPoolExecutor executorService;
 
 	public AbstractWorkload(WorkloadContext context) {
 		this.context = context;
+		long contextID = context.getProcessID();
 		executorService =
-        new ThreadPoolExecutor(1, 2,
-            10, TimeUnit.SECONDS,
-			new SynchronousQueue<>()) {
-			@Override
-			protected void beforeExecute(Thread t, Runnable r) {
-				setProcessID(context.getProcessID());
-				super.beforeExecute(t, r);
-			}
-		};
+			new ThreadPoolExecutor(1, 2,
+								   10, TimeUnit.SECONDS,
+								   new SynchronousQueue<>()) {
+				@Override
+				protected void beforeExecute(Thread t, Runnable r) {
+					context.setProcessID(contextID);
+					super.beforeExecute(t, r);
+				}
+			};
 	}
 
-	private Executor getExecutor() {
+	protected Executor getExecutor() {
 		return executorService;
 	}
 
-	public abstract void setup(Database db);
-	public abstract void start(Database db);
-	public abstract boolean check(Database db);
-	public double getCheckTimeout() {
+	protected abstract void setup(Database db, Promise promise);
+	protected abstract void start(Database db, Promise promise);
+	protected abstract void check(Database db, Promise promise);
+	protected List<PerfMetric> getMetrics() {
+		return new ArrayList<PerfMetric>();
+	}
+	protected double getCheckTimeout() {
 		return 3000;
-	}
-
-	private void setup(Database db, long voidCallback) {
-		AbstractWorkload self = this;
-		getExecutor().execute(new Runnable(){
-			public void run() {
-				self.setup(db);
-				self.sendVoid(voidCallback);
-			}
-		});
-	}
-	private void start(Database db, long voidCallback) {
-		AbstractWorkload self = this;
-		getExecutor().execute(new Runnable(){
-			public void run() {
-				self.start(db);
-				self.sendVoid(voidCallback);
-			}
-		});
-	}
-	private void check(Database db, long boolCallback) {
-		AbstractWorkload self = this;
-		getExecutor().execute(new Runnable(){
-			public void run() {
-				boolean res = self.check(db);
-				self.sendBool(boolCallback, res);
-			}
-		});
 	}
 
 	private void shutdown() {
 		executorService.shutdown();
 	}
 
-	public native void log(int severity, String message, Map<String, String> details);
-	private native void setProcessID(long processID);
-	private native void sendVoid(long handle);
-	private native void sendBool(long handle, boolean value);
-
-	// Helper functions to add to the class path at Runtime - will be called
-	// from C++
-	private static void addFile(String s) throws IOException {
-		File f = new File(s);
-		addFile(f);
+	private static long logger;
+	public static void log(int severity, String message, Map<String, String> details) {
+		log(logger, severity, message, details);
 	}
-
-	private static void addFile(File f) throws IOException {
-		addURL(f.toURI().toURL());
-	}
-
-	private static void addURL(URL u) throws IOException {
-		URLClassLoader sysLoader = (URLClassLoader) ClassLoader.getSystemClassLoader();
-		Class<URLClassLoader> sysClass = URLClassLoader.class;
-
-		try {
-			Method method = sysClass.getDeclaredMethod("addURL", parameters);
-			method.setAccessible(true);
-			method.invoke(sysLoader, new Object[]{u});
-		} catch (Throwable t) {
-			t.printStackTrace();
-			throw new IOException("Error, could not add URL to system classloader");
-		}
-	}
+	private static native void log(long logger, int severity, String message, Map<String, String> details);
 }

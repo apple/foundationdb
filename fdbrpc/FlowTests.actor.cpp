@@ -172,28 +172,29 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, int taskID) {
+	virtual Future<class Void> delay(double seconds, TaskPriority taskID) {
 		return nextTick.getFuture();
 	}
 
-	virtual Future<class Void> yield(int taskID) {
+	virtual Future<class Void> yield(TaskPriority taskID) {
 		if (check_yield(taskID))
 			return delay(0,taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(int taskID) {
+	virtual bool check_yield(TaskPriority taskID) {
 		if (nextYield > 0) --nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual int getCurrentTask() { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(int taskID) { baseNetwork->setCurrentTask(taskID); }
+	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
+	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, int taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN(*func) (void *), void *arg) { return baseNetwork->startThread(func,arg); }
 	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
 	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }

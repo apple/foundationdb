@@ -249,8 +249,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio",
-                  "storage_server_read_load"
+                  "log_server_min_free_space_ratio"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -269,8 +268,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio",
-                  "storage_server_read_load"
+                  "log_server_min_free_space_ratio"
                ]
             },
             "description":"The database is not being saturated by the workload."

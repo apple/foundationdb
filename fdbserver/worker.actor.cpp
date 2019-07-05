@@ -75,7 +75,7 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
@@ -556,7 +556,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 
-		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>() );
+		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -737,7 +737,7 @@ ACTOR Future<Void> workerServer(
 			}
 		} else {
 			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskDefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
+			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskPriority::DefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
 		}
 	}
 
@@ -804,7 +804,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.watchValue);
 
 				Promise<Void> recovery;
-				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
+				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery, connFile);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors( f, kv, s.storeID, kvClosed );
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
@@ -866,6 +866,13 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				if(req.waitForDuration) {
+					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
+					flushTraceFileVoid();
+					setProfilingEnabled(0);
+					g_network->stop();
+					threadSleep(req.waitForDuration);
+				}
 				if(rebootReq.checkData) {
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					wait( checkFile->sync() );
@@ -1169,7 +1176,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
-				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
 			}
 			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				state ExecCmdValueString execArg(req.execPayload);
@@ -1396,3 +1403,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::COORDINATOR("Coordinator", "CD");

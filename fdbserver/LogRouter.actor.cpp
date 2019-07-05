@@ -51,7 +51,7 @@ struct LogRouterData {
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, LogRouterData *tlogData, int taskID ) {
+		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, LogRouterData *tlogData, TaskPriority taskID ) {
 			while(!self->version_messages.empty() && self->version_messages.front().first < before) {
 				Version version = self->version_messages.front().first;
 				int64_t messagesErased = 0;
@@ -68,7 +68,7 @@ struct LogRouterData {
 			return Void();
 		}
 
-		Future<Void> eraseMessagesBefore(Version before, LogRouterData *tlogData, int taskID) {
+		Future<Void> eraseMessagesBefore(Version before, LogRouterData *tlogData, TaskPriority taskID) {
 			return eraseMessagesBefore(this, before, tlogData, taskID);
 		}
 	};
@@ -197,7 +197,7 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 		while(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {
 			if(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS > self->version.get()) {
 				self->version.set( self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS );
-				wait(yield(TaskTLogCommit));
+				wait(yield(TaskPriority::TLogCommit));
 			} else {
 				wait(self->minPopped.whenAtLeast((self->minPopped.get()+1)));
 			}
@@ -220,7 +220,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	loop {
 		loop {
 			choose {
-				when(wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
+				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
 					break;
 				}
 				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
@@ -247,7 +247,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
-					wait(yield(TaskTLogCommit));
+					wait(yield(TaskPriority::TLogCommit));
 					//TraceEvent("LogRouterVersion").detail("Ver",ver);
 				}
 				lastVer = ver;
@@ -260,7 +260,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 						wait( waitForVersion(self, ver) );
 
 						self->version.set( ver );
-						wait(yield(TaskTLogCommit));
+						wait(yield(TaskPriority::TLogCommit));
 					}
 					break;
 				}
@@ -357,6 +357,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	reply.messages = messages.toValue();
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
+	reply.onlySpilled = false;
 
 	req.reply.send( reply );
 	//TraceEvent("LogRouterPeek4", self->dbgid);
@@ -370,7 +371,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	} else if (req.to > tagData->popped) {
 		tagData->popped = req.to;
 		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
-		wait(tagData->eraseMessagesBefore( req.to, self, TaskTLogPop ));
+		wait(tagData->eraseMessagesBefore( req.to, self, TaskPriority::TLogPop ));
 	}
 
 	state Version minPopped = std::numeric_limits<Version>::max();
@@ -384,7 +385,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 	while(!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
 		self->messageBlocks.pop_front();
-		wait(yield(TaskTLogPop));
+		wait(yield(TaskPriority::TLogPop));
 	}
 
 	self->poppedVersion = std::min(minKnownCommittedVersion, self->minKnownCommittedVersion);
