@@ -19,6 +19,8 @@ Fixes
 Status
 ------
 
+* Remove ``cluster.datacenter_version_difference`` and replace it with ``cluster.datacenter_lag`` that has subfields ``versions`` and ``seconds``. `(PR #) <https://github.com/apple/foundationdb/pull/>`_.
+
 Bindings
 --------
 
