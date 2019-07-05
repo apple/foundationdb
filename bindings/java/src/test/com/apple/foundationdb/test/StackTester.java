@@ -263,7 +263,7 @@ public class StackTester {
 			}
 			else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
 				Long approximateSize = inst.tr.getApproximateSize().join();
-				inst.push(Tuple.from(approximateSize).pack());
+				inst.push(approximateSize.toString().getBytes());
 			}
 			else if(op == StackOperation.GET_VERSIONSTAMP) {
 				inst.push(inst.tr.getVersionstamp());

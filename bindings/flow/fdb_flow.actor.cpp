@@ -412,7 +412,7 @@ namespace FDB {
 
 	Future<int64_t> TransactionImpl::getApproximateSize() {
 		return backToFuture<int64_t>(fdb_transaction_get_approximate_size(tr), [](Reference<CFuture> f) {
-			int64_t size;
+			int64_t size = 0;
 			throw_on_error(fdb_future_get_int64(f->f, &size));
 			return size;
 		});

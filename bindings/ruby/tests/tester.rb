@@ -383,7 +383,8 @@ class Tester
           inst.push("GOT_COMMITTED_VERSION")
         when "GET_APPROXIMATE_SIZE"
           approximate_size = inst.tr.get_approximate_size.to_i
-          inst.push(FDB::Tuple.pack([approximate_size]))
+          puts(approximate_size.to_s)
+          inst.push(approximate_size.to_s)
         when "GET_VERSIONSTAMP"
           inst.push(inst.tr.get_versionstamp)
         when "TUPLE_PACK"

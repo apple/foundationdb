@@ -203,7 +203,7 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 	FdbCApi::FDBFuture *f = api->transactionGetApproximateSize(tr);
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		int64_t size;
-		FdbCApi::fdb_error_t error = api->futureGetVersion(f, &size);
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
 		ASSERT(!error);
 		return size;
 	});
@@ -311,6 +311,7 @@ void DLApi::init() {
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
 	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
+	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, "fdb_future_get_int64");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");

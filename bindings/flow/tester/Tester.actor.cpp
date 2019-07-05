@@ -710,9 +710,13 @@ struct GetApproximateSizeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		int64_t size = wait(instruction->tr->getApproximateSize());
-		Tuple tuple;
-		tuple.append(size);
-		data->stack.pushTuple(tuple.pack());
+		char buf[128];
+		memset(buf, 0, 128);
+		buf[0] = 1;  // String starts with \x01.
+		snprintf(buf+1, 127, "%d", size);
+		printf("C: %s\n", buf+1);
+		StringRef ref((uint8_t*)buf, strlen(buf)+1);
+		data->stack.push(Standalone<StringRef>(ref));
 		return Void();
 	}
 };
