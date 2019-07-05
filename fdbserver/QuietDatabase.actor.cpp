@@ -283,13 +283,13 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
-			int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
-			int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
-			int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
-			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
-			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
-			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
+			int64_t currentTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeams"));
+			int64_t desiredTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
+			int64_t maxTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeams"));
+			int64_t currentMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeams"));
+			int64_t healthyMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeams"));
+			int64_t desiredMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			int64_t maxMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
@@ -300,15 +300,15 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber) {
+			if (healthyMachineTeams > desiredMachineTeams) {
 				TraceEvent("GetTeamCollectionValid")
-				    .detail("CurrentTeamNumber", currentTeamNumber)
-				    .detail("DesiredTeamNumber", desiredTeamNumber)
-				    .detail("MaxTeamNumber", maxTeamNumber)
-				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
-				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
-				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
-				    .detail("MaxMachineTeams", maxMachineTeamNumber);
+				    .detail("CurrentTeams", currentTeams)
+				    .detail("DesiredTeams", desiredTeams)
+				    .detail("MaxTeams", maxTeams)
+				    .detail("CurrentHealthyMachineTeams", healthyMachineTeams)
+				    .detail("DesiredMachineTeams", desiredMachineTeams)
+				    .detail("CurrentMachineTeams", currentMachineTeams)
+				    .detail("MaxMachineTeams", maxMachineTeams);
 				return false;
 			} else {
 				return true;

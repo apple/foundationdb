@@ -1213,7 +1213,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-			    .detail("ServerNumber", team->size())
+			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
 	}
@@ -1241,7 +1241,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("MachineTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("MachineIDs", team->getMachineIDsStr())
-			    .detail("ServerTeamNumber", team->serverTeams.size());
+			    .detail("ServerTeams", team->serverTeams.size());
 		}
 	}
 
@@ -1529,7 +1529,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// If we cannot find a healthy machine team
 		TraceEvent("NoHealthyMachineTeamForServer")
 		    .detail("ServerID", chosenServer->id)
-		    .detail("MachineTeamsNumber", chosenServer->machine->machineTeams.size());
+		    .detail("MachineTeams", chosenServer->machine->machineTeams.size());
 		return Reference<TCMachineTeamInfo>();
 	}
 
@@ -1603,7 +1603,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent(SevError, "ServerTeamNumberOnMachineIncorrect")
 			    .detail("MachineTeam", mt->getMachineIDsStr())
 			    .detail("ServerTeamsSize", mt->serverTeams.size())
-			    .detail("CountedServerTeamNumber", num);
+			    .detail("CountedServerTeams", num);
 		}
 		return ret;
 	}
@@ -1693,7 +1693,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					// We may face the situation that temporarily we have no healthy machine.
 					TraceEvent(SevWarn, "MachineTeamNotFound")
 					    .detail("Primary", primary)
-					    .detail("MachineTeamNumber", machineTeams.size());
+					    .detail("MachineTeams", machineTeams.size());
 					continue; // try randomly to find another least used server
 				}
 
@@ -1762,17 +1762,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
-		    .detail("AddedTeamNumber", addedTeams)
-		    .detail("AimToBuildTeamNumber", teamsToBuild)
-		    .detail("CurrentTeamNumber", teams.size())
-		    .detail("DesiredTeamNumber", desiredTeamNumber)
-		    .detail("MaxTeamNumber", maxTeamNumber)
+		    .detail("AddedTeams", addedTeams)
+		    .detail("TeamsToBuild", teamsToBuild)
+		    .detail("CurrentTeams", teams.size())
+		    .detail("DesiredTeams", desiredTeamNumber)
+		    .detail("MaxTeams", maxTeamNumber)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
-		    .detail("CurrentMachineTeamNumber", machineTeams.size())
-		    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+		    .detail("CurrentMachineTeams", machineTeams.size())
+		    .detail("CurrentHealthyMachineTeams", healthyMachineTeamCount)
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+		    .detail("TotalHealthyMachines", totalHealthyMachineCount)
 		    .trackLatest("TeamCollectionInfo");
 
 		return addedTeams;
@@ -1791,17 +1791,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
-		    .detail("AddedTeamNumber", 0)
-		    .detail("AimToBuildTeamNumber", 0)
-		    .detail("CurrentTeamNumber", teams.size())
-		    .detail("DesiredTeamNumber", desiredServerTeams)
-		    .detail("MaxTeamNumber", maxServerTeams)
+		    .detail("AddedTeams", 0)
+		    .detail("TeamsToBuild", 0)
+		    .detail("CurrentTeams", teams.size())
+		    .detail("DesiredTeams", desiredServerTeams)
+		    .detail("MaxTeams", maxServerTeams)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
-		    .detail("CurrentMachineTeamNumber", machineTeams.size())
-		    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+		    .detail("CurrentMachineTeams", machineTeams.size())
+		    .detail("CurrentHealthyMachineTeams", healthyMachineTeamCount)
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+		    .detail("TotalHealthyMachines", totalHealthyMachineCount)
 		    .trackLatest("TeamCollectionInfo");
 
 		// Debug purpose
@@ -1835,7 +1835,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		uniqueMachines = machines.size();
 		TraceEvent("BuildTeams")
-			.detail("ServerNumber", self->server_info.size())
+			.detail("ServerCount", self->server_info.size())
 			.detail("UniqueMachines", uniqueMachines)
 			.detail("Primary", self->primary)
 			.detail("StorageTeamSize", self->configuration.storageTeamSize);
@@ -1900,17 +1900,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				TraceEvent("TeamCollectionInfo", self->distributorId)
 				    .detail("Primary", self->primary)
-				    .detail("AddedTeamNumber", 0)
-				    .detail("AimToBuildTeamNumber", teamsToBuild)
-				    .detail("CurrentTeamNumber", self->teams.size())
-				    .detail("DesiredTeamNumber", desiredTeams)
-				    .detail("MaxTeamNumber", maxTeams)
+				    .detail("AddedTeams", 0)
+				    .detail("TeamsToBuild", teamsToBuild)
+				    .detail("CurrentTeams", self->teams.size())
+				    .detail("DesiredTeams", desiredTeams)
+				    .detail("MaxTeams", maxTeams)
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
-				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+				    .detail("CurrentMachineTeams", self->machineTeams.size())
+				    .detail("CurrentHealthyMachineTeams", healthyMachineTeamCount)
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("MaxMachineTeams", maxMachineTeams)
-				    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+				    .detail("TotalHealthyMachines", totalHealthyMachineCount)
 				    .trackLatest("TeamCollectionInfo");
 			}
 		}
@@ -2167,7 +2167,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		if (removedCount == 0) {
-			TraceEvent(SevInfo, "NoneTeamRemovedWhenServerRemoved")
+			TraceEvent(SevInfo, "NoTeamsRemovedWhenServerRemoved")
 			    .detail("Primary", primary)
 			    .detail("Debug", "ThisShouldRarelyHappen_CheckInfoBelow");
 			traceAllInfo();
@@ -2282,10 +2282,10 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		//		int currentHealthyMTCount = self->getHealthyMachineTeamCount();
 		//		if (currentHealthyMTCount != self->machineTeams.size()) {
 		//			TraceEvent(SevError, "InvalidAssumption")
-		//			    .detail("healthyMachineCount", healthyMachineCount)
-		//			    .detail("MachineNumber", self->machine_info.size())
+		//			    .detail("HealthyMachineCount", healthyMachineCount)
+		//			    .detail("Machines", self->machine_info.size())
 		//			    .detail("CurrentHealthyMTCount", currentHealthyMTCount)
-		//			    .detail("MachineTeamNumber", self->machineTeams.size());
+		//			    .detail("MachineTeams", self->machineTeams.size());
 		//			self->traceAllInfo(true);
 		//		}
 
@@ -2328,8 +2328,8 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			TraceEvent("TeamRemover")
 			    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
 			    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
-			    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
-			    .detail("DesiredMachineTeam", desiredMachineTeams);
+			    .detail("CurrentMachineTeams", self->machineTeams.size())
+			    .detail("DesiredMachineTeams", desiredMachineTeams);
 
 			// Remove the machine team
 			bool foundRemovedMachineTeam = self->removeMachineTeam(mt);
@@ -2342,11 +2342,11 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			if (numMachineTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
 				TraceEvent("TeamRemoverDone")
-				    .detail("HealthyMachineNumber", healthyMachineCount)
-				    // .detail("CurrentHealthyMachineTeamNumber", currentHealthyMTCount)
-				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
-				    .detail("DesiredMachineTeam", desiredMachineTeams)
-				    .detail("NumMachineTeamRemoved", numMachineTeamRemoved);
+				    .detail("HealthyMachines", healthyMachineCount)
+				    // .detail("CurrentHealthyMachineTeams", currentHealthyMTCount)
+				    .detail("CurrentMachineTeams", self->machineTeams.size())
+				    .detail("DesiredMachineTeams", desiredMachineTeams)
+				    .detail("NumMachineTeamsRemoved", numMachineTeamRemoved);
 				self->traceTeamCollectionInfo();
 			}
 		}
@@ -3369,7 +3369,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("Primary", self->primary)
 				    .detail("TotalBytes", self->getDebugTotalDataInFlight())
 				    .detail("UnhealthyServers", self->unhealthyServers)
-				    .detail("ServerNumber", self->server_info.size())
+				    .detail("ServerCount", self->server_info.size())
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
 				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
