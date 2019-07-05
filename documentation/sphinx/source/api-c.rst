@@ -297,7 +297,7 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
-   Extracts a version from an :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
+   Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -726,7 +726,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr)
 
-   Retrieves the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. The size can be obtained by calling :func:`fdb_future_get_int64()` with the returned `FDBFuture` object. This can be called multiple times before transaction is committed.
+   Retrieves the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. The size can be obtained by calling :func:`fdb_future_get_int64()` with the returned :type:`FDBFuture*` object. This can be called multiple times before transaction is committed.
 
 .. function:: FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* transaction)
 
