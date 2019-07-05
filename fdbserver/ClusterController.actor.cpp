@@ -107,7 +107,7 @@ public:
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
-			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
+			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
 		}
 
@@ -1171,7 +1171,7 @@ public:
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
 		db.serverInfo->set( serverInfo );
-		cx = openDBOnServer(db.serverInfo, TaskDefaultEndpoint, true, true);
+		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
 	}
 
 	~ClusterControllerData() {

@@ -37,7 +37,7 @@ struct RestoreInterface {
 	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
-		test.getEndpoint( TaskClusterController );
+		test.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
