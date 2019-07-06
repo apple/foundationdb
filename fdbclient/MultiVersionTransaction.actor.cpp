@@ -301,8 +301,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
-	// TODO: change to 620 for 6.2 release
-	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 610);
+	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 620);
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
@@ -311,7 +310,7 @@ void DLApi::init() {
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
 	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
-	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, "fdb_future_get_int64");
+	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, "fdb_future_get_int64", headerVersion >= 620);
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
