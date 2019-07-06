@@ -14,6 +14,8 @@ Performance
 Fixes
 -----
 
+* If a cluster is upgraded during an ``onError`` call, the cluster could return a ``cluster_version_changed`` error. `(PR #1734) <https://github.com/apple/foundationdb/pull/1734>`_.
+
 Status
 ------
 

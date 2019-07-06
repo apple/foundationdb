@@ -88,7 +88,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 
 ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 	state StorageServerInterface ssi = server->lastKnownInterface;
-	state Future<ErrorOr<GetPhysicalMetricsReply>> metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskDataDistributionLaunch );
+	state Future<ErrorOr<GetPhysicalMetricsReply>> metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
 	state Future<Void> serverRemoved( server->onRemoved );
@@ -104,7 +104,7 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 					return Void();
 				}
 				metricsRequest = Never();
-				resetRequest = delay( SERVER_KNOBS->METRIC_DELAY, TaskDataDistributionLaunch );
+				resetRequest = delay( SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch );
 			}
 			when( std::pair<StorageServerInterface,ProcessClass> _ssi = wait( interfaceChanged ) ) {
 				ssi = _ssi.first;
@@ -120,7 +120,7 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 				}
 				else {
 					resetRequest = Never();
-					metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskDataDistributionLaunch );
+					metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
 				}
 			}
 		}
@@ -635,9 +635,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantTeamRemover(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
-	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
+	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
-	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution)),
+	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
 	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
@@ -671,7 +671,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	ACTOR static Future<Void> logOnCompletion( Future<Void> signal, DDTeamCollection* self ) {
 		wait(signal);
-		wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskDataDistribution));
+		wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskPriority::DataDistribution));
 
 		if(!self->primary || self->configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", self->distributorId)
@@ -1919,7 +1919,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		//Building teams can cause servers to become undesired, which can make teams unhealthy.
 		//Let all of these changes get worked out before responding to the get team request
-		wait( delay(0, TaskDataDistributionLaunch) );
+		wait( delay(0, TaskPriority::DataDistributionLaunch) );
 
 		return Void();
 	}
@@ -2232,7 +2232,7 @@ ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self) {
 			TraceEvent("WaitUntilHealthyStalled", self->distributorId).detail("Primary", self->primary).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 		}
-		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskPriority::Low)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
 			return Void();
 		}
@@ -2643,7 +2643,7 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 				if (nchid != lastChangeID)
 					break;
 
-				wait( delay( SERVER_KNOBS->SERVER_LIST_DELAY, TaskDataDistribution ) );  // FIXME: make this tr.watch( excludedServersVersionKey ) instead
+				wait( delay( SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistribution ) );  // FIXME: make this tr.watch( excludedServersVersionKey ) instead
 				tr = Transaction(self->cx);
 			} catch (Error& e) {
 				wait( tr.onError(e) );
@@ -2762,14 +2762,14 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 	state double lastUpdate = now();
 	loop {
 		wait( updateServerMetrics( server ) );
-		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(), TaskDataDistributionLaunch ) );
+		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(), TaskPriority::DataDistributionLaunch ) );
 		lastUpdate = now();
 	}
 }
 
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
-	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
+	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskPriority::DataDistribution)));
 	if(type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
 		wait(Future<Void>(Never()));
 
@@ -2792,7 +2792,7 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			}
 
 			// Wait for any change to the serverKeys for this server
-			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskDataDistribution) );
+			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution) );
 			tr.reset();
 		} catch (Error& e) {
 			wait( tr.onError(e) );
@@ -2835,7 +2835,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 			ASSERT(!inHealthyZone);
 			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
 		} else if(!inHealthyZone) {
-			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);
+			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskPriority::DataDistribution);
 		}
 		choose {
 			when ( wait(healthChanged) ) {
@@ -3125,7 +3125,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			loop {
 				choose {
 					when( wait( self->recruitingStream.onChange() ) ) {}
-					when( wait( self->recruitingStream.get() == 0 ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskDataDistribution) : Future<Void>(Never()) ) ) { break; }
+					when( wait( self->recruitingStream.get() == 0 ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskPriority::DataDistribution) : Future<Void>(Never()) ) ) { break; }
 				}
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
@@ -3152,12 +3152,12 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 
 	self->recruitingIds.insert(interfaceId);
 	self->recruitingLocalities.insert(candidateWorker.worker.address());
-	state ErrorOr<InitializeStorageReply> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskDataDistribution ) );
+	state ErrorOr<InitializeStorageReply> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskPriority::DataDistribution ) );
 	if(newServer.isError()) {
 		TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
 		if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
 			throw newServer.getError();
-		wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskDataDistribution) );
+		wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution) );
 	}
 	self->recruitingIds.erase(interfaceId);
 	self->recruitingLocalities.erase(candidateWorker.worker.address());
@@ -3222,7 +3222,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 
 			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
 				lastRequest = rsr;
-				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
+				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskPriority::DataDistribution ) );
 			}
 
 			choose {
@@ -3393,7 +3393,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 ACTOR Future<Void> waitForDataDistributionEnabled( Database cx ) {
 	state Transaction tr(cx);
 	loop {
-		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskDataDistribution));
+		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
 
 		try {
 			Optional<Value> mode = wait( tr.get( dataDistributionModeKey ) );
@@ -3521,7 +3521,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	state double lastLimited = 0;
 	self->addActor.send( monitorBatchLimitedTime(self->dbInfo, &lastLimited) );
 
-	state Database cx = openDBOnServer(self->dbInfo, TaskDataDistributionLaunch, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, true, true);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
 	//cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*) &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) );
@@ -3651,7 +3651,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					}
 					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
 				}
-				wait( yield(TaskDataDistribution) );
+				wait( yield(TaskPriority::DataDistribution) );
 			}
 
 			vector<TeamCollectionInterface> tcis;

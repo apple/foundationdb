@@ -163,10 +163,10 @@ struct TransactionOptions {
 
 struct TransactionInfo {
 	Optional<UID> debugID;
-	int taskID;
+	TaskPriority taskID;
 	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -286,7 +286,7 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskDefaultEndpoint ) {}
+	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();

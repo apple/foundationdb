@@ -50,9 +50,9 @@ const uint64_t TOKEN_STREAM_FLAG = 1;
 class EndpointMap : NonCopyable {
 public:
 	EndpointMap();
-	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, uint32_t priority );
+	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
-	uint32_t getPriority( Endpoint::Token const& token );
+	TaskPriority getPriority( Endpoint::Token const& token );
 	void remove( Endpoint::Token const& token, NetworkMessageReceiver* r );
 
 private:
@@ -86,12 +86,12 @@ void EndpointMap::realloc() {
 	firstFree = oldSize;
 }
 
-void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, uint32_t priority ) {
+void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
 	if (firstFree == uint32_t(-1)) realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
 	token = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | index );
-	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | priority );
+	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | static_cast<uint32_t>(priority) );
 	data[index].receiver = r;
 }
 
@@ -102,11 +102,11 @@ NetworkMessageReceiver* EndpointMap::get( Endpoint::Token const& token ) {
 	return 0;
 }
 
-uint32_t EndpointMap::getPriority( Endpoint::Token const& token ) {
+TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() )
-		return data[index].token().second();
-	return TaskUnknownEndpoint;
+		return static_cast<TaskPriority>(data[index].token().second());
+	return TaskPriority::UnknownEndpoint;
 }
 
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
@@ -122,7 +122,7 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		//endpoints[WLTOKEN_ENDPOINT_NOT_FOUND] = this;
 		Endpoint::Token e = WLTOKEN_ENDPOINT_NOT_FOUND;
-		endpoints.insert(this, e, TaskDefaultEndpoint);
+		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
 		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
 	}
 	virtual void receive( ArenaReader& reader ) {
@@ -141,7 +141,7 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 struct PingReceiver : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		Endpoint::Token e = WLTOKEN_PING_PACKET;
-		endpoints.insert(this, e, TaskReadSocket);
+		endpoints.insert(this, e, TaskPriority::ReadSocket);
 		ASSERT( e == WLTOKEN_PING_PACKET );
 	}
 	virtual void receive( ArenaReader& reader ) {
@@ -438,10 +438,10 @@ struct Peer : NonCopyable {
 	ACTOR static Future<Void> connectionWriter( Peer* self, Reference<IConnection> conn ) {
 		state double lastWriteTime = now();
 		loop {
-			//wait( delay(0, TaskWriteSocket) );
-			wait( delayJittered(std::max<double>(FLOW_KNOBS->MIN_COALESCE_DELAY, FLOW_KNOBS->MAX_COALESCE_DELAY - (now() - lastWriteTime)), TaskWriteSocket) );
-			//wait( delay(500e-6, TaskWriteSocket) );
-			//wait( yield(TaskWriteSocket) );
+			//wait( delay(0, TaskPriority::WriteSocket) );
+			wait( delayJittered(std::max<double>(FLOW_KNOBS->MIN_COALESCE_DELAY, FLOW_KNOBS->MAX_COALESCE_DELAY - (now() - lastWriteTime)), TaskPriority::WriteSocket) );
+			//wait( delay(500e-6, TaskPriority::WriteSocket) );
+			//wait( yield(TaskPriority::WriteSocket) );
 
 			// Send until there is nothing left to send
 			loop {
@@ -456,7 +456,7 @@ struct Peer : NonCopyable {
 
 				TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
 				wait( conn->onWritable() );
-				wait( yield(TaskWriteSocket) );
+				wait( yield(TaskPriority::WriteSocket) );
 			}
 
 			// Wait until there is something to send
@@ -602,8 +602,8 @@ TransportData::~TransportData() {
 }
 
 ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
-	int priority = self->endpoints.getPriority(destination.token);
-	if (priority < TaskReadSocket || !inReadSocket) {
+	TaskPriority priority = self->endpoints.getPriority(destination.token);
+	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait( delay(0, priority) );
 	} else {
 		g_network->setCurrentTask( priority );
@@ -637,7 +637,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	}
 
 	if( inReadSocket )
-		g_network->setCurrentTask( TaskReadSocket );
+		g_network->setCurrentTask( TaskPriority::ReadSocket );
 }
 
 static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, const uint8_t* e, Arena& arena,
@@ -797,7 +797,7 @@ ACTOR static Future<Void> connectionReader(
 					if (len == 0) break;
 					state int readBytes = conn->read(unprocessed_end, unprocessed_end + len);
 					if (readBytes == 0) break;
-					wait(yield(TaskReadSocket));
+					wait(yield(TaskPriority::ReadSocket));
 					totalReadBytes += readBytes;
 					unprocessed_end += readBytes;
 				}
@@ -908,11 +908,11 @@ ACTOR static Future<Void> connectionReader(
 				if (readWillBlock)
 					break;
 
-				wait(yield(TaskReadSocket));
+				wait(yield(TaskPriority::ReadSocket));
 			}
 
 			wait( conn->onReadable() );
-			wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
+			wait(delay(0, TaskPriority::ReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
 		}
 	}
 	catch (Error& e) {
@@ -956,7 +956,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 				.detail("FromAddress", conn->getPeerAddress())
 				.detail("ListenAddress", listenAddr.toString());
 			incoming.add( connectionIncoming(self, conn) );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskWriteSocket));
+			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
@@ -1078,7 +1078,7 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 	}
 }
 
-void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
+void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
 	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
@@ -1094,7 +1094,7 @@ void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageRece
 	self->endpoints.remove(endpoint.token, receiver);
 }
 
-void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
+void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
 	endpoint.addresses = self->localAddresses;
 	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
 	Endpoint::Token otoken = endpoint.token;

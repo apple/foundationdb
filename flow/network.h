@@ -29,56 +29,70 @@
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "fdbrpc/crc32c.h"
 
-enum {
-	TaskMaxPriority = 1000000,
-	TaskRunCycleFunction = 20000,
-	TaskFlushTrace = 10500,
-	TaskWriteSocket = 10000,
-	TaskPollEIO = 9900,
-	TaskDiskIOComplete = 9150,
-	TaskLoadBalancedEndpoint = 9000,
-	TaskReadSocket = 9000,
-	TaskCoordinationReply = 8810,
-	TaskCoordination = 8800,
-	TaskFailureMonitor = 8700,
-	TaskResolutionMetrics = 8700,
-	TaskClusterController = 8650,
-	TaskProxyStorageRejoin = 8645,
-	TaskProxyCommitDispatcher = 8640,
-	TaskTLogQueuingMetrics = 8620,
-	TaskTLogPop = 8610,
-	TaskTLogPeekReply = 8600,
-	TaskTLogPeek = 8590,
-	TaskTLogCommitReply = 8580,
-	TaskTLogCommit = 8570,
-	TaskProxyGetRawCommittedVersion = 8565,
-	TaskProxyResolverReply = 8560,
-	TaskProxyCommitBatcher = 8550,
-	TaskProxyCommit = 8540,
-	TaskTLogConfirmRunningReply = 8530,
-	TaskTLogConfirmRunning = 8520,
-	TaskProxyGRVTimer = 8510,
-	TaskProxyGetConsistentReadVersion = 8500,
-	TaskDefaultPromiseEndpoint = 8000,
-	TaskDefaultOnMainThread = 7500,
-	TaskDefaultDelay = 7010,
-	TaskDefaultYield = 7000,
-	TaskDiskWrite = 5030,
-	TaskStorage = 5020,
-	TaskDiskRead = 5010,
-	TaskDefaultEndpoint = 5000,
-	TaskUnknownEndpoint = 4000,
-	TaskMoveKeys = 3550,
-	TaskDataDistributionLaunch = 3530,
-	TaskRatekeeper = 3510,
-	TaskDataDistribution = 3500,
-	TaskUpdateStorage = 3000,
-	TaskTLogSpilledPeekReply = 2800,
-	TaskLowPriority = 2000,
-	TaskMinPriority = 1000
+enum class TaskPriority {
+	Max = 1000000,
+	RunCycleFunction = 20000,
+	FlushTrace = 10500,
+	WriteSocket = 10000,
+	PollEIO = 9900,
+	DiskIOComplete = 9150,
+	LoadBalancedEndpoint = 9000,
+	ReadSocket = 9000,
+	CoordinationReply = 8810,
+	Coordination = 8800,
+	FailureMonitor = 8700,
+	ResolutionMetrics = 8700,
+	ClusterController = 8650,
+	ProxyStorageRejoin = 8645,
+	ProxyCommitDispatcher = 8640,
+	TLogQueuingMetrics = 8620,
+	TLogPop = 8610,
+	TLogPeekReply = 8600,
+	TLogPeek = 8590,
+	TLogCommitReply = 8580,
+	TLogCommit = 8570,
+	ProxyGetRawCommittedVersion = 8565,
+	ProxyResolverReply = 8560,
+	ProxyCommitBatcher = 8550,
+	ProxyCommit = 8540,
+	TLogConfirmRunningReply = 8530,
+	TLogConfirmRunning = 8520,
+	ProxyGRVTimer = 8510,
+	ProxyGetConsistentReadVersion = 8500,
+	DefaultPromiseEndpoint = 8000,
+	DefaultOnMainThread = 7500,
+	DefaultDelay = 7010,
+	DefaultYield = 7000,
+	DiskRead = 5010,
+	DefaultEndpoint = 5000,
+	UnknownEndpoint = 4000,
+	MoveKeys = 3550,
+	DataDistributionLaunch = 3530,
+	Ratekeeper = 3510,
+	DataDistribution = 3500,
+	DiskWrite = 3010,
+	UpdateStorage = 3000,
+	TLogSpilledPeekReply = 2800,
+	Low = 2000,
+
+	Min = 1000,
+	Zero = 0
 };
+
+// These have been given long, annoying names to discourage their use.
+
+inline TaskPriority incrementPriority(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) + 1 );
+}
+
+inline TaskPriority decrementPriority(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) - 1 );
+}
+
+inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) | 1 );
+}
 
 class Void;
 
@@ -270,7 +284,7 @@ struct NetworkMetrics {
 	uint64_t countSlowEvents[SLOW_EVENT_BINS];
 
 	enum { PRIORITY_BINS = 9 };
-	int priorityBins[ PRIORITY_BINS ];
+	TaskPriority priorityBins[ PRIORITY_BINS ];
 	double secSquaredPriorityBlocked[PRIORITY_BINS];
 
 	double oldestAlternativesFailure;
@@ -372,19 +386,19 @@ public:
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	// FIXME: Return a fixed point Time class
 
-	virtual Future<class Void> delay( double seconds, int taskID ) = 0;
+	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed
 
-	virtual Future<class Void> yield( int taskID ) = 0;
+	virtual Future<class Void> yield( TaskPriority taskID ) = 0;
 	// The given future will be set immediately or after higher-priority tasks have executed
 
-	virtual bool check_yield( int taskID ) = 0;
+	virtual bool check_yield( TaskPriority taskID ) = 0;
 	// Returns true if a call to yield would result in a delay
 
-	virtual int getCurrentTask() = 0;
+	virtual TaskPriority getCurrentTask() = 0;
 	// Gets the taskID/priority of the current task
 
-	virtual void setCurrentTask(int taskID ) = 0;
+	virtual void setCurrentTask(TaskPriority taskID ) = 0;
 	// Sets the taskID/priority of the current task, without yielding
 
 	virtual flowGlobalType global(int id) = 0;
@@ -399,7 +413,7 @@ public:
 	virtual bool isOnMainThread() const = 0;
 	// Returns true if the current thread is the main thread
 
-	virtual void onMainThread( Promise<Void>&& signal, int taskID ) = 0;
+	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network
 
 	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void *), void *arg) = 0;

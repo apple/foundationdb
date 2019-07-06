@@ -70,6 +70,13 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 		return keys;
 	}
 	virtual void attributeKeys(std::set<std::string>*) const = 0;
+
+	// For flatbuffers, IReplicationPolicy is just encoded as a string using
+	// |serializeReplicationPolicy|. |writer| is a member of IReplicationPolicy
+	// so that this string outlives all calls to
+	// dynamic_size_traits<Reference<IReplicationPolicy>>::save
+	mutable BinaryWriter writer{ IncludeVersion() };
+	mutable bool alreadyWritten = false;
 };
 
 template <class Archive>
@@ -276,12 +283,28 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 
 template <>
 struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
-	static WriteRawMemory save(const Reference<IReplicationPolicy>& value) {
-		BinaryWriter writer(IncludeVersion());
-		serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
-		std::unique_ptr<uint8_t[]> memory(new uint8_t[writer.getLength()]);
-		memcpy(memory.get(), writer.getData(), writer.getLength());
-		return std::make_pair<OwnershipErasedPtr<const uint8_t>, size_t>(ownedPtr(const_cast<const uint8_t*>(memory.release())), writer.getLength());
+	static Block save(const Reference<IReplicationPolicy>& value) {
+		if (value.getPtr() == nullptr) {
+			static BinaryWriter writer{ IncludeVersion() };
+			writer = BinaryWriter{ IncludeVersion() };
+			serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
+			return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(writer.getData())),
+			                  writer.getLength());
+		}
+		if (!value->alreadyWritten) {
+			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
+			value->alreadyWritten = true;
+		}
+		return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(value->writer.getData())),
+		                  value->writer.getLength());
+	}
+
+	static void serialization_done(const Reference<IReplicationPolicy>& value) {
+		if (value.getPtr() == nullptr) {
+			return;
+		}
+		value->alreadyWritten = false;
+		value->writer = BinaryWriter{ IncludeVersion() };
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
@@ -294,5 +317,6 @@ struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
 	}
 };
 
+static_assert(detail::has_serialization_done<dynamic_size_traits<Reference<IReplicationPolicy>>>::value);
 
 #endif
