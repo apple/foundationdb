@@ -1,4 +1,4 @@
-testTitle=DDMetrics_populate
+testTitle=DDMetricsExclude_populate
 	testName=Mako
 	testDuration=30.0
 	transactionsPerSecond=100000
@@ -14,7 +14,7 @@ testTitle=DDMetrics_populate
 	runBenchmark=true
 	preserveData=true
 
-testTitle=DDMetrics_test
+testTitle=DDMetricsExclude_test
 	testName=Mako
 	testDuration=60.0
 	transactionsPerSecond=100000
@@ -30,6 +30,6 @@ testTitle=DDMetrics_test
 	runBenchmark=true
 	preserveData=true
 
-	testName=DDMetrics
+	testName=DDMetricsExclude
 	excludeIp=127.0.0.1
 	excludePort=4500

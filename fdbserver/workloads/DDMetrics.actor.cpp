@@ -18,68 +18,47 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/Status.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbclient/StatusClient.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DDMetricsWorkload : TestWorkload {
-	double ddDone;
-	Value excludeIp;
-	int excludePort;
-	double peakMovingData;
-	double peakInQueue;
-	double peakInFlight;
-	double movingDataPerSec;
+	double startDelay, ddDone;
 
 	DDMetricsWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), ddDone(0.0), peakMovingData(0.0), peakInQueue(0.0), peakInFlight(0.0), movingDataPerSec(0.0)
+		: TestWorkload(wcx), ddDone( 0.0 )
 	{
-		excludeIp = getOption(options, LiteralStringRef("excludeIp"), Value(LiteralStringRef("127.0.0.1")));
-		excludePort = getOption(options, LiteralStringRef("excludePort"), 4500);
+		startDelay = getOption( options, LiteralStringRef("beginPoll"), 10.0 );
 	}
 
-	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%080d", deterministicRandom()->randomInt(0, 10e6))); }
+	virtual std::string description() { return "Data Distribution Metrics"; }
 
-	ACTOR static Future<double> getMovingDataAmount(Database cx, DDMetricsWorkload* self) {
-		try {
-			StatusObject statusObj = wait(StatusClient::statusFetcher(cx->getConnectionFile()));
-			StatusObjectReader statusObjCluster;
-			((StatusObjectReader)statusObj).get("cluster", statusObjCluster);
-			StatusObjectReader statusObjData;
-			statusObjCluster.get("data", statusObjData);
-			if (statusObjData.has("moving_data")) {
-				StatusObjectReader movingData = statusObjData.last();
-				double dataInQueue, dataInFlight;
-				if (movingData.get("in_queue_bytes", dataInQueue) && movingData.get("in_flight_bytes", dataInFlight)) {
-					self->peakInQueue = std::max(self->peakInQueue, dataInQueue);
-					self->peakInFlight = std::max(self->peakInFlight, dataInFlight);
-					return dataInQueue + dataInFlight;
-				}
-			}
-		} catch(Error& e) {
-			TraceEvent("DDMetricsGetMovingDataError").error(e);
-			throw;
-		}
-		return -1.0;
+	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
+		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
+
+		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+			EventLogRequest( LiteralStringRef( "MovingData" ) ) ), 1.0 ) );
+		int relocations;
+		sscanf(md.getValue("HighPriorityRelocations").c_str(), "%d", &relocations);
+		return relocations;
 	}
 
-	ACTOR static Future<Void> _start(Database cx, DDMetricsWorkload *self) {
+	ACTOR Future<Void> work( Database cx, DDMetricsWorkload *self ) {
 		try {
-			state std::vector<AddressExclusion>	excluded;
-			excluded.push_back(AddressExclusion(IPAddress::parse(self->excludeIp.toString()).get(), self->excludePort));
-			wait(excludeServers(cx, excluded));
+			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
+			wait( delay( self->startDelay ) );
+			TraceEvent("DDMetricsStarting");
 			state double startTime = now();
 			loop {
 				wait( delay( 2.5 ) );
-				double movingData = wait( self->getMovingDataAmount( cx, self ) );
-				self->peakMovingData = std::max(self->peakMovingData, movingData);
-				TraceEvent("DDMetricsCheck")
-					.detail("movingData", movingData);
-				if( movingData == 0.0 ) {
+				int dif = wait( self->getHighPriorityRelocationsInFlight( cx, self ) );
+				TraceEvent("DDMetricsCheck").detail("DIF", dif);
+				if( dif == 0 ) {
 					self->ddDone = now() - startTime;
 					return Void();
 				}
@@ -90,20 +69,16 @@ struct DDMetricsWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual std::string description() { return "Data Distribution Metrics"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) { return _start(cx, this); }
+	virtual Future<Void> start( Database const& cx ) {
+		return clientId == 0 ? work( cx, this ) : Void();
+	}
+
 	virtual Future<bool> check( Database const& cx ) {
-		movingDataPerSec = peakMovingData / ddDone;
 		return true;
 	}
 
 	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( PerfMetric( "peakMovingData", peakMovingData, false));
-		m.push_back( PerfMetric( "peakInQueue", peakInQueue, false));
-		m.push_back( PerfMetric( "peakInFlight", peakInFlight, false));
 		m.push_back( PerfMetric( "DDDuration", ddDone, false ) );
-		m.push_back( PerfMetric( "movingDataPerSec", movingDataPerSec, false));
 	}
 
 };

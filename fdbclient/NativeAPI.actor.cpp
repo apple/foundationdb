@@ -2047,7 +2047,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
-	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info)
+	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info )
 {
 	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info);
 }
