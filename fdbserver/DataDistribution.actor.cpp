@@ -2478,7 +2478,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
 				if ( self->server_info.find(uid) != self->server_info.end() ) {
-					change.push_back( self->server_info[uid]->wrongStoreTypeRemoved.onTrigger() );
+					// server_status change should trigger the teamTracker()
+					//change.push_back( self->server_info[uid]->wrongStoreTypeRemoved.onTrigger() );
 					if ( self->server_info[uid]->toRemove > 0 ) {
 						anyUndesired = true;
 						anyWrongConfiguration = true;

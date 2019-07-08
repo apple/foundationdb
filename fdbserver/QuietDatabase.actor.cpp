@@ -232,6 +232,9 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
 		} catch( Error &e ) {
 			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxStorageServerQueue").detail("SS", servers[i].id());
+			for (auto &m : messages) {
+				TraceEvent("Messages").detail("Info", m.get().toString());
+			}
 			throw;
 		}
 	}

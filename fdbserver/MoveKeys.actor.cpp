@@ -218,6 +218,10 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 	return result;
 }
 
+// keyServer: map from keys to destination servers
+// serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have), complete(already has), ""()
+// MXQ: What does serverKeys[dest][keys] mean?
+
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
 // Set serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member of servers OR if the source list is sufficiently degraded)
@@ -236,6 +240,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 		state int shards = 0;
 		state int maxRetries = 0;
 
+		// If it's multiple transaction, how do we achieve atomicity?
 		//This process can be split up into multiple transactions if there are too many existing overlapping shards
 		//In that case, each iteration of this loop will have begin set to the end of the last processed shard
 		while(begin < keys.end) {
@@ -781,13 +786,21 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 }
 // Q: What is the conditation that a SS can be removed?
 ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
-	Standalone<RangeResultRef> keys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, 2 ) );
+	state Standalone<RangeResultRef> keys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, 2 ) );
 
 	ASSERT(keys.size() >= 2);
 
 	if(keys[0].value == keys[1].value && keys[1].key != allKeys.end) {
 		TraceEvent("ServerKeysCoalescingError", serverID).detail("Key1", keys[0].key).detail("Key2", keys[1].key).detail("Value", keys[0].value);
 		ASSERT(false);
+	}
+
+	if ( !(keys[0].value == serverKeysFalse && keys[1].key == allKeys.end) ) {
+		Standalone<RangeResultRef> allKeys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, CLIENT_KNOBS->TOO_MANY ) );
+		TraceEvent("CanNOTRemove").detail("KeysNum", allKeys.size());
+		for(auto &k : allKeys) {
+			TraceEvent("CanNOTRemove").detail("Key", k.key).detail("Value", k.value);
+		}
 	}
 
 	//Return true if the entire range is false.  Since these values are coalesced, we can return false if there is more than one result
