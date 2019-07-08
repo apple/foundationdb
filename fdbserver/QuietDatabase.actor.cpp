@@ -311,7 +311,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber || currentTeamNumber > desiredTeamNumber
+			if (healthyMachineTeamCount > desiredMachineTeamNumber || currentTeamNumber > desiredTeamNumber ||
 			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.

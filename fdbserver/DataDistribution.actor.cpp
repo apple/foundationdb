@@ -1435,7 +1435,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				addedMachineTeams++;
 				// Update the remaining machine team budget because the budget may decrease by
 				// any value between 1 and storageTeamSize
-				remainingMachineTeamBudget = getRemainingMachineTeamBudget();
+				if ( !(addedMachineTeams < machineTeamsToBuild) ) {
+					remainingMachineTeamBudget = getRemainingMachineTeamBudget();
+				}
 			} else {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
@@ -1665,7 +1667,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		for (auto& t : teams) {
 			// The minimum number of teams of a server in a team is the representative team number for the team
-			int representNumProcessTeams = std::max<int>();
+			int representNumProcessTeams = std::numeric_limits<int>::max()
 			for (auto& server : t->getServers()) {
 				representNumProcessTeams = std::min(representNumProcessTeams, server->teams.size());
 			}
@@ -1721,7 +1723,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	int getMinTeamNumPerServer() {
-		int minTeamNumPerServer = std::max<int>();
+		int minTeamNumPerServer = std::numeric_limits<int>::max()
 		for (auto& s : server_info) {
 			minTeamNumPerServer = std::min(minTeamNumPerServer, s.second->teams.size());
 		}
@@ -1743,7 +1745,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
 		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-		int targetTeamNumPerServer =  (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2);
+		int targetTeamNumPerServer =  (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		ASSERT(targetTeamNumPerServer > 0);
 
 		int addedMachineTeams = 0;
@@ -1775,7 +1777,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
-		int minTeamNumPerServer = std::max<int>();
+		int minTeamNumPerServer =  std::numeric_limits<int>::max()
 		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget || minTeamNumPerServer < targetTeamNumPerServer) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
@@ -1853,7 +1855,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Step 4: Add the server team
 			addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
 			addedTeams++;
-			remainingTeamBudget = getRemainingServerTeamBudget();
+			// Only when the addedTeams < teamsToBuild is invalid, should we use remainingTeamBudget to
+			// keep building teams
+			if ( !(addedTeams < teamsToBuild) ) {
+				remainingTeamBudget = getRemainingServerTeamBudget();
+			}
 			// Keep building teams until each team has no less than targetTeamNumPerServer teams
 			if ( !(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) ) {
 				// update the minTeamNumPerServer
