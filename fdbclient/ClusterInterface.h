@@ -52,12 +52,12 @@ struct ClusterInterface {
 	}
 
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskClusterController );
-		failureMonitoring.getEndpoint( TaskFailureMonitor );
-		databaseStatus.getEndpoint( TaskClusterController );
-		ping.getEndpoint( TaskClusterController );
-		getClientWorkers.getEndpoint( TaskClusterController );
-		forceRecovery.getEndpoint( TaskClusterController );
+		openDatabase.getEndpoint( TaskPriority::ClusterController );
+		failureMonitoring.getEndpoint( TaskPriority::FailureMonitor );
+		databaseStatus.getEndpoint( TaskPriority::ClusterController );
+		ping.getEndpoint( TaskPriority::ClusterController );
+		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
+		forceRecovery.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>

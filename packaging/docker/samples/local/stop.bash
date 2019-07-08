@@ -1,7 +1,7 @@
 #! /bin/bash
 
 #
-# fdb.bash
+# stop.bash
 #
 # This source file is part of the FoundationDB open source project
 #
@@ -20,10 +20,9 @@
 # limitations under the License.
 #
 
-source /var/fdb/scripts/create_server_environment.bash
-create_server_environment
-source /var/fdb/.fdbenv
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen_address 0.0.0.0:$FDB_PORT --public_address $PUBLIC_IP:$FDB_PORT \
-	--datadir /var/fdb/data --logdir /var/fdb/logs \
-	--locality_zoneid=`hostname` --locality_machineid=`hostname` --class $FDB_PROCESS_CLASS
+set -eu
+
+FDB_PORT="${FDB_PORT:-4550}"
+
+FDB_PORT=$FDB_PORT docker-compose down
+echo "Docker-based FDB cluster is now down."

@@ -1,7 +1,4 @@
-#! /bin/bash
-
-#
-# fdb.bash
+# docker-compose.yaml
 #
 # This source file is part of the FoundationDB open source project
 #
@@ -20,10 +17,16 @@
 # limitations under the License.
 #
 
-source /var/fdb/scripts/create_server_environment.bash
-create_server_environment
-source /var/fdb/.fdbenv
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen_address 0.0.0.0:$FDB_PORT --public_address $PUBLIC_IP:$FDB_PORT \
-	--datadir /var/fdb/data --logdir /var/fdb/logs \
-	--locality_zoneid=`hostname` --locality_machineid=`hostname` --class $FDB_PROCESS_CLASS
+# Specification for a one node cluster than can be accessed from the host.
+# The user must specify the FDB_PORT on which it is run.
+
+version: '3'
+services:
+  fdb:
+    image: foundationdb:6.1.8
+    ports:
+      - $FDB_PORT:$FDB_PORT/tcp
+    environment:
+      FDB_NETWORKING_MODE: host
+      FDB_COORDINATOR_PORT: $FDB_PORT
+      FDB_PORT: $FDB_PORT

@@ -63,13 +63,13 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskClusterController );
-		recruitRemoteFromConfiguration.getEndpoint( TaskClusterController );
-		recruitStorage.getEndpoint( TaskClusterController );
-		registerWorker.getEndpoint( TaskClusterController );
-		getWorkers.getEndpoint( TaskClusterController );
-		registerMaster.getEndpoint( TaskClusterController );
-		getServerDBInfo.getEndpoint( TaskClusterController );
+		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterController );
+		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterController );
+		recruitStorage.getEndpoint( TaskPriority::ClusterController );
+		registerWorker.getEndpoint( TaskPriority::ClusterController );
+		getWorkers.getEndpoint( TaskPriority::ClusterController );
+		registerMaster.getEndpoint( TaskPriority::ClusterController );
+		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
