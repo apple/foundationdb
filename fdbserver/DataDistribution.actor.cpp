@@ -1659,20 +1659,18 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Find the server team whose members are on the most number of server teams
-	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams(bool chooseUnhealthyTeam) {
+	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
 		Reference<TCTeamInfo> retST;
 		int maxNumProcessTeams = 0;
 
 		for (auto& t : teams) {
-			if (chooseUnhealthyTeam && t->isHealthy()) {
-				continue;
-			}
-			int numProcessTeams = 0;
+			// The minimum number of teams of a server in a team is the representative team number for the team
+			int representNumProcessTeams = std::max<int>();
 			for (auto& server : t->getServers()) {
-				numProcessTeams += server->teams.size();
+				representNumProcessTeams = std::min(representNumProcessTeams, server->teams.size());
 			}
-			if (numProcessTeams > maxNumProcessTeams) {
-				maxNumProcessTeams = numProcessTeams;
+			if (representNumProcessTeams > maxNumProcessTeams) {
+				maxNumProcessTeams = representNumProcessTeams;
 				retST = t;
 			}
 		}
@@ -1722,6 +1720,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return remainingTeamBudget;
 	}
 
+	int getMinTeamNumPerServer() {
+		int minTeamNumPerServer = std::max<int>();
+		for (auto& s : server_info) {
+			minTeamNumPerServer = std::min(minTeamNumPerServer, s.second->teams.size());
+		}
+
+		return minTeamNumPerServer;
+	}
+
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
@@ -1729,6 +1736,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber, int remainingTeamBudget) {
 		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
+		ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 &&  self->configuration.storageTeamSize >= 1);
+		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
+		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
+		// The numTeamsPerServerFactor is calculated as
+		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
+		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
+		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
+		int targetTeamNumPerServer =  (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2);
+		ASSERT(targetTeamNumPerServer > 0);
 
 		int addedMachineTeams = 0;
 		int addedTeams = 0;
@@ -1759,7 +1775,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
-		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) {
+		int minTeamNumPerServer = std::max<int>();
+		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget || minTeamNumPerServer < targetTeamNumPerServer) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
 			int bestScore = std::numeric_limits<int>::max();
@@ -1837,6 +1854,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
 			addedTeams++;
 			remainingTeamBudget = getRemainingServerTeamBudget();
+			// Keep building teams until each team has no less than targetTeamNumPerServer teams
+			if ( !(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) ) {
+				// update the minTeamNumPerServer
+				minTeamNumPerServer = getMinTeamNumPerServer();
+			}
 
 			if (++loopCount > 2 * teamsToBuild * (configuration.storageTeamSize + 1)) {
 				break;
@@ -1948,17 +1970,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
 		if( uniqueMachines >= self->configuration.storageTeamSize ) {
-			// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
-			// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
-			// The numTeamsPerServerFactor is calculated as
-			// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
-			// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
-			// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-			int numTeamsPerServerFactor = std::max<int>(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER, (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->configuration.storageTeamSize) / 2);
-			ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 &&  self->configuration.storageTeamSize >= 1);
-			ASSERT(numTeamsPerServerFactor > 0);
-			desiredTeams = numTeamsPerServerFactor * serverCount;
-			int maxTeams = numTeamsPerServerFactor * serverCount;
+			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
+			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
 
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
@@ -2387,11 +2400,10 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 			return Void(); // Directly return Void()
 		}
 
-		wait(waitUntilHealthy(self));
-
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
 
+		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
@@ -2501,17 +2513,16 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			return Void(); // Directly return Void()
 		}
 
-		wait(waitUntilHealthy(self));
-
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		wait( delay(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY) );
 
+		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
 
 		// Q: We may need to count the number of servers instead of only healthy servers, since healthyness can change quickly?
-		int healthyServerCount = self->teams.size(); //self->calculateHealthyServerCount();
+		int healthyServerCount = self->calculateHealthyServerCount();
 		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all servers will become healthy.
 		if (healthyServerCount != self->server_info.size()) {
