@@ -282,6 +282,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PROXY_SPIN_DELAY,                                     0.01 );
 	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
+	init( PROXY_FORWARD_DELAY,                                  10.0 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)

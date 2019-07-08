@@ -573,38 +573,44 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 
 			choose {
 				when( ClientDBInfo ni = wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().openDatabase.getReply( req ) ) : Never() ) ) {
-					TraceEvent("ClientInfoChange").detail("ChangeID", ni.id);
 					outInfo->set(ni);
 
-					if (ni.proxies.empty()) {
-						TraceEvent("ClientInfo_NoProxiesReturned").detail("ChangeID", ni.id);
-						continue;
-					} else if (!FlowTransport::transport().isClient()) {
-						continue;
-					}
-
-					vector<Future<Void>> onProxyFailureVec;
-					bool skipWaitForProxyFail = false;
-					for (const auto& proxy : ni.proxies) {
-						if (proxy.provisional) {
-							skipWaitForProxyFail = true;
+					loop {
+						TraceEvent("ClientInfoChange").detail("ChangeID", outInfo->get().id);
+						if (outInfo->get().proxies.empty()) {
+							TraceEvent("ClientInfo_NoProxiesReturned").detail("ChangeID", outInfo->get().id);
+							break;
+						} else if (!FlowTransport::transport().isClient()) {
 							break;
 						}
 
-						onProxyFailureVec.push_back(
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getConsistentReadVersion.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(proxy.commit.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getKeyServersLocations.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getStorageServerRejoinInfo.getEndpoint()));
-					}
-					if (skipWaitForProxyFail) continue;
+						state vector<Future<Void>> onProxyFailureVec;
+						bool skipWaitForProxyFail = false;
+						for (const auto& proxy : outInfo->get().proxies) {
+							if (proxy.provisional) {
+								skipWaitForProxyFail = true;
+								break;
+							}
 
-					leaderMon = Void();
-					wait(waitForAny(onProxyFailureVec));
-					leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
+							onProxyFailureVec.push_back(
+									IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+											proxy.getConsistentReadVersion.getEndpoint()) ||
+									IFailureMonitor::failureMonitor().onDisconnectOrFailure(proxy.commit.getEndpoint()) ||
+									IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+											proxy.getKeyServersLocations.getEndpoint()) ||
+									IFailureMonitor::failureMonitor().onDisconnectOrFailure(
+											proxy.getStorageServerRejoinInfo.getEndpoint()));
+						}
+						if (skipWaitForProxyFail) break;
+
+						leaderMon = Void();
+						state Future<Void> anyFailures = waitForAny(onProxyFailureVec);
+						wait(anyFailures || outInfo->onChange());
+						if(anyFailures.isReady()) {
+							leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
+							break;
+						}
+					}
 				}
 				when( wait( clusterInterface->onChange() ) ) {
 					if(clusterInterface->get().present())
@@ -1241,6 +1247,10 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+				if(rep.newClientInfo.present()) {
+					cx->clientInfo->set(rep.newClientInfo.get());
+					continue;
+				}
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
 				ASSERT( rep.results.size() == 1 );
@@ -1278,6 +1288,11 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+				if(_rep.newClientInfo.present()) {
+					cx->clientInfo->set(_rep.newClientInfo.get());
+					continue;
+				}
+				
 				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.After");
@@ -1490,6 +1505,11 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+					if(v.newClientInfo.present()) {
+						cx->clientInfo->set(v.newClientInfo.get());
+						continue;
+					}
+					
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -2703,6 +2723,11 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				throw request_maybe_delivered();
 			}
 			when (CommitID ci = wait( reply )) {
+				if(ci.newClientInfo.present()) {
+					cx->clientInfo->set(ci.newClientInfo.get());
+					throw not_committed();
+				}
+
 				Version v = ci.version;
 				if (v != invalidVersion) {
 					if (info.debugID.present())
@@ -3034,6 +3059,10 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+					if(v.newClientInfo.present()) {
+						cx->clientInfo->set(v.newClientInfo.get());
+						continue;
+					}
 					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT( v.version > 0 );
