@@ -61,6 +61,7 @@ struct DDMetricsWorkload : TestWorkload {
 				}
 			}
 		} catch(Error& e) {
+			TraceEvent("DDMetricsGetMovingDataError").error(e);
 			throw;
 		}
 		return -1.0;

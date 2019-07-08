@@ -16,17 +16,17 @@ testTitle=DDMetrics_populate
 
 testTitle=DDMetrics_test
 	testName=Mako
-	testDuration=120.0
+	testDuration=60.0
 	transactionsPerSecond=100000
 	rows=1000000
 	sampleSize=100
 	valueBytes=16
 	keyBytes=16
-	operations=gr500:500
+	operations=gr100:100
 	enableLogging=false
-	actorCountPerClient=256;
+	actorCountPerClient=128;
 	commitGet=false
-	populateData=true
+	populateData=false
 	runBenchmark=true
 	preserveData=true
 

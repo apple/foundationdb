@@ -1208,8 +1208,7 @@ Future<Standalone<RangeResultRef>> getRange(
 	KeySelector const& end,
 	GetRangeLimits const& limits,
 	bool const& reverse,
-	TransactionInfo const& info,
-	bool isFetchKeys);
+	TransactionInfo const& info);
 
 ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
                                        Reference<TransactionLogInfo> trLogInfo);
@@ -1842,7 +1841,7 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 
 ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-	TransactionInfo info, bool isFetchKeys = false )
+	TransactionInfo info )
 {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
@@ -1878,7 +1877,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
 
-			req.isFetchKeys = isFetchKeys;
+			req.isFetchKeys = (info.taskID == TaskFetchKeys);
 			req.version = readVersion;
 
 			if( reverse && (begin-1).isDefinitelyLess(shard.begin) &&
@@ -2048,9 +2047,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
-	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, bool isFetchKeys = false )
+	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info)
 {
-	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, isFetchKeys);
+	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info);
 }
 
 Transaction::Transaction( Database const& cx )
@@ -2288,12 +2287,8 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 	if(!snapshot) {
 		extraConflictRanges.push_back( conflictRange.getFuture() );
 	}
-	bool isFetchKeys = false;
-	if (info.taskID == TaskFetchKeys) {
-		isFetchKeys = true;
-	}
 
-	return ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, isFetchKeys);
+	return ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info);
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getRange(
