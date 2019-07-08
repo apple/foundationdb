@@ -287,9 +287,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					  .detail("KeyBegin", currentKeys.begin.toString())
 					  .detail("KeyEnd", currentKeys.end.toString());
 
-					printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
-					for(int i=0; i<old.size(); i++)
-						printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
+					// printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
+					// for(int i=0; i<old.size(); i++)
+					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					//Check that enough servers for each shard are in the correct state
 					vector<vector<UID>> addAsSource = wait(additionalSources(old, &tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER*servers.size()));

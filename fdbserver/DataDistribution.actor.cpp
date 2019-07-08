@@ -2312,6 +2312,8 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType);
 			if ( !server->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 				serversToRemove.push_back(server->second);
+			} else {
+				server->second->toRemove = 0; // In case the configuration.storeType is changed back to the server's type
 			}
 		}
 		if ( prevHasWrongStoreTypeServer && serversToRemove.empty() ) {

@@ -437,7 +437,8 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get()) 
 					.detail("DataDistributionQueueSizeGate", maxDataDistributionQueueSize)
 					.detail("TeamCollectionValid", teamCollectionValid.get())
-					.detail("MaxStorageQueueSize", storageQueueSize.get())
+					.detail("MaxStorageQueueSize", storageQueueSize.get()) 
+					.detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
 					.detail("DataDistributionActive", dataDistributionActive.get())
 					.detail("StorageServersRecruiting", storageServersRecruiting.get())
 					.detail("NumSuccesses", numSuccesses);
