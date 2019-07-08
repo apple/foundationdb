@@ -2646,7 +2646,12 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 									//If we cannot find the team, it could be a bad team so assume unhealthy priority
 									if(!found) {
-										maxPriority = std::max<int>( maxPriority, PRIORITY_TEAM_UNHEALTHY );
+										// If the input team (in function parameters) is a redundant team, found will be
+										// false We want to differentiate the redundant_team from unhealthy_team in
+										// terms of relocate priority
+										maxPriority =
+										    std::max<int>(maxPriority, redundantTeam ? PRIORITY_TEAM_REDUNDANT
+										                                             : PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
 									TEST(true); // A removed server is still associated with a team in SABTF
