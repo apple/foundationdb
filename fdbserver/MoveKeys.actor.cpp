@@ -267,6 +267,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 
 					for(int s=0; s<serverListValues.size(); s++) {
 						if (!serverListValues[s].present()) {
+							// MXQ: Maybe a bug exists somewhere, causing this to happen
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the database)
 							// This can happen (why?) and is handled by the data distribution algorithm
 							TEST(true); //start move keys moving to a removed server
@@ -282,13 +283,13 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					state Key endKey = old.end()[-1].key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
-					/*TraceEvent("StartMoveKeysBatch", relocationIntervalId)
-					  .detail("KeyBegin", currentKeys.begin.c_str())
-					  .detail("KeyEnd", currentKeys.end.c_str());*/
+					TraceEvent("StartMoveKeysBatch", relocationIntervalId)
+					  .detail("KeyBegin", currentKeys.begin.toString())
+					  .detail("KeyEnd", currentKeys.end.toString());
 
-					//printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
-					//for(int i=0; i<old.size(); i++)
-					//	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
+					printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
+					for(int i=0; i<old.size(); i++)
+						printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					//Check that enough servers for each shard are in the correct state
 					vector<vector<UID>> addAsSource = wait(additionalSources(old, &tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER*servers.size()));
@@ -300,12 +301,12 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						vector<UID> dest;
 						decodeKeyServersValue( old[i].value, src, dest );
 
-						/*TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-							.detail("KeyBegin", rangeIntersectKeys.begin.c_str())
-							.detail("KeyEnd", rangeIntersectKeys.end.c_str())
+						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
+							.detail("KeyBegin", rangeIntersectKeys.begin.toString())
+							.detail("KeyEnd", rangeIntersectKeys.end.toString())
 							.detail("OldSrc", describe(src))
 							.detail("OldDest", describe(dest))
-							.detail("ReadVersion", tr.getReadVersion().get());*/
+							.detail("ReadVersion", tr.getReadVersion().get());
 
 						for(auto& uid : addAsSource[i]) {
 							src.push_back(uid);
@@ -318,15 +319,15 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						//Track old destination servers.  They may be removed from serverKeys soon, since they are about to be overwritten in keyServers
 						for(auto s = dest.begin(); s != dest.end(); ++s) {
 							oldDests.insert(*s);
-							/*TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId)
-								.detail("Server", s->id());*/
+							TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId)
+								.detail("Server", *s);
 						}
 
 						//Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 						for(auto& uid : src) {
 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-							/*TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId)
-								.detail("Server", *s);*/
+							TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId)
+								.detail("Server", uid);
 						}
 					}
 

@@ -219,6 +219,7 @@ public:
 		}
 	}
 
+	// To remove?
 	virtual bool isCorrectStoreType() {
 		return all([](Reference<IDataDistributionTeam> team) {
 			return team->isCorrectStoreType();
@@ -228,6 +229,13 @@ public:
 	virtual void setCorrectStoreType(KeyValueStoreType configType) {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setCorrectStoreType(configType);
+		}
+	}
+
+	// To remove?
+	virtual void setCorrectStoreType(bool isCorrectType) {
+		for (auto it = teams.begin(); it != teams.end(); it++) {
+			(*it)->setCorrectStoreType(isCorrectType);
 		}
 	}
 
@@ -262,6 +270,7 @@ public:
 	}
 };
 
+// MXQ: Why do we need to count the utilization for each priority? Can a relocationShard have multiple priorities?
 struct Busyness {
 	vector<int> ledger;
 
@@ -308,6 +317,8 @@ int getWorkFactor( RelocateData const& relocation ) {
 		return WORK_FULL_UTILIZATION / relocation.src.size() / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
+// MXQ: This ensure source servers will not be overloaded. But is it possible we may have thunder-herd effect that many src servers suddently move data to the same dst server team?
+// 		The thuder-herd effect may happen when a dst server team's data was removed suddenly (e.g., at the end of backup which clear a large range)
 // return true if servers are not too busy to launch the relocation
 bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
@@ -370,7 +381,7 @@ struct DDQueueData {
 	int64_t bytesWritten;
 	int teamSize;
 
-	std::map<UID, Busyness> busymap;
+	std::map<UID, Busyness> busymap; // UID is serverID
 
 	KeyRangeMap< RelocateData > queueMap;
 	std::set<RelocateData, std::greater<RelocateData>> fetchingSourcesQueue;
@@ -379,6 +390,7 @@ struct DDQueueData {
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>> queue;
 
 	KeyRangeMap< RelocateData > inFlight;
+	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
 	KeyRangeActorMap inFlightActors;
 
 	Promise<Void> error;
@@ -765,6 +777,9 @@ struct DDQueueData {
 		launchQueuedWork( combined );
 	}
 
+	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped with rd.
+	// If there exist, cancel them by cancel their actors and reduce the src servers' busyness of those canceled inflight relocateData
+	// Launch the relocation for the rd.
 	void launchQueuedWork( std::set<RelocateData, std::greater<RelocateData>> combined ) {
 		int startedHere = 0;
 		double startTime = now();
@@ -773,6 +788,7 @@ struct DDQueueData {
 		for(; it != combined.end(); it++ ) {
 			RelocateData rd( *it );
 
+			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges( rd.keys );
 			for(auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
@@ -795,6 +811,7 @@ struct DDQueueData {
 				continue;
 			}
 
+			// MXQ: What is the if condition?
 			// Because the busyness of a server is decreased when a superseding relocation is issued, we
 			//  need to consider what the busyness of a server WOULD be if
 			auto containedRanges = inFlight.containedRanges( rd.keys );
@@ -805,6 +822,7 @@ struct DDQueueData {
 				}
 			}
 
+			// MXQ: I don't understand the SOMEDAY and FIXME statement
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if( !canLaunch( rd, teamSize, busymap, cancellableRelocations ) ) {
@@ -845,6 +863,7 @@ struct DDQueueData {
 				launch( rrs, busymap );
 				activeRelocations++;
 				startRelocation(rrs.priority);
+				// Start the actor that relocates data in the rrs.keys
 				inFlightActors.insert( rrs.keys, dataDistributionRelocator( this, rrs ) );
 			}
 
@@ -926,7 +945,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 						foundTeams = false;
 						break;
 					}
-					if(!bestTeam.get()->isHealthy() || !bestTeam.get()->isCorrectStoreType()) {
+					if(!bestTeam.get()->isHealthy() || !bestTeam.get()->isCorrectStoreType()) { //Assume getTeam() only return healthy team that has correctStoreType. 
 						allHealthy = false;
 					} else {
 						anyHealthy = true;
@@ -983,7 +1002,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					healthyDestinations.addTeam(bestTeams[i].first);
 				} else {
 					destIds.insert(destIds.end(), serverIds.begin(), serverIds.end());
-					if(bestTeams[i].first->isHealthy() && bestTeams[i].first->isCorrectStoreType()) {
+					if(bestTeams[i].first->isHealthy() && bestTeams[i].first->isCorrectStoreType()) { //bestTeams[i].first->isCorrectStoreType()
 						healthyIds.insert(healthyIds.end(), serverIds.begin(), serverIds.end());
 						healthyDestinations.addTeam(bestTeams[i].first);
 					}
