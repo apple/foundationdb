@@ -38,7 +38,7 @@ public:
 		ready = NotifiedVersion(s);
 		started = false;
 	}
-	Future<bool> order( Seq s, int taskID = TaskDefaultYield ) {
+	Future<bool> order( Seq s, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		if ( ready.get() < s )
 			return waitAndOrder( this, s, taskID );
 		else
@@ -54,7 +54,7 @@ public:
 		return ready.whenAtLeast(v);
 	}
 private:
-	ACTOR static Future<bool> waitAndOrder( Orderer<Seq>* self, Seq s, int taskID ) {
+	ACTOR static Future<bool> waitAndOrder( Orderer<Seq>* self, Seq s, TaskPriority taskID ) {
 		wait( self->ready.whenAtLeast(s) );
 		wait( yield( taskID ) || self->shutdown.getFuture() );
 		return self->dedup(s);

@@ -767,7 +767,7 @@ inline void save( Archive& ar, const StringRef& value ) {
 
 template<>
 struct dynamic_size_traits<StringRef> : std::true_type {
-	static WriteRawMemory save(const StringRef& str) { return { { unownedPtr(str.begin()), str.size() } }; }
+	static Block save(const StringRef& str) { return unownedPtr(str.begin(), str.size()); }
 
 	template <class Context>
 	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {

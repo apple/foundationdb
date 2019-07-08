@@ -24,9 +24,9 @@ RUN apt-get update; apt-get install -y dnsutils
 RUN mkdir -p /app
 WORKDIR /app
 
-COPY --from=foundationdb:5.2.5 /usr/lib/libfdb_c.so /usr/lib
-COPY --from=foundationdb:5.2.5 /usr/bin/fdbcli /usr/bin/
-COPY --from=foundationdb:5.2.5 /var/fdb/scripts/create_cluster_file.bash /app
+COPY --from=foundationdb:6.1.8 /usr/lib/libfdb_c.so /usr/lib
+COPY --from=foundationdb:6.1.8 /usr/bin/fdbcli /usr/bin/
+COPY --from=foundationdb:6.1.8 /var/fdb/scripts/create_cluster_file.bash /app
 
 COPY requirements.txt /app
 RUN pip install -r requirements.txt

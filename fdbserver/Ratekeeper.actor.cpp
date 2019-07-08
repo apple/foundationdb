@@ -297,7 +297,7 @@ ACTOR Future<Void> trackEachStorageServer(
 ACTOR Future<Void> monitorServerListChange(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
-	state Database db = openDBOnServer(dbInfo, TaskRatekeeper, true, true);
+	state Database db = openDBOnServer(dbInfo, TaskPriority::Ratekeeper, true, true);
 	state std::map<UID, StorageServerInterface> oldServers;
 	state Transaction tr(db);
 
@@ -618,7 +618,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 }
 
 ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo, DatabaseConfiguration* conf) {
-	state Database cx = openDBOnServer(dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 
@@ -650,7 +650,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	state Promise<Void> err;
 	state Future<Void> collection = actorCollection( self.addActor.getFuture() );
 
-	TraceEvent("Ratekeeper_Starting", rkInterf.id());
+	TraceEvent("RatekeeperStarting", rkInterf.id());
 	self.addActor.send( waitFailureServer(rkInterf.waitFailure.getFuture()) );
 	self.addActor.send( configurationMonitor(dbInfo, &self.configuration) );
 
@@ -732,7 +732,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		}
 	}
 	catch (Error& err) {
-		TraceEvent("Ratekeeper_Died", rkInterf.id()).error(err, true);
+		TraceEvent("RatekeeperDied", rkInterf.id()).error(err, true);
 	}
 	return Void();
 }
