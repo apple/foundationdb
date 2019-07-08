@@ -3718,7 +3718,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
 	try {
-		TraceEvent("DataDistributor_Running", di.id());
+		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
@@ -3736,10 +3736,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
-			TraceEvent("DataDistributor_Error", di.id()).error(err, true);
+			TraceEvent("DataDistributorError", di.id()).error(err, true);
 			throw err;
 		}
-		TraceEvent("DataDistributor_Died", di.id()).error(err, true);
+		TraceEvent("DataDistributorDied", di.id()).error(err, true);
 	}
 
 	return Void();

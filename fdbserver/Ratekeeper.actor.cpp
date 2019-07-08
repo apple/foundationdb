@@ -650,7 +650,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	state Promise<Void> err;
 	state Future<Void> collection = actorCollection( self.addActor.getFuture() );
 
-	TraceEvent("Ratekeeper_Starting", rkInterf.id());
+	TraceEvent("RatekeeperStarting", rkInterf.id());
 	self.addActor.send( waitFailureServer(rkInterf.waitFailure.getFuture()) );
 	self.addActor.send( configurationMonitor(dbInfo, &self.configuration) );
 
@@ -732,7 +732,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		}
 	}
 	catch (Error& err) {
-		TraceEvent("Ratekeeper_Died", rkInterf.id()).error(err, true);
+		TraceEvent("RatekeeperDied", rkInterf.id()).error(err, true);
 	}
 	return Void();
 }
