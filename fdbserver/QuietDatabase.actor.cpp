@@ -291,14 +291,14 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			int64_t desiredMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
 			int64_t maxMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
-			int64_t minServerTeamOnServer =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamNumberOnServer"));
-			int64_t maxServerTeamOnServer =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumberOnServer"));
-			int64_t minMachineTeamOnMachine =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
-			int64_t maxMachineTeamOnMachine =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
+			int64_t minServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamsOnServer"));
+			int64_t maxServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamsOnServer"));
+			int64_t minMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamsOnMachine"));
+			int64_t maxMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamsOnMachine"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
@@ -321,10 +321,10 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("CurrentMachineTeams", currentMachineTeams)
 				    .detail("MaxMachineTeams", maxMachineTeams)
-				    .detail("MinTeamNumberOnServer", minServerTeamOnServer)
-				    .detail("MaxTeamNumberOnServer", maxServerTeamOnServer)
-				    .detail("MinMachineTeamNumberOnMachine", minMachineTeamOnMachine)
-				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
+				    .detail("MinTeamsOnServer", minServerTeamsOnServer)
+				    .detail("MaxTeamsOnServer", maxServerTeamsOnServer)
+				    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+				    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
 				return false;
