@@ -2309,7 +2309,9 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			NetworkAddress a = server->second->lastKnownInterface.address();
 			AddressExclusion addr( a.ip, a.port );
 			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
-				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType);
+				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType)
+				.detail("IsCorrectStoreType", server->second->isCorrectStoreType(self->configuration.storageServerStoreType))
+				.detail("ToRemove", server->second->toRemove);
 			if ( !server->second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
 				serversToRemove.push_back(server->second);
 			} else {
@@ -2477,6 +2479,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				change.push_back( self->server_status.onChange( uid ) );
 				if ( self->server_info.find(uid) != self->server_info.end() ) {
 					change.push_back( self->server_info[uid]->wrongStoreTypeRemoved.onTrigger() );
+					if ( self->server_info[uid]->toRemove > 0 ) {
+						anyUndesired = true;
+						anyWrongConfiguration = true;
+					}
 				}
 				auto& status = self->server_status.get(uid);
 				if (!status.isFailed) {
@@ -2873,6 +2879,7 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 		} else {
 			server->storeType = type;
 		}
+		server->toRemove = 0;
 		if( server->storeType == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) ) {
 			wait(Future<Void>(Never()));
 		}
@@ -2965,9 +2972,10 @@ ACTOR Future<Void> storageServerFailureTracker(
 			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
 		} else if(!inHealthyZone) {
 			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);
-			server->storeType = KeyValueStoreType::INVALID;
-			status->isUndesired = true;
-			status->isWrongConfiguration = true;
+			// This only signal the healthy change. it does not necessarily mean the server failed
+			// server->storeType = KeyValueStoreType::INVALID;
+			// status->isUndesired = true;
+			// status->isWrongConfiguration = true;
 		}
 		choose {
 			when ( wait(healthChanged) ) {
