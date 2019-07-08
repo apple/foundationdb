@@ -208,24 +208,18 @@ template <> void addref( DatabaseContext* ptr ) { ptr->addref(); }
 template <> void delref( DatabaseContext* ptr ) { ptr->delref(); }
 
 ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
+	state double lastLogged = 0;
 	loop {
-		wait( delay( CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID ) );
-		TraceEvent("TransactionMetrics")
+		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID));
+		TraceEvent ev("TransactionMetrics", cx->dbId);
+
+		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
 			.detail("Cluster", cx->cluster && cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString() : "")
-			.detail("ReadVersions", cx->transactionReadVersions)
-			.detail("LogicalUncachedReads", cx->transactionLogicalReads)
-			.detail("PhysicalReadRequests", cx->transactionPhysicalReads)
-			.detail("CommittedMutations", cx->transactionCommittedMutations)
-			.detail("CommittedMutationBytes", cx->transactionCommittedMutationBytes)
-			.detail("CommitStarted", cx->transactionsCommitStarted)
-			.detail("CommitCompleted", cx->transactionsCommitCompleted)
-			.detail("TooOld", cx->transactionsTooOld)
-			.detail("FutureVersions", cx->transactionsFutureVersions)
-			.detail("NotCommitted", cx->transactionsNotCommitted)
-			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
-			.detail("ResourceConstrained", cx->transactionsResourceConstrained)
-			.detail("ProcessBehind", cx->transactionsProcessBehind)
-			.detail("MeanLatency", cx->latencies.mean())
+			.detail("Internal", cx->internal);
+
+		cx->cc.logToTraceEvent(ev);
+
+		ev.detail("MeanLatency", cx->latencies.mean())
 			.detail("MedianLatency", cx->latencies.median())
 			.detail("Latency90", cx->latencies.percentile(0.90))
 			.detail("Latency98", cx->latencies.percentile(0.98))
@@ -245,12 +239,15 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 			.detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
 			.detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
+
 		cx->latencies.clear();
 		cx->readLatencies.clear();
 		cx->GRVLatencies.clear();
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+
+		lastLogged = now();
 	}
 }
 
@@ -508,18 +505,21 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
-
 DatabaseContext::DatabaseContext(
-	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, 
-	TaskPriority taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, int apiVersion ) 
-	: cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), dbId(dbId), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
-	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
-	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
-	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), transactionsProcessBehind(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
+	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+	TaskPriority taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, bool internal, int apiVersion ) 
+	: cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
+	lockAware(lockAware), apiVersion(apiVersion), provisional(false), cc("TransactionMetrics"),
+	transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
+	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
+	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
+	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
+	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), outstandingWatches(0),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
+	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
 {
+	dbId = deterministicRandom()->randomUniqueID();
+
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
@@ -539,7 +539,14 @@ DatabaseContext::DatabaseContext(
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
-DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
+DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"),
+	transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
+	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
+	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
+	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
+	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), latencies(1000), readLatencies(1000), commitLatencies(1000), 
+	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
+	internal(false) {}
 
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
 	try {
@@ -632,11 +639,11 @@ Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>>
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNumDelayed);
 
-	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskPriority::DefaultEndpoint, clientLocality, true, false));
+	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, true));
 }
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion) {
-	return Database( new DatabaseContext( Reference<Cluster>(nullptr), clientInfo, clientInfoMonitor, LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware, apiVersion ) );
+	return Database( new DatabaseContext( Reference<Cluster>(nullptr), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion ) );
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -816,7 +823,7 @@ Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 	return cluster->getConnectionFile();
 }
 
-Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
+Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
 	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0)); // Number of connected coordinators for the client
 	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
 	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNum, apiVersion));
@@ -825,18 +832,18 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 	DatabaseContext *db;
 	if(preallocatedDb) {
-		db = new (preallocatedDb) DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskPriority::DefaultEndpoint, clientLocality, true, false, apiVersion);
+		db = new (preallocatedDb) DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
 	}
 	else {
-		db = new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskPriority::DefaultEndpoint, clientLocality, true, false, apiVersion);
+		db = new DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
 	}
 
 	return Database(db);
 }
 
-Database Database::createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality ) {
+Database Database::createDatabase( std::string connFileName, int apiVersion, bool internal, LocalityData const& clientLocality ) {
 	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
-	return Database::createDatabase(rccf, apiVersion, clientLocality);
+	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
 }
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
@@ -2718,7 +2725,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					tr->versionstampPromise.send(ret);
 
 					tr->numErrors = 0;
-					cx->transactionsCommitCompleted++;
+					++cx->transactionsCommitCompleted;
 					cx->transactionCommittedMutations += req.transaction.mutations.size();
 					cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
@@ -2793,7 +2800,7 @@ Future<Void> Transaction::commitMutations() {
 			return Void();
 		}
 
-		cx->transactionsCommitStarted++;
+		++cx->transactionsCommitStarted;
 
 		if(options.readOnly)
 			return transaction_read_only();
@@ -3126,7 +3133,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<Transact
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
-	cx->transactionReadVersions++;
+	++cx->transactionReadVersions;
 	flags |= options.getReadVersionFlags;
 
 	auto& batcher = cx->versionBatcher[ flags ];
@@ -3162,15 +3169,15 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_cluster_not_fully_recovered)
 	{
 		if(e.code() == error_code_not_committed)
-			cx->transactionsNotCommitted++;
+			++cx->transactionsNotCommitted;
 		if(e.code() == error_code_commit_unknown_result)
-			cx->transactionsMaybeCommitted++;
+			++cx->transactionsMaybeCommitted;
 		if (e.code() == error_code_proxy_memory_limit_exceeded)
-			cx->transactionsResourceConstrained++;
+			++cx->transactionsResourceConstrained;
 		if (e.code() == error_code_process_behind)
-			cx->transactionsProcessBehind++;
+			++cx->transactionsProcessBehind;
 		if (e.code() == error_code_cluster_not_fully_recovered) {
-			cx->transactionWaitsForFullRecovery++;
+			++cx->transactionWaitsForFullRecovery;
 		}
 
 		double backoff = getBackoff(e.code());
@@ -3181,9 +3188,9 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_future_version)
 	{
 		if( e.code() == error_code_transaction_too_old )
-			cx->transactionsTooOld++;
+			++cx->transactionsTooOld;
 		else if( e.code() == error_code_future_version )
-			cx->transactionsFutureVersions++;
+			++cx->transactionsFutureVersions;
 
 		double maxBackoff = options.maxBackoff;
 		reset();
