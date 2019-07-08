@@ -1204,7 +1204,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	void traceConfigInfo() {
-		TraceEvent("DDConfig")
+		TraceEvent("DDConfig", distributorId)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
@@ -1214,9 +1214,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceServerInfo() {
 		int i = 0;
 
-		TraceEvent("ServerInfo").detail("Size", server_info.size());
+		TraceEvent("ServerInfo", distributorId).detail("Size", server_info.size());
 		for (auto& server : server_info) {
-			TraceEvent("ServerInfo")
+			TraceEvent("ServerInfo", distributorId)
 			    .detail("ServerInfoIndex", i++)
 			    .detail("ServerID", server.first.toString())
 			    .detail("ServerTeamOwned", server.second->teams.size())
@@ -1225,7 +1225,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		for (auto& server : server_info) {
 			const UID& uid = server.first;
-			TraceEvent("ServerStatus", uid)
+			TraceEvent("ServerStatus", distributorId)
+				.detail("ServerID", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 			    .detail("MachineTeamSize",
@@ -1236,9 +1237,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceServerTeamInfo() {
 		int i = 0;
 
-		TraceEvent("ServerTeamInfo").detail("Size", teams.size());
+		TraceEvent("ServerTeamInfo", distributorId).detail("Size", teams.size());
 		for (auto& team : teams) {
-			TraceEvent("ServerTeamInfo")
+			TraceEvent("ServerTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
 				.detail("CorrectStoreType", team->isCorrectStoreType(configuration.storageServerStoreType))
@@ -1252,7 +1253,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("MachineInfo").detail("Size", machine_info.size());
 		for (auto& machine : machine_info) {
-			TraceEvent("MachineInfo")
+			TraceEvent("MachineInfo", distributorId)
 			    .detail("MachineInfoIndex", i++)
 			    .detail("Healthy", isMachineHealthy(machine.second))
 			    .detail("MachineID", machine.first.contents().toString())
@@ -1265,9 +1266,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceMachineTeamInfo() {
 		int i = 0;
 
-		TraceEvent("MachineTeamInfo").detail("Size", machineTeams.size());
+		TraceEvent("MachineTeamInfo", distributorId).detail("Size", machineTeams.size());
 		for (auto& team : machineTeams) {
-			TraceEvent("MachineTeamInfo")
+			TraceEvent("MachineTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("MachineIDs", team->getMachineIDsStr())
 			    .detail("ServerTeamNumber", team->serverTeams.size());
@@ -1277,11 +1278,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceMachineLocalityMap() {
 		int i = 0;
 
-		TraceEvent("MachineLocalityMap").detail("Size", machineLocalityMap.size());
+		TraceEvent("MachineLocalityMap", distributorId).detail("Size", machineLocalityMap.size());
 		for (auto& uid : machineLocalityMap.getObjects()) {
 			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
 			if (record.isValid()) {
-				TraceEvent("MachineLocalityMap")
+				TraceEvent("MachineLocalityMap", distributorId)
 				    .detail("LocalityIndex", i++)
 				    .detail("UID", uid->toString())
 				    .detail("LocalityRecord", record->toString());
@@ -1298,7 +1299,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceAllInfo(bool shouldPrint = false) {
 		if (!shouldPrint) return;
 
-		TraceEvent("TraceAllInfo").detail("Primary", primary);
+		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
 		traceConfigInfo();
 		traceServerInfo();
 		traceServerTeamInfo();
@@ -2303,12 +2304,12 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	
 	loop {
 		wait( delay(1.0) || self->restartRemoveWrongStoreType.onTrigger() );
-		TraceEvent("WrongStoreTypeRemoverStartLoop").detail("ServerInfoSize", self->server_info.size()).detail("SysRestoreType", self->configuration.storageServerStoreType);
+		TraceEvent("WrongStoreTypeRemoverStartLoop", self->distributorId).detail("Primary", self->primary).detail("ServerInfoSize", self->server_info.size()).detail("SysRestoreType", self->configuration.storageServerStoreType);
 		serversToRemove.clear();
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
 			NetworkAddress a = server->second->lastKnownInterface.address();
 			AddressExclusion addr( a.ip, a.port );
-			TraceEvent("WrongStoreTypeRemover").detail("DDID", self->distributorId).detail("Server", server->first)
+			TraceEvent("WrongStoreTypeRemover", self->distributorId).detail("DDID", self->distributorId).detail("Server", server->first)
 				.detail("Addr", addr.toString()).detail("StoreType", server->second->storeType)
 				.detail("IsCorrectStoreType", server->second->isCorrectStoreType(self->configuration.storageServerStoreType))
 				.detail("ToRemove", server->second->toRemove);
@@ -2324,18 +2325,19 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 		prevHasWrongStoreTypeServer = !serversToRemove.empty();
 
-		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
-			TraceEvent("WrongStoreTypeRemover").detail("KickTeamBuilder", "Start");
-			self->restartRecruiting.trigger();
-			self->doBuildTeams = true;
-		}
 		for ( auto& s : serversToRemove ) {
 			if ( s.isValid() ) {
 				s->wrongStoreTypeRemoved.trigger();
 				//wait( delay(10) );
 			}
 			ASSERT(s->toRemove >= 0);
-			s->toRemove++;
+			s->toRemove++; // The server's location will not be excluded
+		}
+
+		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
+			TraceEvent("WrongStoreTypeRemover").detail("KickTeamBuilder", "Start");
+			self->restartRecruiting.trigger();
+			self->doBuildTeams = true;
 		}
 	}
 }
@@ -2467,7 +2469,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				TraceEvent("TeamHealthChangeDetected", self->distributorId)
 					.detail("Team", team->getDesc())
 					.detail("Primary", self->primary)
-					.detail("IsReady", self->initialFailureReactionDelay.isReady());
+					.detail("IsReady", self->initialFailureReactionDelay.isReady())
+					.detail("HealthyTeamCount", self->healthyTeamCount);
 			}
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
@@ -2507,6 +2510,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			team->setCorrectStoreType( team->isCorrectStoreType(self->configuration.storageServerStoreType) ); // Team with wrong storeType storage servers will not be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
+			TraceEvent("TeamHealthChangeDetected", self->distributorId)
+				.detail("Team", team->getDesc())
+				.detail("ServersLeft", serversLeft).detail("LastServersLeft", lastServersLeft)
+				.detail("AnyUndesired", anyUndesired).detail("LastAnyUndesired", lastAnyUndesired)
+				.detail("AnyWrongConfiguration", anyWrongConfiguration).detail("LastWrongConfiguration", lastWrongConfiguration)
+				.detail("Recheck", recheck)
+				.detail("BadTeam", badTeam)
+				.detail("LastZeroHealthy", lastZeroHealthy)
+				.detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 			lastReady = self->initialFailureReactionDelay.isReady();
 			lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -2876,6 +2888,7 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 		// Update server's storeType, especially when it was created
 		KeyValueStoreType type = wait( server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution) );
 		if ( type == KeyValueStoreType::END ) {
+			TraceEvent("InvalidStoreType").detail("Server", server->id);
 			server->storeType = KeyValueStoreType::INVALID;
 		} else {
 			server->storeType = type;
@@ -2989,7 +3002,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 					self->healthyZone.set(Optional<Key>());
 				}
 				if ( status->isFailed ) { // A failed SS storeType will be marked as invalid
-					server->storeType = KeyValueStoreType::INVALID;
+					//TraceEvent("InvalidStoreType").detail("Server", server->id).detail("IsFailed", status->isFailed);
+					//server->storeType = KeyValueStoreType::INVALID;
 					status->isUndesired = true;
 					status->isWrongConfiguration = true;
 				}
@@ -3425,6 +3439,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
+				TraceEvent("StorageRecruiterMXExit").detail("Error", e.what());
 				throw;
 			}
 			TEST(true); //Storage recruitment timed out
