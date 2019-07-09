@@ -288,12 +288,16 @@ private:
 
 public:
 	static size_t size(const T& value) {
+		bool present = true;
 		if (value.getPtr() == nullptr) {
+			present = false;
 			BinaryWriter writer{ IncludeVersion() };
+			writer << present;
 			return writer.getLength();
 		}
 		if (!value->alreadyWritten) {
 			value->writer = BinaryWriter{ IncludeVersion() };
+			value->writer << present;
 			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
 			value->alreadyWritten = true;
 		}
@@ -303,7 +307,9 @@ public:
 	// Guaranteed to be called only once during serialization
 	static void save(uint8_t* out, const T& value) {
 		if (value.getPtr() == nullptr) {
+			bool present = false;
 			BinaryWriter writer{ IncludeVersion() };
+			writer << present;
 			memcpy(out, writer.getData(), writer.getLength());
 		} else {
 			ASSERT(value->alreadyWritten)
@@ -318,7 +324,13 @@ public:
 	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
 		StringRef str(buf, sz);
 		BinaryReader reader(str, IncludeVersion());
-		serializeReplicationPolicy(reader, value);
+		bool present = false;
+		reader >> present;
+		if (present) {
+			serializeReplicationPolicy(reader, value);
+		} else {
+			value.clear();
+		}
 	}
 };
 
