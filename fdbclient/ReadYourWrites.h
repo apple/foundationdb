@@ -27,9 +27,6 @@
 #include "fdbclient/RYWIterator.h"
 #include <list>
 
-// Estimated number of overhead bytes per mutation.
-#define RYW_TRANSACTION_SIZE_OVERHEAD  30
-
 //SOMEDAY: Optimize getKey to avoid using getRange
 
 struct ReadYourWritesTransactionOptions {
