@@ -2516,7 +2516,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1);
+		db = Database::createDatabase(ccf, -1, false);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}

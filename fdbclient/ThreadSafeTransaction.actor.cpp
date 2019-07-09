@@ -68,7 +68,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 
 	onMainThreadVoid([db, connFile, apiVersion](){ 
 		try {
-			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
+			Database::createDatabase(connFile, apiVersion, false, LocalityData(), db).extractPtr();
 		}
 		catch(Error &e) {
 			new (db) DatabaseContext(e);
