@@ -8,6 +8,12 @@ set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
+set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
+
+set(rel_debug_paths OFF)
+if(RELATIVE_DEBUG_PATHS OR FDB_RELEASE)
+  set(rel_debug_paths ON)
+endif()
 
 if(USE_GPERFTOOLS)
   find_package(Gperftools REQUIRED)
@@ -101,6 +107,10 @@ else()
   if(USE_LD STREQUAL "LLD")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
+  endif()
+
+  if(rel_debug_paths)
+    add_compile_options("-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=." "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=.")
   endif()
 
   # we always compile with debug symbols. CPack will strip them out
