@@ -1128,6 +1128,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		teamInfo->machineTeam = machineTeamInfo;
 		machineTeamInfo->serverTeams.push_back(teamInfo);
+		if (g_network->isSimulated()) {
+			traceTeamCollectionInfo();
+		}
 	}
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
@@ -2149,6 +2152,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		ASSERT_WE_THINK(foundInMachineTeam);
 		team->tracker.cancel();
+		// Consistency check needs the most updated team info to decide if the current team number <= desired number
+		if (g_network->isSimulated()) {
+			traceTeamCollectionInfo();
+		}
 		return found;
 	}
 
@@ -2483,7 +2490,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 				self->addActor.send(self->badTeamRemover);
 			}
 
-			TraceEvent("MachineTeamRemover")
+			TraceEvent("MachineTeamRemover", self->distributorId)
 			    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
 			    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
 			    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
@@ -2499,7 +2506,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		} else {
 			if (numMachineTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
-				TraceEvent("MachineTeamRemoverDone")
+				TraceEvent("MachineTeamRemoverDone", self->distributorId)
 				    .detail("HealthyMachineNumber", healthyMachineCount)
 				    // .detail("CurrentHealthyMachineTeamNumber", currentHealthyMTCount)
 				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
@@ -2569,7 +2576,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 				self->addActor.send(self->badTeamRemover);
 			}
 
-			TraceEvent("ServerTeamRemover")
+			TraceEvent("ServerTeamRemover", self->distributorId)
 			    .detail("ServerTeamToRemove", st->getServerIDsStr())
 			    .detail("NumProcessTeamsOnTheServerTeam", maxNumProcessTeams)
 			    .detail("CurrentServerTeamNumber", self->teams.size())
@@ -2579,7 +2586,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		} else {
 			if (numServerTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
-				TraceEvent("ServerTeamRemoverDone")
+				TraceEvent("ServerTeamRemoverDone", self->distributorId)
 				    .detail("HealthyServerNumber", healthyServerCount)
 				    .detail("CurrentServerTeamNumber", self->teams.size())
 				    .detail("DesiredServerTeam", desiredServerTeams)

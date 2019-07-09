@@ -283,38 +283,34 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
-			int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
-			int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
-			int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
-			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
-			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
-			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
+			state int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
+			state int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
+			state int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
+			state int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
+			state int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
+			state int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			state int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
 			// TODO: Get finer granularity check
-			int64_t minServerTeamOnServer =
+			state int64_t minServerTeamOnServer =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamNumberOnServer"));
-			int64_t maxServerTeamOnServer =
+			state int64_t maxServerTeamOnServer =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumberOnServer"));
-			int64_t minMachineTeamOnMachine =
+			state int64_t minMachineTeamOnMachine =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
-			int64_t maxMachineTeamOnMachine =
+			state int64_t maxMachineTeamOnMachine =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
 
+			// The if condition should be consistent with the condition in serverTeamRemover() and 
+			// machineTeamRemover() that decides if redundant teams exist.
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
-			// if (SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER ||
-			//     SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER) {
-			// 	TraceEvent("GetTeamCollectionValid")
-			// 	    .detail("KnobsMachineTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER)
-			// 	    .detail("KnobsServerTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER);
-			// 	return true;
-			// }
-
-			// The if condition should be consistent with the condition in teamRemover() that decides
-			// if redundant teams exist.
 			if ((!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER && healthyMachineTeamCount > desiredMachineTeamNumber) || 
 				(!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeamNumber > desiredTeamNumber) ||
 			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+				if (attempts++ < 10) {
+					wait(delay(60));
+					continue; // We may not receive the most recent TeamCollectionInfo
+				}
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
 				TraceEvent("GetTeamCollectionValid")
