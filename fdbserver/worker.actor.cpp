@@ -75,7 +75,7 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
@@ -278,10 +278,27 @@ struct TLogOptions {
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
 	auto tLogFn = tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::VALUE) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::REFERENCE) ASSERT(false);
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::VALUE ) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::REFERENCE) return tLog;
+	if ( options.spillType == TLogSpillType::VALUE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return oldTLog_6_0::tLog;
+		default:
+			ASSERT(false);
+		}
+	}
+	if ( options.spillType == TLogSpillType::REFERENCE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+			ASSERT(false);
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return tLog;
+		default:
+			ASSERT(false);
+		}
+	}
 	ASSERT(false);
 	return tLogFn;
 }
@@ -556,7 +573,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 
-		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>() );
+		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -737,7 +754,7 @@ ACTOR Future<Void> workerServer(
 			}
 		} else {
 			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskDefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
+			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskPriority::DefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
 		}
 	}
 
@@ -804,7 +821,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.watchValue);
 
 				Promise<Void> recovery;
-				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
+				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery, connFile);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors( f, kv, s.storeID, kvClosed );
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
@@ -1176,7 +1193,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
-				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
 			}
 			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				state ExecCmdValueString execArg(req.execPayload);
@@ -1403,3 +1420,4 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::COORDINATOR("Coordinator", "CD");

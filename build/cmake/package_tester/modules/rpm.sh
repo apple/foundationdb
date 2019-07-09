@@ -8,6 +8,10 @@ then
 
    conf_save_extension=".rpmsave"
 
+   install_build_tools() {
+       yum -y install cmake gcc
+   }
+
    install() {
        local __res=0
        enterfun

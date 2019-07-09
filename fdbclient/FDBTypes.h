@@ -601,8 +601,9 @@ struct TLogVersion {
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
+		V4 = 4, // 6.2
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V3,
+		MAX_SUPPORTED = V4,
 		MIN_RECRUITABLE = V2,
 		DEFAULT = V3,
 	} version;
@@ -624,6 +625,7 @@ struct TLogVersion {
 	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
+		if (s == LiteralStringRef("4")) return V4;
 		return default_error_or();
 	}
 };

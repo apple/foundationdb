@@ -158,6 +158,7 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
     <ActorCompiler Include="workloads\SnapTest.actor.cpp" />
     <ActorCompiler Include="workloads\Mako.actor.cpp" />
+    <ActorCompiler Include="workloads\ExternalWorkload.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />

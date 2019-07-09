@@ -584,7 +584,7 @@ namespace dbBackup {
 					loop{
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+							tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 
@@ -1080,7 +1080,7 @@ namespace dbBackup {
 					loop{
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+							tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 

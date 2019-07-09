@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 
@@ -109,7 +110,7 @@ public:
 	FlowTransport(uint64_t transportId);
 	~FlowTransport();
 
-	static void createInstance(bool isClient, uint64_t transportId = 0);
+	static void createInstance(bool isClient, uint64_t transportId);
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
 	// so it will be private to a simulation.
 
@@ -137,13 +138,13 @@ public:
 	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 
-	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
 

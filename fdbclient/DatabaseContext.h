@@ -56,7 +56,7 @@ public:
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
 	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
-	                       int taskID = TaskDefaultEndpoint, bool lockAware = false,
+	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
 	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
 
 	~DatabaseContext();
@@ -112,11 +112,10 @@ public:
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
 
-	// private:
-	explicit DatabaseContext(Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-	                         Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID,
-	                         LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware,
-	                         int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
+//private: 
+	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, TaskPriority taskID, LocalityData const& clientLocality, 
+		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );
 
 	explicit DatabaseContext( const Error &err );
 
@@ -183,11 +182,12 @@ public:
 	double transactionTimeout;
 	int transactionMaxRetries;
 	double transactionMaxBackoff;
+	int transactionMaxSize;  // Max size in bytes.
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
 
-	int taskID;
+	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
 	EventMetricHandle<GetValueComplete> getValueCompleted;

@@ -38,8 +38,8 @@
 #undef max
 #undef min
 
-Future<Void> sendOnProcess( ISimulator::ProcessInfo* const& process, Promise<Void> const& promise, int const& taskID );
-Future<Void> sendErrorOnProcess( ISimulator::ProcessInfo* const& process, Promise<Void> const& promise, Error const& e, int const& taskID );
+ACTOR Future<Void> sendOnProcess( ISimulator::ProcessInfo* process, Promise<Void> promise, TaskPriority taskID );
+ACTOR Future<Void> sendErrorOnProcess( ISimulator::ProcessInfo* process, Promise<Void> promise, Error e, TaskPriority taskID );
 
 ACTOR template <class T> 
 Future<T> sendErrorOnShutdown( Future<T> in ) {
@@ -198,7 +198,7 @@ public:
 	//Creates a new AsyncFileNonDurable which wraps the provided IAsyncFile
 	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename, std::string actualFilename, Future<Reference<IAsyncFile>> wrappedFile, Reference<DiskParameters> diskParameters) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state Future<Void> shutdown = success(currentProcess->shutdownSignal.getFuture());
 
 		//TraceEvent("AsyncFileNonDurableOpenBegin").detail("Filename", filename).detail("Addr", g_simulator.getCurrentProcess()->address);
@@ -391,7 +391,7 @@ private:
 
 	ACTOR Future<int> read(AsyncFileNonDurable *self, void *data, int length, int64_t offset) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 
 		try {
@@ -411,7 +411,7 @@ private:
 	//or none of the write.  It may also corrupt parts of sectors which have not been written correctly
 	ACTOR Future<Void> write(AsyncFileNonDurable *self, Promise<Void> writeStarted, Future<Future<Void>> ownFuture, void const* data, int length, int64_t offset) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 		
 		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
@@ -535,7 +535,7 @@ private:
 	//If a kill interrupts the delay, then the truncate may or may not be performed
 	ACTOR Future<Void> truncate(AsyncFileNonDurable *self, Promise<Void> truncateStarted, Future<Future<Void>> ownFuture, int64_t size) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 		
 		state double delayDuration = deterministicRandom()->random01() * self->maxWriteDelay;
@@ -573,8 +573,8 @@ private:
 			}
 		}
 
-		if(g_network->check_yield(TaskDefaultYield)) {
-			wait(delay(0, TaskDefaultYield));
+		if(g_network->check_yield(TaskPriority::DefaultYield)) {
+			wait(delay(0, TaskPriority::DefaultYield));
 		}
 
 		//If performing a durable truncate, then pass it through to the file.  Otherwise, pass it through with a 1/2 chance
@@ -663,7 +663,7 @@ private:
 
 	ACTOR Future<Void> sync(AsyncFileNonDurable *self, bool durable) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait( g_simulator.onMachine( currentProcess ) );
 
 		try {
@@ -695,7 +695,7 @@ private:
 
 	ACTOR Future<int64_t> size(AsyncFileNonDurable *self) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		wait( g_simulator.onMachine( currentProcess ) );
 
@@ -714,7 +714,7 @@ private:
 	//Finishes all outstanding actors on an AsyncFileNonDurable and then deletes it
 	ACTOR Future<Void> deleteFile(AsyncFileNonDurable *self) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state std::string filename = self->filename;
 
 		wait( g_simulator.onMachine( currentProcess ) );

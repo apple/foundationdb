@@ -472,9 +472,9 @@ private:
 #endif
 		}
 
-		int getTask() const { return (prio>>32)+1; }
+		TaskPriority getTask() const { return static_cast<TaskPriority>((prio>>32)+1); }
 
-		ACTOR static void deliver( Promise<int> result, bool failed, int r, int task ) {
+		ACTOR static void deliver( Promise<int> result, bool failed, int r, TaskPriority task ) {
 			wait( delay(0, task) );
 			if (failed) result.sendError(io_timeout());
 			else if (r < 0) result.sendError(io_error());
@@ -649,7 +649,7 @@ private:
 		loop {
 			wait(success(ev->read()));
 
-			wait(delay(0, TaskDiskIOComplete));
+			wait(delay(0, TaskPriority::DiskIOComplete));
 
 			linux_ioresult ev[FLOW_KNOBS->MAX_OUTSTANDING];
 			timespec tm; tm.tv_sec = 0; tm.tv_nsec = 0;
