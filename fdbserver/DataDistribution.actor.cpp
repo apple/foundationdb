@@ -1741,7 +1741,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber, int remainingTeamBudget) {
 		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
-		ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
+		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
 		// The numTeamsPerServerFactor is calculated as
@@ -1780,7 +1780,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
-		int minTeamNumPerServer = std::numeric_limits<int>::max();
+		int minTeamNumPerServer = getMinTeamNumPerServer();
 		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget ||
 		       minTeamNumPerServer < targetTeamNumPerServer) {
 			// Step 1: Create 1 best machine team
@@ -1866,7 +1866,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 			// Keep building teams until each team has no less than targetTeamNumPerServer teams
 			if (!(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget)) {
-				// update the minTeamNumPerServer
+				// Update the minTeamNumPerServer
 				minTeamNumPerServer = getMinTeamNumPerServer();
 			}
 
