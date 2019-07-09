@@ -386,6 +386,22 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 		server_dc.clear();
 		succeeded = false;
 		try {
+
+			// Read healthyZone value which is later used to determin on/off of failure triggered DD
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			if (val.present()) {
+				auto p = decodeHealthyZoneValue(val.get());
+				if (p.second > tr.getReadVersion().get()) {
+					result->initHealthyZoneValue = Optional<Key>(p.first);
+				} else {
+					result->initHealthyZoneValue = Optional<Key>();
+				}
+			} else {
+				result->initHealthyZoneValue = Optional<Key>();
+			}
+
 			result->mode = 1;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> mode = wait( tr.get( dataDistributionModeKey ) );
@@ -961,6 +977,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	ACTOR static Future<Void> init( DDTeamCollection* self, Reference<InitialDataDistribution> initTeams ) {
+		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is an address/locality collision, should
 		// we preferentially mark the least used server as undesirable?
 		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
@@ -3063,7 +3080,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 				TraceEvent("MaintenanceZoneEnd", self->distributorId);
 				self->healthyZone.set(Optional<Key>());
 			}
-			
+
 			state Future<Void> watchFuture = tr.watch(healthyZoneKey);
 			wait(tr.commit());
 			wait(watchFuture || healthyZoneTimeout);
@@ -3116,19 +3133,29 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 	}
 }
 
-ACTOR Future<Void> storageServerFailureTracker(
-	DDTeamCollection* self,
-	TCServerInfo *server,
-	Database cx,
-	ServerStatus *status,
-	Version addedVersion )
-{
+ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerInfo* server, Database cx,
+                                               ServerStatus* status, Version addedVersion) {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
+	state Key IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY =
+	    LiteralStringRef("IgnoreSSFailures"); // TODO: make this a global constant/knob
 	loop {
-		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
-		if(inHealthyZone) {
-			status->isFailed = false;
+		state bool inHealthyZone = false;
+		if (self->healthyZone.get().present()) {
+			if (interf.locality.zoneId() == self->healthyZone.get()) {
+				status->isFailed = false;
+				inHealthyZone = true;
+			} else if (self->healthyZone.get().get() == IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY) {
+				// Ignore all SS failures
+				status->isFailed = false;
+				status->isUndesired = false;
+				status->isWrongConfiguration = false;
+				TraceEvent("SSFailureTracker", self->distributorId)
+				    .detail("IgnoredFailure", "BeforeChooseWhen")
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString());
+				return true;
+			}
 		}
 
 		if( self->server_status.get(interf.id()).initialized ) {
@@ -3160,21 +3187,29 @@ ACTOR Future<Void> storageServerFailureTracker(
 				if(!status->isFailed && (server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 				}
-				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
-					self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
-					TraceEvent("MaintenanceZoneCleared", self->distributorId);
-					self->healthyZone.set(Optional<Key>());
+				if (status->isFailed && self->healthyZone.get().present()) {
+					if (self->healthyZone.get().get() == IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY) {
+						// Ignore the failed storage server
+						TraceEvent("SSFailureTracker", self->distributorId)
+						    .detail("IgnoredFailure", "InsideChooseWhen")
+						    .detail("ServerID", interf.id())
+						    .detail("Status", status->toString());
+						status->isFailed = false;
+						status->isUndesired = false;
+						status->isWrongConfiguration = false;
+					} else if (self->clearHealthyZoneFuture.isReady()) {
+						self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
+						TraceEvent("MaintenanceZoneCleared", self->distributorId);
+						self->healthyZone.set(Optional<Key>());
+					}
 				}
-
-				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
-					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
 		}
 	}
 
-	return Void();
+	return false; // Don't ignore failures
 }
 
 // Check the status of a storage server.
@@ -3186,7 +3221,7 @@ ACTOR Future<Void> storageServerTracker(
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
-	state Future<Void> failureTracker;
+	state Future<bool> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
 	state Future<Void> metricsTracker = serverMetricsPolling( server );
@@ -3273,8 +3308,7 @@ ACTOR Future<Void> storageServerTracker(
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
 			otherChanges.push_back( self->excludedServers.onChange( ipaddr ) );
 
-			failureTracker = storageServerFailureTracker( self, server, cx, &status, addedVersion );
-
+			failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
 			//We need to recruit new storage servers if the key value store type has changed
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
@@ -3288,7 +3322,13 @@ ACTOR Future<Void> storageServerTracker(
 
 			state bool recordTeamCollectionInfo = false;
 			choose {
-				when( wait( failureTracker ) ) {
+				when(bool ignoreSSFailures = wait(failureTracker)) {
+					if (ignoreSSFailures) {
+						TraceEvent("IgnoreSSFailure", self->distributorId)
+						    .detail("ServerID", server->id)
+						    .detail("Status", "FailureIgnored");
+						return Void();
+					}
 					// The server is failed AND all data has been removed from it, so permanently remove it.
 					TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", server->id).detail("Status", "Removing");
 

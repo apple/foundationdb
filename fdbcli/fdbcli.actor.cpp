@@ -2569,6 +2569,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state FdbOptions *options = &globalOptions;
 
 	state Reference<ClusterConnectionFile> ccf;
+	state BinaryWriter wr(IncludeVersion());
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
@@ -3442,18 +3443,44 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					if (tokens.size() != 2) {
-						printf("Usage: datadistribution <on|off>\n");
+					if (tokens.size() != 2 || tokens.size() != 3) {
+						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>>\n");
 						is_error = true;
 					} else {
 						if(tokencmp(tokens[1], "on")) {
 							wait(success(setDDMode(db, 1)));
-							printf("Data distribution is enabled\n");
+							tr->clear(healthyZoneKey);
+							tr->clear(rebalanceDDIgnoreKey);
+							if (!intrans) {
+								wait(commitTransaction(tr));
+							}
+							printf("Data distribution is enabled for all cases\n");
 						} else if(tokencmp(tokens[1], "off")) {
 							wait(success(setDDMode(db, 0)));
-							printf("Data distribution is disabled\n");
+							printf("Data distribution is disabled for all cases\n");
+						} else if (tokencmp(tokens[1], "disable")) {
+							if (tokencmp(tokens[2], "ssfailure")) {
+								Version readVersion = wait(tr->getReadVersion());
+								wr << LiteralStringRef("IgnoreSSFailures");
+								wr << (readVersion + 1e6 * 1e6); // Put a ridiculous value here.
+								tr->set(healthyZoneKey, wr.toValue());
+								wr = BinaryWriter(IncludeVersion());
+								if (!intrans) {
+									wait(commitTransaction(tr));
+								}
+								printf("Data distribution is disabled for storage server failures\n");
+							} else if (tokencmp(tokens[2], "rebalance")) {
+								tr->set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+								if (!intrans) {
+									wait(commitTransaction(tr));
+								}
+								printf("Data distribution is disabled for rebalance\n");
+							} else {
+								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>>\n");
+								is_error = true;
+							}
 						} else {
-							printf("Usage: datadistribution <on|off>\n");
+							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>>\n");
 							is_error = true;
 						}
 					}
