@@ -2616,6 +2616,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					.detail("Team", team->getDesc())
 					.detail("Primary", self->primary)
 					.detail("IsReady", self->initialFailureReactionDelay.isReady());
+				self->traceTeamCollectionInfo();
 			}
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;

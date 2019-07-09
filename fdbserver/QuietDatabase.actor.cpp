@@ -302,17 +302,18 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
-			if (SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER ||
-			    SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER) {
-				TraceEvent("GetTeamCollectionValid")
-				    .detail("KnobsMachineTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER)
-				    .detail("KnobsServerTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER);
-				return true;
-			}
+			// if (SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER ||
+			//     SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER) {
+			// 	TraceEvent("GetTeamCollectionValid")
+			// 	    .detail("KnobsMachineTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER)
+			// 	    .detail("KnobsServerTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER);
+			// 	return true;
+			// }
 
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber || currentTeamNumber > desiredTeamNumber ||
+			if ((!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER && healthyMachineTeamCount > desiredMachineTeamNumber) || 
+				(!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeamNumber > desiredTeamNumber) ||
 			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
