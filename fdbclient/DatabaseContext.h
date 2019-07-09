@@ -134,7 +134,7 @@ public:
 	std::map< UID, StorageServerInfo* > server_interf;
 
 	UID dbId;
-	bool internal;
+	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	CounterCollection cc;
 
