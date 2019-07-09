@@ -417,12 +417,14 @@ struct Peer : NonCopyable {
 				}
 			}
 
-			const bool pendingPacketsEmpty = peer->reliable.empty() && peer->unsent.empty();
-			if (pendingPacketsEmpty && (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
-			    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
-				if (peer->peerReferences == 0) {
+			if (peer->reliable.empty() && peer->unsent.empty()) {
+				if (peer->peerReferences == 0 &&
+				    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
+					// TODO: What about when peerReference == -1?
 					throw connection_unreferenced();
-				} else if (FlowTransport::transport().isClient() && peer->destination.isPublic()) {
+				} else if (FlowTransport::transport().isClient() && peer->destination.isPublic() &&
+				           (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
+				           (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
 					// First condition is necessary because we may get here if we are server.
 					throw connection_idle();
 				}
