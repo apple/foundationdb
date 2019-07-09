@@ -803,27 +803,52 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if( found ) {
 			if(stopped) {
 				std::vector<Reference<LogSet>> localSets;
-				int bestSet = 0;
+				int bestPrimarySet = 0;
+				int bestSatelliteSet = -1;
 				for(auto& log : tLogs) {
 					if(log->isLocal && log->logServers.size()) {
 						TraceEvent("TLogPeekLogRouterLocalSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("LogServers", log->logServerString());
 						localSets.push_back(log);
-						if(log->locality != tagLocalitySatellite) {
-							bestSet = localSets.size() - 1;
+						if(log->locality == tagLocalitySatellite) {
+							bestSatelliteSet = localSets.size() - 1;
+						} else {
+							bestPrimarySet = localSets.size() - 1;
 						}
 					}
+				}
+				int bestSet = bestPrimarySet;
+				if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED &&
+				    bestSatelliteSet != -1 &&
+				    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4 ) {
+					bestSet = bestSatelliteSet;
 				}
 
 				TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
 				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, getPeekEnd(), true ) );
 			} else {
-				for( auto& log : tLogs ) {
-					if(log->logServers.size() && log->isLocal && log->locality != tagLocalitySatellite) {
-						TraceEvent("TLogPeekLogRouterBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("LogId", log->logServers[log->bestLocationFor( tag )]->get().id());
-						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, true ) );
+				int bestPrimarySet = -1;
+				int bestSatelliteSet = -1;
+				for( int i = 0; i < tLogs.size(); i++ ) {
+					const auto& log = tLogs[i];
+					if(log->logServers.size() && log->isLocal) {
+						if (log->locality == tagLocalitySatellite) {
+							bestSatelliteSet = i;
+							break;
+						} else {
+							if (bestPrimarySet == -1) bestPrimarySet = i;
+						}
 					}
 				}
+				int bestSet = bestPrimarySet;
+				if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED &&
+				    bestSatelliteSet != -1 &&
+				    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4 ) {
+					bestSet = bestSatelliteSet;
+				}
+				const auto& log = tLogs[bestSet];
+				TraceEvent("TLogPeekLogRouterBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("LogId", log->logServers[log->bestLocationFor( tag )]->get().id());
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, true ) );
 			}
 		}
 		bool firstOld = true;
@@ -836,16 +861,25 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			if( found ) {
-				int bestSet = 0;
+				int bestPrimarySet = 0;
+				int bestSatelliteSet = -1;
 				std::vector<Reference<LogSet>> localSets;
 				for(auto& log : old.tLogs) {
 					if(log->isLocal && log->logServers.size()) {
 						TraceEvent("TLogPeekLogRouterOldLocalSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("LogServers", log->logServerString());
 						localSets.push_back(log);
-						if(log->locality != tagLocalitySatellite) {
-							bestSet = localSets.size()-1;
+						if(log->locality == tagLocalitySatellite) {
+							bestSatelliteSet = localSets.size() - 1;
+						} else {
+							bestPrimarySet = localSets.size() - 1;
 						}
 					}
+				}
+				int bestSet = bestPrimarySet;
+				if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED &&
+				    bestSatelliteSet != -1 &&
+				    old.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4 ) {
+					bestSet = bestSatelliteSet;
 				}
 
 				TraceEvent("TLogPeekLogRouterOldSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("OldEpoch", old.epochEnd).detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1).detail("FirstOld", firstOld);
@@ -1949,12 +1983,25 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.logRouterTags = logSystem->logRouterTags;
 			}
 
-			for(int i = -1; i < oldLogSystem->logRouterTags; i++) {
-				Tag tag = i == -1 ? txsTag : Tag(tagLocalityLogRouter, i);
-				locations.clear();
-				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-				for(int loc : locations)
-					sreqs[ loc ].recoverTags.push_back( tag );
+			locations.clear();
+			logSystem->tLogs[1]->getPushLocations( {txsTag}, locations, 0 );
+			for(int loc : locations)
+				sreqs[ loc ].recoverTags.push_back( txsTag );
+
+			if (logSystem->logRouterTags) {
+				for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
+					Tag tag = Tag(tagLocalityLogRouter, i);
+					// Sattelite logs will index a mutation with tagLocalityLogRouter with an id greater than
+					// the number of log routers as having an id mod the number of log routers.  We thus need
+					// to make sure that if we're going from more log routers in the previous generation to
+					// less log routers in the newer one, that we map the log router tags onto satellites that
+					// are the preferred location for id%logRouterTags.
+					Tag pushLocation = Tag(tagLocalityLogRouter, i%logSystem->logRouterTags);
+					locations.clear();
+					logSystem->tLogs[1]->getPushLocations( {pushLocation}, locations, 0 );
+					for(int loc : locations)
+						sreqs[ loc ].recoverTags.push_back( tag );
+				}
 			}
 
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )
