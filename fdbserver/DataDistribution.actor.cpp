@@ -1725,7 +1725,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int getMinTeamNumPerServer() {
 		int minTeamNumPerServer = std::numeric_limits<int>::max();
 		for (auto& s : server_info) {
-			minTeamNumPerServer = std::min(minTeamNumPerServer, s.second->teams.size());
+			minTeamNumPerServer = std::min<int>(minTeamNumPerServer, s.second->teams.size());
 		}
 
 		return minTeamNumPerServer;
@@ -2521,7 +2521,12 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		}
 
 		// To avoid removing machine teams too fast, which is unlikely happen though
-		wait(delay(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY));
+		double removeServerTeamDelay = SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY;
+		if (g_network->isSimulated()) {
+			// Speed up the team remover in simulation; otherwise, it may time out because we need to remove hundreds of teams
+			removeServerTeamDelay = removeServerTeamDelay / 10;
+		}
+		wait(delay(removeServerTeamDelay));
 
 		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
