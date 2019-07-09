@@ -1848,7 +1848,7 @@ ACTOR Future<Void> masterProxyServer(
 	state PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies;
 	state PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies;
 	state int replyCount = 0;
-	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY) || stripRequest(proxy.commit, commitReplies, &replyCount) || stripRequest(proxy.getConsistentReadVersion, grvReplies, &replyCount) || stripRequest(proxy.getKeyServersLocations, locationReplies, &replyCount);
+	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY) || stripRequests(proxy.commit, commitReplies, &replyCount) || stripRequests(proxy.getConsistentReadVersion, grvReplies, &replyCount) || stripRequests(proxy.getKeyServersLocations, locationReplies, &replyCount);
 	proxy = MasterProxyInterface();
 	loop {
 		if(finishForward.isReady()) {

@@ -283,7 +283,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
 	init( PROXY_FORWARD_DELAY,                                  10.0 );
-	init( MAX_FORWARD_MESSAGES,                                  1e6 );
+	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
