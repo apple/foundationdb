@@ -629,13 +629,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 PromiseStream<RelocateShard> const& output,
 	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	                 DatabaseConfiguration configuration, std::vector<Optional<Key>> includedDCs,
-	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-	                 Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
+	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs, Future<Void> readyToStart,
+	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()), configuration(configuration),
-	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
+	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
+	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
@@ -1435,7 +1435,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				addedMachineTeams++;
 				// Update the remaining machine team budget because the budget may decrease by
 				// any value between 1 and storageTeamSize
-				if ( !(addedMachineTeams < machineTeamsToBuild) ) {
+				if (!(addedMachineTeams < machineTeamsToBuild)) {
 					remainingMachineTeamBudget = getRemainingMachineTeamBudget();
 				}
 			} else {
@@ -1667,9 +1667,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		for (auto& t : teams) {
 			// The minimum number of teams of a server in a team is the representative team number for the team
-			int representNumProcessTeams = std::numeric_limits<int>::max()
+			int representNumProcessTeams = std::numeric_limits<int>::max();
 			for (auto& server : t->getServers()) {
-				representNumProcessTeams = std::min(representNumProcessTeams, server->teams.size());
+				representNumProcessTeams = std::min<int>(representNumProcessTeams, server->teams.size());
 			}
 			if (representNumProcessTeams > maxNumProcessTeams) {
 				maxNumProcessTeams = representNumProcessTeams;
@@ -1723,7 +1723,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	int getMinTeamNumPerServer() {
-		int minTeamNumPerServer = std::numeric_limits<int>::max()
+		int minTeamNumPerServer = std::numeric_limits<int>::max();
 		for (auto& s : server_info) {
 			minTeamNumPerServer = std::min(minTeamNumPerServer, s.second->teams.size());
 		}
@@ -1738,14 +1738,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber, int remainingTeamBudget) {
 		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
-		ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 &&  self->configuration.storageTeamSize >= 1);
+		ASSERT(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
 		// The numTeamsPerServerFactor is calculated as
 		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
 		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-		int targetTeamNumPerServer =  (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
+		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 		ASSERT(targetTeamNumPerServer > 0);
 
 		int addedMachineTeams = 0;
@@ -1777,8 +1777,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
-		int minTeamNumPerServer =  std::numeric_limits<int>::max()
-		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget || minTeamNumPerServer < targetTeamNumPerServer) {
+		int minTeamNumPerServer = std::numeric_limits<int>::max();
+		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget ||
+		       minTeamNumPerServer < targetTeamNumPerServer) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
 			int bestScore = std::numeric_limits<int>::max();
@@ -1857,11 +1858,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedTeams++;
 			// Only when the addedTeams < teamsToBuild is invalid, should we use remainingTeamBudget to
 			// keep building teams
-			if ( !(addedTeams < teamsToBuild) ) {
+			if (!(addedTeams < teamsToBuild)) {
 				remainingTeamBudget = getRemainingServerTeamBudget();
 			}
 			// Keep building teams until each team has no less than targetTeamNumPerServer teams
-			if ( !(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) ) {
+			if (!(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget)) {
 				// update the minTeamNumPerServer
 				minTeamNumPerServer = getMinTeamNumPerServer();
 			}
@@ -2520,14 +2521,14 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		}
 
 		// To avoid removing machine teams too fast, which is unlikely happen though
-		wait( delay(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY) );
+		wait(delay(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY));
 
 		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
 
-		// Q: We may need to count the number of servers instead of only healthy servers, since healthyness can change quickly?
+		// Q: Should we count the number of servers instead of healthy servers, since healthyness can change quickly?
 		int healthyServerCount = self->calculateHealthyServerCount();
 		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all servers will become healthy.
@@ -2544,10 +2545,8 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 
 		if (totalSTCount > desiredServerTeams) {
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
-			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams(true);
-			if (!foundSTInfo.first.isValid()) {
-				foundSTInfo = self->getServerTeamWithMostProcessTeams(false);
-			}
+			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+			ASSERT(foundSTInfo.first.isValid());
 			Reference<TCTeamInfo> st = foundSTInfo.first;
 			int maxNumProcessTeams = foundSTInfo.second;
 			ASSERT(st.isValid());
@@ -2556,7 +2555,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			ASSERT(foundTeam == true);
 			self->addTeam(st->getServers(), true, true);
 			TEST(true);
-			
+
 			self->doBuildTeams = true;
 
 			if (self->badTeamRemover.isReady()) {
