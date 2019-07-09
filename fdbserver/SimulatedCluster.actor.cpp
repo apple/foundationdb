@@ -1373,28 +1373,6 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication, i
 	ifs.close();
 }
 
-// To be called after we stop simulator, so that destructors of each process is
-// called with right context, with access to right globals. At this point, we
-// also no longer have to protect coordinator addresses.
-// TODO: Investigate why this doesn't work when we call before stop(). Some
-//   earlier permanently failed processes seems to be the reason.
-ACTOR Future<Void> destroyAllProcesses() {
-	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
-	state vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
-	state std::vector<ISimulator::ProcessInfo*>::iterator it;
-
-	g_simulator.protectedAddresses.clear();
-	for (it = processes.begin(); it != processes.end(); ++it) {
-		if (*it == simProcess || (*it)->failed) continue;
-		wait (g_simulator.onProcess(*it, TaskPriority::DefaultYield));
-		(*it)->shutdownSignal.send(ISimulator::KillInstantly);
-		g_simulator.destroyProcess(*it);
-	}
-
-	wait (g_simulator.onProcess(simProcess, TaskPriority::DefaultYield));
-	return Void();
-}
-
 ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, bool restoring, std::string whitelistBinPaths, Reference<TLSOptions> tlsOptions) {
 	state vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
@@ -1451,6 +1429,6 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	TraceEvent("SimulatedSystemDestruct");
 	g_simulator.stop();
 	destructed = true;
-	wait(destroyAllProcesses());
-	systemActors.clear();
+	wait(Never());
+	ASSERT(false);
 }
