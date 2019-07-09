@@ -54,7 +54,7 @@ public:
 
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
-	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
+	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID=TaskPriority::DefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
 
 	~DatabaseContext();
 
@@ -97,7 +97,7 @@ public:
 
 //private: 
 	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
+		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, TaskPriority taskID, LocalityData const& clientLocality, 
 		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
 
 	explicit DatabaseContext( const Error &err );
@@ -158,7 +158,7 @@ public:
 
 	Future<Void> logger;
 
-	int taskID;
+	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
 	EventMetricHandle<GetValueComplete> getValueCompleted;

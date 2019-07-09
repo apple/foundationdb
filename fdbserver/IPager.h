@@ -31,8 +31,7 @@
 
 #define debug_printf_always(...) { fprintf(stdout, "%s %f ", g_network->getLocalAddress().toString().c_str(), now()), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
 
-template <class... T>
-void debug_printf_noop(T&&...) {}
+#define debug_printf_noop(...)
 
 #if REDWOOD_DEBUG
   #define debug_printf debug_printf_always
@@ -42,11 +41,18 @@ void debug_printf_noop(T&&...) {}
 
 #define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
 
+#ifndef VALGRIND
+#define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
+#define VALGRIND_MAKE_MEM_DEFINED(x, y)
+#endif
+
 typedef uint32_t LogicalPageID; // uint64_t?
 static const int invalidLogicalPageID = LogicalPageID(-1);
 
 class IPage {
 public:
+	IPage() : userData(nullptr) {}
+
 	virtual uint8_t const* begin() const = 0;
 	virtual uint8_t* mutate() = 0;
 
@@ -57,10 +63,17 @@ public:
 		return StringRef(begin(), size());
 	}
 
-	virtual ~IPage() {}
+	virtual ~IPage() {
+		if(userData != nullptr && userDataDestructor != nullptr) {
+			userDataDestructor(userData);
+		}
+	}
 
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
+
+	mutable void *userData;
+	mutable void (*userDataDestructor)(void *);
 };
 
 class IPagerSnapshot {

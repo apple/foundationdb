@@ -494,7 +494,7 @@ Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<Stri
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring( &systemMonitor, 5.0, TaskFlushTrace );
+	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
 }
 
 void testIndexedSet();

@@ -560,8 +560,32 @@ inline static int ctzll( uint64_t value ) {
     }
     return 64;
 }
+inline static int clzll( uint64_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse64( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
+inline static int ctz( uint32_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+inline static int clz( uint32_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
 #else
 #define ctzll __builtin_ctzll
+#define clzll __builtin_clzll
+#define ctz __builtin_ctz
+#define clz __builtin_clz
 #endif
 
 #include <boost/config.hpp>

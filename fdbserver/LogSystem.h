@@ -341,7 +341,7 @@ struct ILogSystem {
 
 		//returns immediately if hasMessage() returns true.
 		//returns when either the result of hasMessage() or version() has changed, or a cursor has internally been exhausted.
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply) = 0;
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) = 0;
 
 		//returns when the failure monitor detects that the servers associated with the cursor are failed
 		virtual Future<Void> onFailed() = 0;
@@ -407,7 +407,7 @@ struct ILogSystem {
 		virtual StringRef getMessageWithTags();
 		virtual const std::vector<Tag>& getTags();
 		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
@@ -455,7 +455,7 @@ struct ILogSystem {
 		virtual StringRef getMessageWithTags();
 		virtual const std::vector<Tag>& getTags();
 		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
@@ -500,7 +500,7 @@ struct ILogSystem {
 		virtual StringRef getMessageWithTags();
 		virtual const std::vector<Tag>& getTags();
 		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
@@ -534,7 +534,7 @@ struct ILogSystem {
 		virtual StringRef getMessageWithTags();
 		virtual const std::vector<Tag>& getTags();
 		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
@@ -594,7 +594,7 @@ struct ILogSystem {
 		virtual StringRef getMessageWithTags();
 		virtual const std::vector<Tag>& getTags();
 		virtual void advanceTo(LogMessageVersion n);
-		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();

@@ -85,7 +85,7 @@ void fdb_flow_test() {
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
 	systemMonitor();
-	uncancellable(recurring(&systemMonitor, 5.0, TaskFlushTrace));
+	uncancellable(recurring(&systemMonitor, 5.0, TaskPriority::FlushTrace));
 
 	Future<Void> t = _test();
 
@@ -179,7 +179,7 @@ namespace FDB {
 	}
 
 	void backToFutureCallback( FDBFuture* f, void* data ) {
-		g_network->onMainThread( Promise<Void>((SAV<Void>*)data), TaskDefaultOnMainThread ); // SOMEDAY: think about this priority
+		g_network->onMainThread( Promise<Void>((SAV<Void>*)data), TaskPriority::DefaultOnMainThread ); // SOMEDAY: think about this priority
 	}
 
 	// backToFuture<Type>( FDBFuture*, (FDBFuture* -> Type) ) -> Future<Type>

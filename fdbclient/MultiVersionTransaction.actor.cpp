@@ -614,7 +614,20 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	else {
 		auto tr = getTransaction();
 		auto f = tr.transaction ? tr.transaction->onError(e) : ThreadFuture<Void>(Never());
-		return abortableFuture(f, tr.onChange);
+		f = abortableFuture(f, tr.onChange);
+
+		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
+			if(!ready.isError() || ready.getError().code() != error_code_cluster_version_changed) {
+				if(ready.isError()) {
+					return ErrorOr<ThreadFuture<Void>>(ready.getError());
+				}
+
+				return ErrorOr<ThreadFuture<Void>>(Void());
+			}
+
+			updateTransaction();
+			return ErrorOr<ThreadFuture<Void>>(onError(e));
+		});
 	}
 }
 

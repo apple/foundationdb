@@ -179,7 +179,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {
