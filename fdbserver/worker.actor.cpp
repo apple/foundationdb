@@ -278,10 +278,27 @@ struct TLogOptions {
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
 	auto tLogFn = tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::VALUE) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::REFERENCE) ASSERT(false);
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::VALUE ) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::REFERENCE) return tLog;
+	if ( options.spillType == TLogSpillType::VALUE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return oldTLog_6_0::tLog;
+		default:
+			ASSERT(false);
+		}
+	}
+	if ( options.spillType == TLogSpillType::REFERENCE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+			ASSERT(false);
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return tLog;
+		default:
+			ASSERT(false);
+		}
+	}
 	ASSERT(false);
 	return tLogFn;
 }
