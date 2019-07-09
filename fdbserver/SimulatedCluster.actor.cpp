@@ -850,23 +850,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	}
 
 	if (deterministicRandom()->random01() < 0.5) {
-		if (deterministicRandom()->random01() < 0.5) {
-			set_config("log_spill:=1");  // VALUE
-		}
-		int logVersion = deterministicRandom()->randomInt( 0, 3 );
-		switch (logVersion) {
-		case 0:
-			break;
-		case 1:
-			set_config("log_version:=2");  // 6.0
-			break;
-		case 2:
-			set_config("log_version:=3");  // 6.1
-			break;
-		}
+		int logSpill = deterministicRandom()->randomInt( TLogSpillType::VALUE, TLogSpillType::END );
+		set_config(format("log_spill:=%d", logSpill));
+		int logVersion = deterministicRandom()->randomInt( TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED+1 );
+		set_config(format("log_version:=%d", logVersion));
 	} else {
-		set_config("log_version:=3");  // 6.1
-		set_config("log_spill:=2");  // REFERENCE
+		if (deterministicRandom()->random01() < 0.7)
+			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));
+		if (deterministicRandom()->random01() < 0.5)
+			set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
 	}
 
 	if(generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
