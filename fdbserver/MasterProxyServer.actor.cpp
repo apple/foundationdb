@@ -1789,23 +1789,34 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 	}
 }
 
-ACTOR Future<Void> forwardProxy(ClientDBInfo info, RequestStream<CommitTransactionRequest> commit, RequestStream<GetReadVersionRequest> getConsistentReadVersion, RequestStream<GetKeyServerLocationsRequest> getKeyServersLocations) {
+ACTOR template <class X> Future<Void> stripRequests( RequestStream<X> in, PromiseStream<ReplyPromise<REPLY_TYPE(X)>> out, int* count) {
+	loop {
+		X req = waitNext(in.getFuture());
+		out.send(req.reply);
+		if((*count) >= 0 && ++(*count) >= SERVER_KNOBS->MAX_FORWARD_MESSAGES) {
+			TraceEvent(SevWarnAlways, "TooManyProxyForwardRequests");
+			return Void();
+		}
+	}
+}
+
+ACTOR Future<Void> forwardProxy(ClientDBInfo info, PromiseStream<ReplyPromise<CommitID>> commitReplies, PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies, PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies) {
 	loop {
 		choose {
-			when(CommitTransactionRequest req = waitNext(commit.getFuture())) {
+			when(ReplyPromise<CommitID> req = waitNext(commitReplies.getFuture())) {
 				CommitID rep;
 				rep.newClientInfo = info;
-				req.reply.send(rep);
+				req.send(rep);
 			}
-			when(GetReadVersionRequest req = waitNext(getConsistentReadVersion.getFuture())) {
+			when(ReplyPromise<GetReadVersionReply> req = waitNext(grvReplies.getFuture())) {
 				GetReadVersionReply rep;
 				rep.newClientInfo = info;
-				req.reply.send(rep);
+				req.send(rep);
 			}
-			when(GetKeyServerLocationsRequest req = waitNext(getKeyServersLocations.getFuture())) {
+			when(ReplyPromise<GetKeyServerLocationsReply> req = waitNext(locationReplies.getFuture())) {
 				GetKeyServerLocationsReply rep;
 				rep.newClientInfo = info;
-				req.reply.send(rep);
+				req.send(rep);
 			}
 		}
 		wait(yield());
@@ -1833,15 +1844,20 @@ ACTOR Future<Void> masterProxyServer(
 		}
 	}
 	core.cancel();
-	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY);
+	state PromiseStream<ReplyPromise<CommitID>> commitReplies;
+	state PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies;
+	state PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies;
+	state int replyCount = 0;
+	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY) || stripRequest(proxy.commit, commitReplies, &replyCount) || stripRequest(proxy.getConsistentReadVersion, grvReplies, &replyCount) || stripRequest(proxy.getKeyServersLocations, locationReplies, &replyCount);
+	proxy = MasterProxyInterface();
 	loop {
 		if(finishForward.isReady()) {
 			return Void();
 		}
 		if(db->get().client.proxies.size() > 0 && !db->get().client.proxies[0].provisional && db->get().recoveryCount >= req.recoveryCount
 			&& !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy)) {
-			core = forwardProxy(db->get().client, proxy.commit, proxy.getConsistentReadVersion, proxy.getKeyServersLocations);
-			proxy = MasterProxyInterface();
+			replyCount = -1;
+			core = forwardProxy(db->get().client, commitReplies, grvReplies, locationReplies);
 			wait(finishForward);
 			return Void();
 		}
