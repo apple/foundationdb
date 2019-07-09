@@ -132,10 +132,10 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
-	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
-	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );

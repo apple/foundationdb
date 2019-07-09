@@ -592,13 +592,13 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 						}
 
 						onProxyFailureVec.push_back(
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getConsistentReadVersion.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(proxy.commit.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getKeyServersLocations.getEndpoint()) ||
-						    IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-						        proxy.getStorageServerRejoinInfo.getEndpoint()));
+						    IFailureMonitor::failureMonitor().onStateEqual(
+						        proxy.getConsistentReadVersion.getEndpoint(), FailureStatus()) ||
+						    IFailureMonitor::failureMonitor().onStateEqual(proxy.commit.getEndpoint(), FailureStatus()) ||
+						    IFailureMonitor::failureMonitor().onStateEqual(
+						        proxy.getKeyServersLocations.getEndpoint(), FailureStatus()) ||
+						    IFailureMonitor::failureMonitor().onStateEqual(
+						        proxy.getStorageServerRejoinInfo.getEndpoint(), FailureStatus()));
 					}
 					if (skipWaitForProxyFail) continue;
 
