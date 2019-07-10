@@ -380,7 +380,6 @@ private:
 
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
-		// SOMEDAY: Make this value variable? Dependent on buggification status?
 		if (self->process->address.isPublic()) {
 			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
 		} else {
