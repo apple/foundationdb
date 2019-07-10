@@ -1112,7 +1112,7 @@ struct dynamic_size_traits<VectorRef<V, true>> : std::true_type {
 			traits.save(out, item);
 			out += traits.save(out, item);
 		}
-		ASSERT(out - p == t._cached_size);
+		ASSERT(out - p == t._cached_size + sizeof(uint32_t));
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
