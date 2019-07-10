@@ -71,22 +71,22 @@ def test_size_limit_option(db):
 @fdb.transactional
 def test_get_approximate_size(tr):
     tr[b'key1'] = b'value1'
-    s1 = tr.get_approximate_size()
+    s1 = tr.get_approximate_size().wait()
 
     tr[b'key2'] = b'value2'
-    s2 = tr.get_approximate_size()
+    s2 = tr.get_approximate_size().wait()
     assert(s1 < s2)
 
     tr.clear(b'key3')
-    s3 = tr.get_approximate_size()
+    s3 = tr.get_approximate_size().wait()
     assert(s2 < s3)
 
     tr.add_read_conflict_key(b'key3')
-    s4 = tr.get_approximate_size()
+    s4 = tr.get_approximate_size().wait()
     assert(s3 < s4)
 
     tr.add_write_conflict_key(b'key4')
-    s5 = tr.get_approximate_size()
+    s5 = tr.get_approximate_size().wait()
     assert(s4 < s5)
 
 # Expect a cluster file as input. This test will write to the FDB cluster, so

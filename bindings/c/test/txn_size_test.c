@@ -97,8 +97,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	// FIXME: use version 620 after 6.2 release
-	checkError(fdb_select_api_version(610), "select API version", rs);
+	checkError(fdb_select_api_version(620), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
 	keys = generateKeys(numKeys, KEY_SIZE);
