@@ -1354,7 +1354,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
 	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)) );
-	if(recoveryCommit.isReady() && recoveryCommit.get().isError()) {
+	if(recoveryCommit.isReady() && ( recoveryCommit.get().isError() || recoveryCommit.get().get().newClientInfo.present() )) {
 		TEST(true);  // Master recovery failed because of the initial commit failed
 		throw master_recovery_failed();
 	}

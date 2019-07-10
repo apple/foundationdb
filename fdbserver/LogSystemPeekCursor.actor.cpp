@@ -251,7 +251,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 ACTOR Future<Void> serverPeekOnFailed( ILogSystem::ServerPeekCursor* self ) {
 	loop {
 		choose {
-			when( wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onDisconnectOrFailure( self->interf->get().interf().peekMessages.getEndpoint() ) : Never() ) ) { return Void(); }
+			when( wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onStateEqual( self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus() ) : Never() ) ) { return Void(); }
 			when( wait( self->interf->onChange() ) ) {}
 		}
 	}

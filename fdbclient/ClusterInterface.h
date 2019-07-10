@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {

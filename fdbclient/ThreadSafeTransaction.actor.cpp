@@ -51,8 +51,19 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
+	auto itr = FDBDatabaseOptions::optionInfo.find(option);
+	if(itr != FDBDatabaseOptions::optionInfo.end()) {
+		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
+	}
+	else {
+		TraceEvent("UnknownDatabaseOption").detail("Option", option);
+		throw invalid_option();
+	}
+
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
+
+	// ThreadSafeDatabase is not allowed to do anything with options except pass them through to RYW.
 	onMainThreadVoid( [db, option, passValue](){ 
 		db->checkDeferredError();
 		db->setOption(option, passValue.contents()); 
@@ -68,7 +79,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 
 	onMainThreadVoid([db, connFile, apiVersion](){ 
 		try {
-			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
+			Database::createDatabase(connFile, apiVersion, false, LocalityData(), db).extractPtr();
 		}
 		catch(Error &e) {
 			new (db) DatabaseContext(e);
@@ -274,6 +285,8 @@ ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
+
+	// ThreadSafeTransaction is not allowed to do anything with options except pass them through to RYW.
 	onMainThreadVoid( [tr, option, passValue](){ tr->setOption(option, passValue.contents()); }, &tr->deferredError );
 }
 
