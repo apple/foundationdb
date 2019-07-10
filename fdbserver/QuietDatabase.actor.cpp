@@ -304,9 +304,10 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// The if condition should be consistent with the condition in serverTeamRemover() and 
 			// machineTeamRemover() that decides if redundant teams exist.
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
+			// We ensure each server (machine) has at least 1 team if 
 			if ((!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER && healthyMachineTeamCount > desiredMachineTeamNumber) || 
 				(!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeamNumber > desiredTeamNumber) ||
-			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+			    ((minMachineTeamOnMachine <= 0 || minServerTeamOnServer <= 0) && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
 				if (attempts++ < 10) {
 					wait(delay(60));
 					continue; // We may not receive the most recent TeamCollectionInfo

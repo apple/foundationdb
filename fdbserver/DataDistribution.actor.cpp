@@ -1775,6 +1775,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
 		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
+		if (healthyMachineTeamCount == 0) {
+			traceAllInfo(true);
+		}
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0 || remainingMachineTeamBudget > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
