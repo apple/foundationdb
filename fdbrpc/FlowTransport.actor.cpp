@@ -305,11 +305,12 @@ struct Peer : NonCopyable {
 	int peerReferences;
 	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
+	double lastDataPacketSentTime;
 
-	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), 
-		  compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0)
-	{
+	explicit Peer(TransportData* transport, NetworkAddress const& destination)
+	  : transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0),
+	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true),
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {
 		connect = connectionKeeper(this);
 	}
 
@@ -396,19 +397,44 @@ struct Peer : NonCopyable {
 	}
 
 	ACTOR static Future<Void> connectionMonitor( Peer *peer ) {
-		state RequestStream< ReplyPromise<Void> > remotePing( Endpoint( {peer->destination}, WLTOKEN_PING_PACKET ) );
-
+		state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 		loop {
-			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				throw connection_unreferenced();
+			if (!FlowTransport::transport().isClient() && !peer->destination.isPublic()) {
+				// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
+				state double lastRefreshed = now();
+				state int64_t lastBytesReceived = peer->bytesReceived;
+				loop {
+					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+					if (lastBytesReceived < peer->bytesReceived) {
+						lastRefreshed = now();
+						lastBytesReceived = peer->bytesReceived;
+					} else if (lastRefreshed < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT *
+							   FLOW_KNOBS->CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER) {
+						// If we have not received anything in this period, client must have closed
+						// connection by now. Break loop to check if it is still alive by sending a ping.
+						break;
+					}
+				}
 			}
 
-			wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
+			if (peer->reliable.empty() && peer->unsent.empty()) {
+				if (peer->peerReferences == 0 &&
+				    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
+					// TODO: What about when peerReference == -1?
+					throw connection_unreferenced();
+				} else if (FlowTransport::transport().isClient() && peer->destination.isPublic() &&
+				           (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
+				           (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
+					// First condition is necessary because we may get here if we are server.
+					throw connection_idle();
+				}
+			}
 
-			// SOMEDAY: Stop monitoring and close the connection after a long period of inactivity with no reliable or onDisconnect requests outstanding
+			wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
 
+			// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 			state ReplyPromise<Void> reply;
-			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
+			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePingEndpoint );
 			state int64_t startingBytes = peer->bytesReceived;
 			state int timeouts = 0;
 			loop {
@@ -419,7 +445,10 @@ struct Peer : NonCopyable {
 							throw connection_failed();
 						}
 						if(timeouts > 1) {
-							TraceEvent(SevWarnAlways, "ConnectionSlowPing").suppressFor(1.0).detail("WithAddr", peer->destination).detail("Timeouts", timeouts);
+							TraceEvent(SevWarnAlways, "ConnectionSlowPing")
+							    .suppressFor(1.0)
+							    .detail("WithAddr", peer->destination)
+							    .detail("Timeouts", timeouts);
 						}
 						startingBytes = peer->bytesReceived;
 						timeouts++;
@@ -550,14 +579,21 @@ struct Peer : NonCopyable {
 				self->discardUnreliablePackets();
 				reader = Future<Void>();
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
-				          e.code() == error_code_connection_unreferenced ||
+				          e.code() == error_code_connection_unreferenced || e.code() == error_code_connection_idle ||
 				          (g_network->isSimulated() && e.code() == error_code_checksum_failed);
 
 				if(self->compatible) {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID())
+					    .error(e, true)
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->destination);
 				}
 				else {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed",
+					           conn ? conn->getDebugID() : UID())
+					    .error(e, true)
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->destination);
 				}
 
 				if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
@@ -565,20 +601,25 @@ struct Peer : NonCopyable {
 					if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
 						it.first = now();
 					} else if(now() - it.first > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT) {
-						TraceEvent(SevWarnAlways, "TooManyConnectionsClosed", conn ? conn->getDebugID() : UID()).suppressFor(5.0).detail("PeerAddr", self->destination);
+						TraceEvent(SevWarnAlways, "TooManyConnectionsClosed", conn ? conn->getDebugID() : UID())
+						    .suppressFor(5.0)
+						    .detail("PeerAddr", self->destination);
 						self->transport->degraded->set(true);
 					}
 					it.second = now();
 				}
 
 				if (conn) {
-					if (FlowTransport::transport().isClient()) {
+					if (FlowTransport::transport().isClient() && e.code() != error_code_connection_idle) {
 						clientReconnectDelay = true;
 					}
 					conn->close();
 					conn = Reference<IConnection>();
 				}
-				IFailureMonitor::failureMonitor().notifyDisconnect( self->destination );  //< Clients might send more packets in response, which needs to go out on the next connection
+
+				// Clients might send more packets in response, which needs to go out on the next connection
+				IFailureMonitor::failureMonitor().notifyDisconnect( self->destination );
+
 				if (e.code() == error_code_actor_cancelled) throw;
 				// Try to recover, even from serious errors, by retrying
 
@@ -1047,12 +1088,12 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 	return Endpoint(g_currentDeliveryPeerAddress, token);
 }
 
-void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
-	if (FlowTransport::transport().isClient()) {
+void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
+	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+		return;
+	else if (FlowTransport::transport().isClient())
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
-	}
 
-	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
 	Peer* peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
 		peer->peerReferences = 1;
@@ -1061,8 +1102,8 @@ void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageRe
 	}
 }
 
-void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
-	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
+void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
+	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
 	Peer* peer = self->getPeer(endpoint.getPrimaryAddress(), false);
 	if(peer) {
 		peer->peerReferences--;
@@ -1213,7 +1254,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 #endif
 
 		peer->send(pb, rp, firstUnsent);
-
+		if (destination.token != WLTOKEN_PING_PACKET) {
+			peer->lastDataPacketSentTime = now();
+		}
 		return (PacketID)rp;
 	}
 }

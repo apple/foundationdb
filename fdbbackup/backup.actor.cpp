@@ -3244,7 +3244,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				db = Database::createDatabase(ccf, -1, localities);
+				db = Database::createDatabase(ccf, -1, true, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -3266,7 +3266,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(sourceCcf, -1, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, true, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
