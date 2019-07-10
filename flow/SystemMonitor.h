@@ -124,8 +124,8 @@ struct NetworkData {
 		countFileCachePageReadsMerged = getValue(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
 		countFileCacheFinds = getValue(LiteralStringRef("AsyncFile.CountCacheFinds"));
 		countFileCacheReadBytes = getValue(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
-		countFilePageCacheHits = getValue(LiteralStringRef("EvictablePageCache.CacheHits"));
-		countFilePageCacheMisses = getValue(LiteralStringRef("EvictablePageCache.CacheMisses"));
+		countFilePageCacheHits = getValue(LiteralStringRef("AsyncFile.CountCachePageReadsHit"));
+		countFilePageCacheMisses = getValue(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
 		countFilePageCacheEvictions = getValue(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 };
