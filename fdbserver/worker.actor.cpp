@@ -747,7 +747,7 @@ ACTOR Future<Void> workerServer(
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
 			try {
-				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, locality);
+				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, true, locality);
 				metricsLogger = runMetrics( db, KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);

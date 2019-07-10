@@ -31,15 +31,19 @@
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
-	FlowReceiver() : m_isLocalEndpoint(false) {}
-	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
-		FlowTransport::transport().addPeerReference(endpoint, this);
+	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {
 	}
+
+	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
+	  : endpoint(remoteEndpoint), m_isLocalEndpoint(false), m_stream(stream) {
+		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+	}
+
 	~FlowReceiver() {
 		if (m_isLocalEndpoint) {
 			FlowTransport::transport().removeEndpoint(endpoint, this);
 		} else {
-			FlowTransport::transport().removePeerReference(endpoint, this);
+			FlowTransport::transport().removePeerReference(endpoint, m_stream);
 		}
 	}
 
@@ -63,9 +67,10 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
 
-protected:
+private:
 	Endpoint endpoint;
 	bool m_isLocalEndpoint;
+	bool m_stream;
 };
 
 template <class T>
@@ -74,7 +79,9 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	using FastAllocated<NetSAV<T>>::operator delete;
 
 	NetSAV(int futures, int promises) : SAV<T>(futures, promises) {}
-	NetSAV(int futures, int promises, const Endpoint& remoteEndpoint) : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint) {}
+	NetSAV(int futures, int promises, const Endpoint& remoteEndpoint)
+	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {
+	}
 
 	virtual void destroy() { delete this; }
 	virtual void receive(ArenaReader& reader) {
@@ -228,7 +235,8 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	using FastAllocated<NetNotifiedQueue<T>>::operator delete;
 
 	NetNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
-	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint) : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint) {}
+	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	virtual void destroy() { delete this; }
 	virtual void receive(ArenaReader& reader) {

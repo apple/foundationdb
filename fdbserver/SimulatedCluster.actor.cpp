@@ -1427,8 +1427,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	}
 
 	TraceEvent("SimulatedSystemDestruct");
-	destructed = true;
-	systemActors.clear();
-
 	g_simulator.stop();
+	destructed = true;
+	wait(Never());
+	ASSERT(false);
 }

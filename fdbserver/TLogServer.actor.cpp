@@ -2236,6 +2236,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 	state Version tagAt = beginVersion;
 	state Version lastVer = 0;
 
+	if (endVersion.present()) {
+		TraceEvent("TLogRestoreReplicationFactor", self->dbgid).detail("LogId", logData->logId).detail("Locality", logData->locality).detail("RecoverFrom", beginVersion).detail("RecoverTo", endVersion.get());
+	}
+
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
