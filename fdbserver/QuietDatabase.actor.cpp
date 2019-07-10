@@ -307,7 +307,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// We ensure each server (machine) has at least 1 team if 
 			if ((!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER && healthyMachineTeamCount > desiredMachineTeamNumber) || 
 				(!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeamNumber > desiredTeamNumber) ||
-			    ((minMachineTeamOnMachine <= 0 || minServerTeamOnServer <= 0) && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
 				if (attempts++ < 10) {
 					wait(delay(60));
 					continue; // We may not receive the most recent TeamCollectionInfo

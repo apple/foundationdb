@@ -1313,19 +1313,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Five steps to create each machine team, which are document in the function
 	// Reuse ReplicationPolicy selectReplicas func to select machine team
 	// return number of added machine teams
-	int addBestMachineTeams(int targetMachineTeamsToBuild, int remainingMachineTeamBudget) {
+	int addBestMachineTeams(int machineTeamsToBuild, int remainingMachineTeamBudget) {
 		int addedMachineTeams = 0;
-		int machineTeamsToBuild = 0;
 
-		ASSERT(targetMachineTeamsToBuild >= 0);
-		// Not build any machine team if asked to build none
-		if (targetMachineTeamsToBuild == 0) return 0;
-
-		machineTeamsToBuild = targetMachineTeamsToBuild;
-
+		ASSERT(machineTeamsToBuild >= 0);
 		// The number of machines is always no smaller than the storageTeamSize in a correct configuration
 		ASSERT(machine_info.size() >= configuration.storageTeamSize);
-
+		// Future: Consider if we should overbuild more machine teams to
+		// allow machineTeamRemover() to get a more balanced machine teams per machine
+		
 		// Step 1: Create machineLocalityMap which will be used in building machine team
 		rebuildMachineLocalityMap();
 
@@ -3327,6 +3323,8 @@ ACTOR Future<Void> storageServerTracker(
 							// self->traceTeamCollectionInfo();
 							recordTeamCollectionInfo = true;
 						}
+						// The locality change of the server will make the server have 0 teams
+						self->doBuildTeams = true;
 					}
 
 					interfaceChanged = server->onInterfaceChanged;
