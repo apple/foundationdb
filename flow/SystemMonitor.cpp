@@ -145,7 +145,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				}
 			}
 
-			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != 0; i++) {
+			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
 				if(g_network->networkMetrics.priorityBlocked[i]) {
 					double lastSegment = std::min(currentStats.elapsed, now() - g_network->networkMetrics.priorityTimer[i]);
 					g_network->networkMetrics.priorityBlockedDuration[i] += lastSegment;
