@@ -803,37 +803,120 @@ struct memcpy_able : std::is_trivial<T> {};
 template <>
 struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 
+template<class T>
+struct string_serialized_traits : std::false_type {
+	int32_t getSize(const T& item) const {
+		return 0;
+	}
+
+	uint32_t save(uint8_t* out, const T& t) const {
+		return 0;
+	}
+
+	template <class Context>
+	uint32_t load(const uint8_t* data, T& t, Context& context) {
+		return 0;
+	}
+};
+
+template <class T, bool>
+struct VectorRefPreserializer {
+	VectorRefPreserializer() {}
+	VectorRefPreserializer(const VectorRefPreserializer<T, true>&) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, true>&) { return *this; }
+	VectorRefPreserializer(const VectorRefPreserializer<T, false>&) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, false>&) { return *this; }
+
+	void invalidate() {}
+	void add(const T& item) {}
+	void remove(const T& item) {}
+};
+
 template <class T>
-class VectorRef : public ComposedIdentifier<T, 0x8> {
+struct VectorRefPreserializer<T, true> {
+	mutable int32_t _cached_size; // -1 means unknown
+	string_serialized_traits<T> _string_traits;
+
+	VectorRefPreserializer() : _cached_size(0) {}
+	VectorRefPreserializer(const VectorRefPreserializer<T, true>& other) : _cached_size(other._cached_size) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, true>& other) {
+		_cached_size = other._cached_size;
+		return *this;
+	}
+	VectorRefPreserializer(const VectorRefPreserializer<T, false>&) : _cached_size(-1) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, false>&) { _cached_size = -1; return *this; }
+
+	void invalidate() { _cached_size = -1; }
+	void add(const T& item) {
+		if (_cached_size > 0) {
+			_cached_size += _string_traits.getSize(item);
+		}
+	}
+	void remove(const T& item) {
+		if (_cached_size > 0) {
+			_cached_size -= _string_traits.getSize(item);
+		}
+	}
+};
+
+template <class T, bool StringSerialized = false>
+class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, StringSerialized> {
+	using VPS = VectorRefPreserializer<T, StringSerialized>;
+	friend class VectorRef<T, !StringSerialized>;
 public:
 	using value_type = T;
+	static_assert(!StringSerialized || string_serialized_traits<T>::value);
 
 	// T must be trivially destructible (and copyable)!
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
+	template<bool b2>
+	VectorRef(const VectorRef<T, b2>& other) : VPS(other), data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}
+	template <bool b2>
+	VectorRef& operator=(const VectorRef<T, b2>& other) {
+		*static_cast<VPS*>(this) = other;
+		data = other.data;
+		m_size = other.m_size;
+		m_capacity = other.m_capacity;
+		return *this;
+	}
+
 	// Arena constructor for non-Ref types, identified by memcpy_able
-	template<class T2 = T>
-	VectorRef( Arena& p, const VectorRef<T>& toCopy, typename std::enable_if<memcpy_able<T2>::value, int>::type = 0)
-	  : data( (T*)new (p) uint8_t[sizeof(T)*toCopy.size()] ),
-	    m_size( toCopy.size() ), m_capacity( toCopy.size() )
-	{
+	template <class T2 = T, bool S>
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<memcpy_able<T2>::value, int>::type = 0)
+	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
+	    m_capacity(toCopy.size()) {
 		memcpy(data, toCopy.data, m_size * sizeof(T));
 	}
 
 	// Arena constructor for Ref types, which must have an Arena constructor
-	template<class T2 = T>
-	VectorRef( Arena& p, const VectorRef<T>& toCopy, typename std::enable_if<!memcpy_able<T2>::value, int>::type = 0)
-		: data( (T*)new (p) uint8_t[sizeof(T)*toCopy.size()] ),
-		  m_size( toCopy.size() ), m_capacity( toCopy.size() )
-	{
-		for(int i=0; i<m_size; i++)
-			new (&data[i]) T(p, toCopy[i]);
+	template <class T2 = T, bool S>
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!memcpy_able<T2>::value, int>::type = 0)
+	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
+		for (int i = 0; i < m_size; i++) {
+			auto ptr = new (&data[i]) T(p, toCopy[i]);
+			VPS::add(*ptr);
+		}
 	}
 
 	VectorRef( T* data, int size ) : data(data), m_size(size), m_capacity(size) {}
 	VectorRef( T* data, int size, int capacity ) : data(data), m_size(size), m_capacity(capacity) {}
 	//VectorRef( const VectorRef<T>& toCopy ) : data( toCopy.data ), m_size( toCopy.m_size ), m_capacity( toCopy.m_capacity ) {}
 	//VectorRef<T>& operator=( const VectorRef<T>& );
+
+	template<bool S = StringSerialized>
+	typename std::enable_if<S, uint32_t>::type serializedSize() const {
+		uint32_t result = sizeof(uint32_t);
+		string_serialized_traits<T> t;
+		if (VPS::_cached_size >= 0) {
+			return result + VPS::_cached_size;
+		}
+		for (const auto& v : *this) {
+			result += t.getSize(v);
+		}
+		VPS::_cached_size = result - sizeof(uint32_t);
+		return result;
+	}
 
 	const T* begin() const { return data; }
 	const T* end() const { return data + m_size; }
@@ -846,9 +929,11 @@ public:
 	std::reverse_iterator<const T*> rbegin() const { return std::reverse_iterator<const T*>( end() ); }
 	std::reverse_iterator<const T*> rend() const { return std::reverse_iterator<const T*>( begin() ); }
 
-	VectorRef slice(int begin, int end) const { return VectorRef(data+begin, end-begin); }
+	template<bool S = StringSerialized>
+	typename std::enable_if<!S, VectorRef>::type slice(int begin, int end) const { return VectorRef(data+begin, end-begin); }
 
-	bool operator == ( VectorRef<T> const& rhs ) const {
+	template<bool S>
+	bool operator == ( VectorRef<T, S> const& rhs ) const {
 		if (size() != rhs.size()) return false;
 		for(int i=0; i<m_size; i++)
 			if ( (*this)[i] != rhs[i] )
@@ -858,37 +943,43 @@ public:
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
 	// since copies will share data
-	T* begin() { return data; }
-	T* end() { return data + m_size; }
-	T& front() { return *begin(); }
-	T& back() { return end()[-1]; }
-	T& operator[](int i) { return data[i]; }
+	T* begin() { VPS::invalidate(); return data; }
+	T* end() { VPS::invalidate(); return data + m_size; }
+	T& front() { VPS::invalidate(); return *begin(); }
+	T& back() { VPS::invalidate(); return end()[-1]; }
+	T& operator[](int i) { VPS::invalidate(); return data[i]; }
 	void push_back( Arena& p, const T& value ) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size+1);
-		new (&data[m_size]) T(value);
+		auto ptr = new (&data[m_size]) T(value);
+		VPS::add(*ptr);
 		m_size++;
 	}
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep( Arena& p, const T& value ) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size+1);
-		new (&data[m_size]) T(p, value);
+		auto ptr = new (&data[m_size]) T(p, value);
+		VPS::add(*ptr);
 		m_size++;
 	}
 	void append( Arena& p, const T* begin, int count ) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
+		VPS::invalidate();
 		memcpy( data+m_size, begin, sizeof(T)*count );
 		m_size += count;
 	}
 	template <class It>
 	void append_deep( Arena& p, It begin, int count ) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
-		for(int i=0; i<count; i++)
-			new (&data[m_size+i]) T( p, *begin++ );
+		for(int i=0; i<count; i++) {
+			auto ptr = new (&data[m_size+i]) T( p, *begin++ );
+			VPS::add(*ptr);
+		}
 		m_size += count;
 	}
-	void pop_back() { m_size--; }
+	void pop_back() { VPS::remove(back()); m_size--; }
 
 	void pop_front( int count ) {
+		VPS::invalidate();
 		count = std::min(m_size, count);
 
 		data += count;
@@ -898,8 +989,10 @@ public:
 
 	void resize( Arena& p, int size ) {
 		if (size > m_capacity) reallocate(p, size);
-		for(int i=m_size; i<size; i++)
-			new (&data[i]) T();
+		for(int i=m_size; i<size; i++) {
+			auto ptr = new (&data[i]) T();
+			VPS::add(*ptr);
+		}
 		m_size = size;
 	}
 
@@ -964,8 +1057,8 @@ struct Traceable<VectorRef<T>> {
 	}
 };
 
-template <class Archive, class T>
-inline void load( Archive& ar, VectorRef<T>& value ) {
+template <class Archive, class T, bool b>
+inline void load( Archive& ar, VectorRef<T, b>& value ) {
 	// FIXME: range checking for length, here and in other serialize code
 	uint32_t length;
 	ar >> length;
@@ -975,8 +1068,8 @@ inline void load( Archive& ar, VectorRef<T>& value ) {
 	for(uint32_t i=0; i<length; i++)
 		ar >> value[i];
 }
-template <class Archive, class T>
-inline void save( Archive& ar, const VectorRef<T>& value ) {
+template <class Archive, class T, bool b>
+inline void save( Archive& ar, const VectorRef<T, b>& value ) {
 	uint32_t length = value.size();
 	ar << length;
 	for(uint32_t i=0; i<length; i++)
@@ -984,7 +1077,7 @@ inline void save( Archive& ar, const VectorRef<T>& value ) {
 }
 
 template <class T>
-struct vector_like_traits<VectorRef<T>> : std::true_type {
+struct vector_like_traits<VectorRef<T, false>> : std::true_type {
 	using Vec = VectorRef<T>;
 	using value_type = typename Vec::value_type;
 	using iterator = const T*;
@@ -998,6 +1091,46 @@ struct vector_like_traits<VectorRef<T>> : std::true_type {
 
 	static insert_iterator insert(Vec& v) { return v.begin(); }
 	static iterator begin(const Vec& v) { return v.begin(); }
+};
+
+template <class V>
+struct dynamic_size_traits<VectorRef<V, true>> : std::true_type {
+	using T = VectorRef<V, true>;
+	// May be called multiple times during one serialization
+	static size_t size(const T& t) {
+		return t.serializedSize();
+	}
+
+	// Guaranteed to be called only once during serialization
+	static void save(uint8_t* out, const T& t) {
+		string_serialized_traits<V> traits;
+		auto* p = out;
+		uint32_t length = t.size();
+		memcpy(out, &length, sizeof(length));
+		out += sizeof(length);
+		for (const auto& item : t) {
+			traits.save(out, item);
+			out += traits.save(out, item);
+		}
+		ASSERT(out - p == t._cached_size);
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* data, size_t size, T& t, Context& context) {
+		string_serialized_traits<V> traits;
+		auto* p = data;
+		uint32_t num_elements;
+		memcpy(&num_elements, data, sizeof(num_elements));
+		data += sizeof(num_elements);
+		t.resize(context.arena(), num_elements);
+		for (int i = 0; i < num_elements; ++i) {
+			data += traits.load(data, t[i], context);
+		}
+		ASSERT(data - p == size);
+		t._cached_size = size - sizeof(uint32_t);
+	}
 };
 
  void ArenaBlock::destroy() {
