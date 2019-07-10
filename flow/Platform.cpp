@@ -107,6 +107,7 @@
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
+#include <mach-o/dyld.h>
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
@@ -1211,7 +1212,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 	uint64_t nowBusyTicks = (*statState)->lastBusyTicks;
 	uint64_t nowReads = (*statState)->lastReads;
 	uint64_t nowWrites = (*statState)->lastWrites;
-	uint64_t nowWriteSectors = (*statState)->lastWriteSectors; 
+	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
 	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
 	if(dataFolder != "") {
@@ -1611,7 +1612,7 @@ int getRandomSeed() {
 		retryCount++;
 		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed) ) {
 			TraceEvent(SevError, "OpenURandom").GetLastError();
-			throw platform_error();	
+			throw platform_error();
 		}
 	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);
 	close(devRandom);
@@ -1883,18 +1884,6 @@ std::string cleanPath(std::string const &path) {
 	return result.empty() ? "." : result;
 }
 
-// Removes the last component from a path string (if possible) and returns the result with one trailing separator.
-// If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
-// Note that this is NOT the same as getting the parent of path, as the final component could be ".."
-// or "." and it would still be simply removed.
-// ALL of the following inputs will yield the result "/a/"
-//   /a/b
-//   /a/b/
-//   /a/..
-//   /a/../
-//   /a/.
-//   /a/./
-//   /a//..//
 std::string popPath(const std::string &path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
@@ -2703,6 +2692,56 @@ void* loadFunction(void* lib, const char* func_name) {
 	return dlfcn;
 }
 
+void closeLibrary(void* handle) {
+#ifdef __unixish__
+	dlclose(handle);
+#else
+	FreeLibrary(reinterpret_cast<HMODULE>(handle));
+#endif
+}
+
+std::string exePath() {
+#if defined(__linux__)
+	std::unique_ptr<char[]> buf(new char[PATH_MAX]);
+	auto len = readlink("/proc/self/exe", buf.get(), PATH_MAX);
+	if (len > 0 && len < PATH_MAX) {
+		buf[len] = '\0';
+		return std::string(buf.get());
+	} else {
+		throw platform_error();
+	}
+#elif defined(__APPLE__)
+	uint32_t bufSize = 1024;
+	std::unique_ptr<char[]> buf(new char[bufSize]);
+	while (true) {
+		auto res = _NSGetExecutablePath(buf.get(), &bufSize);
+		if (res == -1) {
+			buf.reset(new char[bufSize]);
+		} else {
+			return std::string(buf.get());
+		}
+	}
+#elif defined(_WIN32)
+	DWORD bufSize = 1024;
+	std::unique_ptr<char[]> buf(new char[bufSize]);
+	while (true) {
+		auto s = GetModuleFileName(nullptr, buf.get(), bufSize);
+		if (s >= 0) {
+			if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+				bufSize *= 2;
+				buf.reset(new char[bufSize]);
+				continue;
+			}
+			return std::string(buf.get());
+		} else {
+			throw platform_error();
+		}
+	}
+#else
+#  error Port me!
+#endif
+}
+
 void platformInit() {
 #ifdef WIN32
 	_set_FMA3_enable(0); // Workaround for VS 2013 code generation bug. See https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
@@ -2773,8 +2812,8 @@ volatile thread_local bool profileThread = false;
 
 volatile thread_local int profilingEnabled = 1;
 
-void setProfilingEnabled(int enabled) { 
-	profilingEnabled = enabled; 
+void setProfilingEnabled(int enabled) {
+	profilingEnabled = enabled;
 }
 
 void profileHandler(int sig) {
@@ -3001,7 +3040,7 @@ int testPathFunction2(const char *name, std::function<std::string(std::string, b
 		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
 		return 0;
 	}
-	
+
 	ErrorOr<std::string> result;
 	try { result  = fun(a, resolveLinks, mustExist); } catch(Error &e) { result = e; }
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());

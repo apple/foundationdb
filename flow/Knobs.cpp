@@ -55,6 +55,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 );
+	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
+	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
@@ -109,6 +112,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
+	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
+	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );

@@ -57,6 +57,13 @@ helpful when setting up a larger cluster inside a docker network, for instance
 when using Docker Compose. The name you provide must be resolvable through the
 DNS on the container you are running.
 
+### FDB_COORDINATOR_PORT
+
+The port to use for connecting to the FDB coordinator process. This should be
+set by other processes in a multi-process cluster to the same value as the
+`FDB_PORT` environment variable of the coordinator process. It will default
+to 4500, which is also the default for `FDB_PORT`.
+
 # Copying Into Other Images
 
 You can also use this image to provide files for images that are clients of a

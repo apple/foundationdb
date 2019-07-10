@@ -580,7 +580,7 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
             sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d",
                     digits(args->txnspec.ops[i][OP_RANGE]), rangei);
             if (rangei == 0) {
-              strncpy(keystr2, keystr, strlen(keystr));
+              strcpy(keystr2, keystr);
               keystr2[strlen(keystr)] = '\0';
             }
             rc = run_op_insert(transaction, keystr, valstr);

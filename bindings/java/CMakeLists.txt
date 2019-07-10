@@ -53,6 +53,8 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/TransactionContext.java
   src/main/com/apple/foundationdb/testing/AbstractWorkload.java
   src/main/com/apple/foundationdb/testing/WorkloadContext.java
+  src/main/com/apple/foundationdb/testing/Promise.java
+  src/main/com/apple/foundationdb/testing/PerfMetric.java
   src/main/com/apple/foundationdb/tuple/ByteArrayUtil.java
   src/main/com/apple/foundationdb/tuple/IterableComparator.java
   src/main/com/apple/foundationdb/tuple/package-info.java
@@ -119,11 +121,11 @@ endif()
 
 if(OPEN_FOR_IDE)
   add_library(fdb_java OBJECT fdbJNI.cpp)
+  add_library(java_workloads OBJECT JavaWorkload.cpp)
 else()
   add_library(fdb_java SHARED fdbJNI.cpp)
+  add_library(java_workloads SHARED JavaWorkload.cpp)
 endif()
-message(DEBUG ${JNI_INCLUDE_DIRS})
-message(DEBUG ${JNI_LIBRARIES})
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
 # libfdb_java.so is loaded by fdb-java.jar and doesn't need to depened on jvm shared libraries.
 target_link_libraries(fdb_java PRIVATE fdb_c)
@@ -132,6 +134,10 @@ set_target_properties(fdb_java PROPERTIES
 if(APPLE)
   set_target_properties(fdb_java PROPERTIES SUFFIX ".jnilib")
 endif()
+set_target_properties(java_workloads PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
+target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
+target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
 set(CMAKE_JNI_TARGET TRUE)

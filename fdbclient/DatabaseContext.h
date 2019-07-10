@@ -54,11 +54,11 @@ public:
 
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
-	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
+	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID=TaskPriority::DefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware, apiVersion )); }
+	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion )); }
 
 	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -97,8 +97,8 @@ public:
 
 //private: 
 	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
-		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
+		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
+		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST );
 
 	explicit DatabaseContext( const Error &err );
 
@@ -133,22 +133,26 @@ public:
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
-	Standalone<StringRef> dbId;
+	UID dbId;
+	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
-	int64_t transactionReadVersions;
-	int64_t transactionLogicalReads;
-	int64_t transactionPhysicalReads;
-	int64_t transactionCommittedMutations;
-	int64_t transactionCommittedMutationBytes;
-	int64_t transactionsCommitStarted;
-	int64_t transactionsCommitCompleted;
-	int64_t transactionsTooOld;
-	int64_t transactionsFutureVersions;
-	int64_t transactionsNotCommitted;
-	int64_t transactionsMaybeCommitted;
-	int64_t transactionsResourceConstrained;
-	int64_t transactionsProcessBehind;
-	int64_t transactionWaitsForFullRecovery;
+	CounterCollection cc;
+
+	Counter transactionReadVersions;
+	Counter transactionLogicalReads;
+	Counter transactionPhysicalReads;
+	Counter transactionCommittedMutations;
+	Counter transactionCommittedMutationBytes;
+	Counter transactionsCommitStarted;
+	Counter transactionsCommitCompleted;
+	Counter transactionsTooOld;
+	Counter transactionsFutureVersions;
+	Counter transactionsNotCommitted;
+	Counter transactionsMaybeCommitted;
+	Counter transactionsResourceConstrained;
+	Counter transactionsProcessBehind;
+	Counter transactionWaitsForFullRecovery;
+
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
@@ -162,7 +166,7 @@ public:
 
 	Future<Void> logger;
 
-	int taskID;
+	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
 	EventMetricHandle<GetValueComplete> getValueCompleted;

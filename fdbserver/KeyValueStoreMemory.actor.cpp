@@ -400,7 +400,7 @@ private:
 
 		bool ok = count < 1e6;
 		if( !ok ) {
-			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
+			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommitQueue", id)
 				.detail("Bytes", total)
 				.detail("Log", log)
 				.detail("Ops", count)
@@ -715,7 +715,7 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 
 IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
-	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V0 );
+	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V1 );
 	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
 }
 

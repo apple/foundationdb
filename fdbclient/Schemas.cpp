@@ -250,8 +250,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio",
-                  "storage_server_read_load"
+                  "log_server_min_free_space_ratio"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -270,8 +269,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio",
-                  "storage_server_read_load"
+                  "log_server_min_free_space_ratio"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -288,7 +286,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "incompatible_connections":[
 
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag": {
+         "seconds" : 1.0,
+         "versions" : 1000000
+      },
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,

@@ -1822,7 +1822,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db, TaskDefaultEndpoint, true, false); // Open a new database connection that isn't lock-aware
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, false); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -2117,7 +2117,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
+
+		StatusObject datacenterLag;
+		datacenterLag["versions"] = datacenterVersionDifference;
+		datacenterLag["seconds"] = datacenterVersionDifference / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+		statusObj["datacenter_lag"] = datacenterLag;
 
 		int totalDegraded = 0;
 		for(auto& it : workers) {

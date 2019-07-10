@@ -73,6 +73,9 @@ public:
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
 	double CONNECTION_MONITOR_TIMEOUT;
+	double CONNECTION_MONITOR_IDLE_TIMEOUT;
+	double CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER;
+	double CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY;
 
 	//FlowTransport
 	double CONNECTION_REJECTED_MESSAGE_DELAY;
@@ -128,6 +131,9 @@ public:
 	int64_t PACKET_LIMIT;
 	int64_t PACKET_WARNING;  // 2MB packet warning quietly allows for 1MB system messages
 	double TIME_OFFSET_LOGGING_INTERVAL;
+	int MAX_PACKET_SEND_BYTES;
+	int MIN_PACKET_BUFFER_BYTES;
+	int MIN_PACKET_BUFFER_FREE_BYTES;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out
