@@ -159,7 +159,7 @@ struct WatchValueRequest {
 struct GetKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
-	VectorRef<KeyValueRef> data;
+	VectorRef<KeyValueRef, true> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
 
