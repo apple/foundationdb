@@ -408,17 +408,39 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParame
 }
 
 // MultiVersionTransaction
-MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db) : db(db) {
+MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db, UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions) : db(db) {
+	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
 
-// SOMEDAY: This function is unsafe if it's possible to set Database options that affect subsequently created transactions. There are currently no such options.
+void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options) {
+	MutexHolder holder(db->dbState->optionLock);
+	std::copy(options.begin(), options.end(), std::back_inserter(persistentOptions));
+}
+
 void MultiVersionTransaction::updateTransaction() {
 	auto currentDb = db->dbState->dbVar->get();
 
 	TransactionInfo newTr;
 	if(currentDb.value) {
 		newTr.transaction = currentDb.value->createTransaction();
+
+		Optional<StringRef> timeout;
+		for (auto option : persistentOptions) {
+			if(option.first == FDBTransactionOptions::TIMEOUT) {
+				timeout = option.second.castTo<StringRef>();
+			}
+			else {
+				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+			}
+		}
+	
+		// Setting a timeout can immediately cause a transaction to fail. The only timeout 
+		// that matters is the one most recently set, so we ignore any earlier set timeouts
+		// that might inadvertently fail the transaction.
+		if(timeout.present()) {
+			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
+		}
 	}
 
 	newTr.onChange = currentDb.onChange;
@@ -574,6 +596,10 @@ Version MultiVersionTransaction::getCommittedVersion() {
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
+	if(MultiVersionApi::apiVersionAtLeast(610) && FDBTransactionOptions::optionInfo[option].persistent) {
+		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+
+	}
 	auto tr = getTransaction();
 	if(tr.transaction) {
 		tr.transaction->setOption(option, value);
@@ -606,6 +632,8 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 }
 
 void MultiVersionTransaction::reset() {
+	persistentOptions.clear();
+	setDefaultOptions(db->dbState->transactionDefaultOptions);
 	updateTransaction();
 }
 
@@ -643,27 +671,30 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this)));
+	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(dbState->optionLock);
 
-
 	auto itr = FDBDatabaseOptions::optionInfo.find(option);
-	if(itr != FDBDatabaseOptions::optionInfo.end()) {
-		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
-	}
-	else {
+	if(itr == FDBDatabaseOptions::optionInfo.end()) {
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
 
-	if(dbState->db) {
-		dbState->db->setOption(option, value);
+	int defaultFor = FDBDatabaseOptions::optionInfo[option].defaultFor;
+	if (defaultFor >= 0) {
+		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
+		       FDBTransactionOptions::optionInfo.end());
+		dbState->transactionDefaultOptions.addOption((FDBTransactionOptions::Option)defaultFor, value.castTo<Standalone<StringRef>>());
 	}
 
 	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+
+	if(dbState->db) {
+		dbState->db->setOption(option, value);
+	}
 }
 
 void MultiVersionDatabase::Connector::connect() {
@@ -823,6 +854,11 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 }
 
 // MultiVersionApi
+
+bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
+	ASSERT(MultiVersionApi::api->apiVersion != 0);
+	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
+}
 
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
 void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientInfo>)> func, bool runOnFailedClients) {

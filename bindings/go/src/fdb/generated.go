@@ -228,6 +228,30 @@ func (o NetworkOptions) SetEnableSlowTaskProfiling() error {
 	return o.setOpt(71, nil)
 }
 
+// Enable client buggify - will make requests randomly fail (intended for client testing)
+func (o NetworkOptions) SetClientBuggifyEnable() error {
+	return o.setOpt(80, nil)
+}
+
+// Disable client buggify
+func (o NetworkOptions) SetClientBuggifyDisable() error {
+	return o.setOpt(81, nil)
+}
+
+// Set the probability of a CLIENT_BUGGIFY section being active for the current execution.
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionActivatedProbability(param int64) error {
+	return o.setOpt(82, int64ToBytes(param))
+}
+
+// Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) error {
+	return o.setOpt(83, int64ToBytes(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
@@ -277,7 +301,7 @@ func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
-// Set the maximum transaction size which, if exceeded, will cause the transaction to be cancelled. Default to 10,000,000 bytes.
+// Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: value in bytes
 func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
@@ -409,7 +433,7 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
-// Set the maximum transaction size which, if exceeded, will cause the transaction to be cancelled. Valid parameter values are ``[32, 10,000,000]```.
+// Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.
 //
 // Parameter: value in bytes
 func (o TransactionOptions) SetSizeLimit(param int64) error {

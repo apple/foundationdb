@@ -1124,7 +1124,8 @@ public:
 };
 
 ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
-	resetTimeout();
+	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
+	applyPersistentOptions();
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1473,34 +1474,14 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 }
 
 ReadYourWritesTransactionOptions::ReadYourWritesTransactionOptions(Transaction const& tr) {
-	Database cx = tr.getDatabase();
-	timeoutInSeconds = cx->transactionTimeout;
-	maxRetries = cx->transactionMaxRetries;
 	reset(tr);
 }
 
 void ReadYourWritesTransactionOptions::reset(Transaction const& tr) {
-	double oldTimeout = timeoutInSeconds;
-	int oldMaxRetries = maxRetries;
 	memset(this, 0, sizeof(*this));
-	if( tr.apiVersionAtLeast(610) ) {
-		// Starting in API version 610, these options are not cleared after reset.
-		timeoutInSeconds = oldTimeout;
-		maxRetries = oldMaxRetries;
-	}
-	else {
-		Database cx = tr.getDatabase();
-		maxRetries = cx->transactionMaxRetries;
-		timeoutInSeconds = cx->transactionTimeout;
-	}
+	timeoutInSeconds = 0.0;
+	maxRetries = -1;
 	snapshotRywEnabled = tr.getDatabase()->snapshotRywEnabled;
-}
-
-void ReadYourWritesTransactionOptions::fullReset(Transaction const& tr) {
-	reset(tr);
-	Database cx = tr.getDatabase();
-	maxRetries = cx->transactionMaxRetries;
-	timeoutInSeconds = cx->transactionTimeout;
 }
 
 bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {
@@ -1777,7 +1758,16 @@ Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
 	return waitOrError(tr.getVersionstamp(), resetPromise.getFuture());
 }
 
-void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) { 
+void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
+	setOptionImpl(option, value);
+
+	if(FDBTransactionOptions::optionInfo[option].persistent) {
+		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+
+	}
+}
+
+void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option option, Optional<StringRef> value ) { 
 	switch(option) {
 		case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 			validateOptionValue(value, false);
@@ -1872,6 +1862,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	transactionDebugInfo = r.transactionDebugInfo;
 	cache.arena = &arena;
 	writes.arena = &arena;
+	persistentOptions = std::move(r.persistentOptions);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
@@ -1894,10 +1885,30 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	readConflicts = std::move(r.readConflicts);
 	watchMap = std::move( r.watchMap );
 	r.resetPromise = Promise<Void>();
+	persistentOptions = std::move(r.persistentOptions);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
 	return RYWImpl::onError( this, e );
+}
+
+void ReadYourWritesTransaction::applyPersistentOptions() {
+	Optional<StringRef> timeout;
+	for (auto option : persistentOptions) {
+		if(option.first == FDBTransactionOptions::TIMEOUT) {
+			timeout = option.second.castTo<StringRef>();
+		}
+		else {
+			setOptionImpl(option.first, option.second.castTo<StringRef>());
+		}
+	}
+
+	// Setting a timeout can immediately cause a transaction to fail. The only timeout 
+	// that matters is the one most recently set, so we ignore any earlier set timeouts
+	// that might inadvertently fail the transaction.
+	if(timeout.present()) {
+		setOptionImpl(FDBTransactionOptions::TIMEOUT, timeout);
+	}
 }
 
 void ReadYourWritesTransaction::resetRyow() {
@@ -1917,7 +1928,7 @@ void ReadYourWritesTransaction::resetRyow() {
 
 	if(tr.apiVersionAtLeast(16)) {
 		options.reset(tr);
-		resetTimeout();
+		applyPersistentOptions();
 	}
 
 	if ( !oldReset.isSet() )
@@ -1933,9 +1944,11 @@ void ReadYourWritesTransaction::reset() {
 	retries = 0;
 	creationTime = now();
 	timeoutActor.cancel();
-	options.fullReset(tr);
+	persistentOptions.clear();
+	options.reset(tr);
 	transactionDebugInfo.clear();
 	tr.fullReset();
+	std::copy(tr.getDatabase().getTransactionDefaults().begin(), tr.getDatabase().getTransactionDefaults().end(), std::back_inserter(persistentOptions));
 	resetRyow();
 }
 

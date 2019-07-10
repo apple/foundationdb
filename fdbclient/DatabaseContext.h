@@ -158,10 +158,6 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
-	double transactionTimeout;
-	int transactionMaxRetries;
-	double transactionMaxBackoff;
-	int transactionMaxSize;  // Max size in bytes.
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
@@ -184,6 +180,8 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+
+	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 };
 
 #endif
