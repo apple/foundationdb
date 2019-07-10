@@ -2098,7 +2098,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
+
+		StatusObject datacenterLag;
+		datacenterLag["versions"] = datacenterVersionDifference;
+		datacenterLag["seconds"] = datacenterVersionDifference / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+		statusObj["datacenter_lag"] = datacenterLag;
 
 		int totalDegraded = 0;
 		for(auto& it : workers) {
