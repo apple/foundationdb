@@ -188,7 +188,7 @@
                   "hz":0.0
                }
             },
-			"run_loop_busy":0.2 // fraction of time the run loop was busy
+            "run_loop_busy":0.2 // fraction of time the run loop was busy
          }
       },
       "old_logs":[
