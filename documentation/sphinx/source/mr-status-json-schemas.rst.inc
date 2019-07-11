@@ -297,6 +297,10 @@
              }
          ]
       },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
+      },
       "messages":[
          {
             "reasons":[
