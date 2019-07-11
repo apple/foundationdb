@@ -70,13 +70,6 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 		return keys;
 	}
 	virtual void attributeKeys(std::set<std::string>*) const = 0;
-
-	// For flatbuffers, IReplicationPolicy is just encoded as a string using
-	// |serializeReplicationPolicy|. |writer| is a member of IReplicationPolicy
-	// so that this string outlives all calls to
-	// dynamic_size_traits<Reference<IReplicationPolicy>>::save
-	mutable BinaryWriter writer{ IncludeVersion() };
-	mutable bool alreadyWritten = false;
 };
 
 template <class Archive>
@@ -288,34 +281,18 @@ private:
 
 public:
 	static size_t size(const T& value) {
-		bool present = true;
-		if (value.getPtr() == nullptr) {
-			present = false;
-			BinaryWriter writer{ IncludeVersion() };
-			writer << present;
-			return writer.getLength();
-		}
-		if (!value->alreadyWritten) {
-			value->writer = BinaryWriter{ IncludeVersion() };
-			value->writer << present;
-			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
-			value->alreadyWritten = true;
-		}
-		return value->writer.getLength();
+		// size gets called multiple times. If this becomes a performance problem, we can perform the
+		// serialization once and cache the result as a mutable member of IReplicationPolicy
+		BinaryWriter writer{ IncludeVersion() };
+		::save(writer, value);
+		return writer.getLength();
 	}
 
 	// Guaranteed to be called only once during serialization
 	static void save(uint8_t* out, const T& value) {
-		if (value.getPtr() == nullptr) {
-			bool present = false;
-			BinaryWriter writer{ IncludeVersion() };
-			writer << present;
-			memcpy(out, writer.getData(), writer.getLength());
-		} else {
-			ASSERT(value->alreadyWritten)
-			memcpy(out, value->writer.getData(), value->writer.getLength());
-			value->alreadyWritten = false;
-		}
+		BinaryWriter writer{ IncludeVersion() };
+		::save(writer, value);
+		memcpy(out, writer.getData(), writer.getLength());
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
@@ -324,13 +301,7 @@ public:
 	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
 		StringRef str(buf, sz);
 		BinaryReader reader(str, IncludeVersion());
-		bool present = false;
-		reader >> present;
-		if (present) {
-			serializeReplicationPolicy(reader, value);
-		} else {
-			value.clear();
-		}
+		::load(reader, value);
 	}
 };
 
