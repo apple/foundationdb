@@ -756,13 +756,7 @@ uint64_t extractHexOption( StringRef value ) {
 }
 
 void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	auto itr = FDBDatabaseOptions::optionInfo.find(option);
-	if(itr == FDBDatabaseOptions::optionInfo.end()) {
-		TraceEvent("UnknownDatabaseOption").detail("Option", option);
-		throw invalid_option();
-	}
-	
-	int defaultFor = itr->second.defaultFor;
+	int defaultFor = FDBDatabaseOptions::optionInfo.getMustExist(option).defaultFor;
 	if (defaultFor >= 0) {
 		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
 		       FDBTransactionOptions::optionInfo.end());
