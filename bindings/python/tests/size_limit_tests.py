@@ -36,14 +36,14 @@ def setValueWithLimit(tr, key, value, limit):
 def test_size_limit_option(db):
     db.options.set_transaction_timeout(2000)  # 2 seconds
     db.options.set_transaction_retry_limit(3)
-    value = 'a' * 1024
+    value = b'a' * 1024
 
-    setValue(db, 't1', value)
-    assert(value == db['t1'])
+    setValue(db, b't1', value)
+    assert(value == db[b't1'])
 
     try:
         db.options.set_transaction_size_limit(1000)
-        setValue(db, 't2', value)
+        setValue(db, b't2', value)
         assert(False)  # not reached
     except fdb.FDBError as e:
         assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
@@ -51,7 +51,7 @@ def test_size_limit_option(db):
     # Per transaction option overrides database option
     db.options.set_transaction_size_limit(1000000)
     try:
-        setValueWithLimit(db, 't3', value, 1000)
+        setValueWithLimit(db, b't3', value, 1000)
         assert(False)  # not reached
     except fdb.FDBError as e:
         assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
@@ -60,9 +60,9 @@ def test_size_limit_option(db):
     db.options.set_transaction_size_limit(1000)
     tr = db.create_transaction()
     try:
-        tr['t4'] = 'bar'
+        tr[b't4'] = b'bar'
         tr.on_error(fdb.FDBError(1007)).wait()
-        setValue(tr, 't4', value)
+        setValue(tr, b't4', value)
         tr.commit().wait()
         assert(False)  # not reached
     except fdb.FDBError as e:
