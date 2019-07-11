@@ -596,9 +596,14 @@ Version MultiVersionTransaction::getCommittedVersion() {
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	if(MultiVersionApi::apiVersionAtLeast(610) && FDBTransactionOptions::optionInfo[option].persistent) {
+	auto itr = FDBTransactionOptions::optionInfo.find(option);
+	if(itr == FDBTransactionOptions::optionInfo.end()) {
+		TraceEvent("UnknownTransactionOption").detail("Option", option);
+		throw invalid_option();
+	}
+	
+	if(MultiVersionApi::apiVersionAtLeast(610) && itr->second.persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
-
 	}
 	auto tr = getTransaction();
 	if(tr.transaction) {
@@ -683,7 +688,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		throw invalid_option();
 	}
 
-	int defaultFor = FDBDatabaseOptions::optionInfo[option].defaultFor;
+	int defaultFor = itr->second.defaultFor;
 	if (defaultFor >= 0) {
 		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
 		       FDBTransactionOptions::optionInfo.end());
