@@ -97,6 +97,7 @@
     <ActorCompiler Include="workloads\ConsistencyCheck.actor.cpp" />
     <ActorCompiler Include="workloads\CpuProfiler.actor.cpp" />
     <ActorCompiler Include="workloads\DDMetrics.actor.cpp" />
+    <ActorCompiler Include="workloads\DDMetricsExclude.actor.cpp" />
     <ActorCompiler Include="workloads\ConfigureDatabase.actor.cpp" />
     <ActorCompiler Include="workloads\CommitBugCheck.actor.cpp" />
     <ActorCompiler Include="workloads\FastTriggeredWatches.actor.cpp" />
