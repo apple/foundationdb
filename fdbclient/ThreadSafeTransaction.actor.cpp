@@ -283,6 +283,12 @@ ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 }
 
 void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
+	auto itr = FDBTransactionOptions::optionInfo.find(option);
+	if(itr == FDBTransactionOptions::optionInfo.end()) {
+		TraceEvent("UnknownTransactionOption").detail("Option", option);
+		throw invalid_option();
+	}
+	
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
 
