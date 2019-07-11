@@ -54,11 +54,19 @@ private:
 	std::map<typename T::Option, FDBOptionInfo> optionInfo;
 
 public:
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator begin() { return optionInfo.begin(); }
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator end() { return optionInfo.end(); }
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator find(const typename T::Option& key) { return optionInfo.find(key); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator begin() const { return optionInfo.begin(); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator end() const { return optionInfo.end(); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator find(const typename T::Option& key) const { return optionInfo.find(key); }
 
-	FDBOptionInfo& operator[] (const typename T::Option& key) { return optionInfo[key]; }
+	void insert(const typename T::Option& key, FDBOptionInfo info) {
+		optionInfo[key] = info;
+	}
+
+	FDBOptionInfo const& getMustExist(const typename T::Option& key) const { 
+		auto itr = optionInfo.find(key);
+		ASSERT(itr != optionInfo.end());
+		return itr->second; 
+	}
 
 	FDBOptionInfoMap() { T::init(); }
 };
@@ -88,6 +96,6 @@ public:
 	typename OptionList::const_iterator end() const { return options.cend(); }
 };
 
-#define ADD_OPTION_INFO( type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor ) type::optionInfo[var] = FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor);
+#define ADD_OPTION_INFO( type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor ) type::optionInfo.insert(var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor));
 
 #endif

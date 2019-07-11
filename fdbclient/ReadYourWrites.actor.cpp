@@ -1759,17 +1759,10 @@ Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
 }
 
 void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
-	auto itr = FDBTransactionOptions::optionInfo.find(option);
-	if(itr == FDBTransactionOptions::optionInfo.end()) {
-		TraceEvent("UnknownTransactionOption").detail("Option", option);
-		throw invalid_option();
-	}
-	
 	setOptionImpl(option, value);
 
-	if(itr->second.persistent) {
+	if (FDBTransactionOptions::optionInfo.getMustExist(option).persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
-
 	}
 }
 
