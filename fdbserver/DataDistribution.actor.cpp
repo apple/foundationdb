@@ -1249,10 +1249,27 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
+	void traceLocalityArrayIndexName(Reference<LocalityRecord> record) {
+		TraceEvent("LocalityRecordKeyName");
+		for (int i = 0; i < machineLocalityMap._keymap->_lookuparray.size(); ++i) {
+			TraceEvent("LocalityRecordKeyIndexName")
+				.detail("KeyIndex",  i)
+				.detail("KeyName", machineLocalityMap._keymap->_lookuparray[i]);
+		}
+	}
+
 	void traceMachineLocalityMap() {
 		int i = 0;
 
 		TraceEvent("MachineLocalityMap").detail("Size", machineLocalityMap.size());
+		for (auto& uid : machineLocalityMap.getObjects()) {
+			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
+			if (record.isValid()) {
+				// Record the Locality KeyIndex and name so that we know what each key means
+				traceLocalityArrayIndexName(record);
+				break;
+			}
+		}
 		for (auto& uid : machineLocalityMap.getObjects()) {
 			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
 			if (record.isValid()) {
@@ -1270,7 +1287,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// To enable verbose debug info, set shouldPrint to true
-	void traceAllInfo(bool shouldPrint = false) {
+	void traceAllInfo(bool shouldPrint = true) {
 		if (!shouldPrint) return;
 
 		TraceEvent("TraceAllInfo").detail("Primary", primary);
@@ -1302,6 +1319,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			machine->second->localityEntry = localityEntry;
 			++numHealthyMachine;
 		}
+		TraceEvent("RebuildMachineLocalityMapDebug").detail("NumHealthyMachine", numHealthyMachine);
 	}
 
 	// Create machineTeamsToBuild number of machine teams
@@ -1354,33 +1372,39 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			std::vector<UID*> team;
 			std::vector<LocalityEntry> forcedAttributes;
 
-			// Step 3: Create a representative process for each machine.
-			// Construct forcedAttribute from leastUsedMachines.
-			// We will use forcedAttribute to call existing function to form a team
-			if (leastUsedMachines.size()) {
-				// Randomly choose 1 least used machine
-				Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
-				ASSERT(!tcMachineInfo->serversOnMachine.empty());
-				LocalityEntry process = tcMachineInfo->localityEntry;
-				forcedAttributes.push_back(process);
-			} else {
-				// when leastUsedMachine is empty, we will never find a team later, so we can simply return.
-				return addedMachineTeams;
-			}
-
 			// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 			std::vector<UID*> bestTeam;
 			int bestScore = std::numeric_limits<int>::max();
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 			for (int i = 0; i < maxAttempts && i < 100; ++i) {
+				// Step 3: Create a representative process for each machine.
+				// Construct forcedAttribute from leastUsedMachines.
+				// We will use forcedAttribute to call existing function to form a team
+				if (leastUsedMachines.size()) {
+					forcedAttributes.clear();
+					// Randomly choose 1 least used machine
+					Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
+					ASSERT(!tcMachineInfo->serversOnMachine.empty());
+					LocalityEntry process = tcMachineInfo->localityEntry;
+					forcedAttributes.push_back(process);
+					TraceEvent("ChosenMachine").detail("MachineInfo", tcMachineInfo->machineID).detail("LeaseUsedMachinesSize", leastUsedMachines.size()).detail("ForcedAttributesSize", forcedAttributes.size());
+				} else {
+					// when leastUsedMachine is empty, we will never find a team later, so we can simply return.
+					return addedMachineTeams;
+				}
+
 				// Choose a team that balances the # of teams per server among the teams
 				// that have the least-utilized server
 				team.clear();
+				ASSERT_WE_THINK(forcedAttributes.size() == 1);
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
+				TraceEvent("SelectReplicasDebug").detail("Success", success).detail("PolicyInfo", configuration.storagePolicy->info());
 				// NOTE: selectReplicas() should always return success when storageTeamSize = 1
 				ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
 				if (!success) {
-					break;
+					traceAllInfo(true);
+					TraceEvent("SelectReplicasDebug").detail("FoundTeamSize", team.size() + 1).detail("ExpectedTeamSize", configuration.storageTeamSize);
+					continue; // Try up to maxAttempts, since next time we may choose a different forcedAttributes
 				}
 				ASSERT(forcedAttributes.size() > 0);
 				team.push_back((UID*)machineLocalityMap.getObject(forcedAttributes[0]));
@@ -1395,12 +1419,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				int score = 0;
 				vector<Standalone<StringRef>> machineIDs;
+				TraceEvent("MachineTeamDebug").detail("TeamSize", team.size());
 				for (auto process = team.begin(); process != team.end(); process++) {
 					Reference<TCServerInfo> server = server_info[**process];
 					score += server->machine->machineTeams.size();
 					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
+					TraceEvent("MachineTeamDebug\n").detail("MachineTeamMember", machine_id);
 				}
+				
 
 				// Only choose healthy machines into machine team
 				ASSERT_WE_THINK(isMachineTeamHealthy(machineIDs));
@@ -2166,8 +2193,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		Standalone<StringRef> machine_id = locality.zoneId().get(); // locality to machine_id with std::string type
 
 		Reference<TCMachineInfo> machineInfo;
-		if (machine_info.find(machine_id) ==
-		    machine_info.end()) { // uid is the first storage server process on the machine
+		if (machine_info.find(machine_id) == machine_info.end()) {
+			// uid is the first storage server process on the machine
 			TEST(true);
 			// For each machine, store the first server's localityEntry into machineInfo for later use.
 			LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->id);
@@ -3243,7 +3270,8 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent("StorageServerInterfaceChanged", self->distributorId).detail("ServerID", server->id)
 						.detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
 						.detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
-						.detail("LocalityChanged", localityChanged);
+						.detail("LocalityChanged", localityChanged)
+						.detail("MachineLocalityChanged", machineLocalityChanged);
 
 					server->lastKnownInterface = newInterface.first;
 					server->lastKnownClass = newInterface.second;
@@ -3267,6 +3295,7 @@ ACTOR Future<Void> storageServerTracker(
 								int serverIndex = -1;
 								for (int i = 0; i < machine->serversOnMachine.size(); ++i) {
 									if (machine->serversOnMachine[i].getPtr() == server) {
+										// NOTE: now the machine's locality is wrong. Need update it whenever uses it.
 										serverIndex = i;
 										machine->serversOnMachine[i] = machine->serversOnMachine.back();
 										machine->serversOnMachine.pop_back();
