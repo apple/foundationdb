@@ -415,6 +415,21 @@
                "counter":0,
                "roughness":0.0
             },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "conflicted":{
                "hz":0.0,
                "counter":0,
