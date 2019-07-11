@@ -91,6 +91,9 @@ function(add_fdb_test)
   # if the value was undefined before, it will still be
   # undefined.
   math(EXPR assigned_id "${test_idx} - 1")
+  math(EXPR test_file_idx "${CURRENT_TEST_FILE_INDEX} + ${NUM_TEST_FILES}")
+  set(CURRENT_TEST_FILE_INDEX "${test_file_idx}" PARENT_SCOPE)
+  math(EXPR assigned_test_number "${test_file_idx} - ${NUM_TEST_FILES}")
   if(ADD_FDB_TEST_UNIT)
     message(STATUS
       "ADDING UNIT TEST ${assigned_id} ${test_name}")
@@ -118,7 +121,7 @@ function(add_fdb_test)
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
     --seed ${SEED}
-    --test-number ${assigned_id}
+    --test-number ${assigned_test_number}
     ${BUGGIFY_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
