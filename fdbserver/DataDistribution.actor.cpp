@@ -393,7 +393,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
-				if (p.second > tr.getReadVersion().get()) {
+				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailure) {
 					result->initHealthyZoneValue = Optional<Key>(p.first);
 				} else {
 					result->initHealthyZoneValue = Optional<Key>();
@@ -3065,14 +3065,17 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			state Future<Void> healthyZoneTimeout = Never();
 			if(val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
-				if(p.second > tr.getReadVersion().get()) {
+				if (p.first == ignoreSSFailure) {
+					// healthyZone is now overloaded for DD diabling purpose, which does not timeout
+					healthyZoneTimeout = Never();
+				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 					healthyZoneTimeout = delay(timeoutSeconds);
 					if(self->healthyZone.get() != p.first) {
 						TraceEvent("MaintenanceZoneStart", self->distributorId).detail("ZoneID", printable(p.first)).detail("EndVersion", p.second).detail("Duration", timeoutSeconds);
 						self->healthyZone.set(p.first);
 					}
-				} else if(self->healthyZone.get().present()) {
+				} else if (self->healthyZone.get().present()) {
 					TraceEvent("MaintenanceZoneEnd", self->distributorId);
 					self->healthyZone.set(Optional<Key>());
 				}
@@ -3137,15 +3140,13 @@ ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerI
                                                ServerStatus* status, Version addedVersion) {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-	state Key IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY =
-	    LiteralStringRef("IgnoreSSFailures"); // TODO: make this a global constant/knob
 	loop {
 		state bool inHealthyZone = false;
 		if (self->healthyZone.get().present()) {
 			if (interf.locality.zoneId() == self->healthyZone.get()) {
 				status->isFailed = false;
 				inHealthyZone = true;
-			} else if (self->healthyZone.get().get() == IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY) {
+			} else if (self->healthyZone.get().get() == ignoreSSFailure) {
 				// Ignore all SS failures
 				status->isFailed = false;
 				status->isUndesired = false;
@@ -3188,7 +3189,7 @@ ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 					self->doBuildTeams = true;
 				}
 				if (status->isFailed && self->healthyZone.get().present()) {
-					if (self->healthyZone.get().get() == IGNORE_SS_FAILURE_HEALTHY_ZONE_KEY) {
+					if (self->healthyZone.get().get() == ignoreSSFailure) {
 						// Ignore the failed storage server
 						TraceEvent("SSFailureTracker", self->distributorId)
 						    .detail("IgnoredFailure", "InsideChooseWhen")
