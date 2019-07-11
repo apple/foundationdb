@@ -228,7 +228,7 @@ extern "C" {
     fdb_transaction_get_committed_version( FDBTransaction* tr,
                                            int64_t* out_version );
 
-	// This function intentionally returns a FDBFuture instead of an integer directly,
+	// This function intentionally returns an FDBFuture instead of an integer directly,
 	// so that calling this API can see the effect of previous mutations on the transaction.
 	// Specifically, mutations are applied asynchronously by the main thread. In order to
 	// see them, this call has to be serviced by the main thread too.
