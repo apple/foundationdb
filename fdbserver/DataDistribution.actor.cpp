@@ -1287,7 +1287,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// To enable verbose debug info, set shouldPrint to true
-	void traceAllInfo(bool shouldPrint = true) {
+	void traceAllInfo(bool shouldPrint = false) {
+
 		if (!shouldPrint) return;
 
 		TraceEvent("TraceAllInfo").detail("Primary", primary);
@@ -1425,7 +1426,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					score += server->machine->machineTeams.size();
 					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
-					TraceEvent("MachineTeamDebug\n").detail("MachineTeamMember", machine_id);
+					TraceEvent("MachineTeamDebugDetail").detail("MachineTeamMember", machine_id);
 				}
 				
 
@@ -2637,6 +2638,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 	state bool firstCheck = true;
 
+	state bool optimal;
+
 	if(logTeamEvents) {
 		TraceEvent("TeamTrackerStarting", self->distributorId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 	}
@@ -2678,7 +2681,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
-			bool optimal = team->isOptimal() && healthy;
+			optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 
 			lastReady = self->initialFailureReactionDelay.isReady();
@@ -2855,7 +2858,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc());
 		}
 		self->priority_teams[team->getPriority()]--;
-		if( team->isHealthy() ) {
+		if(team->isHealthy()) {
 			self->healthyTeamCount--;
 			ASSERT( self->healthyTeamCount >= 0 );
 
@@ -2863,6 +2866,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
 			}
+		}
+		if (optimal) {
+			self->optimalTeamCount--;
+			ASSERT( self->optimalTeamCount >= 0 );
+			self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 		}
 		throw;
 	}
@@ -3200,7 +3208,8 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				if( self->optimalTeamCount > 0 ) {
+				// We see a case optimalTeamCount = 1, while healthyTeamCount = 0 in 3 data_hall configuration
+				if( self->optimalTeamCount > 0 ) { //&& self->healthyTeamCount > 0 
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
