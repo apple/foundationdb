@@ -87,7 +87,18 @@ void FileTraceLogWriter::write(const std::string& str) {
 void FileTraceLogWriter::open() {
 	cleanupTraceFiles();
 
-	auto finalname = format("%s.%d.%s", basename.c_str(), ++index, extension.c_str());
+	++index;
+	int indexWidth = -1;
+	while (index > 0) {
+		index /= 10;
+		++indexWidth;
+	}
+
+	// this allows one process to write 10 billion log files
+	// this should be enough - if not we could make the base larger...
+	ASSERT(index >= 0 && index < 10);
+
+	auto finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, ++index, extension.c_str());
 	while ( (traceFileFD = __open( finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE )) == -1 ) {
 		lastError(errno);
 		if (errno == EEXIST)
