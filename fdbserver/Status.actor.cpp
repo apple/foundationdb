@@ -1578,6 +1578,68 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEvents pMetrics, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
+	Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tlogFuture, std::set<std::string> *incomplete_reasons)
+{
+	state JsonBuilderObject statusObj;
+	try {
+		state JsonBuilderObject cacheStatistics;
+
+		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
+
+		if (!storageServers.present()) {
+			throw storageServers.getError();
+		}
+
+		double storageCacheHitsHz = 0;
+		double storageCacheMissesHz = 0;
+
+		for(auto &ss : storageServers.get()) {
+			auto processMetrics = pMetrics.find(ss.first.address());
+			if(processMetrics != pMetrics.end()) {
+				int64_t hits = processMetrics->second.getInt64("CacheHits");
+				int64_t misses = processMetrics->second.getInt64("CacheMisses");
+				double elapsed = processMetrics->second.getDouble("Elapsed");
+				storageCacheHitsHz += hits / elapsed;
+				storageCacheMissesHz += misses / elapsed;
+			}
+		}
+
+		cacheStatistics["storage_hit_rate"] = (storageCacheMissesHz == 0) ? 1.0 : storageCacheHitsHz / (storageCacheHitsHz + storageCacheMissesHz);
+
+		ErrorOr<vector<std::pair<TLogInterface, EventMap>>> tlogServers = wait(tlogFuture);
+
+		if(!tlogServers.present()) {
+			throw tlogServers.getError();
+		}
+
+		double logCacheHitsHz = 0;
+		double logCacheMissesHz = 0;
+
+		for(auto &log : tlogServers.get()) {
+			auto processMetrics = pMetrics.find(log.first.address());
+			if(processMetrics != pMetrics.end()) {
+				int64_t hits = processMetrics->second.getInt64("CacheHits");
+				int64_t misses = processMetrics->second.getInt64("CacheMisses");
+				double elapsed = processMetrics->second.getDouble("Elapsed");
+				logCacheHitsHz += hits / elapsed;
+				logCacheMissesHz += misses / elapsed;
+			}
+		}
+
+		cacheStatistics["log_hit_rate"] = (logCacheMissesHz == 0) ? 1.0 : logCacheHitsHz / (logCacheHitsHz + logCacheMissesHz);
+		statusObj["page_cache"] = cacheStatistics;
+	}
+	catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		incomplete_reasons->insert("Unknown cache statistics.");
+	}
+
+	return statusObj;
+}
+
 static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderArray oldTlogsArray;
 
@@ -2025,6 +2087,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
+			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
@@ -2067,6 +2130,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Insert database_locked section
 			if(!workerStatuses[3].empty()) {
 				statusObj.addContents(workerStatuses[3]);
+			}
+
+			// Insert cluster summary statistics
+			if(!workerStatuses[4].empty()) {
+				statusObj.addContents(workerStatuses[4]);
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
