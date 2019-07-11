@@ -301,6 +301,18 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			state int64_t maxMachineTeamOnMachine =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
 
+			// Get storage policy
+			//state std::string replicationPolicyName = g_simulator.storagePolicy->name(); // Across
+			state std::string replicationPolicyInfo = g_simulator.storagePolicy->info();
+			// machineID is zoneid by default. If machine concept is not zoneid (say it is data_hall), 
+			// the machine-team logic needs to carefully change to assigne machineID as a different type (say data_hall)
+			state bool isMachineIDZoneID = replicationPolicyInfo.find("zoneid") != string::npos;
+
+			if (!isMachineIDZoneID) {
+				TraceEvent(SevWarnAlways, "MachineIDIsNotZoneID");
+				return true;
+			}
+
 			// The if condition should be consistent with the condition in serverTeamRemover() and 
 			// machineTeamRemover() that decides if redundant teams exist.
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
