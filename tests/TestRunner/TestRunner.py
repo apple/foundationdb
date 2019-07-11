@@ -335,8 +335,8 @@ def run_simulation_test(basedir, options):
     if options.keep_logs == 'NONE' or options.keep_logs == 'FAILED' and res:
         print("Deleting old logs in {}".format(wd))
         traces = get_traces(wd, options.log_format)
-        #for trace in traces:
-        #    os.remove(trace)
+        for trace in traces:
+            os.remove(trace)
     if options.keep_simdirs == 'NONE' or options.keep_simdirs == 'FAILED' and res:
         print("Delete {}".format(os.path.join(wd, 'simfdb')))
         shutil.rmtree(os.path.join(wd, 'simfdb'))
