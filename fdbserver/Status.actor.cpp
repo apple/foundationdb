@@ -1462,13 +1462,23 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		}
 		vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
 
-		StatusCounter mutations, mutationBytes, txnConflicts, txnStartOut, txnCommitOutSuccess;
+		StatusCounter mutations;
+		StatusCounter mutationBytes;
+		StatusCounter txnConflicts;
+		StatusCounter txnStartOut;
+		StatusCounter txnSystemPriorityStartOut;
+		StatusCounter txnDefaultPriorityStartOut;
+		StatusCounter txnBatchPriorityStartOut;
+		StatusCounter txnCommitOutSuccess;
 
 		for (auto &ps : proxyStats) {
 			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
 			mutationBytes.updateValues( StatusCounter(ps.getValue("MutationBytes")) );
 			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
 			txnStartOut.updateValues( StatusCounter(ps.getValue("TxnStartOut")) );
+			txnSystemPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnSystemPriorityStartOut")));
+			txnDefaultPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnDefaultPriorityStartOut")));
+			txnBatchPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnBatchPriorityStartOut")));
 			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
 		}
 
@@ -1478,6 +1488,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		JsonBuilderObject transactions;
 		transactions["conflicted"] = txnConflicts.getStatus();
 		transactions["started"] = txnStartOut.getStatus();
+		transactions["started_immediate_priority"] = txnSystemPriorityStartOut.getStatus();
+		transactions["started_default_priority"] = txnDefaultPriorityStartOut.getStatus();
+		transactions["started_batch_priority"] = txnBatchPriorityStartOut.getStatus();
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
 
 		statusObj["transactions"] = transactions;
