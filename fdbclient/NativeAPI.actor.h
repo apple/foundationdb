@@ -74,8 +74,8 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
-	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
+	static Database createDatabase( std::string connFileName, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
@@ -89,6 +89,8 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+
+	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
 private:
 	Reference<DatabaseContext> db;
@@ -163,10 +165,10 @@ struct TransactionOptions {
 
 struct TransactionInfo {
 	Optional<UID> debugID;
-	int taskID;
+	TaskPriority taskID;
 	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -286,7 +288,7 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskDefaultEndpoint ) {}
+	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();

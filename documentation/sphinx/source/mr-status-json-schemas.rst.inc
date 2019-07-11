@@ -187,7 +187,8 @@
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+			"run_loop_busy":0.2 // fraction of time the run loop was busy
          }
       },
       "old_logs":[
@@ -264,7 +265,10 @@
       },
       "incompatible_connections":[
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,

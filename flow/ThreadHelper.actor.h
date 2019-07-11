@@ -35,11 +35,11 @@
 // void onMainThreadVoid( F f ) {
 // 	Promise<Void> signal;
 // 	doOnMainThreadVoid( signal.getFuture(), f );
-// 	g_network->onMainThread( std::move(signal), TaskDefaultOnMainThread );
+// 	g_network->onMainThread( std::move(signal), TaskPriority::DefaultOnMainThread );
 // }
 
 template <class F>
-void onMainThreadVoid( F f, Error* err, int taskID = TaskDefaultOnMainThread ) {
+void onMainThreadVoid( F f, Error* err, TaskPriority taskID = TaskPriority::DefaultOnMainThread ) {
 	Promise<Void> signal;
 	doOnMainThreadVoid( signal.getFuture(), f, err );
 	g_network->onMainThread( std::move(signal), taskID );
@@ -585,7 +585,7 @@ template <class F> ThreadFuture< decltype(fake<F>()().getValue()) > onMainThread
 	returnValue->addref(); // For the ThreadFuture we return
 	Future<Void> cancelFuture = doOnMainThread<decltype(fake<F>()().getValue()), F>( signal.getFuture(), f, returnValue );
 	returnValue->setCancel( std::move(cancelFuture) );
-	g_network->onMainThread( std::move(signal), TaskDefaultOnMainThread );
+	g_network->onMainThread( std::move(signal), TaskPriority::DefaultOnMainThread );
 	return ThreadFuture<decltype(fake<F>()().getValue())>( returnValue );
 }
 

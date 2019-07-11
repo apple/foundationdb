@@ -713,7 +713,7 @@ static int asyncSleep(sqlite3_vfs *pVfs, int microseconds){
 			waitFor( delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY) );
 			return 0;
 		}
-		waitFor( g_network->delay( microseconds*1e-6, TaskDefaultDelay ) || simCancel );
+		waitFor( g_network->delay( microseconds*1e-6, TaskPriority::DefaultDelay ) || simCancel );
 		return microseconds;
 	} catch( Error &e ) {
 		TraceEvent(SevError, "AsyncSleepError").error(e,true);

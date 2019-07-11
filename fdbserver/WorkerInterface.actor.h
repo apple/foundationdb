@@ -369,6 +369,7 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
+	static const Role COORDINATOR;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -392,7 +393,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error
 
 struct ServerDBInfo;
 
-class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID = TaskDefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
+class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 

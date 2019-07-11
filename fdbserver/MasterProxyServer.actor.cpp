@@ -95,11 +95,11 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 	loop choose {
 		when ( wait( db->onChange() ) ) {
 			if ( db->get().ratekeeper.present() ) {
-				TraceEvent("Proxy_RatekeeperChanged", myID)
+				TraceEvent("ProxyRatekeeperChanged", myID)
 				.detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void();  // trigger GetRate request
 			} else {
-				TraceEvent("Proxy_RatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID);
 				nextRequestTimer = Never();
 				reply = Never();
 			}
@@ -158,7 +158,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				if (now() - *lastGRVTime > *GRVBatchTime)
 					*lastGRVTime = now() - *GRVBatchTime;
 
-				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskProxyGRVTimer));
+				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskPriority::ProxyGRVTimer));
 			}
 
 			transactionQueue->push(std::make_pair(req, counter--));
@@ -263,7 +263,7 @@ struct ProxyCommitData {
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-			firstProxy(firstProxy), cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)), db(db),
+			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0)
 	{}
 };
@@ -350,7 +350,7 @@ struct ResolutionRequestBuilder {
 };
 
 ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
-	wait(delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher));  
+	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));  
 
 	state double lastBatch = 0;
 
@@ -363,7 +363,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 			timeout = Never();
 		}
 		else {
-			timeout = delayJittered(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskProxyCommitBatcher);
+			timeout = delayJittered(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskPriority::ProxyCommitBatcher);
 		}
 
 		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
@@ -387,10 +387,10 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					if(!batch.size()) {
 						commitData->commitBatchStartNotifications.send(Void());
 						if(now() - lastBatch > commitData->commitBatchInterval) {
-							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskProxyCommitBatcher);
+							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskPriority::ProxyCommitBatcher);
 						}
 						else {
-							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskProxyCommitBatcher);
+							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskPriority::ProxyCommitBatcher);
 						}
 					}
 
@@ -398,7 +398,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						out.send({ batch, batchBytes });
 						lastBatch = now();
 						commitData->commitBatchStartNotifications.send(Void());
-						timeout = delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher);
+						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 						batch = std::vector<CommitTransactionRequest>();
 						batchBytes = 0;
 					}
@@ -457,7 +457,7 @@ ACTOR Future<Void> commitBatch(
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
-	wait(delay(0, TaskProxyCommit));
+	wait(delay(0, TaskPriority::ProxyCommit));
 
 	self->lastVersionTime = t1;
 
@@ -534,7 +534,7 @@ ACTOR Future<Void> commitBatch(
 	vector< Future<ResolveTransactionBatchReply> > replies;
 	for (int r = 0; r<self->resolvers.size(); r++) {
 		requests.requests[r].debugID = debugID;
-		replies.push_back(brokenPromiseToNever(self->resolvers[r].resolve.getReply(requests.requests[r], TaskProxyResolverReply)));
+		replies.push_back(brokenPromiseToNever(self->resolvers[r].resolve.getReply(requests.requests[r], TaskPriority::ProxyResolverReply)));
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
@@ -965,7 +965,7 @@ ACTOR Future<Void> commitBatch(
 				break; 
 			}
 			when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
-				if(v.version > self->committedVersion.get()) {
+				if(!v.newClientInfo.present() && v.version > self->committedVersion.get()) {
 					self->locked = v.locked;
 					self->metadataVersion = v.metadataVersion;
 					self->committedVersion.set(v.version);
@@ -1135,7 +1135,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	state vector<Future<GetReadVersionReply>> proxyVersions;
 	for (auto const& p : *otherProxies)
-		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskTLogConfirmRunningReply)));
+		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
 
 	if (!(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY))
 	{
@@ -1292,7 +1292,7 @@ ACTOR static Future<Void> transactionStarter(
 		}
 
 		if (!transactionQueue.empty())
-			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskProxyGRVTimer));
+			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
 
 		/*TraceEvent("GRVBatch", proxy.id())
 		.detail("Elapsed", elapsed)
@@ -1782,9 +1782,44 @@ ACTOR Future<Void> masterProxyServerCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface))
-		throw worker_removed();
+		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface)) {
+			throw worker_removed();
+		}
 		wait(db->onChange());
+	}
+}
+
+ACTOR template <class X> Future<Void> stripRequests( RequestStream<X> in, PromiseStream<ReplyPromise<REPLY_TYPE(X)>> out, int* count) {
+	loop {
+		X req = waitNext(in.getFuture());
+		out.send(req.reply);
+		if((*count) >= 0 && ++(*count) >= SERVER_KNOBS->MAX_FORWARD_MESSAGES) {
+			TraceEvent(SevWarnAlways, "TooManyProxyForwardRequests");
+			return Void();
+		}
+	}
+}
+
+ACTOR Future<Void> forwardProxy(ClientDBInfo info, PromiseStream<ReplyPromise<CommitID>> commitReplies, PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies, PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies) {
+	loop {
+		choose {
+			when(ReplyPromise<CommitID> req = waitNext(commitReplies.getFuture())) {
+				CommitID rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+			when(ReplyPromise<GetReadVersionReply> req = waitNext(grvReplies.getFuture())) {
+				GetReadVersionReply rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+			when(ReplyPromise<GetKeyServerLocationsReply> req = waitNext(locationReplies.getFuture())) {
+				GetKeyServerLocationsReply rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+		}
+		wait(yield());
 	}
 }
 
@@ -1794,21 +1829,38 @@ ACTOR Future<Void> masterProxyServer(
 	Reference<AsyncVar<ServerDBInfo>> db,
 	std::string whitelistBinPaths)
 {
+	state Future<Void> core;
 	try {
-		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
-		loop choose{
-			when(wait(core)) { return Void(); }
-			when(wait(checkRemoved(db, req.recoveryCount, proxy))) {}
-		}
+		core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
+		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed || e.code() == error_code_tlog_stopped ||
-			e.code() == error_code_master_tlog_failed || e.code() == error_code_coordinators_changed || e.code() == error_code_coordinated_state_conflict ||
-			e.code() == error_code_new_coordinators_timed_out)
-		{
-			TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
+
+		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
+			e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+			e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+			throw;
+		}
+	}
+	core.cancel();
+	state PromiseStream<ReplyPromise<CommitID>> commitReplies;
+	state PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies;
+	state PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies;
+	state int replyCount = 0;
+	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY) || stripRequests(proxy.commit, commitReplies, &replyCount) || stripRequests(proxy.getConsistentReadVersion, grvReplies, &replyCount) || stripRequests(proxy.getKeyServersLocations, locationReplies, &replyCount);
+	proxy = MasterProxyInterface();
+	loop {
+		if(finishForward.isReady()) {
 			return Void();
 		}
-		throw;
+		if(db->get().client.proxies.size() > 0 && !db->get().client.proxies[0].provisional && db->get().recoveryCount >= req.recoveryCount
+			&& !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy)) {
+			replyCount = -1;
+			core = forwardProxy(db->get().client, commitReplies, grvReplies, locationReplies);
+			wait(finishForward);
+			return Void();
+		}
+		wait(db->onChange() || finishForward);
 	}
 }

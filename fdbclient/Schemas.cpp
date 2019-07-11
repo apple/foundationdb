@@ -207,7 +207,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+            "run_loop_busy":0.2
          }
       },
       "old_logs":[
@@ -285,7 +286,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "incompatible_connections":[
 
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag": {
+         "seconds" : 1.0,
+         "versions" : 1000000
+      },
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,

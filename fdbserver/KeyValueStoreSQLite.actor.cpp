@@ -1937,8 +1937,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	readCursors.resize(64); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskWrite);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskWrite);
 	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
@@ -1963,8 +1963,8 @@ StorageBytes KeyValueStoreSQLite::getStorageBytes() {
 
 void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskRead);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for(int i=0; i<nReadThreads; i++)
 		readThreads->addThread( new Reader(filename, type==KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]) );
 	g_network->setCurrentTask(taskId);

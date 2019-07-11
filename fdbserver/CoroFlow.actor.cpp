@@ -263,7 +263,7 @@ typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 
 
 
-ACTOR void coroSwitcher( Future<Void> what, int taskID, Coro* coro ) {
+ACTOR void coroSwitcher( Future<Void> what, TaskPriority taskID, Coro* coro ) {
 	try {
 		// state double t = now();
 		wait(what);
