@@ -2569,7 +2569,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state FdbOptions *options = &globalOptions;
 
 	state Reference<ClusterConnectionFile> ccf;
-	state BinaryWriter wr(IncludeVersion());
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
