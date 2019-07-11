@@ -2109,7 +2109,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if (logSystem->logRouterTags) {
 				for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
 					Tag tag = Tag(tagLocalityLogRouter, i);
-					// Sattelite logs will index a mutation with tagLocalityLogRouter with an id greater than
+					// Satellite logs will index a mutation with tagLocalityLogRouter with an id greater than
 					// the number of log routers as having an id mod the number of log routers.  We thus need
 					// to make sure that if we're going from more log routers in the previous generation to
 					// less log routers in the newer one, that we map the log router tags onto satellites that
