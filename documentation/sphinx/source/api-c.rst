@@ -724,9 +724,11 @@ Applications must provide error handling and an appropriate retry loop around th
 
    Most applications will not call this function.
 
-.. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr)
+.. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
 
-   Retrieves the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. The size can be obtained by calling :func:`fdb_future_get_int64()` with the returned :type:`FDBFuture*` object. This can be called multiple times before transaction is committed.
+  |future-return0| the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+  This can be called multiple times before the transaction is committed.
 
 .. function:: FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* transaction)
 

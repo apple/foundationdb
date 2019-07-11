@@ -702,9 +702,9 @@ class FutureVersion(Future):
 class FutureInt64(Future):
     def wait(self):
         self.block_until_ready()
-        size = ctypes.c_int64()
-        self.capi.fdb_future_get_version(self.fpointer, ctypes.byref(size))
-        return size.value
+        value = ctypes.c_int64()
+        self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
+        return value.value
 
 
 class FutureKeyValueArray(Future):
@@ -1374,6 +1374,10 @@ def init_c_api():
     _capi.fdb_future_get_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
     _capi.fdb_future_get_version.restype = ctypes.c_int
     _capi.fdb_future_get_version.errcheck = check_error_code
+
+    _capi.fdb_future_get_int64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
+    _capi.fdb_future_get_int64.restype = ctypes.c_int
+    _capi.fdb_future_get_int64.errcheck = check_error_code
 
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]

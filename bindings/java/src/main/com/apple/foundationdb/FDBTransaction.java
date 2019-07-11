@@ -518,7 +518,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getApproximateSize() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion(Transaction_getApproximateSize(getPtr()), executor);
+			return new FutureInt64(Transaction_getApproximateSize(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}

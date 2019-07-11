@@ -86,6 +86,7 @@ module FDB
 
       attach_function :fdb_future_get_error, [ :pointer ], :fdb_error
       attach_function :fdb_future_get_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_int64, [ :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
@@ -449,6 +450,15 @@ module FDB
       version = FFI::MemoryPointer.new :int64
       FDBC.check_error FDBC.fdb_future_get_version(@fpointer, version)
       @value = version.read_long_long
+    end
+    private :getter
+  end
+
+  class Int64Future < LazyFuture
+    def getter
+      val = FFI::MemoryPointer.new :int64
+      FDBC.check_error FDBC.fdb_future_get_int64(@fpointer, val)
+      @value = val.read_long_long
     end
     private :getter
   end
@@ -906,7 +916,7 @@ module FDB
     end
 
     def get_approximate_size
-      Version.new(FDBC.fdb_transaction_get_approximate_size @tpointer)
+      Int64Future.new(FDBC.fdb_transaction_get_approximate_size @tpointer)
     end
 
     def get_versionstamp

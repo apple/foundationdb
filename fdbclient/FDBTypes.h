@@ -235,7 +235,7 @@ struct KeyRangeRef {
 		return *this;
 	}
 
-	int expectedSize() const { return begin.expectedSize() + end.expectedSize() + sizeof(KeyRangeRef); }
+	int expectedSize() const { return begin.expectedSize() + end.expectedSize(); }
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
