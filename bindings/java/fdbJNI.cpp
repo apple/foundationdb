@@ -243,23 +243,6 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1releaseM
 	fdb_future_release_memory(var);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureVersion_FutureVersion_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	int64_t version = 0;
-	fdb_error_t err = fdb_future_get_version(f, &version);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return 0;
-	}
-
-	return (jlong)version;
-}
-
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get(JNIEnv *jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);

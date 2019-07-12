@@ -695,7 +695,7 @@ class FutureVersion(Future):
     def wait(self):
         self.block_until_ready()
         version = ctypes.c_int64()
-        self.capi.fdb_future_get_version(self.fpointer, ctypes.byref(version))
+        self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(version))
         return version.value
 
 
@@ -1370,10 +1370,6 @@ def init_c_api():
     _capi.fdb_future_get_error.argtypes = [ctypes.c_void_p]
     _capi.fdb_future_get_error.restype = int
     _capi.fdb_future_get_error.errcheck = check_error_code
-
-    _capi.fdb_future_get_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
-    _capi.fdb_future_get_version.restype = ctypes.c_int
-    _capi.fdb_future_get_version.errcheck = check_error_code
 
     _capi.fdb_future_get_int64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
     _capi.fdb_future_get_int64.restype = ctypes.c_int

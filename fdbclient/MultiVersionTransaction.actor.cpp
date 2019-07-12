@@ -309,7 +309,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
-	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
+	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version", headerVersion < 620);
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, "fdb_future_get_int64", headerVersion >= 620);
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");

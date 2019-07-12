@@ -294,7 +294,7 @@ ACTOR Future<Void> printFlowTesterStack(FlowTesterStack* stack) {
 	state int idx;
 	for (idx = stack->data.size() - 1; idx >= 0; --idx) {
 		Standalone<StringRef> value = wait(stack->data[idx].value);
-		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index, printable(value).c_str());
+		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index, value.printable().c_str());
 	}
 	return Void();
 }

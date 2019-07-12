@@ -292,7 +292,7 @@ namespace FDB {
 		return backToFuture<Version>( fdb_transaction_get_read_version( tr ), [](Reference<CFuture> f){
 				Version value;
 
-				throw_on_error( fdb_future_get_version( f->f, &value ) );
+				throw_on_error( fdb_future_get_int64( f->f, &value ) );
 
 				return value;
 			} );

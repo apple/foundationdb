@@ -216,7 +216,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getReadVersion() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion(Transaction_getReadVersion(getPtr()), executor);
+			return new FutureInt64(Transaction_getReadVersion(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
