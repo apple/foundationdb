@@ -81,7 +81,7 @@ def test_get_approximate_size(tr):
     s3 = tr.get_approximate_size().wait()
     assert(s2 < s3)
 
-    tr.add_read_conflict_key(b'key3')
+    tr.add_read_conflict_key(b'key3+')
     s4 = tr.get_approximate_size().wait()
     assert(s3 < s4)
 

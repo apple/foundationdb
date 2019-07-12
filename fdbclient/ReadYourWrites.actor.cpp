@@ -1045,8 +1045,8 @@ public:
 
 				return Void();
 			}
-			
-			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end));
+
+			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end), /* updateSize= */ false);
 
 			auto conflictRanges = ryw->readConflicts.ranges();
 			for( auto iter = conflictRanges.begin(); iter != conflictRanges.end(); ++iter ) {
@@ -1123,8 +1123,11 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
-	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
+  : cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0), creationTime(now()), commitStarted(false),
+    options(tr), deferredError(cx->deferredError) {
+	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(),
+	          std::back_inserter(persistentOptions));
 	applyPersistentOptions();
 }
 
@@ -1366,8 +1369,8 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 		return;
 	}
 
-	approximateSize += r.expectedSize();
 	if(options.readYourWritesDisabled) {
+		approximateSize += r.expectedSize() + sizeof(KeyRangeRef);
 		tr.addReadConflictRange(r);
 		return;
 	}
@@ -1382,6 +1385,7 @@ void ReadYourWritesTransaction::updateConflictMap( KeyRef const& key, WriteMap::
 	//it.skip( key );
 	//ASSERT( it.beginKey() <= key && key < it.endKey() );
 	if( it.is_unmodified_range() || ( it.is_operation() && !it.is_independent() ) ) {
+		approximateSize += key.expectedSize() + sizeof(KeyRangeRef);
 		readConflicts.insert( singleKeyRange( key, arena ), true );
 	}
 }
@@ -1392,13 +1396,15 @@ void ReadYourWritesTransaction::updateConflictMap( KeyRangeRef const& keys, Writ
 	for(; it.beginKey() < keys.end; ++it ) {
 		if( it.is_unmodified_range() || ( it.is_operation() && !it.is_independent() ) ) {
 			KeyRangeRef insert_range = KeyRangeRef( std::max( keys.begin, it.beginKey().toArenaOrRef( arena ) ), std::min( keys.end, it.endKey().toArenaOrRef( arena ) ) );
-			if( !insert_range.empty() )
+			if (!insert_range.empty()) {
+				approximateSize += keys.expectedSize() + sizeof(KeyRangeRef);
 				readConflicts.insert( insert_range, true );
+			}
 		}
 	}
 }
 
-void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const& keys ) {
+void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const& keys, bool updateSize) {
 	WriteMap::iterator it( &writes );
 	it.skip(keys.begin);
 
@@ -1411,12 +1417,16 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			clearBegin = std::max(ExtStringRef(keys.begin), it.beginKey());
 			inClearRange = true;
 		} else if( !it.is_cleared_range() && inClearRange ) {
-			tr.clear( KeyRangeRef( clearBegin.toArenaOrRef(arena), it.beginKey().toArenaOrRef(arena) ), false );
+			approximateSize += updateSize ? clearBegin.toArenaOrRef(arena).expectedSize() +
+			                                    it.beginKey().toArenaOrRef(arena).expectedSize() + sizeof(KeyRangeRef)
+			                              : 0;
+			tr.clear(KeyRangeRef(clearBegin.toArenaOrRef(arena), it.beginKey().toArenaOrRef(arena)), false);
 			inClearRange = false;
 		}
 	}
 
-	if( inClearRange ) {
+	if (inClearRange) {
+		approximateSize += updateSize ? clearBegin.toArenaOrRef(arena).expectedSize() + keys.end.expectedSize() + sizeof(KeyRangeRef) : 0;
 		tr.clear(KeyRangeRef(clearBegin.toArenaOrRef(arena), keys.end), false);
 	}
 
@@ -1430,7 +1440,10 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			conflictBegin = std::max(ExtStringRef(keys.begin), it.beginKey());
 			inConflictRange = true;
 		} else if( !it.is_conflict_range() && inConflictRange ) {
-			tr.addWriteConflictRange( KeyRangeRef( conflictBegin.toArenaOrRef(arena), it.beginKey().toArenaOrRef(arena) ) );
+			approximateSize += updateSize ? conflictBegin.toArenaOrRef(arena).expectedSize() +
+			                                    it.beginKey().toArenaOrRef(arena).expectedSize() + sizeof(KeyRangeRef)
+			                              : 0;
+			tr.addWriteConflictRange(KeyRangeRef(conflictBegin.toArenaOrRef(arena), it.beginKey().toArenaOrRef(arena)));
 			inConflictRange = false;
 		}
 
@@ -1441,10 +1454,15 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 				switch(op[i].type) {
 					case MutationRef::SetValue:
 						if (op[i].value.present()) {
-							tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
-						} else {
-							tr.clear( it.beginKey().assertRef(), false );
-						}
+						    approximateSize += updateSize ? it.beginKey().assertRef().expectedSize() +
+						                                        op[i].value.get().expectedSize() + sizeof(MutationRef)
+						                                  : 0;
+						    tr.set(it.beginKey().assertRef(), op[i].value.get(), false);
+					    } else {
+						    approximateSize +=
+						        updateSize ? it.beginKey().assertRef().expectedSize() + sizeof(MutationRef) : 0;
+						    tr.clear(it.beginKey().assertRef(), false);
+					    }
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1460,8 +1478,11 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::MinV2:
 					case MutationRef::AndV2:
 					case MutationRef::CompareAndClear:
-						tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
-						break;
+					    approximateSize += updateSize ? it.beginKey().assertRef().expectedSize() +
+					                                        op[i].value.get().expectedSize() + sizeof(MutationRef)
+					                                  : 0;
+					    tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
+					    break;
 					default:
 						break;
 				}
@@ -1470,6 +1491,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 	}
 
 	if( inConflictRange ) {
+		approximateSize += updateSize ? conflictBegin.toArenaOrRef(arena).expectedSize() + keys.end.expectedSize() + sizeof(KeyRangeRef) : 0;
 		tr.addWriteConflictRange( KeyRangeRef( conflictBegin.toArenaOrRef(arena), keys.end ) );
 	}
 }
@@ -1560,7 +1582,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if(operationType == MutationRef::SetVersionstampedKey) {
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		if(!options.readYourWritesDisabled) {
-			writeRangeToNativeTransaction(range);
+			writeRangeToNativeTransaction(range, /* updateSize= */ true);
 			writes.addUnmodifiedAndUnreadableRange(range);
 		}
 	}
@@ -1575,6 +1597,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 			throw client_invalid_operation();
 	}
 
+	approximateSize += k.expectedSize() + v.expectedSize() + sizeof(MutationRef);
 	if(options.readYourWritesDisabled) {
 		return tr.atomicOp(k, v, (MutationRef::Type) operationType, addWriteConflict);
 	}
@@ -1605,9 +1628,9 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 	if(key >= getMaxWriteKey())
 		throw key_outside_legal_range();
 
+	approximateSize += key.expectedSize() + value.expectedSize() + sizeof(MutationRef) +
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2 * key.expectedSize() + 1 : 0);
 	if (options.readYourWritesDisabled) {
-		approximateSize += key.expectedSize() + value.expectedSize() + sizeof(MutationRef) +
-		                   (addWriteConflict ? sizeof(KeyRangeRef) : 0);
 		return tr.set(key, value, addWriteConflict);
 	}
 
@@ -1619,7 +1642,6 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 	
 	KeyRef k = KeyRef( arena, key );
 	ValueRef v = ValueRef( arena, value );
-	approximateSize += k.expectedSize() + v.expectedSize() + sizeof(Watch);
 
 	writes.mutate(k, MutationRef::SetValue, v, addWriteConflict);
 	RYWImpl::triggerWatches(this, key, value);
@@ -1636,11 +1658,12 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 	if(range.begin > maxKey || range.end > maxKey)
 		throw key_outside_legal_range();
 
-	if( options.readYourWritesDisabled ) {
-		approximateSize += range.expectedSize() + sizeof(MutationRef) + (addWriteConflict ? sizeof(KeyRangeRef) : 0);
+	approximateSize += range.expectedSize() + sizeof(MutationRef) +
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + range.expectedSize() : 0);
+	if (options.readYourWritesDisabled) {
 		return tr.clear(range, addWriteConflict);
 	}
-	
+
 	//There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
 	//we can translate it to an equivalent one with smaller keys
 	KeyRef begin = range.begin;
@@ -1658,7 +1681,6 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 	}
 
 	r = KeyRangeRef( arena, r );
-	approximateSize += r.expectedSize();
 
 	writes.clear(r, addWriteConflict);
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
@@ -1682,7 +1704,7 @@ void ReadYourWritesTransaction::clear( const KeyRef& key ) {
 	}
 	
 	KeyRangeRef r = singleKeyRange( key, arena );
-	approximateSize += r.expectedSize();
+	approximateSize += r.expectedSize() + sizeof(KeyRangeRef);
 
 	//SOMEDAY: add an optimized single key clear to write map
 	writes.clear(r, addWriteConflict);
@@ -1707,7 +1729,7 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if (key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
 		return key_too_large();
 
-	approximateSize += key.expectedSize() + sizeof(Watch);
+	approximateSize += key.expectedSize();
 	return RYWImpl::watch(this, key);
 }
 
@@ -1738,7 +1760,7 @@ void ReadYourWritesTransaction::addWriteConflictRange( KeyRangeRef const& keys )
 		return;
 	}
 
-	approximateSize += r.expectedSize();
+	approximateSize += r.expectedSize() + sizeof(KeyRangeRef);
 	if(options.readYourWritesDisabled) {
 		tr.addWriteConflictRange(r);
 		return;
