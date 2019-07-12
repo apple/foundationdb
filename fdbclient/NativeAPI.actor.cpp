@@ -620,7 +620,10 @@ ACTOR static Future<Void> monitorClientInfo(Reference<AsyncVar<Optional<ClusterI
 
 						leaderMon = Void();
 						state Future<Void> anyFailures = waitForAny(onProxyFailureVec);
-						wait(anyFailures || outInfo->onChange() || ccfChanged);
+						choose {
+							when(wait(anyFailures || outInfo->onChange())) {}
+							when(wait(ccfChanged)) { break; }
+						}
 						if(anyFailures.isReady()) {
 							leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
 							break;
