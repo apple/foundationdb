@@ -514,6 +514,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 				limits->tpsLimit = limits->durabilityLagLimit;
 				limitReason = limitReason_t::storage_server_durability_lag;
 			}
+		} else if(limits->durabilityLagLimit != std::numeric_limits<double>::infinity() && limitingDurabilityLag > limits->durabilityLagTargetVersions - SERVER_KNOBS->DURABILITY_LAG_UNLIMITED_THRESHOLD) {
+			limits->durabilityLagLimit = SERVER_KNOBS->DURABILITY_LAG_INCREASE_RATE*limits->durabilityLagLimit;
 		} else {
 			limits->durabilityLagLimit = std::numeric_limits<double>::infinity();
 		}

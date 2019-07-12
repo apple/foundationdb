@@ -400,8 +400,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
 	init( TARGET_DURABILITY_LAG_VERSIONS,                      200e6 );
 	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                100e6 );
+	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
+	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
