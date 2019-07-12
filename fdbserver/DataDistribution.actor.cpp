@@ -4026,7 +4026,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		TraceEvent("SnapDataDistributor.GotStorageWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-		//state std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		state std::vector<Future<Void>> storageSnapReqs;
 		for (const auto & worker : storageWorkers) {
 			storageSnapReqs.push_back(
@@ -4041,7 +4040,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local tlog nodes
 		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
-		//state std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
 		state std::vector<Future<Void>> tLogSnapReqs;
 		for (const auto & tlog : tlogs) {
 			tLogSnapReqs.push_back(
@@ -4056,7 +4054,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapUID", snapReq.snapUID);
 		// enable tlog pop on local tlog nodes
 		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
-		//state std::vector<Future<ErrorOr<Void>>> enablePops;
 		state std::vector<Future<Void>> enablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(
@@ -4073,7 +4070,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		TraceEvent("SnapDataDistributor.GotCoordWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-		//state std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
 		state std::vector<Future<Void>> coordSnapReqs;
 		for (const auto & worker : coordWorkers) {
 			coordSnapReqs.push_back(
