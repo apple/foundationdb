@@ -1252,7 +1252,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Locality string is hashed into integer, used as KeyIndex
 	// For better understand which KeyIndex is used for locality, we print this info in trace.
-	void traceLocalityArrayIndexName(Reference<LocalityRecord> record) {
+	void traceLocalityArrayIndexName() {
 		TraceEvent("LocalityRecordKeyName").detail("Size", machineLocalityMap._keymap->_lookuparray.size());
 		for (int i = 0; i < machineLocalityMap._keymap->_lookuparray.size(); ++i) {
 			TraceEvent("LocalityRecordKeyIndexName")
@@ -1263,15 +1263,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	void traceMachineLocalityMap() {
 		int i = 0;
-
-		for (auto& uid : machineLocalityMap.getObjects()) {
-			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
-			if (record.isValid()) {
-				// Record the Locality KeyIndex and name so that we know what each key means
-				traceLocalityArrayIndexName(record);
-				break;
-			}
-		}
 
 		TraceEvent("MachineLocalityMap").detail("Size", machineLocalityMap.size());
 		for (auto& uid : machineLocalityMap.getObjects()) {
@@ -1301,6 +1292,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		traceServerTeamInfo();
 		traceMachineInfo();
 		traceMachineTeamInfo();
+		traceLocalityArrayIndexName();
 		traceMachineLocalityMap();
 	}
 
@@ -1799,10 +1791,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MaxMachineTeams", maxMachineTeams)
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
 		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
-		if (healthyMachineTeamCount == 0) {
-			// This should rarely happen in production cluster.
-			traceAllInfo(true);
-		}
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0 || remainingMachineTeamBudget > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
@@ -3198,8 +3186,8 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				// We saw a corner case in situation when optimalTeamCount = 1, healthyTeamCount = 0 in 3 data_hall
-				// configuration
+				// We saw a corner case in in 3 data_hall configuration
+				// when optimalTeamCount = 1, healthyTeamCount = 0.
 				if (self->optimalTeamCount > 0 && self->healthyTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
