@@ -667,6 +667,9 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 			.detail("Role", snapReq.role)
 			.detail("Value", snapFolder)
 			.detail("ExecPayload", snapReq.snapPayload);
+		if (err != 0) {
+			throw operation_failed();
+		}
 		if (snapReq.role.toString() == "storage") {
 			printStorageVersionInfo();
 		}
