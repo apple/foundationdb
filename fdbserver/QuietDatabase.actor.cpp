@@ -234,11 +234,10 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool localOnly ) {
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
 	state Future<std::vector<WorkerDetails>> workersFuture = getWorkers(dbInfo);
-
 	state std::vector<StorageServerInterface> servers = wait(serversFuture);
 	state std::vector<WorkerDetails> workers = wait(workersFuture);
-
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
+
 	for(const auto & worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}

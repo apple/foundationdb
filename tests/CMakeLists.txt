@@ -149,6 +149,9 @@ add_fdb_test(
   TEST_FILES restarting/StorefrontTestRestart-1.txt
              restarting/StorefrontTestRestart-2.txt)
 add_fdb_test(
+  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
+             restarting/from_6.2.0/SnapTestAttrition-2.txt)
+add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
              restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
 add_fdb_test(

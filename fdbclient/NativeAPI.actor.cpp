@@ -3539,7 +3539,7 @@ ACTOR Future<Void> snapCreateVersion1(Database inputCx, StringRef snapCmd, UID s
 	return Void();
 }
 
-ACTOR Future<Void> snapshotDatabase(DatabaseContext* cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
+ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
 	TraceEvent("NativeAPI.SnapshotDatabaseEnter")
 		.detail("SnapPayload", snapPayload)
 		.detail("SnapUID", snapUID);
@@ -3563,8 +3563,7 @@ ACTOR Future<Void> snapshotDatabase(DatabaseContext* cx, StringRef snapPayload, 
 	return Void();
 }
 
-ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID snapUID) {
-	state DatabaseContext* cx = inputCx.getPtr();
+ACTOR Future<Void> snapCreateVersion2(Database cx, StringRef snapCmd, UID snapUID) {
 	// remember the client ID before the snap operation
 	state UID preSnapClientUID = cx->clientInfo->get().id;
 
@@ -3583,7 +3582,7 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 		.withSuffix(snapCmdArgs);
 
 	try {
-		Future<Void> exec = snapshotDatabase(cx, snapPayloadRef, snapUID, snapUID);
+		Future<Void> exec = snapshotDatabase(Reference<DatabaseContext>::addRef(cx.getPtr()), snapPayloadRef, snapUID, snapUID);
 		double timeOut = g_network->isSimulated() ? 80.0 : CLIENT_KNOBS->SNAP_CREATE_TIMEOUT;
 		wait(timeoutError(exec, timeOut));
 	} catch (Error& e) {

@@ -1221,8 +1221,8 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 
 		TraceEvent("EnableTLogPlayAllIgnoredPops");
 		// use toBePopped and issue all the pops
-		state std::map<Tag, Version>::iterator it;
-		state vector<Future<Void>> ignoredPops;
+		std::map<Tag, Version>::iterator it;
+		vector<Future<Void>> ignoredPops;
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;

@@ -4001,15 +4001,15 @@ static std::set<int> const& normalDataDistributorErrors() {
 }
 
 ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
-	state Database cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	state double snapTimeout = g_network->isSimulated() ? 15.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	TraceEvent("SnapDataDistributor.SnapReqEnter")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
 	try {
 		// disable tlog pop on local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
-		state std::vector<Future<Void>> disablePops;
+		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
+		std::vector<Future<Void>> disablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(
 				timeoutError(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID)), snapTimeout)
@@ -4025,7 +4025,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		TraceEvent("SnapDataDistributor.GotStorageWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-		state std::vector<Future<Void>> storageSnapReqs;
+		std::vector<Future<Void>> storageSnapReqs;
 		for (const auto & worker : storageWorkers) {
 			storageSnapReqs.push_back(
 				timeoutError(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage"))),
@@ -4038,8 +4038,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
-		state std::vector<Future<Void>> tLogSnapReqs;
+		std::vector<Future<Void>> tLogSnapReqs;
 		for (const auto & tlog : tlogs) {
 			tLogSnapReqs.push_back(
 				timeoutError(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog"))),
@@ -4052,10 +4051,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// enable tlog pop on local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
-		state std::vector<Future<Void>> enablePops;
+		std::vector<Future<Void>> enablePops;
 		for (const auto & tlog : tlogs) {
-			disablePops.push_back(
+			enablePops.push_back(
 				timeoutError(tlog.enablePopRequest.getReply(TLogEnablePopRequest(snapReq.snapUID)), snapTimeout)
 				);
 		}
@@ -4069,7 +4067,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		TraceEvent("SnapDataDistributor.GotCoordWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-		state std::vector<Future<Void>> coordSnapReqs;
+		std::vector<Future<Void>> coordSnapReqs;
 		for (const auto & worker : coordWorkers) {
 			coordSnapReqs.push_back(
 				timeoutError(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord"))),
@@ -4098,7 +4096,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
-	state Database cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	state ActorCollection actors(false);
 
 	try {
