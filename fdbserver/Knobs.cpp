@@ -396,6 +396,13 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
 	init( MAX_MACHINES_FALLING_BEHIND,                             1 );
 
+	init( MAX_TPS_HISTORY_SAMPLES,                               600 );
+	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
+	init( TARGET_DURABILITY_LAG_VERSIONS,                      200e6 );
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                100e6 );
+	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
+	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
+
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
 	init( STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,        1000.0 / STORAGE_METRICS_AVERAGE_INTERVAL );  // milliHz!
