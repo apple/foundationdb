@@ -292,8 +292,8 @@ bool PolicyAcross::selectReplicas(
 					if (_selected->size() > 0) {
 						// entry is the locality entry info (entryValue) from the to-be-selected team member alsoServer
 						printf("Across !select    key: %-7s value: (%3d) %-10s entry: %s\n", _attribKey.c_str(),
-								value.get()._id, fromServers->valueText(value.get()).c_str(),
-								fromServers->getEntryInfo(alsoServer).c_str());
+						       value.get()._id, fromServers->valueText(value.get()).c_str(),
+						       fromServers->getEntryInfo(alsoServer).c_str());
 					} else {
 						printf("Across !select    empty\n");
 					}

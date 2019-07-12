@@ -1129,6 +1129,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		teamInfo->machineTeam = machineTeamInfo;
 		machineTeamInfo->serverTeams.push_back(teamInfo);
 		if (g_network->isSimulated()) {
+			// Update server team information for consistency check in simulation
 			traceTeamCollectionInfo();
 		}
 	}
@@ -1249,19 +1250,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
+	// Locality string is hashed into integer, used as KeyIndex
+	// For better understand which KeyIndex is used for locality, we print this info in trace.
 	void traceLocalityArrayIndexName(Reference<LocalityRecord> record) {
-		TraceEvent("LocalityRecordKeyName");
+		TraceEvent("LocalityRecordKeyName").detail("Size", machineLocalityMap._keymap->_lookuparray.size());
 		for (int i = 0; i < machineLocalityMap._keymap->_lookuparray.size(); ++i) {
 			TraceEvent("LocalityRecordKeyIndexName")
-				.detail("KeyIndex",  i)
-				.detail("KeyName", machineLocalityMap._keymap->_lookuparray[i]);
+			    .detail("KeyIndex", i)
+			    .detail("KeyName", machineLocalityMap._keymap->_lookuparray[i]);
 		}
 	}
 
 	void traceMachineLocalityMap() {
 		int i = 0;
 
-		TraceEvent("MachineLocalityMap").detail("Size", machineLocalityMap.size());
 		for (auto& uid : machineLocalityMap.getObjects()) {
 			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
 			if (record.isValid()) {
@@ -1270,6 +1272,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				break;
 			}
 		}
+
+		TraceEvent("MachineLocalityMap").detail("Size", machineLocalityMap.size());
 		for (auto& uid : machineLocalityMap.getObjects()) {
 			Reference<LocalityRecord> record = machineLocalityMap.getRecord(i);
 			if (record.isValid()) {
@@ -1320,7 +1324,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			machine->second->localityEntry = localityEntry;
 			++numHealthyMachine;
 		}
-		TraceEvent("RebuildMachineLocalityMapDebug").detail("NumHealthyMachine", numHealthyMachine);
 	}
 
 	// Create machineTeamsToBuild number of machine teams
@@ -1340,7 +1343,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		ASSERT(machine_info.size() >= configuration.storageTeamSize);
 		// Future: Consider if we should overbuild more machine teams to
 		// allow machineTeamRemover() to get a more balanced machine teams per machine
-		
+
 		// Step 1: Create machineLocalityMap which will be used in building machine team
 		rebuildMachineLocalityMap();
 
@@ -1388,7 +1391,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					ASSERT(!tcMachineInfo->serversOnMachine.empty());
 					LocalityEntry process = tcMachineInfo->localityEntry;
 					forcedAttributes.push_back(process);
-					TraceEvent("ChosenMachine").detail("MachineInfo", tcMachineInfo->machineID).detail("LeaseUsedMachinesSize", leastUsedMachines.size()).detail("ForcedAttributesSize", forcedAttributes.size());
+					TraceEvent("ChosenMachine")
+					    .detail("MachineInfo", tcMachineInfo->machineID)
+					    .detail("LeaseUsedMachinesSize", leastUsedMachines.size())
+					    .detail("ForcedAttributesSize", forcedAttributes.size());
 				} else {
 					// when leastUsedMachine is empty, we will never find a team later, so we can simply return.
 					return addedMachineTeams;
@@ -1399,12 +1405,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				team.clear();
 				ASSERT_WE_THINK(forcedAttributes.size() == 1);
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
-				TraceEvent("SelectReplicasDebug").detail("Success", success).detail("PolicyInfo", configuration.storagePolicy->info());
 				// NOTE: selectReplicas() should always return success when storageTeamSize = 1
 				ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
 				if (!success) {
-					traceAllInfo(true);
-					TraceEvent("SelectReplicasDebug").detail("FoundTeamSize", team.size() + 1).detail("ExpectedTeamSize", configuration.storageTeamSize);
 					continue; // Try up to maxAttempts, since next time we may choose a different forcedAttributes
 				}
 				ASSERT(forcedAttributes.size() > 0);
@@ -1420,15 +1423,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				int score = 0;
 				vector<Standalone<StringRef>> machineIDs;
-				TraceEvent("MachineTeamDebug").detail("TeamSize", team.size());
 				for (auto process = team.begin(); process != team.end(); process++) {
 					Reference<TCServerInfo> server = server_info[**process];
 					score += server->machine->machineTeams.size();
 					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
-					TraceEvent("MachineTeamDebugDetail").detail("MachineTeamMember", machine_id);
 				}
-				
 
 				// Only choose healthy machines into machine team
 				ASSERT_WE_THINK(isMachineTeamHealthy(machineIDs));
@@ -1800,6 +1800,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
 		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
 		if (healthyMachineTeamCount == 0) {
+			// This should rarely happen in production cluster.
 			traceAllInfo(true);
 		}
 		// Pre-build all machine teams until we have the desired number of machine teams
@@ -2179,8 +2180,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		ASSERT_WE_THINK(foundInMachineTeam);
 		team->tracker.cancel();
-		// Consistency check needs the most updated team info to decide if the current team number <= desired number
 		if (g_network->isSimulated()) {
+			// Update server team information for consistency check in simulation
 			traceTeamCollectionInfo();
 		}
 		return found;
@@ -2558,14 +2559,15 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		double removeServerTeamDelay = SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY;
 		if (g_network->isSimulated()) {
-			// Speed up the team remover in simulation; otherwise, it may time out because we need to remove hundreds of teams
+			// Speed up the team remover in simulation; otherwise,
+			// it may time out because we need to remove hundreds of teams
 			removeServerTeamDelay = removeServerTeamDelay / 100;
 		}
 		wait(delay(removeServerTeamDelay));
 
 		wait(waitUntilHealthy(self));
-		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
-		// and remove bad team (cancel the team tracker).
+		// Wait for the badTeamRemover() to avoid the potential race between
+		// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
 
 		// Q: Should we count the number of servers instead of healthy servers, since healthyness can change quickly?
@@ -2638,8 +2640,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 	state bool firstCheck = true;
 
-	state bool optimal;
-
 	if(logTeamEvents) {
 		TraceEvent("TeamTrackerStarting", self->distributorId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 	}
@@ -2681,7 +2681,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
-			optimal = team->isOptimal() && healthy;
+			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 
 			lastReady = self->initialFailureReactionDelay.isReady();
@@ -2858,7 +2858,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc());
 		}
 		self->priority_teams[team->getPriority()]--;
-		if(team->isHealthy()) {
+		if (team->isHealthy()) {
 			self->healthyTeamCount--;
 			ASSERT( self->healthyTeamCount >= 0 );
 
@@ -2868,7 +2868,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			}
 		}
 		// Q: Why adding this will fail the ASSERT?
-		// if (optimal) {
+		// if (lastOptimal) {
 		// 	self->optimalTeamCount--;
 		// 	ASSERT( self->optimalTeamCount >= 0 );
 		// 	self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
@@ -3209,8 +3209,9 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				// We see a case optimalTeamCount = 1, while healthyTeamCount = 0 in 3 data_hall configuration
-				if( self->optimalTeamCount > 0 && self->healthyTeamCount > 0 ) {
+				// We saw a corner case in situation when optimalTeamCount = 1, healthyTeamCount = 0 in 3 data_hall
+				// configuration
+				if (self->optimalTeamCount > 0 && self->healthyTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
@@ -3277,11 +3278,12 @@ ACTOR Future<Void> storageServerTracker(
 					bool localityChanged = server->lastKnownInterface.locality != newInterface.first.locality;
 					bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
 					                              newInterface.first.locality.zoneId().get();
-					TraceEvent("StorageServerInterfaceChanged", self->distributorId).detail("ServerID", server->id)
-						.detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
-						.detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
-						.detail("LocalityChanged", localityChanged)
-						.detail("MachineLocalityChanged", machineLocalityChanged);
+					TraceEvent("StorageServerInterfaceChanged", self->distributorId)
+					    .detail("ServerID", server->id)
+					    .detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
+					    .detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
+					    .detail("LocalityChanged", localityChanged)
+					    .detail("MachineLocalityChanged", machineLocalityChanged);
 
 					server->lastKnownInterface = newInterface.first;
 					server->lastKnownClass = newInterface.second;
@@ -3362,7 +3364,8 @@ ACTOR Future<Void> storageServerTracker(
 							// self->traceTeamCollectionInfo();
 							recordTeamCollectionInfo = true;
 						}
-						// The locality change of the server will make the server have 0 teams
+						// The locality change of the server will invalid the server's old teams,
+						// so we need to rebuild teams for the server
 						self->doBuildTeams = true;
 					}
 
@@ -4242,7 +4245,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	for(auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
 		auto teamCount = process->second->teams.size();
 		ASSERT(teamCount >= 1);
-		//ASSERT(teamCount <= 5);
+		// ASSERT(teamCount <= 5);
 	}
 
 	delete(collection);
