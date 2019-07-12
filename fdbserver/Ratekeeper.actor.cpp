@@ -75,7 +75,7 @@ const char* limitReasonDesc[] = {
 	"Storage server running out of space (approaching 5% limit).",
 	"Log server running out of space (approaching 100MB limit).",
 	"Log server running out of space (approaching 5% limit).",
-	"Storage server is overwhelmed by read workload"
+	"Storage server durable version falling behind."
 };
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
@@ -128,10 +128,11 @@ struct RatekeeperLimits {
 	int64_t logTargetBytes;
 	int64_t logSpringBytes;
 	double maxVersionDifference;
+	int64_t durabilityLagTargetVersions;
 
 	std::string context;
 
-	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference) :
+	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference, int64_t durabilityLagTargetVersions) :
 		tpsLimit(std::numeric_limits<double>::infinity()),
 		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 		reasonMetric(StringRef("Ratekeeper.Reason" + context)),
@@ -140,6 +141,7 @@ struct RatekeeperLimits {
 		logTargetBytes(logTargetBytes),
 		logSpringBytes(logSpringBytes),
 		maxVersionDifference(maxVersionDifference),
+		durabilityLagTargetVersions(durabilityLagTargetVersions),
 		context(context)
 	{}
 };
@@ -177,8 +179,8 @@ struct RatekeeperData {
 	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
 		lastWarning(0),
-		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE),
-		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH),
+		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
+		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 		durabilityLagLimit(std::numeric_limits<double>::infinity()), lastDurabilityLag(0)
 	{}
 };
@@ -350,7 +352,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back up from this value
 	actualTps = std::max( std::max( 1.0, actualTps ), self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT );
 	
-	if(self->actualTpsHistory.size() > 600) {
+	if(self->actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
 		self->actualTpsHistory.pop_front();
 	}
 	self->actualTpsHistory.push_back(actualTps);
@@ -495,16 +497,16 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		}
 
 		limitingStorageDurabilityLagStorageServer = -1*ss->first;
-		if(limitingStorageDurabilityLagStorageServer > 200e6) {
+		if(limitingStorageDurabilityLagStorageServer > limits->durabilityLagTargetVersions && self->actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
 			if(self->durabilityLagLimit == std::numeric_limits<double>::infinity()) {
 				double maxTps = 0;
 				for(int i = 0; i < self->actualTpsHistory.size(); i++) {
 					maxTps = std::max(maxTps, self->actualTpsHistory[i]);
 				}
-				self->durabilityLagLimit = 1.02*maxTps;
+				self->durabilityLagLimit = SERVER_KNOBS->INITIAL_DURABILITY_LAG_MULTIPLIER*maxTps;
 			}
 			if( limitingStorageDurabilityLagStorageServer > self->lastDurabilityLag ) {
-				self->durabilityLagLimit = 0.9999*self->durabilityLagLimit;
+				self->durabilityLagLimit = SERVER_KNOBS->DURABILITY_LAG_REDUCTION_RATE*self->durabilityLagLimit;
 			}
 			if(self->durabilityLagLimit < limits->tpsLimit) {
 				limits->tpsLimit = self->durabilityLagLimit;
