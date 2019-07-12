@@ -2867,11 +2867,12 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				self->zeroHealthyTeams->set(true);
 			}
 		}
-		if (optimal) {
-			self->optimalTeamCount--;
-			ASSERT( self->optimalTeamCount >= 0 );
-			self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
-		}
+		// Q: Why adding this will fail the ASSERT?
+		// if (optimal) {
+		// 	self->optimalTeamCount--;
+		// 	ASSERT( self->optimalTeamCount >= 0 );
+		// 	self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+		// }
 		throw;
 	}
 }
@@ -3209,7 +3210,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
 				// We see a case optimalTeamCount = 1, while healthyTeamCount = 0 in 3 data_hall configuration
-				if( self->optimalTeamCount > 0 ) { //&& self->healthyTeamCount > 0 
+				if( self->optimalTeamCount > 0 && self->healthyTeamCount > 0 ) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
