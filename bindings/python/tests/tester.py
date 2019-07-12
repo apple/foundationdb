@@ -477,7 +477,7 @@ class Tester:
                     inst.push(b"GOT_COMMITTED_VERSION")
                 elif inst.op == six.u("GET_APPROXIMATE_SIZE"):
                     approximate_size = inst.tr.get_approximate_size().wait()
-                    inst.push(approximate_size)
+                    inst.push(b"GOT_APPROXIMATE_SIZE")
                 elif inst.op == six.u("GET_VERSIONSTAMP"):
                     inst.push(inst.tr.get_versionstamp())
                 elif inst.op == six.u("TUPLE_PACK"):

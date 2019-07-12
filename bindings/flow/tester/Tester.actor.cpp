@@ -710,10 +710,9 @@ struct GetApproximateSizeFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		int64_t size = wait(instruction->tr->getApproximateSize());
-		Tuple f;
-		f.append(size);
-		data->stack.push(f.pack());
+		int64_t _ = wait(instruction->tr->getApproximateSize());
+		(void) _;  // disable unused variable warning
+		data->stack.pushTuple(LiteralStringRef("GOT_APPROXIMATE_SIZE"));
 		return Void();
 	}
 };

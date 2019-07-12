@@ -438,7 +438,7 @@ class ApiTest(Test):
 
             elif op == 'GET_APPROXIMATE_SIZE':
                 instructions.append(op)
-                self.add_stack_items(1)
+                self.add_strings(1)
 
             elif op == 'TUPLE_PACK' or op == 'TUPLE_RANGE':
                 tup = self.random.random_tuple(10)
