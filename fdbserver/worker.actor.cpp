@@ -129,6 +129,9 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 			} else {
 				wait(onClosed);
 			}
+			if(e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
+				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
+			}
 			if(storeError.isReady()) throw storeError.get().getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
@@ -747,7 +750,7 @@ ACTOR Future<Void> workerServer(
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
 			try {
-				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, locality);
+				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, true, locality);
 				metricsLogger = runMetrics( db, KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);

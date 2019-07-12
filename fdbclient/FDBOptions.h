@@ -23,7 +23,10 @@
 #define FDBCLIENT_FDBOPTIONS_H
 
 #include <string>
+#include <list>
 #include <map>
+
+#include "flow/Arena.h"
 
 struct FDBOptionInfo {
 	std::string name;
@@ -32,9 +35,15 @@ struct FDBOptionInfo {
 
 	bool hasParameter;
 	bool hidden;
+	bool persistent;
 
-	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden) 
-		: name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden) { }
+	// If non-negative, this specifies the code for the transaction option that this option is the default value for.
+	// Options that have a defaultFor will only retain the value from time they were most recently set (i.e. there can be no cumulative effects from calling multiple times).
+	int defaultFor;
+
+	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden, bool persistent, int defaultFor) 
+		: name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden), persistent(persistent),
+		  defaultFor(defaultFor) { }
 
 	FDBOptionInfo() { }
 };
@@ -45,15 +54,48 @@ private:
 	std::map<typename T::Option, FDBOptionInfo> optionInfo;
 
 public:
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator begin() { return optionInfo.begin(); }
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator end() { return optionInfo.end(); }
-	typename std::map<typename T::Option, FDBOptionInfo>::iterator find(const typename T::Option& key) { return optionInfo.find(key); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator begin() const { return optionInfo.begin(); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator end() const { return optionInfo.end(); }
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator find(const typename T::Option& key) const { return optionInfo.find(key); }
 
-	FDBOptionInfo& operator[] (const typename T::Option& key) { return optionInfo[key]; }
+	void insert(const typename T::Option& key, FDBOptionInfo info) {
+		optionInfo[key] = info;
+	}
+
+	FDBOptionInfo const& getMustExist(const typename T::Option& key) const { 
+		auto itr = optionInfo.find(key);
+		ASSERT(itr != optionInfo.end());
+		return itr->second; 
+	}
 
 	FDBOptionInfoMap() { T::init(); }
 };
 
-#define ADD_OPTION_INFO( type, var, name, comment, parameterComment, hasParameter, hidden ) type::optionInfo[var] = FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden);
+// An ordered list of options where each option is represented only once. Subsequent insertions will remove the option from its
+// original location and add it to the end with the new value.
+template<class T>
+class UniqueOrderedOptionList {
+public:
+	typedef std::list<std::pair<typename T::Option, Optional<Standalone<StringRef>>>> OptionList;
+
+private:
+	OptionList options;
+	std::map<typename T::Option, typename OptionList::iterator> optionsIndexMap;
+
+public:
+	void addOption(typename T::Option option, Optional<Standalone<StringRef>> value) {
+		auto itr = optionsIndexMap.find(option);
+		if(itr != optionsIndexMap.end()) {
+			options.erase(itr->second);
+		}
+		options.push_back(std::make_pair(option, value));
+		optionsIndexMap[option] = --options.end();
+	}
+
+	typename OptionList::const_iterator begin() const { return options.cbegin(); }
+	typename OptionList::const_iterator end() const { return options.cend(); }
+};
+
+#define ADD_OPTION_INFO( type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor ) type::optionInfo.insert(var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor));
 
 #endif

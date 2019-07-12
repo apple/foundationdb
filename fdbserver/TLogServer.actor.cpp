@@ -315,7 +315,7 @@ struct TLogData : NonCopyable {
 	int64_t overheadBytesDurable;
 
 	struct PeekTrackerData {
-		std::map<int, Promise<Version>> sequence_version;
+		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
 		double lastUpdate;
 	};
 
@@ -1317,8 +1317,9 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				}
 
 				trackerData.lastUpdate = now();
-				Version ver = wait(trackerData.sequence_version[sequence].getFuture());
-				req.begin = ver;
+				std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequence].getFuture());
+				req.begin = prevPeekData.first;
+				req.onlySpilled = prevPeekData.second;
 				wait(yield());
 			}
 		} catch( Error &e ) {
@@ -1376,13 +1377,13 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			}
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			if(sequenceData.isSet()) {
-				if(sequenceData.getFuture().get() != rep.end) {
+				if(sequenceData.getFuture().get().first != rep.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
 					req.reply.sendError(timed_out());
 					return Void();
 				}
 			} else {
-				sequenceData.send(rep.end);
+				sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
 			}
 			rep.begin = req.begin;
 		}
@@ -1537,13 +1538,13 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		}
 		auto& sequenceData = trackerData.sequence_version[sequence+1];
 		if(sequenceData.isSet()) {
-			if(sequenceData.getFuture().get() != reply.end) {
+			if(sequenceData.getFuture().get().first != reply.end) {
 				TEST(true); //tlog peek second attempt ended at a different version
 				req.reply.sendError(timed_out());
 				return Void();
 			}
 		} else {
-			sequenceData.send(reply.end);
+			sequenceData.send(std::make_pair(reply.end, reply.onlySpilled));
 		}
 		reply.begin = req.begin;
 	}
@@ -2235,6 +2236,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
 	state Version lastVer = 0;
+
+	if (endVersion.present()) {
+		TraceEvent("TLogRestoreReplicationFactor", self->dbgid).detail("LogId", logData->logId).detail("Locality", logData->locality).detail("RecoverFrom", beginVersion).detail("RecoverTo", endVersion.get());
+	}
 
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {

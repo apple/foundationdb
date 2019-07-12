@@ -210,6 +210,7 @@ FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(double, "%g");
+FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
 FORMAT_TRACEABLE(volatile unsigned long, "%lu");
 FORMAT_TRACEABLE(volatile long long, "%lld");

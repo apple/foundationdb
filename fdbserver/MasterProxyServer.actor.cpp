@@ -965,7 +965,7 @@ ACTOR Future<Void> commitBatch(
 				break; 
 			}
 			when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
-				if(v.version > self->committedVersion.get()) {
+				if(!v.newClientInfo.present() && v.version > self->committedVersion.get()) {
 					self->locked = v.locked;
 					self->metadataVersion = v.metadataVersion;
 					self->committedVersion.set(v.version);
@@ -1782,9 +1782,44 @@ ACTOR Future<Void> masterProxyServerCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface))
-		throw worker_removed();
+		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface)) {
+			throw worker_removed();
+		}
 		wait(db->onChange());
+	}
+}
+
+ACTOR template <class X> Future<Void> stripRequests( RequestStream<X> in, PromiseStream<ReplyPromise<REPLY_TYPE(X)>> out, int* count) {
+	loop {
+		X req = waitNext(in.getFuture());
+		out.send(req.reply);
+		if((*count) >= 0 && ++(*count) >= SERVER_KNOBS->MAX_FORWARD_MESSAGES) {
+			TraceEvent(SevWarnAlways, "TooManyProxyForwardRequests");
+			return Void();
+		}
+	}
+}
+
+ACTOR Future<Void> forwardProxy(ClientDBInfo info, PromiseStream<ReplyPromise<CommitID>> commitReplies, PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies, PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies) {
+	loop {
+		choose {
+			when(ReplyPromise<CommitID> req = waitNext(commitReplies.getFuture())) {
+				CommitID rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+			when(ReplyPromise<GetReadVersionReply> req = waitNext(grvReplies.getFuture())) {
+				GetReadVersionReply rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+			when(ReplyPromise<GetKeyServerLocationsReply> req = waitNext(locationReplies.getFuture())) {
+				GetKeyServerLocationsReply rep;
+				rep.newClientInfo = info;
+				req.send(rep);
+			}
+		}
+		wait(yield());
 	}
 }
 
@@ -1794,21 +1829,38 @@ ACTOR Future<Void> masterProxyServer(
 	Reference<AsyncVar<ServerDBInfo>> db,
 	std::string whitelistBinPaths)
 {
+	state Future<Void> core;
 	try {
-		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
-		loop choose{
-			when(wait(core)) { return Void(); }
-			when(wait(checkRemoved(db, req.recoveryCount, proxy))) {}
-		}
+		core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
+		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed || e.code() == error_code_tlog_stopped ||
-			e.code() == error_code_master_tlog_failed || e.code() == error_code_coordinators_changed || e.code() == error_code_coordinated_state_conflict ||
-			e.code() == error_code_new_coordinators_timed_out)
-		{
-			TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
+
+		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
+			e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+			e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+			throw;
+		}
+	}
+	core.cancel();
+	state PromiseStream<ReplyPromise<CommitID>> commitReplies;
+	state PromiseStream<ReplyPromise<GetReadVersionReply>> grvReplies;
+	state PromiseStream<ReplyPromise<GetKeyServerLocationsReply>> locationReplies;
+	state int replyCount = 0;
+	state Future<Void> finishForward = delay(SERVER_KNOBS->PROXY_FORWARD_DELAY) || stripRequests(proxy.commit, commitReplies, &replyCount) || stripRequests(proxy.getConsistentReadVersion, grvReplies, &replyCount) || stripRequests(proxy.getKeyServersLocations, locationReplies, &replyCount);
+	proxy = MasterProxyInterface();
+	loop {
+		if(finishForward.isReady()) {
 			return Void();
 		}
-		throw;
+		if(db->get().client.proxies.size() > 0 && !db->get().client.proxies[0].provisional && db->get().recoveryCount >= req.recoveryCount
+			&& !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy)) {
+			replyCount = -1;
+			core = forwardProxy(db->get().client, commitReplies, grvReplies, locationReplies);
+			wait(finishForward);
+			return Void();
+		}
+		wait(db->onChange() || finishForward);
 	}
 }

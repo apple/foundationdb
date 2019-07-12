@@ -181,7 +181,7 @@ public:
 private:
 	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
 	void setTransactionOption(Reference<ReadYourWritesTransaction> tr, FDBTransactionOptions::Option option, bool enabled, Optional<StringRef> arg, bool intrans) {
-		if(enabled && arg.present() != FDBTransactionOptions::optionInfo[option].hasParameter)	{
+		if(enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter)	{
 			printf("ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
 			throw invalid_option_value();
 		}
@@ -237,7 +237,7 @@ private:
 
 		//Returns true if the specified option is documented
 		bool isDocumented(typename T::Option option) {
-			FDBOptionInfo info = T::optionInfo[option];
+			FDBOptionInfo info = T::optionInfo.getMustExist(option);
 
 			std::string deprecatedStr = "Deprecated";
 			return !info.comment.empty() && info.comment.substr(0, deprecatedStr.size()) != deprecatedStr;
@@ -259,7 +259,7 @@ private:
 		void printHelpString() {
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
 				if(isDocumented(itr->second)) {
-					FDBOptionInfo info = T::optionInfo[itr->second];
+					FDBOptionInfo info = T::optionInfo.getMustExist(itr->second);
 					std::string helpStr = info.name + " - " + info.comment;
 					if(info.hasParameter)
 						helpStr += " " + info.parameterComment;
@@ -2516,7 +2516,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1);
+		db = Database::createDatabase(ccf, -1, false);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
