@@ -346,15 +346,11 @@ TODO finish documenting/implementing the following.
 1. Requirements (serialize must be cheap for a default-constructed instance, must have a serialize method or implement a trait.)
 1. Traits/Concepts: vector_like, union_like, dynamic_size, scalar
 1. isDeserializing idiom
-1. `if (ar.protocolVersion() < ...)` idiom is explicitly not supported for the ObjectSerializer
-1. Gotchas (serialize gets called more than once, maybe more)
+1. Gotchas (serialize gets called more than once on save path, maybe more)
 1. File identifiers
 1. Schema evolution
-1. dynamic_size_traits + mutable member backdoor
 1. Testing plan: have buggify sometimes default initialize fields that are introduced without changing the protocol version.
-1. (Implement) Check protocol version in addition to flatbuffers when accepting a connection from a peer.
-1. (Implement) FastVectorOfKV for GetKeyValuesReply
-1. (Future work) Allow ObjectSerializer to take the usual version specifications, `IncludeVersion`, `AssumeVersion`, or `Unversioned`. Version decides what root type to interpret the message as.
+1. (Future work) Allow ObjectSerializer to take the usual version specifications, `IncludeVersion`, `AssumeVersion`, or `Unversioned`.
 1. (Future work) Smaller messages for deprecated fields
 1. (Future work) `Deprecated<...>` template that knows whether or not the field was present? Automatically buggifies the field being absent?
 
