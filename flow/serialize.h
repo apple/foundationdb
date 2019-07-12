@@ -779,7 +779,7 @@ struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
 	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
 		if (useObjectSerializer) {
-			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); });
+			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
 			writer.serialize(get()); // Writes directly into buffer supplied by |w|
 		} else {
 			static_cast<T const*>(this)->serialize(w);

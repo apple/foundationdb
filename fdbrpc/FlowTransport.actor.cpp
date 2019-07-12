@@ -657,7 +657,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 			if (g_network->useObjectSerializer()) {
 				StringRef data = reader.arenaReadAll();
 				ASSERT(data.size() > 8);
-				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
+				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
 				receiver->receive(objReader);
 			} else {
 				receiver->receive(reader);
@@ -1150,7 +1150,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		Standalone<StringRef> copy;
 		if (g_network->useObjectSerializer()) {
-			ObjectWriter wr;
+			ObjectWriter wr(AssumeVersion(currentProtocolVersion));
 			what.serializeObjectWriter(wr);
 			copy = wr.toStringRef();
 		} else {

@@ -439,11 +439,11 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 			for (const auto& str : src) {
 				vec.push_back(arena, str);
 			}
-			ObjectWriter writer;
+			ObjectWriter writer(Unversioned());
 			writer.serialize(FileIdentifierFor<decltype(vec)>::value, arena, vec);
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
-		ArenaObjectReader reader(readerArena, serializedVector);
+		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
 		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
 	}
 	ASSERT(src.size() == outVec.size());
@@ -461,8 +461,8 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
 		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
 	}
-	Standalone<StringRef> value = ObjectWriter::toValue(vecIn);
-	ArenaObjectReader reader(value.arena(), value);
+	Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
+	ArenaObjectReader reader(value.arena(), value, Unversioned());
 	VectorRef<Standalone<StringRef>> vecOut;
 	reader.deserialize(vecOut);
 	ASSERT(vecOut.size() == vecIn.size());

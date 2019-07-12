@@ -22,6 +22,7 @@
 #include "flow/Error.h"
 #include "flow/Arena.h"
 #include "flow/flat_buffers.h"
+#include "flow/ProtocolVersion.h"
 
 template <class Ar>
 struct LoadContext {
@@ -45,7 +46,12 @@ struct LoadContext {
 
 template <class ReaderImpl>
 class _ObjectReader {
+	ProtocolVersion mProtocolVersion;
 public:
+
+	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
+
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
@@ -61,10 +67,20 @@ public:
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
+	friend class _IncludeVersion;
+	ObjectReader& operator>> (ProtocolVersion& version) {
+		uint64_t result;
+		memcpy(&result, _data, sizeof(result));
+		_data += sizeof(result);
+		return *this;
+	}
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
-	ObjectReader(const uint8_t* data) : _data(data) {}
+	template<class VersionOptions>
+	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
+		vo.read(*this);
+	}
 
 	const uint8_t* data() { return _data; }
 
@@ -76,10 +92,21 @@ private:
 };
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
+	friend class _IncludeVersion;
+	ArenaObjectReader& operator>> (ProtocolVersion& version) {
+		uint64_t result;
+		memcpy(&result, _data, sizeof(result));
+		_data += sizeof(result);
+		return *this;
+	}
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
 
-	ArenaObjectReader(Arena const& arena, const StringRef& input) : _data(input.begin()), _arena(arena) {}
+	template <class VersionOptions>
+	ArenaObjectReader(Arena const& arena, const StringRef& input, VersionOptions vo)
+	  : _data(input.begin()), _arena(arena) {
+		vo.read(*this);
+	}
 
 	const uint8_t* data() { return _data; }
 
@@ -91,25 +118,45 @@ private:
 };
 
 class ObjectWriter {
+	friend class _IncludeVersion;
+	bool writeProtocolVersion = false;
+	ObjectWriter& operator<< (const ProtocolVersion& version) {
+		writeProtocolVersion = true;
+		return *this;
+	}
+	ProtocolVersion mProtocolVersion;
 public:
-	ObjectWriter() = default;
-	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator) : customAllocator(customAllocator) {}
+	template <class VersionOptions>
+	ObjectWriter(VersionOptions vo) {
+		vo.write(*this);
+	}
+	template <class VersionOptions>
+	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator, VersionOptions vo)
+	  : customAllocator(customAllocator) {
+		vo.write(*this);
+	}
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
+		int allocations = 0;
+		auto allocator = [this, &allocations](size_t size_) {
+			++allocations;
+			size = size_;
+			auto toAllocate = writeProtocolVersion ? size + sizeof(uint64_t) : size;
+			if (customAllocator) {
+				data = customAllocator(toAllocate);
+			} else {
+				data = new (arena) uint8_t[toAllocate];
+			}
+			if (writeProtocolVersion) {
+				auto v = protocolVersion().versionWithFlags();
+				memcpy(data, &v, sizeof(uint64_t));
+				return data + sizeof(uint64_t);
+			}
+			return data;
+		};
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		if (customAllocator) {
-			save_members(customAllocator, file_identifier, items...);
-		} else {
-			int allocations = 0;
-			auto allocator = [this, &allocations](size_t size_) {
-				++allocations;
-				size = size_;
-				data = new (arena) uint8_t[size];
-				return data;
-			};
-			save_members(allocator, file_identifier, items...);
-			ASSERT(allocations == 1);
-		}
+		save_members(allocator, file_identifier, items...);
+		ASSERT(allocations == 1);
 	}
 
 	template <class Item>
@@ -126,11 +173,17 @@ public:
 		return Standalone<StringRef>(toStringRef(), arena);
 	}
 
-	template <class Item>
-	static Standalone<StringRef> toValue(Item const& item) {
-		ObjectWriter writer;
+	template <class Item, class VersionOptions>
+	static Standalone<StringRef> toValue(Item const& item, VersionOptions vo) {
+		ObjectWriter writer(vo);
 		writer.serialize(item);
 		return writer.toString();
+	}
+
+	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+	void setProtocolVersion(ProtocolVersion v) {
+		mProtocolVersion = v;
+		ASSERT(mProtocolVersion.isValid());
 	}
 
 private:
