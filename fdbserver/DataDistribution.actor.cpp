@@ -2570,19 +2570,9 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
 
-		// Q: Should we count the number of servers instead of healthy servers, since healthyness can change quickly?
-		int healthyServerCount = self->calculateHealthyServerCount();
-		// Check if all servers are healthy, if not, we wait for 1 second and loop back.
-		// Eventually, all servers will become healthy.
-		if (healthyServerCount != self->server_info.size()) {
-			continue;
-		}
-
 		// From this point, all server teams should be healthy, because we wait above
 		// until processingUnhealthy is done, and all machines are healthy
-
-		// In most cases, all machine teams should be healthy teams at this point.
-		int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * healthyServerCount;
+		int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->server_info.size();
 		int totalSTCount = self->teams.size();
 
 		if (totalSTCount > desiredServerTeams) {
@@ -2616,7 +2606,6 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			if (numServerTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
 				TraceEvent("ServerTeamRemoverDone", self->distributorId)
-				    .detail("HealthyServerNumber", healthyServerCount)
 				    .detail("CurrentServerTeamNumber", self->teams.size())
 				    .detail("DesiredServerTeam", desiredServerTeams)
 				    .detail("NumServerTeamRemoved", numServerTeamRemoved);
