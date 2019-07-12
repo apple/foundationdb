@@ -286,6 +286,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PROXY_FORWARD_DELAY,                                  10.0 );
 	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
 
+	bool shortRecoveryDuration = randomize && BUGGIFY;
+	init( MIN_RECOVERY_DURATION,                                 0.1 ); if( shortRecoveryDuration ) MIN_RECOVERY_DURATION = 0.01;
+	init( MAX_COMMIT_LATENCY,                                   0.09 ); if( shortRecoveryDuration ) MAX_COMMIT_LATENCY = 0.009;
+
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
