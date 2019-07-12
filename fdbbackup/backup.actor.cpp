@@ -945,6 +945,17 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -992,6 +1003,17 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --add_prefix PREFIX\n");
 	printf("                 Prefix to add to the restored keys\n");
 	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1073,6 +1095,17 @@ static void printDBBackupUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
