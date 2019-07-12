@@ -2994,6 +2994,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			else {
 				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
+				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
 			break;
 
@@ -3005,6 +3006,20 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			else {
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before logging the transaction");
 				throw client_invalid_operation();
+			}
+			break;
+
+		case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
+			validateOptionValue(value, true);
+			{
+				int maxFieldLength = extractIntOption(value, -1, std::numeric_limits<int32_t>::max());
+				if(maxFieldLength == 0) {
+					throw invalid_option_value();
+				}
+				options.maxTransactionLoggingFieldLength = maxFieldLength;
+			}
+			if(trLogInfo) {
+				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
 			break;
 

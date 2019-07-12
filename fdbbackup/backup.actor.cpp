@@ -3194,11 +3194,14 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");
 

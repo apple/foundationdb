@@ -2529,12 +2529,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
+			.setMaxEventLength(12000)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", opt.commandLine)
 			.trackLatest("ProgramStart");
 	}

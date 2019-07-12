@@ -30,6 +30,7 @@ Bindings
 
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Fix issue with finalizers running too early that could lead to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
+* Added transaction option to control the field length of keys and values in debug transaction logging in order to avoid truncation. `(PR #) <https://github.com/apple/foundationdb/pull/>`_.
 
 Other Changes
 -------------

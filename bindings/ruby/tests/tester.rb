@@ -456,14 +456,15 @@ class Tester
             @db.options.set_max_watches(10001)
             @db.options.set_datacenter_id("dc_id")
             @db.options.set_machine_id("machine_id")
+            @db.options.set_snapshot_ryw_enable()
+            @db.options.set_snapshot_ryw_disable()
+            @db.options.set_transaction_logging_max_field_length(1000)
             @db.options.set_transaction_timeout(100000)
             @db.options.set_transaction_timeout(0)
             @db.options.set_transaction_max_retry_delay(100)
             @db.options.set_transaction_size_limit(100000)
             @db.options.set_transaction_retry_limit(10)
             @db.options.set_transaction_retry_limit(-1)
-            @db.options.set_snapshot_ryw_enable()
-            @db.options.set_snapshot_ryw_disable()
 
             @db.transact do |tr|
               tr.options.set_priority_system_immediate
@@ -473,6 +474,7 @@ class Tester
               tr.options.set_read_your_writes_disable
               tr.options.set_read_system_keys
               tr.options.set_access_system_keys
+              tr.options.set_transaction_logging_max_field_length(1000)
               tr.options.set_timeout(60*1000)
               tr.options.set_retry_limit(50)
               tr.options.set_max_retry_delay(100)
