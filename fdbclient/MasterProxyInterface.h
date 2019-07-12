@@ -50,8 +50,8 @@ struct MasterProxyInterface {
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
-	RequestStream<struct ExecRequest> execReq;
-	RequestStream<struct ProxySnapRequest> proxySnapReq;
+	RequestStream< struct ExecRequest > execReq;
+	RequestStream< struct ProxySnapRequest > proxySnapReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }

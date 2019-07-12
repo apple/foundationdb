@@ -213,6 +213,7 @@ Future<T> timeoutError( Future<ErrorOr<T>> what, double time, TaskPriority taskI
 	}
 }
 
+ACTOR template <class T>
 Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
 	try {
 		state T t = wait( what );

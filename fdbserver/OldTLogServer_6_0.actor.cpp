@@ -1846,7 +1846,7 @@ tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<Lo
 	TraceEvent("EnableTLogPlayAllIgnoredPops2");
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
-	state vector<Future<Void>> ignoredPops;
+	vector<Future<Void>> ignoredPops;
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";

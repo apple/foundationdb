@@ -1482,31 +1482,23 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd, int version) {
+ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd, int version) {
 	state int retryCount = 0;
 
 	loop {
 		state UID snapUID = deterministicRandom()->randomUniqueID();
 		try {
 			wait(snapCreate(cx, snapCmd, snapUID, version));
-			if (version == 1) {
-				printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
-			} else {
-				printf("Snapshots create succeeded with UID: %s\n", snapUID.toString().c_str());
-			}
 			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-			break;
+			return snapUID;
 		} catch (Error& e) {
 			++retryCount;
 			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
 			if (retryCount > 3) {
-				fprintf(stderr, "Snapshot create failed, %d (%s)."
-						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
 				throw;
 			}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {

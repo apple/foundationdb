@@ -253,6 +253,7 @@ public: // workload functions
 						}
 					}
 					if (self->snapVersion == 2) {
+						++retry;
 						// snap v2 can fail for many reasons, so retry for 5 times and then fail it
 						if (retry > 5) {
 							snapFailed = true;

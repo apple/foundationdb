@@ -1533,8 +1533,8 @@ proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData)
 		.detail("SnapUID", snapReq.snapUID);
 	try {
 		// whitelist check
-		state ExecCmdValueString execArg(snapReq.snapPayload);
-		state StringRef binPath = execArg.getBinaryPath();
+		ExecCmdValueString execArg(snapReq.snapPayload);
+		StringRef binPath = execArg.getBinaryPath();
 		if (!isWhitelisted(commitData->whitelistedBinPathVec, binPath)) {
 			TraceEvent("SnapMasterProxy.WhiteListCheckFailed")
 				.detail("SnapPayload", snapReq.snapPayload)
