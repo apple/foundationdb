@@ -1728,14 +1728,21 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return remainingMachineTeamBudget;
 	}
 
-	// Each server is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
+	// Each server is expected to have targetTeamNumPerServer teams
 	int getRemainingServerTeamBudget() {
-		// remainingTeamBudget is the number of teams needed to ensure every server has
-		// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+		// remainingTeamBudget is the number of teams needed to ensure every server has targetTeamNumPerServer teams
+		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
+		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
+		// The numTeamsPerServerFactor is calculated as
+		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
+		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
+		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
+		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+		ASSERT(targetTeamNumPerServer > 0);
 		int remainingTeamBudget = 0;
 		for (auto& s : server_info) {
 			int numValidTeams = s.second->teams.size();
-			remainingTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - numValidTeams));
+			remainingTeamBudget += std::max(0, (int)(targetTeamNumPerServer - numValidTeams));
 		}
 
 		return remainingTeamBudget;
@@ -1749,14 +1756,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
-		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
-		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
-		// The numTeamsPerServerFactor is calculated as
-		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
-		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
-		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
-		ASSERT(targetTeamNumPerServer > 0);
 
 		int addedMachineTeams = 0;
 		int addedTeams = 0;
@@ -1994,9 +1993,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					totalTeamCount++;
 				}
 			}
-			// Each server is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
-			// remainingTeamBudget is the number of teams needed to ensure every server has
-			// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
+			// Each server is expected to have a certain number of teams.
+			// We slightly over-build more teams so that serverTeamRemover can remove some redundant ones to
+			// create a balanced number of teams per server
 			int remainingTeamBudget = self->getRemainingServerTeamBudget();
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
