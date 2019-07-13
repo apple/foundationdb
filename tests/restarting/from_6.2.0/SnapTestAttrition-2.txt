@@ -6,3 +6,4 @@ maxSnapDelay=3.0
 testID=3
 restartInfoLocation=simfdb/restartInfo.ini
 buggify=off
+enableDD=true
