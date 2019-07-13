@@ -1327,7 +1327,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Five steps to create each machine team, which are document in the function
 	// Reuse ReplicationPolicy selectReplicas func to select machine team
 	// return number of added machine teams
-	int addBestMachineTeams(int machineTeamsToBuild, int remainingMachineTeamBudget) {
+	int addBestMachineTeams(int machineTeamsToBuild) {
 		int addedMachineTeams = 0;
 
 		ASSERT(machineTeamsToBuild >= 0);
@@ -1341,7 +1341,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		int loopCount = 0;
 		// Add a team in each iteration
-		while (addedMachineTeams < machineTeamsToBuild || addedMachineTeams < remainingMachineTeamBudget) {
+		while (addedMachineTeams < machineTeamsToBuild || notEnoughMachineTeamsForAMachine()) {
 			// Step 2: Get least used machines from which we choose machines as a machine team
 			std::vector<Reference<TCMachineInfo>> leastUsedMachines; // A less used machine has less number of teams
 			int minTeamCount = std::numeric_limits<int>::max();
@@ -1452,11 +1452,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				addMachineTeam(machines);
 				addedMachineTeams++;
-				// Update the remaining machine team budget because the budget may decrease by
-				// any value between 1 and storageTeamSize
-				if (!(addedMachineTeams < machineTeamsToBuild)) {
-					remainingMachineTeamBudget = getRemainingMachineTeamBudget();
-				}
 			} else {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
@@ -1712,47 +1707,47 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return healthyTeamCount;
 	}
 
-	// Each machine is expected to have SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER,
-	// remainingMachineTeamBudget is the number of machine teams needed to ensure every machine has
-	// SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER teams
-	int getRemainingMachineTeamBudget() {
-		int remainingMachineTeamBudget = 0;
+	// Each machine is expected to have DESIRED_TEAMS_PER_SERVER
+	// Return true if there exists a machine that does not have enough teams.
+	bool notEnoughMachineTeamsForAMachine() {
 		for (auto& m : machine_info) {
-			int machineTeamCount = m.second->machineTeams.size();
-			remainingMachineTeamBudget += std::max(0, (int)(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER - machineTeamCount));
+			// The desired machine team number is not the same with the desired server team number
+			// in notEnoughTeamsForAServer() below, because the machineTeamRemover() does not
+			// remove a machine team with the most number of machine teams.
+			if (m.second->machineTeams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER) {
+				return true;
+			}
 		}
 
-		// We over-provision the remainingMachineTeamBudget because we do not know, when a new machine team is built,
-		// how many times it can be counted into the budget. For example, when a new machine is added,
-		// a new machine team only consume 1 such budget
-		return remainingMachineTeamBudget;
+		return false;
 	}
 
-	// Each server is expected to have targetTeamNumPerServer teams
-	int getRemainingServerTeamBudget() {
-		// remainingTeamBudget is the number of teams needed to ensure every server has targetTeamNumPerServer teams
+	// Each server is expected to have targetTeamNumPerServer teams.
+	// Return true if there exists a server that does not have enough teams.
+	bool notEnoughTeamsForAServer() {
 		// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 		// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
+		// We want to ensure every server has targetTeamNumPerServer teams.
 		// The numTeamsPerServerFactor is calculated as
 		// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
 		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 		ASSERT(targetTeamNumPerServer > 0);
-		int remainingTeamBudget = 0;
 		for (auto& s : server_info) {
-			int numValidTeams = s.second->teams.size();
-			remainingTeamBudget += std::max(0, (int)(targetTeamNumPerServer - numValidTeams));
+			if (s.second->teams.size() < targetTeamNumPerServer) {
+				return true;
+			}
 		}
 
-		return remainingTeamBudget;
+		return false;
 	}
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
-	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber, int remainingTeamBudget) {
+	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber) {
 		ASSERT(teamsToBuild >= 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
@@ -1766,7 +1761,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int healthyMachineTeamCount = getHealthyMachineTeamCount();
 		int totalMachineTeamCount = machineTeams.size();
 		int totalHealthyMachineCount = calculateHealthyMachineCount();
-		int remainingMachineTeamBudget = getRemainingMachineTeamBudget();
 
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
@@ -1779,14 +1773,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("MachineTeamsToBuild", machineTeamsToBuild)
-		    .detail("RemainingMachineTeamBudget", remainingMachineTeamBudget);
+		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
 		// Pre-build all machine teams until we have the desired number of machine teams
-		if (machineTeamsToBuild > 0 || remainingMachineTeamBudget > 0) {
-			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
+		if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
+			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
 		}
 
-		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) {
+		while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
 			int bestScore = std::numeric_limits<int>::max();
@@ -1863,11 +1856,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Step 4: Add the server team
 			addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
 			addedTeams++;
-			// Only when the addedTeams < teamsToBuild is invalid, should we use remainingTeamBudget to
-			// keep building teams
-			if (!(addedTeams < teamsToBuild)) {
-				remainingTeamBudget = getRemainingServerTeamBudget();
-			}
 
 			if (++loopCount > 2 * teamsToBuild * (configuration.storageTeamSize + 1)) {
 				break;
@@ -1883,7 +1871,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
 		    .detail("AimToBuildTeamNumber", teamsToBuild)
-		    .detail("RemainingTeamBudget", remainingTeamBudget)
 		    .detail("CurrentTeamNumber", teams.size())
 		    .detail("DesiredTeamNumber", desiredTeamNumber)
 		    .detail("MaxTeamNumber", maxTeamNumber)
@@ -1993,10 +1980,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					totalTeamCount++;
 				}
 			}
-			// Each server is expected to have a certain number of teams.
-			// We slightly over-build more teams so that serverTeamRemover can remove some redundant ones to
-			// create a balanced number of teams per server
-			int remainingTeamBudget = self->getRemainingServerTeamBudget();
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
@@ -2017,13 +2000,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 
-			if (teamsToBuild > 0 || remainingTeamBudget > 0) {
+			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
 				state vector<std::vector<UID>> builtTeams;
 
 				// addTeamsBestOf() will not add more teams than needed.
 				// If the team number is more than the desired, the extra teams are added in the code path when
 				// a team is added as an initial team
-				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams, remainingTeamBudget);
+				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams);
 
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam")
@@ -2046,7 +2029,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("Primary", self->primary)
 				    .detail("AddedTeamNumber", 0)
 				    .detail("AimToBuildTeamNumber", teamsToBuild)
-				    .detail("RemainingTeamBudget", remainingTeamBudget)
 				    .detail("CurrentTeamNumber", self->teams.size())
 				    .detail("DesiredTeamNumber", desiredTeams)
 				    .detail("MaxTeamNumber", maxTeams)
@@ -4117,7 +4099,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
-	collection->addTeamsBestOf(30, desiredTeams, maxTeams, 30);
+	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 	ASSERT(collection->sanityCheckTeams() == true);
 
@@ -4142,8 +4124,8 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 		return Void();
 	}
 
-	collection->addBestMachineTeams(30, 30); // Create machine teams to help debug
-	collection->addTeamsBestOf(30, desiredTeams, maxTeams, 30);
+	collection->addBestMachineTeams(30); // Create machine teams to help debug
+	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
 	if (collection) delete (collection);
@@ -4158,7 +4140,7 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
 
-	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams, 200);
+	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
 
 	delete(collection);
 
@@ -4178,7 +4160,7 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 
 	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
 
-	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams, 10);
+	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 	delete(collection);
 
@@ -4198,7 +4180,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams, 8);
+	state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
 
 	ASSERT(result >= 8);
 
@@ -4228,8 +4210,8 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	collection->addBestMachineTeams(10, 10);
-	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams, 10);
+	collection->addBestMachineTeams(10);
+	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 	if (collection->machineTeams.size() != 10 || result != 8) {
 		collection->traceAllInfo(true); // Debug message
