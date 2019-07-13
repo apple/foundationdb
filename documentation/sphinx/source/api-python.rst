@@ -25,6 +25,7 @@
 .. |timeout-database-option| replace:: :func:`Database.options.set_transaction_timeout`
 .. |max-retry-delay-database-option| replace:: :func:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
+.. |causal-read-risky-database-option| replace:: :func:`Database.options.set_causal_read_risky`
 .. |snapshot-ryw-enable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :ref:`future <api-python-future>`
@@ -35,6 +36,7 @@
 .. |size-limit-transaction-option| replace:: :func:`Transaction.options.set_size_limit`
 .. |snapshot-ryw-enable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_disable`
+.. |causal-read-risky-transaction-option| replace:: :func:`Transaction.options.set_causal_read_risky`
 .. |lazy-iterator-object| replace:: generator
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :ref:`DirectorySubspace <api-python-directory-subspace>`
@@ -383,6 +385,10 @@ Database options
 .. method:: Database.options.set_transaction_size_limit(size_limit)
 
     |option-db-tr-size-limit-blurb|
+
+.. method:: Database.options.set_causal_read_risky()
+
+    |option-db-causal-read-risky-blurb|
 
 .. method:: Database.options.set_snapshot_ryw_enable()
 

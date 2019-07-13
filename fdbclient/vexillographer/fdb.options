@@ -162,6 +162,9 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="value in bytes"
             description="Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information." 
             defaultFor="503"/>
+    <Option name="transaction_casual_read_risky" code="504"
+            description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
+            defaultFor="20"/>
     <!-- The snapshot RYW options act like defaults for the equivalent transaction options, but database defaults cannot have cumulative effects from multiple calls.
          Thus, we don't use the defaultFor annotation on these options. -->
     <Option name="snapshot_ryw_enable" code="26"
@@ -174,7 +177,7 @@ description is not currently required but encouraged.
     <Option name="causal_write_risky" code="10"
             description="The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault"/>
     <Option name="causal_read_risky" code="20"
-            description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a fault or partition"/>
+            description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."/>
     <Option name="causal_read_disable" code="21" />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />

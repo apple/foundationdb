@@ -1258,7 +1258,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		if(oldLogSystem) {
 			logChanges = triggerUpdates(self, oldLogSystem);
 			if(!minRecoveryDuration.isValid()) {
-				minRecoveryDuration = delay(SERVER_KNOBS->MIN_RECOVERY_DURATION);
+				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
 			}
 		}
 

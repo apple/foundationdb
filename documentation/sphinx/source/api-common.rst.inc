@@ -318,6 +318,10 @@
 
     Set the default maximum backoff delay incurred by each transaction in the call to |on-error-func| if the error is retryable. This is equivalent to calling |max-retry-delay-transaction-option| on each transaction created by this database.
 
+.. |option-db-causal-read-risky-blurb| replace::
+
+    Transactions do not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Enabling this option is equivalent to calling |causal-read-risky-transaction-option| on each transaction created by this database.
+
 .. |option-db-snapshot-ryw-enable-blurb| replace::
 
     If this option has been set an equal or more times with this database than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling |snapshot-ryw-enable-transaction-option| on each transaction created by this database.
@@ -351,7 +355,7 @@
 
 .. |option-causal-read-risky-blurb| replace::
 
-    This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version of the transaction will be a committed version, and usually will be the latest committed, but it might be an older version in the event of a fault or network partition.
+    This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling |causal-read-risky-database-option|.
 
 .. |option-causal-write-risky-blurb| replace::
 

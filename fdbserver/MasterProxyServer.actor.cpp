@@ -267,7 +267,7 @@ struct ProxyCommitData {
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
 			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
-			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->MIN_RECOVERY_DURATION), lastCommitTime(0)
+			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
 	{}
 };
 
@@ -1144,8 +1144,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	for (auto const& p : *otherProxies)
 		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
 
-	if (!(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY) && (now() - SERVER_KNOBS->MIN_RECOVERY_DURATION) > commitData->lastCommitTime.get()) {
-		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->MIN_RECOVERY_DURATION));
+	if (!(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
+		wait(commitData->logSystem->confirmEpochLive(debugID));
+	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 && now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > commitData->lastCommitTime.get()) {
+		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
 
 	if (debugID.present())
@@ -1534,7 +1536,7 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self) {
 
 ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future<Void>> addActor) {
 	loop {
-		double interval = (SERVER_KNOBS->MIN_RECOVERY_DURATION - std::min(SERVER_KNOBS->MAX_COMMIT_LATENCY, self->lastCommitLatency))/2;
+		double interval = std::max(SERVER_KNOBS->MIN_CONFIRM_INTERVAL, (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION - self->lastCommitLatency)/2.0);
 		double elapsed = now()-self->lastStartCommit;
 		if(elapsed < interval) {
 			wait( delay(interval + 0.0001 - elapsed) );
@@ -1608,7 +1610,9 @@ ACTOR Future<Void> masterProxyServerCore(
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
 
-	addActor.send(lastCommitUpdater(&commitData, addActor));
+	if(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
+		addActor.send(lastCommitUpdater(&commitData, addActor));
+	}
 
 	int commitBatchByteLimit = 
 		(int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX, 
