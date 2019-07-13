@@ -26,9 +26,11 @@
 
 template <class Ar>
 struct LoadContext {
-	Ar& ar;
-	LoadContext(Ar& ar) : ar(ar) {}
-	Arena& arena() { return ar.arena(); }
+	Ar* ar;
+	LoadContext(Ar* ar) : ar(ar) {}
+	Arena& arena() { return ar->arena(); }
+
+	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
 
 	const uint8_t* tryReadZeroCopy(const uint8_t* ptr, unsigned len) {
 		if constexpr (Ar::ownsUnderlyingMemory) {
@@ -41,7 +43,23 @@ struct LoadContext {
 		}
 	}
 
-	void addArena(Arena& arena) { arena = ar.arena(); }
+	void addArena(Arena& arena) { arena = ar->arena(); }
+};
+
+template <class Ar, class Allocator>
+struct SaveContext {
+	Ar* ar;
+	Allocator allocator;
+
+	SaveContext(Ar* ar, const Allocator& allocator) : ar(ar), allocator(allocator) {}
+
+	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
+
+	void addArena(Arena& arena) {}
+
+	uint8_t* allocate(size_t s) {
+		return allocator(s);
+	}
 };
 
 template <class ReaderImpl>
@@ -55,7 +73,7 @@ public:
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
-		LoadContext<ReaderImpl> context(*static_cast<ReaderImpl*>(this));
+		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		ASSERT(read_file_identifier(data) == file_identifier);
 		load_members(data, context, items...);
 	}
@@ -72,6 +90,7 @@ class ObjectReader : public _ObjectReader<ObjectReader> {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
+		version = ProtocolVersion(version);
 		return *this;
 	}
 public:
@@ -97,6 +116,7 @@ class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
+		version = ProtocolVersion(version);
 		return *this;
 	}
 public:
@@ -155,7 +175,8 @@ public:
 			return data;
 		};
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		save_members(allocator, file_identifier, items...);
+		SaveContext<ObjectWriter, decltype(allocator)> context(this, allocator);
+		save_members(context, file_identifier, items...);
 		ASSERT(allocations == 1);
 	}
 
@@ -197,12 +218,14 @@ private:
 // Standalone<T> and T to be equivalent for serialization
 namespace detail {
 
-template <class T>
-struct LoadSaveHelper<Standalone<T>> {
-	template <class Context>
-	void load(Standalone<T>& member, const uint8_t* current, Context& context) {
-		helper.load(member.contents(), current, context);
-		context.addArena(member.arena());
+template <class T, class Context>
+struct LoadSaveHelper<Standalone<T>, Context> : Context {
+	LoadSaveHelper(const Context& context)
+		: Context(context), helper(context) {}
+
+	void load(Standalone<T>& member, const uint8_t* current) {
+		helper.load(member.contents(), current);
+		this->addArena(member.arena());
 	}
 
 	template <class Writer>
@@ -211,7 +234,7 @@ struct LoadSaveHelper<Standalone<T>> {
 	}
 
 private:
-	LoadSaveHelper<T> helper;
+	LoadSaveHelper<T, Context> helper;
 };
 
 } // namespace detail

@@ -30,6 +30,8 @@
 
 namespace detail {
 
+std::vector<int>* writeToOffsetsMemory;
+
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
@@ -63,17 +65,6 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 	}
 	result[1] = offset + 4;
 	return result;
-}
-
-static auto* writeToOffsetsMemory = new std::vector<int>;
-
-PrecomputeSize::PrecomputeSize() {
-	writeToOffsets.swap(*writeToOffsetsMemory);
-	writeToOffsets.clear();
-}
-
-PrecomputeSize::~PrecomputeSize() {
-	writeToOffsets.swap(*writeToOffsetsMemory);
 }
 
 } // namespace detail
@@ -170,10 +161,19 @@ struct Root {
 	}
 };
 
+struct TestContextArena {
+	Arena& _arena;
+	Arena& arena() { return _arena; }
+	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	uint8_t* allocate(size_t size) { return new (_arena) uint8_t[size]; }
+};
+
 TEST_CASE("flow/FlatBuffers/collectVTables") {
 	Root root;
-	const auto* vtables = detail::get_vtableset(root);
-	ASSERT(vtables == detail::get_vtableset(root));
+	Arena arena;
+	TestContextArena context{ arena };
+	const auto* vtables = detail::get_vtableset(root, context);
+	ASSERT(vtables == detail::get_vtableset(root, context));
 	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
 	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
 	int root_offset = vtables->offsets.at(&root_vtable);
@@ -219,9 +219,11 @@ struct Arena {
 	}
 };
 
-struct DummyContext {
-	Arena a;
-	Arena& arena() { return a; }
+struct TestContext {
+	Arena& _arena;
+	Arena& arena() { return _arena; }
+	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	uint8_t* allocate(size_t size) { return _arena(size); }
 };
 
 TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
@@ -230,7 +232,8 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	auto out = detail::save(arena, root, FileIdentifier{});
+	TestContext context{ arena };
+	auto out = detail::save(context, root, FileIdentifier{});
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -242,7 +245,6 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 	ASSERT(root.c.c == root2.c.c);
 
 	root2 = {};
-	DummyContext context;
 	detail::load(root2, out, context);
 
 	ASSERT(root.a == root2.a);
@@ -262,7 +264,8 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	const auto* out = save_members(arena, FileIdentifier{}, root.a, root.b, root.c);
+	TestContext context{arena};
+	const auto* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -274,7 +277,6 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 	ASSERT(root.c.c == root2.c.c);
 
 	root2 = {};
-	DummyContext context;
 	load_members(out, context, root2.a, root2.b, root2.c);
 
 	ASSERT(root.a == root2.a);
@@ -297,23 +299,23 @@ TEST_CASE("flow/FlatBuffers/variant") {
 	V v1;
 	V v2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
 	v1 = 1;
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
 	ASSERT(std::get<int>(v1) == std::get<int>(v2));
 
 	v1 = 1.0;
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
 	ASSERT(std::get<double>(v1) == std::get<double>(v2));
 
 	v1 = Nested2{ 1, { "abc", "def" }, 2 };
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
 	ASSERT(std::get<Nested2>(v1).a == std::get<Nested2>(v2).a);
@@ -326,10 +328,10 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	std::vector<bool> x1 = { true, false, true, false, true };
 	std::vector<bool> x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, x2);
 	ASSERT(x1 == x2);
@@ -375,10 +377,10 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y1> x1 = { 1, { 2 }, 3 };
 	X<Y2> x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	load_members(out, context, x2);
 	ASSERT(x1.a == x2.a);
 	ASSERT(x1.b.a == x2.b.a);
@@ -387,7 +389,7 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	x1 = {};
 	x2.b.b = 4;
 
-	out = save_members(arena, FileIdentifier{}, x2);
+	out = save_members(context, FileIdentifier{}, x2);
 	load_members(out, context, x1);
 	ASSERT(x1.a == x2.a);
 	ASSERT(x1.b.a == x2.b.a);
@@ -399,10 +401,10 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 	std::vector<std::tuple<int16_t, bool, int64_t>> x1 = { { 1, true, 2 }, { 3, false, 4 } };
 	decltype(x1) x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena };
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, x2);
 	ASSERT(x1 == x2);
@@ -411,9 +413,10 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 
 TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
+	TestContext context{arena};
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
-	out = save_members(arena, file_identifier);
+	out = save_members(context, file_identifier);
 	// print_buffer(out, arena.get_size(out));
 	ASSERT(read_file_identifier(out) == file_identifier);
 	return Void();
