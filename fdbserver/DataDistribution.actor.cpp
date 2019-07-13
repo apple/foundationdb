@@ -1741,15 +1741,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return remainingTeamBudget;
 	}
 
-	int getMinTeamNumPerServer() {
-		int minTeamNumPerServer = std::numeric_limits<int>::max();
-		for (auto& s : server_info) {
-			minTeamNumPerServer = std::min<int>(minTeamNumPerServer, s.second->teams.size());
-		}
-
-		return minTeamNumPerServer;
-	}
-
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
@@ -1796,9 +1787,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild, remainingMachineTeamBudget);
 		}
 
-		int minTeamNumPerServer = getMinTeamNumPerServer();
-		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget ||
-		       minTeamNumPerServer < targetTeamNumPerServer) {
+		while (addedTeams < teamsToBuild || addedTeams < remainingTeamBudget) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
 			int bestScore = std::numeric_limits<int>::max();
@@ -1879,11 +1868,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// keep building teams
 			if (!(addedTeams < teamsToBuild)) {
 				remainingTeamBudget = getRemainingServerTeamBudget();
-			}
-			// Keep building teams until each team has no less than targetTeamNumPerServer teams
-			if (!(addedTeams < teamsToBuild || addedTeams < remainingTeamBudget)) {
-				// Update the minTeamNumPerServer
-				minTeamNumPerServer = getMinTeamNumPerServer();
 			}
 
 			if (++loopCount > 2 * teamsToBuild * (configuration.storageTeamSize + 1)) {
@@ -2544,13 +2528,13 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			return Void(); // Directly return Void()
 		}
 
-		// To avoid removing machine teams too fast, which is unlikely happen though
 		double removeServerTeamDelay = SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_DELAY;
 		if (g_network->isSimulated()) {
 			// Speed up the team remover in simulation; otherwise,
 			// it may time out because we need to remove hundreds of teams
 			removeServerTeamDelay = removeServerTeamDelay / 100;
 		}
+		// To avoid removing server teams too fast, which is unlikely happen though
 		wait(delay(removeServerTeamDelay));
 
 		wait(waitUntilHealthy(self));
@@ -2734,7 +2718,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
 						team->setPriority( PRIORITY_TEAM_2_LEFT );
-					else // Q: Does this assume the replica factor is no larger than 3?
+					else
 						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
 				}
 				else if ( badTeam || anyWrongConfiguration ) {

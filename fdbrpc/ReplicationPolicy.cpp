@@ -280,7 +280,6 @@ bool PolicyAcross::selectReplicas(
 	if (g_replicationdebug > 0) {
 		printf("Across !also:%4lu key: %-7s policy: %-10s => %s\n", alsoServers.size(), _attribKey.c_str(), _policy->name().c_str(), _policy->info().c_str());
 	}
-	// Q: What does this for loop do???
 	for (auto& alsoServer : alsoServers) {
 		auto value = fromServers->getValueViaGroupKey(alsoServer, groupIndexKey);
 		if (value.present()) {
