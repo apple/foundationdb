@@ -151,7 +151,10 @@ struct DBCoreState {
 		if(ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
 			if (ar.protocolVersion().hasPseudoLocalities()) {
-				serializer(ar, pseudoLocalities, txsTags);
+				serializer(ar, pseudoLocalities);
+			}
+			if (ar.protocolVersion().hasShardedTxsTags()) {
+				serializer(ar, txsTags);
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
