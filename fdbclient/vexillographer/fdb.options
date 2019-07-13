@@ -162,7 +162,7 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="value in bytes"
             description="Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information." 
             defaultFor="503"/>
-    <Option name="transaction_casual_read_risky" code="504"
+    <Option name="transaction_causal_read_risky" code="504"
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
             defaultFor="20"/>
     <!-- The snapshot RYW options act like defaults for the equivalent transaction options, but database defaults cannot have cumulative effects from multiple calls.

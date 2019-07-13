@@ -462,7 +462,7 @@ class Tester
             @db.options.set_transaction_size_limit(100000)
             @db.options.set_transaction_retry_limit(10)
             @db.options.set_transaction_retry_limit(-1)
-            @db.options.set_causal_read_risky()
+            @db.options.set_transaction_causal_read_risky()
             @db.options.set_snapshot_ryw_enable()
             @db.options.set_snapshot_ryw_disable()
 
