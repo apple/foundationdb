@@ -2126,7 +2126,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 					Tag pushTag = (i==-1 || logSystem->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 					locations.clear();
-					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
+					logSystem->tLogs[1]->getPushLocations( {pushTag}, locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}
