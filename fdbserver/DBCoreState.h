@@ -98,7 +98,10 @@ struct OldTLogCoreData {
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
 		if (ar.protocolVersion().hasPseudoLocalities()) {
-			serializer(ar, pseudoLocalities, txsTags);
+			serializer(ar, pseudoLocalities);
+		}
+		if (ar.protocolVersion().hasShardedTxsTags()) {
+			serializer(ar, txsTags);
 		}
 	}
 };
