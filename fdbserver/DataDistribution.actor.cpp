@@ -326,16 +326,6 @@ public:
 	virtual void setWrongConfiguration(bool wrongConfiguration) { this->wrongConfiguration = wrongConfiguration; }
 	virtual bool isHealthy() { return healthy; }
 	virtual void setHealthy(bool h) { healthy = h; }
-	virtual bool isCorrectStoreType() { return correctStoreType; }
-	virtual void setCorrectStoreType(bool type) { correctStoreType = type; }
-	virtual bool isCorrectStoreType(KeyValueStoreType configType) {
-		for (auto &server : servers) {
-			if ( !server->isCorrectStoreType(configType) ) {
-				return false;
-			}
-		}
-		return true;
-	};
 	virtual int getPriority() { return priority; }
 	virtual void setPriority(int p) { priority = p; }
 	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
@@ -706,7 +696,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	ACTOR static Future<Void> interruptableBuildTeams( DDTeamCollection* self ) {
-		TraceEvent("DDInterruptableBuildTeamsStart");
+		TraceEvent("DDInterruptableBuildTeamsStart", self->distributorId);
 		if(!self->addSubsetComplete.isSet()) {
 			wait( addSubsetOfEmergencyTeams(self) );
 			self->addSubsetComplete.send(Void());
@@ -723,7 +713,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	ACTOR static Future<Void> checkBuildTeams( DDTeamCollection* self ) {
-		TraceEvent("DDCheckBuildTeamsStart");
+		TraceEvent("DDCheckBuildTeamsStart", self->distributorId);
 		wait( self->checkTeamDelay );
 		while( !self->teamBuilder.isReady() )
 			wait( self->teamBuilder );
@@ -774,7 +764,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					if( self->server_info.count( req.sources[i] ) ) {
 						auto& teamList = self->server_info[ req.sources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
-							if( teamList[j]->isHealthy() && teamList[j]->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
+							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
 								int sharedMembers = 0;
 								for( const UID& id : teamList[j]->getServerIDs() )
 									if( sources.count( id ) )
@@ -820,7 +810,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if( self->teams[i]->isHealthy() && self->teams[i]->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
+					if( self->teams[i]->isHealthy() && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
 						int64_t loadBytes = NONE_SHARED * self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 							bestLoadBytes = loadBytes;
@@ -834,7 +824,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && dest->isCorrectStoreType(self->configuration.storageServerStoreType) && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
 					for(int i=0; ok && i<randomTeams.size(); i++)
 						if (randomTeams[i].second->getServerIDs() == dest->getServerIDs())
 							ok = false;
@@ -1242,7 +1232,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-				.detail("CorrectStoreType", team->isCorrectStoreType(configuration.storageServerStoreType))
 			    .detail("ServerNumber", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
@@ -1893,7 +1882,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int teamCount = 0;
 			int totalTeamCount = 0;
 			for (int i = 0; i < self->teams.size(); ++i) {
-				if (!self->teams[i]->isWrongConfiguration() && self->teams[i]->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
+				if (!self->teams[i]->isWrongConfiguration()) {
 					if( self->teams[i]->isHealthy() ) {
 						teamCount++;
 					}
@@ -1995,6 +1984,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	void addServer( StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut, Version addedVersion ) {
 		if (!shouldHandleServer(newServer)) {
+			TraceEvent("AddedStorageServer", distributorId).detail("ServerID", newServer.id()).detail("ShouldHandleServer", 0).detail("ServerDCId", newServer.locality.dcId()).detail("IncludedDCSize", includedDCs.size());
 			return;
 		}
 		allServers.push_back( newServer.id() );
@@ -2507,7 +2497,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
-			team->setCorrectStoreType( team->isCorrectStoreType(self->configuration.storageServerStoreType) ); // Team with wrong storeType storage servers will not be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 			TraceEvent("TeamHealthChangeDetected", self->distributorId)
@@ -3071,7 +3060,7 @@ ACTOR Future<Void> storageServerTracker(
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
 					// When a wrongStoreType server colocate with a correct StoreType server, we should not mark the correct one as unhealthy
-					if ( !self->server_status.get( i.second->id ).isUnhealthy() && i.second->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
+					if ( !self->server_status.get( i.second->id ).isUnhealthy() && i.second->toRemove == 0 ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3083,7 +3072,7 @@ ACTOR Future<Void> storageServerTracker(
 
 							status.isUndesired = true;
 						}
-						else if ( server->isCorrectStoreType(self->configuration.storageServerStoreType) )
+						else
 							wakeUpTrackers.push_back(i.second->wakeUpTracker);
 					}
 				}
@@ -3095,7 +3084,7 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				if( self->optimalTeamCount > 0 ) {
+				if( self->optimalTeamCount > 0 && self->healthyTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
@@ -3323,7 +3312,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 	isr.reqId = deterministicRandom()->randomUniqueID();
 	isr.interfaceId = interfaceId;
 
-	TraceEvent("DDRecruiting").detail("State", "Sending request to worker").detail("WorkerID", candidateWorker.worker.id())
+	TraceEvent("DDRecruiting").detail("Primary", self->primary).detail("State", "Sending request to worker").detail("WorkerID", candidateWorker.worker.id())
 		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Interf", interfaceId).detail("Addr", candidateWorker.worker.address())
 		.detail("RecruitingStream", self->recruitingStream.get());
 
@@ -3341,7 +3330,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 
 	self->recruitingStream.set(self->recruitingStream.get()-1);
 
-	TraceEvent("DDRecruiting").detail("State", "Finished request").detail("WorkerID", candidateWorker.worker.id())
+	TraceEvent("DDRecruiting").detail("Primary", self->primary).detail("State", "Finished request").detail("WorkerID", candidateWorker.worker.id())
 		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Interf", interfaceId).detail("Addr", candidateWorker.worker.address())
 		.detail("RecruitingStream", self->recruitingStream.get());
 
@@ -3376,7 +3365,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
 				auto serverStatus = self->server_status.get( s->second->lastKnownInterface.id() );
 				if( serverStatus.excludeOnRecruit() && s->second->toRemove == 0 ) {
-					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
+					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Primary", self->primary).detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
 					AddressExclusion addrExcl( addr.ip, addr.port );
 					exclusions.insert( addrExcl );
@@ -3393,7 +3382,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			auto excl = self->excludedServers.getKeys();
 			for(auto& s : excl)
 				if (self->excludedServers.get(s)) {
-					TraceEvent(SevDebug, "DDRecruitExcl2").detail("Excluding", s.toString());
+					TraceEvent(SevDebug, "DDRecruitExcl2").detail("Primary", self->primary).detail("Excluding", s.toString());
 					exclusions.insert( s );
 				}
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
@@ -3403,11 +3392,11 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 
 			rsr.includeDCs = self->includedDCs;
 
-			TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting").detail("State", "Sending request to CC")
-			.detail("Exclusions", rsr.excludeAddresses.size()).detail("Critical", rsr.criticalRecruitment);
+			TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting").detail("Primary", self->primary).detail("State", "Sending request to CC")
+			.detail("Exclusions", rsr.excludeAddresses.size()).detail("Critical", rsr.criticalRecruitment).detail("IncludedDCsSize", rsr.includeDCs.size());
 
 			if( rsr.criticalRecruitment ) {
-				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
+				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId).detail("Primary", self->primary);
 			}
 
 			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
@@ -3415,21 +3404,20 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskDataDistribution ) );
 			}
 
-			TraceEvent("StorageRecruiterMX", self->distributorId).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam).detail("SysStoreType", self->configuration.storageServerStoreType);
+			TraceEvent("StorageRecruiterMX", self->distributorId).detail("Primary", self->primary).detail("HasWrongStoreType", hasWrongStoreType).detail("HasHealthyTeam", hasHealthyTeam).detail("SysStoreType", self->configuration.storageServerStoreType);
 			self->traceAllInfo(true);
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
 					AddressExclusion candidateSSAddr(candidateWorker.worker.address().ip, candidateWorker.worker.address().port);
 					int numExistingSS = numSSPerAddr[candidateSSAddr];
-					if ( numExistingSS <= 2 ) {
-						self->addActor.send(initializeStorage(self, candidateWorker));
-						fCandidateWorker = Never();
-						self->doBuildTeams = true;
-						self->restartTeamBuilder.trigger();
-					} else {
-						TraceEvent(SevWarnAlways, "StorageRecruiterMX", self->distributorId).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
+					if ( numExistingSS >= 2 ) {
+						TraceEvent(SevWarnAlways, "StorageRecruiterTooManySSOnSameAddrMX", self->distributorId).detail("Primary", self->primary).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
 					}
+					self->addActor.send(initializeStorage(self, candidateWorker));
+					fCandidateWorker = Never();
+					self->doBuildTeams = true;
+					self->restartTeamBuilder.trigger();
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
@@ -3439,7 +3427,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
-				TraceEvent("StorageRecruiterMXExit").detail("Error", e.what());
+				TraceEvent("StorageRecruiterMXExit").detail("Primary", self->primary).detail("Error", e.what());
 				throw;
 			}
 			TEST(true); //Storage recruitment timed out
@@ -3456,14 +3444,14 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 
 	wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
 	wait(waitUntilHealthy(self));
-	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
+	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("Primary", self->primary).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);
 	loop {
 		try {
 			Optional<Value> val = wait( tr.get(datacenterReplicasKeyFor(dcId)) );
 			state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 			if(oldReplicas == self->configuration.storageTeamSize) {
-				TraceEvent("DDUpdatedAlready", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
+				TraceEvent("DDUpdatedAlready", self->distributorId).detail("Primary", self->primary).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
 				return Void();
 			}
 			if(oldReplicas < self->configuration.storageTeamSize) {
@@ -3471,7 +3459,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 			}
 			tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(self->configuration.storageTeamSize));
 			wait( tr.commit() );
-			TraceEvent("DDUpdatedReplicas", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
+			TraceEvent("DDUpdatedReplicas", self->distributorId).detail("Primary", self->primary).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
 			return Void();
 		} catch( Error &e ) {
 			wait( tr.onError(e) );
