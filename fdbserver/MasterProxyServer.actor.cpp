@@ -1131,6 +1131,14 @@ ACTOR Future<Void> commitBatch(
 	return Void();
 }
 
+ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
+	state double confirmStart = now();
+	self->lastStartCommit = confirmStart;
+	wait(self->logSystem->confirmEpochLive(debugID));
+	self->lastCommitLatency = now()-confirmStart;
+	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
+	return Void();
+}
 
 ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
@@ -1145,7 +1153,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
 
 	if (!(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
-		wait(commitData->logSystem->confirmEpochLive(debugID));
+		wait(updateLastCommit(commitData, debugID));
 	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 && now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > commitData->lastCommitTime.get()) {
 		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
@@ -1523,15 +1531,6 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 			}
 		}
 	}
-}
-
-ACTOR Future<Void> updateLastCommit(ProxyCommitData* self) {
-	state double confirmStart = now();
-	self->lastStartCommit = confirmStart;
-	wait(self->logSystem->confirmEpochLive(Optional<UID>()));
-	self->lastCommitLatency = now()-confirmStart;
-	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
-	return Void();
 }
 
 ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future<Void>> addActor) {
