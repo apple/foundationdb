@@ -67,13 +67,13 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	using Member = std::tuple<Ts...>;
 	using types = pack<Ts...>;
 
-	template <int i>
-	static const index_t<i, types>& get(const Member& m) {
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member& m, Context&) {
 		return std::get<i>(m);
 	}
 
-	template <int i, class Type>
-	static const void assign(Member& m, const Type& t) {
+	template <int i, class Type, class Context>
+	static const void assign(Member& m, const Type& t, Context&) {
 		std::get<i>(m) = t;
 	}
 };
@@ -83,7 +83,10 @@ struct scalar_traits<
     T, std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value || std::is_enum<T>::value>>
   : std::true_type {
 	constexpr static size_t size = sizeof(T);
-	static void save(uint8_t* out, const T& t) { memcpy(out, &t, size); }
+	template <class Context>
+	static void save(uint8_t* out, const T& t, Context&) {
+		memcpy(out, &t, size);
+	}
 	template <class Context>
 	static void load(const uint8_t* in, T& t, Context&) {
 		memcpy(&t, in, size);
@@ -105,15 +108,24 @@ struct vector_like_traits<std::vector<T, Alloc>> : std::true_type {
 	using iterator = typename Vec::const_iterator;
 	using insert_iterator = std::back_insert_iterator<Vec>;
 
-	static size_t num_entries(const Vec& v) { return v.size(); }
+	template <class Context>
+	static size_t num_entries(const Vec& v, Context&) {
+		return v.size();
+	}
 	template <class Context>
 	static void reserve(Vec& v, size_t size, Context&) {
 		v.clear();
 		v.reserve(size);
 	}
 
-	static insert_iterator insert(Vec& v) { return std::back_inserter(v); }
-	static iterator begin(const Vec& v) { return v.begin(); }
+	template <class Context>
+	static insert_iterator insert(Vec& v, Context&) {
+		return std::back_inserter(v);
+	}
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <class T, size_t N>
@@ -123,11 +135,20 @@ struct vector_like_traits<std::array<T, N>> : std::true_type {
 	using iterator = typename Vec::const_iterator;
 	using insert_iterator = typename Vec::iterator;
 
-	static size_t num_entries(const Vec& v) { return N; }
+	template <class Context>
+	static size_t num_entries(const Vec& v, Context&) {
+		return N;
+	}
 	template <class Context>
 	static void reserve(Vec& v, size_t size, Context&) {}
-	static insert_iterator insert(Vec& v) { return v.begin(); }
-	static iterator begin(const Vec& v) { return v.begin(); }
+	template <class Context>
+	static insert_iterator insert(Vec& v, Context&) {
+		return v.begin();
+	}
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <class Key, class T, class Compare, class Allocator>
@@ -137,12 +158,21 @@ struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type
 	using iterator = typename Vec::const_iterator;
 	using insert_iterator = std::insert_iterator<Vec>;
 
-	static size_t num_entries(const Vec& v) { return v.size(); }
+	template <class Context>
+	static size_t num_entries(const Vec& v, Context&) {
+		return v.size();
+	}
 	template <class Context>
 	static void reserve(Vec& v, size_t size, Context&) {}
 
-	static insert_iterator insert(Vec& v) { return std::inserter(v, v.end()); }
-	static iterator begin(const Vec& v) { return v.begin(); }
+	template <class Context>
+	static insert_iterator insert(Vec& v, Context&) {
+		return std::inserter(v, v.end());
+	}
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <class Key, class Compare, class Allocator>
@@ -152,12 +182,21 @@ struct vector_like_traits<std::set<Key, Compare, Allocator>> : std::true_type {
 	using iterator = typename Vec::const_iterator;
 	using insert_iterator = std::insert_iterator<Vec>;
 
-	static size_t num_entries(const Vec& v) { return v.size(); }
+	template <class Context>
+	static size_t num_entries(const Vec& v, Context&) {
+		return v.size();
+	}
 	template <class Context>
 	static void reserve(Vec&, size_t, Context&) {}
 
-	static insert_iterator insert(Vec& v) { return std::inserter(v, v.end()); }
-	static iterator begin(const Vec& v) { return v.begin(); }
+	template <class Context>
+	static insert_iterator insert(Vec& v, Context&) {
+		return std::inserter(v, v.end());
+	}
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <>
@@ -166,8 +205,14 @@ private:
 	using T = std::string;
 
 public:
-	static size_t size(const T& t) { return t.size(); }
-	static void save(uint8_t* out, const T& t) { std::copy(t.begin(), t.end(), out); }
+	template <class Context>
+	static size_t size(const T& t, Context&) {
+		return t.size();
+	}
+	template <class Context>
+	static void save(uint8_t* out, const T& t, Context&) {
+		std::copy(t.begin(), t.end(), out);
+	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -313,7 +358,7 @@ struct PrecomputeSize : Context {
 
 	template <class T>
 	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
-		uint32_t size = dynamic_size_traits<T>::size(t);
+		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
 		int start = RightAlign(current_buffer_size + size + 4, 4);
 		current_buffer_size = std::max(current_buffer_size, start);
 	}
@@ -354,7 +399,8 @@ struct is_array : std::false_type {};
 template <class T, size_t size>
 struct is_array<std::array<T, size>> : std::true_type {};
 
-struct WriteToBuffer {
+template <class Context>
+struct WriteToBuffer : Context {
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
 	void write(const void* src, int offset, int len) {
@@ -362,8 +408,9 @@ struct WriteToBuffer {
 		current_buffer_size = std::max(current_buffer_size, offset);
 	}
 
-	WriteToBuffer(int buffer_length, int vtable_start, uint8_t* buffer, std::vector<int>::iterator writeToOffsetsIter)
-	  : buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
+	WriteToBuffer(Context& context, int buffer_length, int vtable_start, uint8_t* buffer,
+	              std::vector<int>::iterator writeToOffsetsIter)
+	  : Context(context), buffer_length(buffer_length), vtable_start(vtable_start), buffer(buffer),
 	    writeToOffsetsIter(writeToOffsetsIter) {}
 
 	struct MessageWriter {
@@ -397,12 +444,12 @@ struct WriteToBuffer {
 
 	template <class T>
 	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
-		uint32_t size = dynamic_size_traits<T>::size(t);
+		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
 		int padding = 0;
 		int start = RightAlign(current_buffer_size + size + 4, 4, &padding);
 		write(&size, start, 4);
 		start -= 4;
-		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t);
+		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t, this->context());
 		start -= size;
 		memset(&buffer[buffer_length - start], 0, padding);
 	}
@@ -606,8 +653,8 @@ private:
 	RelativeOffset save_(uint8_t type_tag, const typename UnionTraits::Member& member) {
 		if constexpr (Alternative < pack_size(typename UnionTraits::alternatives{})) {
 			if (type_tag == Alternative) {
-				auto result = save_helper(UnionTraits::template get<Alternative>(member), writer, vtables,
-				                          static_cast<const Context&>(*this));
+				auto result = save_helper(UnionTraits::template get<Alternative, Context>(member, this->context()),
+				                          writer, vtables, this->context());
 				if constexpr (use_indirection<index_t<Alternative, typename UnionTraits::alternatives>>) {
 					return result;
 				}
@@ -642,7 +689,7 @@ private:
 					current += current_offset;
 					load_helper(alternative, current, context);
 				}
-				UnionTraits::template assign<Alternative>(member, alternative);
+				UnionTraits::template assign<Alternative, AlternativeT, Context>(member, alternative, context);
 			} else {
 				load_<Alternative + 1>(type_tag, member);
 			}
@@ -673,16 +720,17 @@ struct SaveVisitorLambda : Context {
 				    using VectorTraits = vector_like_traits<Member>;
 				    using T = typename VectorTraits::value_type;
 				    using UnionTraits = union_like_traits<T>;
-				    uint32_t num_entries = VectorTraits::num_entries(member);
+				    uint32_t num_entries = VectorTraits::num_entries(member, this->context());
 				    auto typeVectorWriter = writer.getMessageWriter(num_entries); // type tags are one byte
 				    auto offsetVectorWriter = writer.getMessageWriter(num_entries * sizeof(RelativeOffset));
-				    auto iter = VectorTraits::begin(member);
+				    auto iter = VectorTraits::begin(member, this->context());
 				    for (int i = 0; i < num_entries; ++i) {
-					    uint8_t type_tag = UnionTraits::index(*iter);
-					    uint8_t fb_type_tag =
-					        UnionTraits::empty(*iter) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
+					    uint8_t type_tag = UnionTraits::index(*iter, this->context());
+					    uint8_t fb_type_tag = UnionTraits::empty(*iter, this->context())
+					                              ? 0
+					                              : type_tag + 1; // Flatbuffers indexes from 1.
 					    typeVectorWriter.write(&fb_type_tag, i, sizeof(fb_type_tag));
-					    if (!UnionTraits::empty(*iter)) {
+					    if (!UnionTraits::empty(*iter, this->context())) {
 						    RelativeOffset offset =
 						        (SaveAlternative<Writer, UnionTraits, Context>{ writer, vtableset, *this })
 						            .save(type_tag, *iter);
@@ -708,10 +756,11 @@ struct SaveVisitorLambda : Context {
 				    self.write(&offsetVectorOffset, vtable[i++], sizeof(offsetVectorOffset));
 			    } else if constexpr (is_union_like<Member>) {
 				    using UnionTraits = union_like_traits<Member>;
-				    uint8_t type_tag = UnionTraits::index(member);
-				    uint8_t fb_type_tag = UnionTraits::empty(member) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
+				    uint8_t type_tag = UnionTraits::index(member, this->context());
+				    uint8_t fb_type_tag =
+				        UnionTraits::empty(member, this->context()) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
 				    self.write(&fb_type_tag, vtable[i++], sizeof(fb_type_tag));
-				    if (!UnionTraits::empty(member)) {
+				    if (!UnionTraits::empty(member, this->context())) {
 					    RelativeOffset offset =
 					        (SaveAlternative<Writer, UnionTraits, Context>{ writer, vtableset, *this })
 					            .save(type_tag, member);
@@ -721,9 +770,9 @@ struct SaveVisitorLambda : Context {
 					    ++i;
 				    }
 			    } else if constexpr (_SizeOf<Member>::size == 0) {
-				    save_helper(member, writer, vtableset, static_cast<const Context&>(*this));
+				    save_helper(member, writer, vtableset, this->context());
 			    } else {
-				    auto result = save_helper(member, writer, vtableset, static_cast<const Context&>(*this));
+				    auto result = save_helper(member, writer, vtableset, this->context());
 				    self.write(&result, vtable[i++], sizeof(result));
 			    }
 		    },
@@ -768,7 +817,7 @@ struct LoadMember {
 			uint32_t numEntries = interpret_as<uint32_t>(current);
 			current += sizeof(uint32_t);
 			VectorTraits::reserve(member, numEntries, context);
-			auto inserter = VectorTraits::insert(member);
+			auto inserter = VectorTraits::insert(member, context);
 			for (int i = 0; i < numEntries; ++i) {
 				T value;
 				if (types_current[i] > 0) {
@@ -827,7 +876,7 @@ struct LoadSaveHelper : Context {
 	LoadSaveHelper(const Context& context) : Context(context) {}
 	template <class U>
 	std::enable_if_t<is_scalar<U>> load(U& member, const uint8_t* current) {
-		scalar_traits<U>::load(current, member, *this);
+		scalar_traits<U>::load(current, member, this->context());
 	}
 
 	template <class U>
@@ -839,7 +888,7 @@ struct LoadSaveHelper : Context {
 			using type = index_t<i, types>;
 			type t;
 			load_helper(t, current + struct_offset<i>(types{}), *this);
-			StructTraits::template assign<i>(member, t);
+			StructTraits::template assign<i, type, Context>(member, t, this->context());
 		});
 	}
 
@@ -849,7 +898,7 @@ struct LoadSaveHelper : Context {
 		current += current_offset;
 		uint32_t size = interpret_as<uint32_t>(current);
 		current += sizeof(size);
-		dynamic_size_traits<U>::load(current, size, member, *this);
+		dynamic_size_traits<U>::load(current, size, member, this->context());
 	}
 
 	struct SerializeFun : Context {
@@ -868,7 +917,7 @@ struct LoadSaveHelper : Context {
 			int i = 0;
 			uint16_t vtable_length = vtable[i++] / sizeof(uint16_t);
 			uint16_t table_length = vtable[i++];
-			for_each(LoadMember<Context>{ vtable, current, vtable_length, table_length, i, *this }, members...);
+			for_each(LoadMember<Context>{ vtable, current, vtable_length, table_length, i, this->context() }, members...);
 		}
 	};
 
@@ -878,7 +927,7 @@ struct LoadSaveHelper : Context {
 		current += current_offset;
 		int32_t vtable_offset = interpret_as<int32_t>(current);
 		const uint16_t* vtable = reinterpret_cast<const uint16_t*>(current - vtable_offset);
-		SerializeFun fun(vtable, current, *this);
+		SerializeFun fun(vtable, current, this->context());
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(fun, member);
 		} else {
@@ -894,11 +943,11 @@ struct LoadSaveHelper : Context {
 		current += current_offset;
 		uint32_t numEntries = interpret_as<uint32_t>(current);
 		current += sizeof(uint32_t);
-		VectorTraits::reserve(member, numEntries, *this);
-		auto inserter = VectorTraits::insert(member);
+		VectorTraits::reserve(member, numEntries, this->context());
+		auto inserter = VectorTraits::insert(member, this->context());
 		for (uint32_t i = 0; i < numEntries; ++i) {
 			T value;
-			load_helper(value, current, *this);
+			load_helper(value, current, this->context());
 			*inserter = std::move(value);
 			++inserter;
 			current += fb_size<T>;
@@ -910,7 +959,7 @@ struct LoadSaveHelper : Context {
 		constexpr auto size = scalar_traits<U>::size;
 		std::array<uint8_t, size> result = {};
 		if constexpr (size > 0) {
-			scalar_traits<U>::save(&result[0], message);
+			scalar_traits<U>::save(&result[0], message, this->context());
 		}
 		return result;
 	}
@@ -924,8 +973,8 @@ struct LoadSaveHelper : Context {
 		std::array<uint8_t, size> struct_bytes = {};
 		for_each_i<pack_size(types{})>([&](auto i_type) {
 			constexpr int i = decltype(i_type)::value;
-			auto result = save_helper(StructTraits::template get<i>(message), writer, vtables,
-			                          static_cast<const Context&>(*this));
+			auto result = save_helper(StructTraits::template get<i, Context>(message, this->context()), writer, vtables,
+			                          this->context());
 			memcpy(&struct_bytes[struct_offset<i>(types{})], &result, sizeof(result));
 		});
 		return struct_bytes;
@@ -955,12 +1004,12 @@ struct LoadSaveHelper : Context {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
 		constexpr auto size = fb_size<T>;
-		uint32_t num_entries = VectorTraits::num_entries(members);
+		uint32_t num_entries = VectorTraits::num_entries(members, this->context());
 		uint32_t len = num_entries * size;
 		auto self = writer.getMessageWriter(len);
-		auto iter = VectorTraits::begin(members);
+		auto iter = VectorTraits::begin(members, this->context());
 		for (uint32_t i = 0; i < num_entries; ++i) {
-			auto result = save_helper(*iter, writer, vtables, static_cast<const Context&>(*this));
+			auto result = save_helper(*iter, writer, vtables, this->context());
 			self.write(&result, i * size, size);
 			++iter;
 		}
@@ -1054,7 +1103,7 @@ uint8_t* save(Context& context, const Root& root, FileIdentifier file_identifier
 	int vtable_start;
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier, context);
 	uint8_t* out = context.allocate(precompute_size.current_buffer_size);
-	WriteToBuffer writeToBuffer{ precompute_size.current_buffer_size, vtable_start, out,
+	WriteToBuffer writeToBuffer{ context, precompute_size.current_buffer_size, vtable_start, out,
 		                         precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier, context);
 	return out;

@@ -228,6 +228,7 @@ struct TestContext {
 	Arena& arena() { return _arena; }
 	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
 	uint8_t* allocate(size_t size) { return _arena(size); }
+	TestContext& context() { return *this; }
 };
 
 TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {

@@ -81,8 +81,8 @@ struct struct_like_traits<Tag> : std::true_type {
 	using Member = Tag;
 	using types = pack<uint16_t, int8_t>;
 
-	template <int i>
-	static const index_t<i, types>& get(const Member& m) {
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member& m, Context&) {
 		if constexpr (i == 0) {
 			return m.id;
 		} else {
@@ -91,8 +91,8 @@ struct struct_like_traits<Tag> : std::true_type {
 		}
 	}
 
-	template <int i, class Type>
-	static const void assign(Member& m, const Type& t) {
+	template <int i, class Type, class Context>
+	static const void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {

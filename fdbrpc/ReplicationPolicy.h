@@ -280,17 +280,19 @@ private:
 	using T = Reference<IReplicationPolicy>;
 
 public:
-	static size_t size(const T& value) {
+	template <class Context>
+	static size_t size(const T& value, Context& context) {
 		// size gets called multiple times. If this becomes a performance problem, we can perform the
 		// serialization once and cache the result as a mutable member of IReplicationPolicy
-		BinaryWriter writer{ IncludeVersion() };
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
 		::save(writer, value);
 		return writer.getLength();
 	}
 
 	// Guaranteed to be called only once during serialization
-	static void save(uint8_t* out, const T& value) {
-		BinaryWriter writer{ IncludeVersion() };
+	template <class Context>
+	static void save(uint8_t* out, const T& value, Context& context) {
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
 		::save(writer, value);
 		memcpy(out, writer.getData(), writer.getLength());
 	}
@@ -298,9 +300,9 @@ public:
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
+	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
 		StringRef str(buf, sz);
-		BinaryReader reader(str, IncludeVersion());
+		BinaryReader reader(str, AssumeVersion(context.protocolVersion()));
 		::load(reader, value);
 	}
 };

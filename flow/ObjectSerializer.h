@@ -44,6 +44,8 @@ struct LoadContext {
 	}
 
 	void addArena(Arena& arena) { arena = ar->arena(); }
+
+	LoadContext& context() { return *this; }
 };
 
 template <class Ar, class Allocator>
@@ -60,6 +62,8 @@ struct SaveContext {
 	uint8_t* allocate(size_t s) {
 		return allocator(s);
 	}
+
+	SaveContext& context() { return *this; }
 };
 
 template <class ReaderImpl>

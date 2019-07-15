@@ -113,7 +113,8 @@ public:
 template<>
 struct scalar_traits<Arena> : std::true_type {
 	constexpr static size_t size = 0;
-	static void save(uint8_t*, const Arena&) {}
+	template <class Context>
+	static void save(uint8_t*, const Arena&, Context&) {}
 	// Context is an arbitrary type that is plumbed by reference throughout
 	// the load call tree.
 	template <class Context>
@@ -454,17 +455,20 @@ template<class T>
 struct union_like_traits<Optional<T>> : std::true_type {
 	using Member = Optional<T>;
 	using alternatives = pack<T>;
-	static uint8_t index(const Member& variant) { return 0; }
-	static bool empty(const Member& variant) { return !variant.present(); }
 
-	template <int i>
-	static const T& get(const Member& variant) {
+	template <class Context>
+	static uint8_t index(const Member& variant, Context&) { return 0; }
+	template <class Context>
+	static bool empty(const Member& variant, Context&) { return !variant.present(); }
+
+	template <int i, class Context>
+	static const T& get(const Member& variant, Context&) {
 		static_assert(i == 0);
 		return variant.get();
 	}
 
-	template <size_t i>
-	static const void assign(Member& member, const T& t) {
+	template <size_t i, class U, class Context>
+	static const void assign(Member& member, const U& t, Context&) {
 		member = t;
 	}
 };
@@ -767,8 +771,10 @@ inline void save( Archive& ar, const StringRef& value ) {
 
 template <>
 struct dynamic_size_traits<StringRef> : std::true_type {
-	static size_t size(const StringRef& t) { return t.size(); }
-	static void save(uint8_t* out, const StringRef& t) { std::copy(t.begin(), t.end(), out); }
+	template <class Context>
+	static size_t size(const StringRef& t, Context&) { return t.size(); }
+	template<class Context>
+	static void save(uint8_t* out, const StringRef& t, Context&) { std::copy(t.begin(), t.end(), out); }
 
 	template <class Context>
 	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {
@@ -1083,26 +1089,33 @@ struct vector_like_traits<VectorRef<T, false>> : std::true_type {
 	using iterator = const T*;
 	using insert_iterator = T*;
 
-	static size_t num_entries(const VectorRef<T>& v) { return v.size(); }
+	template <class Context>
+	static size_t num_entries(const VectorRef<T>& v, Context&) {
+		return v.size();
+	}
 	template <class Context>
 	static void reserve(VectorRef<T>& v, size_t s, Context& context) {
 		v.resize(context.arena(), s);
 	}
 
-	static insert_iterator insert(Vec& v) { return v.begin(); }
-	static iterator begin(const Vec& v) { return v.begin(); }
+	template <class Context>
+	static insert_iterator insert(Vec& v, Context&) { return v.begin(); }
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) { return v.begin(); }
 };
 
 template <class V>
 struct dynamic_size_traits<VectorRef<V, true>> : std::true_type {
 	using T = VectorRef<V, true>;
 	// May be called multiple times during one serialization
-	static size_t size(const T& t) {
+	template <class Context>
+	static size_t size(const T& t, Context&) {
 		return t.serializedSize();
 	}
 
 	// Guaranteed to be called only once during serialization
-	static void save(uint8_t* out, const T& t) {
+	template <class Context>
+	static void save(uint8_t* out, const T& t, Context&) {
 		string_serialized_traits<V> traits;
 		auto* p = out;
 		uint32_t length = t.size();
