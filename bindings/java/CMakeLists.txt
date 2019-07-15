@@ -152,10 +152,10 @@ Built-By: CMake ${CMAKE_VERSION}
 Bundle-Description: FoundationDB java binding and API
 Bundle-ManifestVersion: 2
 Bundle-Name: fdb-java
-Bundle-SymbolicName: com.foundationdb
+Bundle-SymbolicName: com.apple.foundationdb
 Bundle-Version: ${JAR_VERSION}
 Created-By: CMake ${CMAKE_VERSION}
-Name: com.foundationdb
+Name: com.apple.foundationdb
 Implementation-Title: fdb-java
 Implementation-Version: ${CURRENT_GIT_VERSION}
 Signature-Version: ${JAR_VERSION}
