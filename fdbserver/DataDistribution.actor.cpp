@@ -4009,7 +4009,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 	try {
 		// disable tlog pop on local tlog nodes
 		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
-		//state std::vector<Future<ErrorOr<Void>>> disablePops;
 		state std::vector<Future<Void>> disablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(

@@ -1950,7 +1950,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				req.reply.send(Void());
 			}
 		}
-		when( state TLogEnablePopRequest enablePopReq = waitNext( tli.enablePopRequest.getFuture() ) ) {
+		when( TLogEnablePopRequest enablePopReq = waitNext( tli.enablePopRequest.getFuture() ) ) {
 			logData->addActor.send( tLogEnablePopReq( enablePopReq, self, logData) );
 		}
 		when( TLogSnapRequest snapReq = waitNext( tli.snapRequest.getFuture() ) ) {

@@ -1560,7 +1560,7 @@ proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData)
 			logAntiQuorum = atoi(result.get().toString().c_str());
 		}
 		// FIXME: logAntiQuorum not supported, remove it later,
-		// snap feature should just work fine version 2
+		// In version2, we probably don't need this limtiation, but this needs to be tested.
 		if (logAntiQuorum > 0) {
 			TraceEvent("SnapMasterProxy.LogAnitQuorumNotSupported")
 				.detail("SnapPayload", snapReq.snapPayload)
