@@ -18,24 +18,24 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/DatabaseContext.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
 #include <set>
 #include <sstream>
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/Replication.h"
-#include "flow/UnitTest.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 class TCTeamInfo;
