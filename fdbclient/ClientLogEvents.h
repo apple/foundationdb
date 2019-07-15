@@ -60,7 +60,7 @@ namespace FdbClientLogEvents {
 
 		double latency;
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetVersion")
 			.detail("TransactionID", id)
 			.detail("Latency", latency);
@@ -82,7 +82,7 @@ namespace FdbClientLogEvents {
 		int valueSize;
 		Key key;
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_Get")
 			.setMaxEventLength(-1)
 			.detail("TransactionID", id)
@@ -109,7 +109,7 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetRange")
 			.setMaxEventLength(-1)
 			.detail("TransactionID", id)
@@ -137,7 +137,7 @@ namespace FdbClientLogEvents {
 		int commitBytes;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
 				TraceEvent("TransactionTrace_Commit_ReadConflictRange")
 				.setMaxEventLength(-1)
@@ -186,7 +186,7 @@ namespace FdbClientLogEvents {
 		int errCode;
 		Key key;
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetError")
 			.setMaxEventLength(-1)
 			.detail("TransactionID", id)
@@ -211,7 +211,7 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetRangeError")
 			.setMaxEventLength(-1)
 			.detail("TransactionID", id)
@@ -236,7 +236,7 @@ namespace FdbClientLogEvents {
 		int errCode;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id, int maxFieldLength) const override {
+		void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
 				TraceEvent("TransactionTrace_CommitError_ReadConflictRange")
 				.setMaxEventLength(-1)
