@@ -56,6 +56,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
