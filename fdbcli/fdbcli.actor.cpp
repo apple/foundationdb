@@ -2170,9 +2170,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 }
 
 ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
-	// FIXME: default version for snapshots are still 1, once version 2 is stable - it will be made the default
-	// and version 1 may be deprecated
-	wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, 1 /* version */)));
+	wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, 2 /* version */)));
 	return false;
 }
 
