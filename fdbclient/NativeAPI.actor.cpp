@@ -3575,8 +3575,8 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 
 	StringRef snapCmdArgs = snapCmd;
 	StringRef snapCmdPart = snapCmdArgs.eat(":");
-	state Standalone<StringRef> snapUIDRef(snapUID.toString());
-	state Standalone<StringRef> snapPayloadRef = snapCmdPart
+	Standalone<StringRef> snapUIDRef(snapUID.toString());
+	Standalone<StringRef> snapPayloadRef = snapCmdPart
 		.withSuffix(LiteralStringRef(":uid="))
 		.withSuffix(snapUIDRef)
 		.withSuffix(LiteralStringRef(","))

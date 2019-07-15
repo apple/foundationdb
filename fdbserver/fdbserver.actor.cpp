@@ -867,6 +867,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
 }
 
+// moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
 void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
 	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
 	for (const auto & fileEntry: returnFiles) {

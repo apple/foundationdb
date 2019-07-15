@@ -10,6 +10,7 @@
 #if defined(CMAKE_BUILD) || !defined(_WIN32)
 #include "versions.h"
 #endif
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
@@ -103,14 +104,11 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	state boost::process::child c(binPath, boost::process::args(paramList),
 								  boost::process::std_err > boost::process::null);
 
-	// for async calls in simulator, always delay by a fixed time, otherwise
-	// the predictability of the simulator breaks
+	// for async calls in simulator, always delay by a deterinistic amount of time and do the call
+	// synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
-		double snapDelay = 0.0;
-		if (maxSimDelayTime > 1.0) {
-			int delayTime = (int) round(maxSimDelayTime - 1);
-			snapDelay += deterministicRandom()->randomInt(0, delayTime);
-		}
+		double snapDelay = std::max(maxSimDelayTime - 1, 0.0);
+		// add some randomness
 		snapDelay += deterministicRandom()->random01();
 		TraceEvent("SnapDelaySpawnProcess")
 			.detail("SnapDelay", snapDelay);
@@ -159,6 +157,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
 	state int err = 0;
 	state Future<int> cmdErr;
+	state double maxWaitTime = (snapVersion == 2) ? SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT : 3.0;
 	if (!g_network->isSimulated()) {
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
@@ -177,7 +176,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		versionString += version;
 		paramList.push_back(versionString);
 		paramList.push_back(role);
-		cmdErr = spawnProcess(snapBin.toString(), paramList, 3.0, false /*isSync*/, 0);
+		cmdErr = spawnProcess(snapBin.toString(), paramList, maxWaitTime, false /*isSync*/, 0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 	} else {
@@ -194,7 +193,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, 3.0, false /*isSync*/, maxSimDelayTime);
+		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {
@@ -203,7 +202,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 			paramList.push_back("-a");
 			paramList.push_back(folderFrom);
 			paramList.push_back(folderTo);
-			cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/, 1.0);
+			cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
 		}
@@ -254,6 +253,8 @@ struct StorageVersionInfo {
 	Version durableVersion;
 };
 
+// storage nodes get snapshotted through the worker interface which does not have context about version information,
+// following info is gathered at worker level to facilitate printing of version info during storage snapshots.
 typedef std::map<UID, StorageVersionInfo> UidStorageVersionInfo;
 
 std::map<NetworkAddress, UidStorageVersionInfo> workerStorageVersionInfo;
