@@ -1055,7 +1055,7 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilder
 					break;
 				} catch(Error &e) {
 					if(e.code() == error_code_timed_out) {
-						messages->push_back(JsonString::makeMessage("consistencycheck_fetch_timeout", 
+						messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout", 
 							format("Timed out trying to fetch `%s` from the database.", fdbShouldConsistencyCheckBeSuspended.toString().c_str()).c_str()));
 						break;
 					}
