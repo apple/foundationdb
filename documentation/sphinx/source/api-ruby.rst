@@ -803,7 +803,7 @@ Transaction options
 
     |option-set-timeout-blurb3|
 
-.. method:: Transaction.options.set_size_limit(size_limit) -> nil
+.. method:: Transaction.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
     |option-set-transaction-logging-max-field-length-blurb|
 

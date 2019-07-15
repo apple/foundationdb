@@ -452,7 +452,7 @@ public:
 	TraceEvent& setMaxFieldLength(int maxFieldLength);
 
 	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the default,
-	// A negative value disables length suppression. This should be called before adding details.
+	// a negative value disables length suppression. This should be called before adding details.
 	TraceEvent& setMaxEventLength(int maxEventLength);
 
 	//Cannot call other functions which could disable the trace event afterwords
