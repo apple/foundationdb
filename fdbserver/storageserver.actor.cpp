@@ -471,6 +471,7 @@ public:
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
+		Counter readsRejected;
 
 		LatencyBands readLatencyBands;
 
@@ -499,6 +500,7 @@ public:
 			fetchWaitingCount("FetchWaitingCount", cc),
 			fetchExecutingMS("FetchExecutingMS", cc),
 			fetchExecutingCount("FetchExecutingCount", cc),
+			readsRejected("ReadsRejected", cc),
 			readLatencyBands("ReadLatencyMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
@@ -645,6 +647,7 @@ public:
 		if (rate < 0.8 && deterministicRandom()->random01() > rate) {
 			//request.error = future_version();
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
+			++counters.readsRejected;
 			return Void();
 		}
 		return fun(this, request);
