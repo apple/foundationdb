@@ -11,7 +11,7 @@ set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 
 set(rel_debug_paths OFF)
-if(RELATIVE_DEBUG_PATHS OR FDB_RELEASE)
+if(RELATIVE_DEBUG_PATHS)
   set(rel_debug_paths ON)
 endif()
 
