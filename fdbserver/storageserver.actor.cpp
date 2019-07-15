@@ -1348,9 +1348,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 	TaskPriority taskType = TaskPriority::DefaultEndpoint;
 	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
 		taskType = TaskPriority::FetchKeys;
-	} else if (false) {
-		// Placeholder for up-prioritizing fetches for important requests
-		taskType = TaskPriority::DefaultDelay;
+	// } else if (false) {
+	// 	// Placeholder for up-prioritizing fetches for important requests
+	// 	taskType = TaskPriority::DefaultDelay;
 	}
 	wait( delay(0, taskType) );
 
