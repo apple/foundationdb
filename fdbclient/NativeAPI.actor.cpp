@@ -3584,7 +3584,7 @@ ACTOR Future<Void> snapCreateVersion2(Database inputCx, StringRef snapCmd, UID s
 
 	try {
 		Future<Void> exec = snapshotDatabase(cx, snapPayloadRef, snapUID, snapUID);
-		double timeOut = g_network->isSimulated() ? CLIENT_KNOBS->SNAP_CREATE_TIMEOUT : 80.0;
+		double timeOut = g_network->isSimulated() ? 80.0 : CLIENT_KNOBS->SNAP_CREATE_TIMEOUT;
 		wait(timeoutError(exec, timeOut));
 	} catch (Error& e) {
 		TraceEvent("SnapshotDatabaseErrorVersion2")
