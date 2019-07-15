@@ -147,7 +147,8 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 		state Version expectedBegin = self->messageVersion.version;
 		try {
 			if (self->parallelGetMore || self->onlySpilled) {
-				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
+				const int extraRequests = BUGGIFY ? deterministicRandom()->randomSkewedUInt32(0, SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) : 0;
+				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS + extraRequests && self->interf->get().present()) {
 					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
 			} else if (self->futureResults.size() == 0) {
