@@ -1047,13 +1047,18 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilder
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+					Optional<Value> ccSuspendVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
 					bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
 					if(ccSuspend) {
 						messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
 					}
 					break;
 				} catch(Error &e) {
+					if(e.code() == error_code_timed_out) {
+						messages->push_back(JsonString::makeMessage("consistencycheck_fetch_timeout", 
+							format("Timed out trying to fetch `%s` from the database.", fdbShouldConsistencyCheckBeSuspended.toString().c_str()).c_str()));
+						break;
+					}
 					wait(tr.onError(e));
 				}
 			}
