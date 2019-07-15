@@ -125,7 +125,7 @@ struct union_like_traits : std::false_type {
 	template <int i, class Context>
 	static const index_t<i, alternatives>& get(const Member&, Context&);
 
-	template <int i, class Alternative, class Context&>
+	template <int i, class Alternative, class Context>
 	static const void assign(Member&, const Alternative&, Context&);
 
 	template <class Context>
@@ -139,7 +139,7 @@ struct struct_like_traits : std::false_type {
 	using Member = StructLike;
 	using types = pack<>;
 
-	template <int i, class Context&>
+	template <int i, class Context>
 	static const index_t<i, types>& get(const Member&, Context&);
 
 	template <int i, class Context>
