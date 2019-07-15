@@ -30,7 +30,11 @@
 
 namespace detail {
 
-std::vector<int>* writeToOffsetsMemory;
+namespace {
+std::vector<int> mWriteToOffsetsMemoy;
+}
+
+std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
 
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
