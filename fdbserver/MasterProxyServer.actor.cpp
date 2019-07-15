@@ -986,7 +986,7 @@ ACTOR Future<Void> commitBatch(
 	bool firstMessage = true;
 	for(auto m : msg.messages) {
 		if(firstMessage) {
-			toCommit.addTag(txsTag);
+			toCommit.addTxsTag();
 		}
 		toCommit.addMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
@@ -1033,7 +1033,7 @@ ACTOR Future<Void> commitBatch(
 
 		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
-	self->logSystem->pop(msg.popTo, txsTag);
+	self->logSystem->popTxs(msg.popTo);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1505,7 +1505,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 
 			while(self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {
 				self->lastTxsPop = self->txsPopVersions.front().second;
-				self->logSystem->pop(self->txsPopVersions.front().second, txsTag, 0, tagLocalityRemoteLog);
+				self->logSystem->popTxs(self->txsPopVersions.front().second, tagLocalityRemoteLog);
 				self->txsPopVersions.pop_front();
 			}
 
@@ -1563,7 +1563,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
+	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
@@ -1595,7 +1595,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
-				commitData.logSystem->pop(commitData.lastTxsPop, txsTag, 0, tagLocalityRemoteLog);
+				commitData.logSystem->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
 			}
 
 			Optional<LatencyBandConfig> newLatencyBandConfig = commitData.db->get().latencyBandConfig;

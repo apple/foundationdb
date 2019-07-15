@@ -250,7 +250,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -269,7 +270,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -318,6 +320,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
          ]
+      },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
       },
       "messages":[
          {
@@ -430,6 +436,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          },
          "transactions":{
             "started":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
