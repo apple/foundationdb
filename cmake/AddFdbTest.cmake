@@ -84,16 +84,13 @@ function(add_fdb_test)
   if (NOT "${ADD_FDB_TEST_TEST_NAME}" STREQUAL "")
     set(test_name ${ADD_FDB_TEST_TEST_NAME})
   endif()
-  math(EXPR test_idx "${CURRENT_TEST_INDEX} + 1")
+  math(EXPR test_idx "${CURRENT_TEST_INDEX} + ${NUM_TEST_FILES}")
   set(CURRENT_TEST_INDEX "${test_idx}" PARENT_SCOPE)
   # set(<var> <value> PARENT_SCOPE) doesn't set the
   # value in this scope (only in the parent scope). So
   # if the value was undefined before, it will still be
   # undefined.
-  math(EXPR assigned_id "${test_idx} - 1")
-  math(EXPR test_file_idx "${CURRENT_TEST_FILE_INDEX} + ${NUM_TEST_FILES}")
-  set(CURRENT_TEST_FILE_INDEX "${test_file_idx}" PARENT_SCOPE)
-  math(EXPR assigned_test_number "${test_file_idx} - ${NUM_TEST_FILES}")
+  math(EXPR assigned_id "${test_idx} - ${NUM_TEST_FILES}")
   if(ADD_FDB_TEST_UNIT)
     message(STATUS
       "ADDING UNIT TEST ${assigned_id} ${test_name}")
@@ -121,7 +118,7 @@ function(add_fdb_test)
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
     --seed ${SEED}
-    --test-number ${assigned_test_number}
+    --test-number ${assigned_id}
     ${BUGGIFY_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
