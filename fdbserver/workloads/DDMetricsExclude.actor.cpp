@@ -78,7 +78,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 				double movingData = wait( self->getMovingDataAmount( cx, self ) );
 				self->peakMovingData = std::max(self->peakMovingData, movingData);
 				TraceEvent("DDMetricsExcludeCheck")
-					.detail("movingData", movingData);
+					.detail("MovingData", movingData);
 				if( movingData == 0.0 ) {
 					self->ddDone = now() - startTime;
 					return Void();
