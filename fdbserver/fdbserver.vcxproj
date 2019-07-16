@@ -20,6 +20,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ApplyMetadataMutation.cpp" />
     <ActorCompiler Include="ClusterController.actor.cpp" />
     <ActorCompiler Include="DataDistribution.actor.cpp" />
     <ActorCompiler Include="DataDistributionQueue.actor.cpp" />
