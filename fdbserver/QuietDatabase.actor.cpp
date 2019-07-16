@@ -277,7 +277,8 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
-			if (g_simulator.storagePolicy.isValid() && g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
+			if (g_simulator.storagePolicy.isValid() &&
+			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
 				// Do not test DD team number for data_hall modes
 				return true;
 			}
@@ -314,7 +315,6 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			state int64_t maxMachineTeamOnMachine =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
 
-
 			// The if condition should be consistent with the condition in serverTeamRemover() and
 			// machineTeamRemover() that decides if redundant teams exist.
 			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
@@ -332,8 +332,8 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 					continue; // We may not receive the most recent TeamCollectionInfo
 				}
 				// If the machineTeamRemover does not remove the machine team with the most machine teams,
-				// we may oscillate between building more server teams by teamBuilder() and removing those teams by teamRemover
-				// To avoid false positive in simulation, we skip the consistency check in this case.
+				// we may oscillate between building more server teams by teamBuilder() and removing those teams by
+				// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
 				if (!SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
 					TraceEvent(SevWarnAlways, "GetTeamCollectionValid").detail("RemoveMTWithMostTeams", "False");
 					ret = true;
@@ -357,7 +357,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
 				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
-					.detail("RemoveMTWithMostTeams", SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS);
+				    .detail("RemoveMTWithMostTeams", SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS);
 				return ret;
 			} else {
 				return true;

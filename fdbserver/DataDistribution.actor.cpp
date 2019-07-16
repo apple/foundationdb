@@ -1674,7 +1674,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() {
 		Reference<TCMachineTeamInfo> retMT;
 		int maxNumMachineTeams = 0;
-		int targetMachineTeamNumPerMachine = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+		int targetMachineTeamNumPerMachine =
+		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 
 		for (auto& mt : machineTeams) {
 			// The representative team number for the machine team mt is
@@ -1683,7 +1684,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			for (auto& m : mt->machines) {
 				representNumMachineTeams = std::min<int>(representNumMachineTeams, m->machineTeams.size());
 			}
-			if (representNumMachineTeams > targetMachineTeamNumPerMachine && representNumMachineTeams > maxNumMachineTeams) {
+			if (representNumMachineTeams > targetMachineTeamNumPerMachine &&
+			    representNumMachineTeams > maxNumMachineTeams) {
 				maxNumMachineTeams = representNumMachineTeams;
 				retMT = mt;
 			}
@@ -1691,7 +1693,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		return std::pair<Reference<TCMachineTeamInfo>, int>(retMT, maxNumMachineTeams);
 	}
-
 
 	// Find the server team whose members are on the most number of server teams
 	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
@@ -1706,7 +1707,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				representNumProcessTeams = std::min<int>(representNumProcessTeams, server->teams.size());
 			}
 			// We only remove the team whose representNumProcessTeams is larger than the targetTeamNumPerServer number
-			// otherwise, teamBuilder will build the to-be-removed team again 
+			// otherwise, teamBuilder will build the to-be-removed team again
 			if (representNumProcessTeams > targetTeamNumPerServer && representNumProcessTeams > maxNumProcessTeams) {
 				maxNumProcessTeams = representNumProcessTeams;
 				retST = t;
@@ -1732,8 +1733,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Each machine is expected to have targetMachineTeamNumPerMachine
 	// Return true if there exists a machine that does not have enough teams.
 	bool notEnoughMachineTeamsForAMachine() {
-		// If we want to remove the machine team with most machine teams, we use the same logic as notEnoughTeamsForAServer
-		int targetMachineTeamNumPerMachine = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2 : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
+		// If we want to remove the machine team with most machine teams, we use the same logic as
+		// notEnoughTeamsForAServer
+		int targetMachineTeamNumPerMachine =
+		    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+		        ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2
+		        : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 		for (auto& m : machine_info) {
 			// If SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS is false,
 			// The desired machine team number is not the same with the desired server team number
@@ -2451,7 +2456,9 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		int totalMTCount = self->machineTeams.size();
 		// Pick the machine team to remove. After release-6.2 version,
 		// we remove the machine team with most machine teams, the same logic as serverTeamRemover
-		std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams() : self->getMachineTeamWithLeastProcessTeams();
+		std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+		                                                               ? self->getMachineTeamWithMostMachineTeams()
+		                                                               : self->getMachineTeamWithLeastProcessTeams();
 
 		if (totalMTCount > desiredMachineTeams && foundMTInfo.first.isValid()) {
 			Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
