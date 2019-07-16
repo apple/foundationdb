@@ -371,7 +371,7 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
-	getLeader.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskCoordination );
+	getLeader.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination );
 }
 
 // Nominee is the worker among all workers that are considered as leader by a coordinator
@@ -380,7 +380,7 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
 	state bool hasCounted = false;
 	loop {
-		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
+		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskPriority::CoordinationReply ) );
 		if (li.present() && !hasCounted && connectedCoordinatorsNum.isValid()) {
 			connectedCoordinatorsNum->set(connectedCoordinatorsNum->get() + 1);
 			hasCounted = true;

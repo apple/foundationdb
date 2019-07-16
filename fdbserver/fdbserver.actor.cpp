@@ -494,7 +494,7 @@ Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<Stri
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring( &systemMonitor, 5.0, TaskFlushTrace );
+	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
 }
 
 void testIndexedSet();
@@ -1596,6 +1596,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("RandomSeed", randomSeed)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
@@ -1606,7 +1607,9 @@ int main(int argc, char* argv[]) {
 			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
 			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("BuggifyEnabled", buggifyEnabled)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");

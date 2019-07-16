@@ -215,7 +215,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		    g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
 		                           coordFolder->c_str());
 		wait(g_simulator.onProcess(process,
-		                           TaskDefaultYield)); // Now switch execution to the process on which we will run
+		                           TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
 
 		try {
@@ -1391,7 +1391,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Optional<Standalone<StringRef>>()),
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", ""),
-	    TaskDefaultYield));
+	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(true, 1);
 	if (tlsOptions->enabled()) {
@@ -1427,8 +1427,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	}
 
 	TraceEvent("SimulatedSystemDestruct");
-	destructed = true;
-	systemActors.clear();
-
 	g_simulator.stop();
+	destructed = true;
+	wait(Never());
+	ASSERT(false);
 }

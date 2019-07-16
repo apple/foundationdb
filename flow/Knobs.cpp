@@ -55,6 +55,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 );
+	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
+	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
@@ -134,6 +137,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
+	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );

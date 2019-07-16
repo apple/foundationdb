@@ -34,17 +34,16 @@ bool TraverseMessageTypes::vtableGeneratedBefore(const std::type_index& idx) {
 	return !f.known_types.insert(idx).second;
 }
 
-VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& members,
-                       const std::vector<unsigned>& alignments) {
+VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
 	}
 	// first is index, second is size
 	std::vector<std::pair<unsigned, unsigned>> indexed;
-	indexed.reserve(members.size());
-	for (unsigned i = 0; i < members.size(); ++i) {
-		if (members[i] > 0) {
-			indexed.emplace_back(i, members[i]);
+	indexed.reserve(numMembers);
+	for (unsigned i = 0; i < numMembers; ++i) {
+		if (sizesAlignments[i] > 0) {
+			indexed.emplace_back(i, sizesAlignments[i]);
 		}
 	}
 	std::stable_sort(indexed.begin(), indexed.end(),
@@ -52,15 +51,15 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& members,
 		                 return lhs.second > rhs.second;
 	                 });
 	VTable result;
-	result.resize(members.size() + 2);
+	result.resize(numMembers + 2);
 	// size of the vtable is
 	// - 2 bytes per member +
 	// - 2 bytes for the size entry +
 	// - 2 bytes for the size of the object
-	result[0] = 2 * members.size() + 4;
+	result[0] = 2 * numMembers + 4;
 	int offset = 0;
 	for (auto p : indexed) {
-		auto align = alignments[p.first];
+		auto align = sizesAlignments[numMembers + p.first];
 		auto& res = result[p.first + 2];
 		res = offset % align == 0 ? offset : ((offset / align) + 1) * align;
 		offset = res + p.second;
@@ -78,8 +77,10 @@ TEST_CASE("flow/FlatBuffers/test") {
 	auto* vtable1 = detail::get_vtable<int>();
 	auto* vtable2 = detail::get_vtable<uint8_t, uint8_t, int, int64_t, int>();
 	auto* vtable3 = detail::get_vtable<uint8_t, uint8_t, int, int64_t, int>();
+	auto* vtable4 = detail::get_vtable<uint32_t>();
 	ASSERT(vtable1 != vtable2);
 	ASSERT(vtable2 == vtable3);
+	ASSERT(vtable1 == vtable4); // Different types, but same vtable! Saves space in encoded messages
 	ASSERT(vtable1->size() == 3);
 	ASSERT(vtable2->size() == 7);
 	ASSERT((*vtable2)[0] == 14);
@@ -166,7 +167,6 @@ TEST_CASE("flow/FlatBuffers/collectVTables") {
 	Root root;
 	const auto* vtables = detail::get_vtableset(root);
 	ASSERT(vtables == detail::get_vtableset(root));
-	ASSERT(vtables->offsets.size() == 3);
 	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
 	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
 	int root_offset = vtables->offsets.at(&root_vtable);
@@ -329,50 +329,9 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	return Void();
 }
 
-struct DynamicSizeThingy {
-	std::string x;
-	mutable int saves = 0;
-};
-
 } // namespace unit_tests
 
-template <>
-struct dynamic_size_traits<unit_tests::DynamicSizeThingy> : std::true_type {
-private:
-	using T = unit_tests::DynamicSizeThingy;
-
-public:
-	static WriteRawMemory save(const T& t) {
-		++t.saves;
-		T* t2 = new T(t);
-		return { { ownedPtr(reinterpret_cast<const uint8_t*>(t2->x.data()), [t2](auto*) { delete t2; }),
-			       t2->x.size() } };
-	}
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t* p, size_t n, T& t, Context&) {
-		t.x.assign(reinterpret_cast<const char*>(p), n);
-	}
-};
-
 namespace unit_tests {
-
-TEST_CASE("flow/FlatBuffers/dynamic_size_owned") {
-	DynamicSizeThingy x1 = { "abcdefg" };
-	DynamicSizeThingy x2;
-	Arena arena;
-	DummyContext context;
-	const uint8_t* out;
-
-	out = save_members(arena, FileIdentifier{}, x1);
-	ASSERT(x1.saves == 1);
-	// print_buffer(out, arena.get_size(out));
-	load_members(out, context, x2);
-	ASSERT(x1.x == x2.x);
-	return Void();
-}
 
 struct Y1 {
 	int a;
