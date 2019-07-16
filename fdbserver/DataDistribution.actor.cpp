@@ -1412,11 +1412,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// selectReplicas() should always return a team with correct size. otherwise, it has a bug
 				ASSERT(team.size() == configuration.storageTeamSize);
 
-				int score = 0;
+				int score = std::numeric_limits<int>::max();
 				vector<Standalone<StringRef>> machineIDs;
 				for (auto process = team.begin(); process != team.end(); process++) {
 					Reference<TCServerInfo> server = server_info[**process];
-					score += server->machine->machineTeams.size();
+					score = std::min(score, (int) server->machine->machineTeams.size());
 					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
 				}
@@ -1452,6 +1452,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				addMachineTeam(machines);
 				addedMachineTeams++;
 			} else {
+				traceAllInfo(true);
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
@@ -1729,6 +1730,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool notEnoughMachineTeamsForAMachine() {
 		// If we want to remove the machine team with most machine teams, we use the same logic as notEnoughTeamsForAServer
 		int targetMachineTeamNumPerMachine = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2 : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
+		targetMachineTeamNumPerMachine = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 		for (auto& m : machine_info) {
 			// If SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS is false,
 			// The desired machine team number is not the same with the desired server team number
@@ -1753,6 +1755,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+		targetTeamNumPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 		ASSERT(targetTeamNumPerServer > 0);
 		for (auto& s : server_info) {
 			if (s.second->teams.size() < targetTeamNumPerServer) {
@@ -1851,10 +1854,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				// Pick the server team with smallest score in all attempts
+				// Score is defined as the minimum number of teams in the member because
+				// serverTeamRemover picks the team with largest score to remove.
+				// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
-				int score = 0;
+				int score = std::numeric_limits<int>::max();
 				for (auto& server : serverTeam) {
-					score += server_info[server]->teams.size();
+					score = std::min(score, (int) server_info[server]->teams.size());
 				}
 				TraceEvent("BuildServerTeams")
 				    .detail("Score", score)

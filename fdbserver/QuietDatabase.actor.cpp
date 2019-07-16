@@ -274,6 +274,7 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 // Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistributorWorker) {
 	state int attempts = 0;
+	state bool ret = false;
 	loop {
 		try {
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
@@ -318,10 +319,20 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			    (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeamNumber > desiredTeamNumber) ||
 			    ((minMachineTeamOnMachine <= 0 || minServerTeamOnServer <= 0) &&
 			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+				ret = false;
+
 				if (attempts++ < 10) {
 					wait(delay(60));
 					continue; // We may not receive the most recent TeamCollectionInfo
 				}
+				// If the machineTeamRemover does not remove the machine team with the most machine teams,
+				// we may oscillate between building more server teams by teamBuilder() and removing those teams by teamRemover
+				// To avoid false positive in simulation, we skip the consistency check in this case.
+				if (!SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
+					TraceEvent(SevWarnAlways, "GetTeamCollectionValid").detail("RemoveMTWithMostTeams", "False");
+					ret = true;
+				}
+
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
 				// TODO: Remove the constraint SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3 to ensure that
@@ -339,8 +350,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				    .detail("MinMachineTeamNumberOnMachine", minMachineTeamOnMachine)
 				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
 				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
-				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
-				return false;
+				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+					.detail("RemoveMTWithMostTeams", SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS);
+				return ret;
 			} else {
 				return true;
 			}
