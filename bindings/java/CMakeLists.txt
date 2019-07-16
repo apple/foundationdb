@@ -149,16 +149,14 @@ set(MANIFEST_TEXT "Manifest-Version: 1.0
 Bnd-LastModified: ${BND_LAST_MODIFIED_SEC}000
 Build-Jdk: ${Java_VERSION_STRING}
 Built-By: CMake ${CMAKE_VERSION}
-Bundle-Description: FoundationDB java binding and API
+Bundle-Description: FoundationDB Java bindings and API
 Bundle-ManifestVersion: 2
 Bundle-Name: fdb-java
 Bundle-SymbolicName: com.apple.foundationdb
 Bundle-Version: ${JAR_VERSION}
 Created-By: CMake ${CMAKE_VERSION}
-Name: com.apple.foundationdb
 Implementation-Title: fdb-java
 Implementation-Version: ${CURRENT_GIT_VERSION}
-Signature-Version: ${JAR_VERSION}
 Specification-Title: FoundationDB Java bindings and API
 Specification-Version: ${JAR_VERSION}
 ")
