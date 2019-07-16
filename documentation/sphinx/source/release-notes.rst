@@ -8,7 +8,7 @@ Release Notes
 Fixes
 -----
 
-* New data distributor takes the onwer lock to kill the old one. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
+* An untracked data distributor could prevent a newly recruited data distributor from being started. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
 
 6.1.11
 ======
