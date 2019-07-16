@@ -84,8 +84,8 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
 
-double hugeArenaLastLogged = 0;
-std::map<std::string, std::pair<int,int>> hugeArenaTraces;
+thread_local double hugeArenaLastLogged = 0;
+thread_local std::map<std::string, std::pair<int,int>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
 	auto& info = hugeArenaTraces[platform::get_backtrace()];
