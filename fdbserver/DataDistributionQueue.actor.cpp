@@ -1172,43 +1172,43 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-			if (!val.present()) {
-				wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
-				if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
-				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-					state Optional<Reference<IDataDistributionTeam>> randomTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(true, false, true))));
-					if (randomTeam.present()) {
-						if (randomTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
-							state Optional<Reference<IDataDistributionTeam>> loadedTeam =
-							    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-							        GetTeamRequest(true, true, false))));
-							if (loadedTeam.present()) {
-								bool moved =
-								    wait(rebalanceTeams(self, PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
-								                        randomTeam.get(), teamCollectionIndex == 0));
-								if (moved) {
-									resetCount = 0;
-								} else {
-									resetCount++;
-								}
+			if (val.present()) {
+				continue;
+			}
+			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
+			if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
+			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
+				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true))));
+				if (randomTeam.present()) {
+					if (randomTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
+						state Optional<Reference<IDataDistributionTeam>> loadedTeam =
+						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+						        GetTeamRequest(true, true, false))));
+						if (loadedTeam.present()) {
+							bool moved =
+							    wait(rebalanceTeams(self, PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
+							                        randomTeam.get(), teamCollectionIndex == 0));
+							if (moved) {
+								resetCount = 0;
+							} else {
+								resetCount++;
 							}
 						}
 					}
 				}
+			}
 
-				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-					checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
-				} else {
-					checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
-				}
+			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
+			} else {
+				checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+			}
 
-				if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-				    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
-					checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
-					resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-				}
+			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
+			    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
+				checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 			}
 			tr.reset();
 		} catch (Error& e) {
@@ -1226,43 +1226,42 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-			if (!val.present()) {
-				wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
-				if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
-				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-					state Optional<Reference<IDataDistributionTeam>> randomTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(true, false, false))));
-					if (randomTeam.present()) {
-						state Optional<Reference<IDataDistributionTeam>> unloadedTeam =
-						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-						        GetTeamRequest(true, true, true))));
-						if (unloadedTeam.present()) {
-							if (unloadedTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
-								bool moved =
-								    wait(rebalanceTeams(self, PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
-								                        unloadedTeam.get(), teamCollectionIndex == 0));
-								if (moved) {
-									resetCount = 0;
-								} else {
-									resetCount++;
-								}
+			if (val.present()) {
+				continue;
+			}
+			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
+			if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
+			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
+				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false))));
+				if (randomTeam.present()) {
+					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
+					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true))));
+					if (unloadedTeam.present()) {
+						if (unloadedTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
+							bool moved =
+							    wait(rebalanceTeams(self, PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
+							                        unloadedTeam.get(), teamCollectionIndex == 0));
+							if (moved) {
+								resetCount = 0;
+							} else {
+								resetCount++;
 							}
 						}
 					}
 				}
+			}
 
-				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-					checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
-				} else {
-					checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
-				}
+			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
+			} else {
+				checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+			}
 
-				if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-				    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
-					checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
-					resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-				}
+			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
+			    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
+				checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 			}
 			tr.reset();
 		} catch (Error& e) {

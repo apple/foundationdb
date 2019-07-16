@@ -2879,6 +2879,12 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.keys = shards[i];
 						rs.priority = maxPriority;
 
+						// Failed server or excluded server should not trigger DD if SS failures are set to be ignored
+						if (rs.priority == PRIORITY_TEAM_UNHEALTHY ||
+						    rs.priority == PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+							ASSERT_WE_THINK(!(self->healthyZone.get().present() &&
+							                  (self->healthyZone.get().get() == ignoreSSFailure)));
+						}
 						self->output.send(rs);
 						if(deterministicRandom()->random01() < 0.01) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
@@ -3136,12 +3142,12 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 	}
 }
 
-ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerInfo* server, Database cx,
+ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerInfo* server, Database cx,
                                                ServerStatus* status, Version addedVersion) {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 	loop {
-		state bool inHealthyZone = false;
+		state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 		if (self->healthyZone.get().present()) {
 			if (interf.locality.zoneId() == self->healthyZone.get()) {
 				status->isFailed = false;
@@ -3151,11 +3157,12 @@ ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 				status->isFailed = false;
 				status->isUndesired = false;
 				status->isWrongConfiguration = false;
+				inHealthyZone = true;
 				TraceEvent("SSFailureTracker", self->distributorId)
+				    .suppressFor(1.0)
 				    .detail("IgnoredFailure", "BeforeChooseWhen")
 				    .detail("ServerID", interf.id())
 				    .detail("Status", status->toString());
-				return true;
 			}
 		}
 
@@ -3210,7 +3217,7 @@ ACTOR Future<bool> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 		}
 	}
 
-	return false; // Don't ignore failures
+	return Void(); // Don't ignore failures
 }
 
 // Check the status of a storage server.
@@ -3222,7 +3229,7 @@ ACTOR Future<Void> storageServerTracker(
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
-	state Future<bool> failureTracker;
+	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
 	state Future<Void> metricsTracker = serverMetricsPolling( server );
@@ -3323,13 +3330,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			state bool recordTeamCollectionInfo = false;
 			choose {
-				when(bool ignoreSSFailures = wait(failureTracker)) {
-					if (ignoreSSFailures) {
-						TraceEvent("IgnoreSSFailure", self->distributorId)
-						    .detail("ServerID", server->id)
-						    .detail("Status", "FailureIgnored");
-						return Void();
-					}
+				when(wait(failureTracker)) {
 					// The server is failed AND all data has been removed from it, so permanently remove it.
 					TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", server->id).detail("Status", "Removing");
 
@@ -4062,6 +4063,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
+					}
+					if (unhealthy) {
+						ASSERT_WE_THINK(!(initData->initHealthyZoneValue.present() &&
+						                  (initData->initHealthyZoneValue.get() == ignoreSSFailure)));
 					}
 					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
 				}
