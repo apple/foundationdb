@@ -2622,7 +2622,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	try {
 		wait(waitOrError((checkDataDistributionStatus(db, true)), delay(5)));
 	} catch (Error& e) {
-		printf("WARN: Failed to check dada distribution status. Once the database is available, you can check manually "
+		printf("WARN: Failed to check data distribution status. Once the database is available, you can check manually "
 		       "using command 'datadistribution status'");
 	}
 
