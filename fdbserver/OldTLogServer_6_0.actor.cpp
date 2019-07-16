@@ -1030,10 +1030,8 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
 			auto& trackerData = logData->peekTracker[peekId];
-			if (sequence == 0) {
-				Promise<std::pair<Version, bool>> firstRequest;
-				trackerData.sequence_version[0] = firstRequest;
-				firstRequest.send(std::make_pair(req.begin, req.onlySpilled));
+			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
+				trackerData.sequence_version[0].send(std::make_pair(req.begin, req.onlySpilled));
 			}
 			auto seqBegin = trackerData.sequence_version.begin();
 			while(trackerData.sequence_version.size() && seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
@@ -1042,9 +1040,6 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				}
 				trackerData.sequence_version.erase(seqBegin);
 				seqBegin = trackerData.sequence_version.begin();
-			}
-			if (seqBegin != trackerData.sequence_version.end() && !seqBegin->second.isSet()) {
-				seqBegin->second.send(std::make_pair(req.begin, req.onlySpilled));
 			}
 
 			if(trackerData.sequence_version.size() && sequence < seqBegin->first) {
@@ -1572,7 +1567,7 @@ ACTOR Future<Void> tLogCommit(
 	}
 
 	state Version execVersion = invalidVersion;
-	state ExecCmdValueString execArg();
+	state ExecCmdValueString execArg;
 	state TLogQueueEntryRef qe;
 	state StringRef execCmd;
 	state Standalone<VectorRef<Tag>> execTags;
