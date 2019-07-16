@@ -4008,7 +4008,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		.detail("SnapUID", snapReq.snapUID);
 	try {
 		// disable tlog pop on local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
+		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		state std::vector<Future<Void>> disablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(
@@ -4038,7 +4038,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
+		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		state std::vector<Future<Void>> tLogSnapReqs;
 		for (const auto & tlog : tlogs) {
 			tLogSnapReqs.push_back(
@@ -4052,7 +4052,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// enable tlog pop on local tlog nodes
-		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs();
+		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		state std::vector<Future<Void>> enablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(
