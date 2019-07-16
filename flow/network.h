@@ -107,7 +107,7 @@ private:
 	struct IsV6Visitor : boost::static_visitor<> {
 		bool result = false;
 		void operator() (const IPAddressStore&) { result = true; }
-		void operator() (const uint32_t&) { result = true; }
+		void operator() (const uint32_t&) { result = false; }
 	};
 public:
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
