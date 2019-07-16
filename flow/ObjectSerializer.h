@@ -94,7 +94,7 @@ class ObjectReader : public _ObjectReader<ObjectReader> {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
-		version = ProtocolVersion(version);
+		version = ProtocolVersion(result);
 		return *this;
 	}
 public:
@@ -120,7 +120,7 @@ class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
 		_data += sizeof(result);
-		version = ProtocolVersion(version);
+		version = ProtocolVersion(result);
 		return *this;
 	}
 public:
@@ -164,12 +164,11 @@ public:
 		int allocations = 0;
 		auto allocator = [this, &allocations](size_t size_) {
 			++allocations;
-			size = size_;
-			auto toAllocate = writeProtocolVersion ? size + sizeof(uint64_t) : size;
+			this->size = writeProtocolVersion ? size_ + sizeof(uint64_t) : size_;
 			if (customAllocator) {
-				data = customAllocator(toAllocate);
+				data = customAllocator(this->size);
 			} else {
-				data = new (arena) uint8_t[toAllocate];
+				data = new (arena) uint8_t[this->size];
 			}
 			if (writeProtocolVersion) {
 				auto v = protocolVersion().versionWithFlags();

@@ -2740,7 +2740,7 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
-		bool useObjectSerializer = false;
+		bool useObjectSerializer = true;
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -2855,7 +2855,7 @@ int main(int argc, char* argv[]) {
 					std::string s = args->OptionArg();
 					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 					if (s == "on" || s == "true" || s == "1") {
-					useObjectSerializer = true;
+						useObjectSerializer = true;
 					} else if (s == "off" || s == "false" || s == "0") {
 						useObjectSerializer = false;
 					} else {

@@ -897,7 +897,7 @@ ACTOR static Future<Void> connectionReader(
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
 								.detail("ConnectionId", connectionId)
-								.detail("UseObjectSerializer", false);
+								.detail("UseObjectSerializer", g_network->useObjectSerializer());
 						}
 
 						if(connectionId > 1) {

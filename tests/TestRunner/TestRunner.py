@@ -268,19 +268,7 @@ def run_simulation_test(basedir, options):
     fdbserver = os.path.join(basedir, 'bin', 'fdbserver')
     pargs = [fdbserver,
              '-r', options.testtype]
-    if options.testtype == 'test':
-        pargs.append('-C')
-        pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
-    else:
-        pargs.append('-S')
-        pargs.append('on')
-    td = TestDirectory(basedir)
-    if options.buggify:
-        pargs.append('-b')
-        pargs.append('on')
-    pargs.append('--trace_format')
-    pargs.append(options.log_format)
-    test_dir = td.get_current_test_dir()
+    seed = 0
     if options.seed is not None:
         pargs.append('-s')
         seed = int(options.seed, 0)
@@ -288,6 +276,19 @@ def run_simulation_test(basedir, options):
             idx = int(options.test_number)
             seed = ((seed + idx) % (2**32-2)) + 1
         pargs.append("{}".format(seed))
+    if options.testtype == 'test':
+        pargs.append('-C')
+        pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
+    else:
+        pargs.append('-S')
+        pargs.append('on' if seed % 2 == 0 else 'off')
+    td = TestDirectory(basedir)
+    if options.buggify:
+        pargs.append('-b')
+        pargs.append('on')
+    pargs.append('--trace_format')
+    pargs.append(options.log_format)
+    test_dir = td.get_current_test_dir()
     wd = os.path.join(test_dir,
                       'test_{}'.format(options.name.replace('/', '_')))
     os.mkdir(wd)
