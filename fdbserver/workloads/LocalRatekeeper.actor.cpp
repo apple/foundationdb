@@ -61,7 +61,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		state std::vector<Future<GetValueReply>> requests;
 		requests.reserve(100);
 		loop {
-			state StorageQueuingMetricsReply metrics = wait(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{}));
+			state StorageQueuingMetricsReply metrics = wait(brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{})));
 			auto durabilityLag = metrics.version - metrics.durableVersion;
 			double expectedRateLimit = 1.0;
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
@@ -85,7 +85,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				req.version = readVersion;
 				// we don't care about the value
 				req.key = LiteralStringRef("/lkfs");
-				requests.emplace_back(ssi.getValue.getReply(req));
+				requests.emplace_back(brokenPromiseToNever(ssi.getValue.getReply(req)));
 			}
 			wait(waitForAllReady(requests));
 			int failedRequests = 0;

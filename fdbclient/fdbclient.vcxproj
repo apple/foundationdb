@@ -31,7 +31,6 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="BlobStore.h" />
-    <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />
     <ClInclude Include="ClientWorkerInterface.h" />
     <ClInclude Include="ClusterInterface.h" />

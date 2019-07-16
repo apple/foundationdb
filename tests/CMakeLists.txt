@@ -157,9 +157,6 @@ add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
 add_fdb_test(
-  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-             restarting/from_6.2.0/SnapTestAttrition-2.txt)
-add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
              restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
 add_fdb_test(

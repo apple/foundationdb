@@ -48,7 +48,7 @@ namespace oldTLog_4_6 {
 	typedef int16_t OldTag;
 
 	OldTag convertTag( Tag tag ) {
-		if(tag == invalidTag) return invalidTagOld;
+		if(tag == invalidTag || tag.locality == tagLocalityTxs) return invalidTagOld;
 		if(tag == txsTag) return txsTagOld;
 		ASSERT(tag.id >= 0);
 		return tag.id;

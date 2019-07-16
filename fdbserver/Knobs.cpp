@@ -68,6 +68,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
 	init( VERSIONS_PER_BATCH,                 VERSIONS_PER_SECOND/20 ); if( randomize && BUGGIFY ) VERSIONS_PER_BATCH = std::max<int64_t>(1,VERSIONS_PER_SECOND/1000);
 	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
+	init( LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED,               1 ); if( randomize && BUGGIFY ) LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED = 0;
 	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
 	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 	init( TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES,            2e9 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES = 2e6;
@@ -285,6 +286,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PROXY_SPIN_DELAY,                                     0.01 );
 	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
+	init( PROXY_FORWARD_DELAY,                                  10.0 );
+	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -395,6 +398,15 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TL_SS_VERSION_DIFFERENCE,                         1e99 ); // if( randomize && BUGGIFY ) MAX_TL_SS_VERSION_DIFFERENCE = std::max(1.0, 0.25 * VERSIONS_PER_SECOND); // spring starts at half this value //FIXME: this knob causes ratekeeper to clamp on idle cluster in simulation that have a large number of logs
 	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
 	init( MAX_MACHINES_FALLING_BEHIND,                             1 );
+
+	init( MAX_TPS_HISTORY_SAMPLES,                               600 );
+	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
+	init( TARGET_DURABILITY_LAG_VERSIONS,                      200e6 );
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                100e6 );
+	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
+	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
+	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
+	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
