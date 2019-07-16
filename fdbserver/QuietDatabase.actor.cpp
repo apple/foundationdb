@@ -277,6 +277,11 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
+			if (g_simulator.storagePolicy.isValid() && g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
+				// Do not test DD team number for data_hall modes
+				return true;
+			}
+
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
@@ -308,6 +313,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
 			state int64_t maxMachineTeamOnMachine =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
+
 
 			// The if condition should be consistent with the condition in serverTeamRemover() and
 			// machineTeamRemover() that decides if redundant teams exist.

@@ -1412,11 +1412,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// selectReplicas() should always return a team with correct size. otherwise, it has a bug
 				ASSERT(team.size() == configuration.storageTeamSize);
 
-				int score = std::numeric_limits<int>::max();
+				int score = 0;
 				vector<Standalone<StringRef>> machineIDs;
 				for (auto process = team.begin(); process != team.end(); process++) {
 					Reference<TCServerInfo> server = server_info[**process];
-					score = std::min(score, (int) server->machine->machineTeams.size());
+					score += server->machine->machineTeams.size();
 					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
 				}
@@ -1674,6 +1674,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() {
 		Reference<TCMachineTeamInfo> retMT;
 		int maxNumMachineTeams = 0;
+		int targetMachineTeamNumPerMachine = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 
 		for (auto& mt : machineTeams) {
 			// The representative team number for the machine team mt is
@@ -1682,7 +1683,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			for (auto& m : mt->machines) {
 				representNumMachineTeams = std::min<int>(representNumMachineTeams, m->machineTeams.size());
 			}
-			if (representNumMachineTeams > maxNumMachineTeams) {
+			if (representNumMachineTeams > targetMachineTeamNumPerMachine && representNumMachineTeams > maxNumMachineTeams) {
 				maxNumMachineTeams = representNumMachineTeams;
 				retMT = mt;
 			}
@@ -1696,6 +1697,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() {
 		Reference<TCTeamInfo> retST;
 		int maxNumProcessTeams = 0;
+		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 
 		for (auto& t : teams) {
 			// The minimum number of teams of a server in a team is the representative team number for the team t
@@ -1703,7 +1705,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			for (auto& server : t->getServers()) {
 				representNumProcessTeams = std::min<int>(representNumProcessTeams, server->teams.size());
 			}
-			if (representNumProcessTeams > maxNumProcessTeams) {
+			// We only remove the team whose representNumProcessTeams is larger than the targetTeamNumPerServer number
+			// otherwise, teamBuilder will build the to-be-removed team again 
+			if (representNumProcessTeams > targetTeamNumPerServer && representNumProcessTeams > maxNumProcessTeams) {
 				maxNumProcessTeams = representNumProcessTeams;
 				retST = t;
 			}
@@ -1730,7 +1734,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool notEnoughMachineTeamsForAMachine() {
 		// If we want to remove the machine team with most machine teams, we use the same logic as notEnoughTeamsForAServer
 		int targetMachineTeamNumPerMachine = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2 : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
-		targetMachineTeamNumPerMachine = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 		for (auto& m : machine_info) {
 			// If SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS is false,
 			// The desired machine team number is not the same with the desired server team number
@@ -1755,7 +1758,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 		// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
-		targetTeamNumPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 		ASSERT(targetTeamNumPerServer > 0);
 		for (auto& s : server_info) {
 			if (s.second->teams.size() < targetTeamNumPerServer) {
@@ -1854,13 +1856,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				// Pick the server team with smallest score in all attempts
-				// Score is defined as the minimum number of teams in the member because
-				// serverTeamRemover picks the team with largest score to remove.
 				// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
-				int score = std::numeric_limits<int>::max();
+				int score = 0;
 				for (auto& server : serverTeam) {
-					score = std::min(score, (int) server_info[server]->teams.size());
+					score += server_info[server]->teams.size();
 				}
 				TraceEvent("BuildServerTeams")
 				    .detail("Score", score)
@@ -2449,11 +2449,11 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		// In most cases, all machine teams should be healthy teams at this point.
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * healthyMachineCount;
 		int totalMTCount = self->machineTeams.size();
+		// Pick the machine team to remove. After release-6.2 version,
+		// we remove the machine team with most machine teams, the same logic as serverTeamRemover
+		std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams() : self->getMachineTeamWithLeastProcessTeams();
 
-		if (totalMTCount > desiredMachineTeams) {
-			// Pick the machine team to remove. After release-6.2 version,
-			// we remove the machine team with most machine teams, the same logic as serverTeamRemover
-			std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams() : self->getMachineTeamWithLeastProcessTeams();
+		if (totalMTCount > desiredMachineTeams && foundMTInfo.first.isValid()) {
 			Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
 			int minNumProcessTeams = foundMTInfo.second;
 			ASSERT(mt.isValid());
@@ -2549,10 +2549,10 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// until processingUnhealthy is done, and all machines are healthy
 		int desiredServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->server_info.size();
 		int totalSTCount = self->teams.size();
+		// Pick the server team whose members are on the most number of server teams, and mark it undesired
+		std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
 
-		if (totalSTCount > desiredServerTeams) {
-			// Pick the server team whose members are on the most number of server teams, and mark it undesired
-			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+		if (totalSTCount > desiredServerTeams && foundSTInfo.first.isValid()) {
 			ASSERT(foundSTInfo.first.isValid());
 			Reference<TCTeamInfo> st = foundSTInfo.first;
 			int maxNumProcessTeams = foundSTInfo.second;
