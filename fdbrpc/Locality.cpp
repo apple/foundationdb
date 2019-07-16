@@ -198,16 +198,14 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 }
 
 LBDistance::Type loadBalanceDistance( LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2 ) {
-	if (FLOW_KNOBS->LOAD_BALANCE_LOCALITY_ENABLED) {
-		if ( loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() ) {
-			return LBDistance::SAME_MACHINE;
-		}
-		//FIXME: add this back in when load balancing works with local requests
-		//if ( g_network->isAddressOnThisHost( addr2 ) )
-		//	return LBDistance::SAME_MACHINE;
-		if ( loc1.dcId().present() && loc1.dcId() == loc2.dcId() ) {
-			return LBDistance::SAME_DC;
-		}
+	if ( FLOW_KNOBS->LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED && loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() ) {
+		return LBDistance::SAME_MACHINE;
+	}
+	//FIXME: add this back in when load balancing works with local requests
+	//if ( g_network->isAddressOnThisHost( addr2 ) )
+	//	return LBDistance::SAME_MACHINE;
+	if ( FLOW_KNOBS->LOAD_BALANCE_DC_ID_LOCALITY_ENABLED && loc1.dcId().present() && loc1.dcId() == loc2.dcId() ) {
+		return LBDistance::SAME_DC;
 	}
 	return LBDistance::DISTANT;
 }
