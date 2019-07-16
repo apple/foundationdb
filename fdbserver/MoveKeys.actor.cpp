@@ -28,7 +28,7 @@
 using std::min;
 using std::max;
 
-ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
+ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -36,7 +36,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
 				UID id(g_random->randomUniqueID());
-				TraceEvent("TakeMoveKeysLockTransaction", masterId)
+				TraceEvent("TakeMoveKeysLockTransaction", ddId)
 					.detail("TransactionUID", id);
 				tr.debugTransaction( id );
 			}
@@ -49,6 +49,8 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
 			lock.myOwner = g_random->randomUniqueID();
+			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
+			wait(tr.commit());
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
