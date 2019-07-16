@@ -2531,6 +2531,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 				    .detail("DesiredMachineTeams", desiredMachineTeams)
 				    .detail("NumMachineTeamsRemoved", numMachineTeamRemoved);
 				self->traceTeamCollectionInfo();
+				numMachineTeamRemoved = 0; //Reset the counter to avoid keep printing the message
 			}
 		}
 	}
@@ -2600,6 +2601,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 				    .detail("DesiredServerTeam", desiredServerTeams)
 				    .detail("NumServerTeamRemoved", numServerTeamRemoved);
 				self->traceTeamCollectionInfo();
+				numServerTeamRemoved = 0; //Reset the counter to avoid keep printing the message
 			}
 		}
 	}
