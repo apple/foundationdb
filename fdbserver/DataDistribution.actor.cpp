@@ -387,9 +387,9 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 		succeeded = false;
 		try {
 
-			// Read healthyZone value which is later used to determin on/off of failure triggered DD
+			// Read healthyZone value which is later used to determine on/off of failure triggered DD
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());

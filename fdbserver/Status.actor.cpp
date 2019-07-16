@@ -2167,11 +2167,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 					statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
 					statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
 				} else {
-					statusObj["dataDistribution_disabled_for_ssfailures"] = true;
+					statusObj["data_distribution_disabled_for_ss_failures"] = true;
 				}
 			}
 			if (loadResult.get().rebalanceDDIgnored) {
-				statusObj["dataDistribution_disabled_for_rebalance"] = true;
+				statusObj["data_distribution_disabled_for_rebalance"] = true;
 			}
 		}
 
