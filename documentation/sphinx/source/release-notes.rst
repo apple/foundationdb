@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.12
+======
+
+Fixes
+-----
+
+* New data distributor takes the onwer lock to kill the old one. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
+
 6.1.11
 ======
 
