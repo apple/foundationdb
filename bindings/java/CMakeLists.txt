@@ -159,7 +159,7 @@ Name: com.apple.foundationdb
 Implementation-Title: fdb-java
 Implementation-Version: ${CURRENT_GIT_VERSION}
 Signature-Version: ${JAR_VERSION}
-Specification-Title: FoundationDB java binding and API
+Specification-Title: FoundationDB Java bindings and API
 Specification-Version: ${JAR_VERSION}
 ")
 
