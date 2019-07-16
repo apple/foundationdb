@@ -1385,7 +1385,7 @@ void ReadYourWritesTransaction::updateConflictMap( KeyRef const& key, WriteMap::
 	//it.skip( key );
 	//ASSERT( it.beginKey() <= key && key < it.endKey() );
 	if( it.is_unmodified_range() || ( it.is_operation() && !it.is_independent() ) ) {
-		approximateSize += key.expectedSize() + sizeof(KeyRangeRef);
+		approximateSize += 2 * key.expectedSize() + 1 + sizeof(KeyRangeRef);
 		readConflicts.insert( singleKeyRange( key, arena ), true );
 	}
 }
