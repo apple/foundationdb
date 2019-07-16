@@ -120,7 +120,7 @@ extern "C" {
     fdb_future_get_error( FDBFuture* f );
 #endif
 
-#if FDB_API_VERSION <= 610
+#if FDB_API_VERSION < 620
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_version( FDBFuture* f, int64_t* out_version );
 #endif
