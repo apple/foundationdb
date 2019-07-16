@@ -149,6 +149,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 1 );
+	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
 	init( LOAD_BALANCE_BACKOFF_RATE,                           2.0 );
