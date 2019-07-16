@@ -81,15 +81,15 @@ function(assert_no_version_h target)
   if (DEFINED ENV{VERBOSE})
     add_custom_target("${target_name}"
       COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+      -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
       COMMAND echo
       "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-                                 -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+      -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
       COMMENT "Check old build system wasn't used in source dir")
   else()
     add_custom_target("${target_name}"
       COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+      -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
       COMMENT "Check old build system wasn't used in source dir")
   endif()
 
@@ -135,7 +135,7 @@ function(strip_debug_symbols target)
   if(is_exec AND NOT APPLE)
     add_custom_command(OUTPUT "${out_file}.debug"
       COMMAND objcopy --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug" &&
-              objcopy --add-gnu-debuglink="${out_file}.debug" ${out_file}
+      objcopy --add-gnu-debuglink="${out_file}.debug" ${out_file}
       DEPENDS "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
     list(APPEND out_files "${out_file}.debug")
@@ -165,15 +165,10 @@ function(add_flow_target)
       set(actor_compiler_flags "")
       if(${src} MATCHES ".*\\.actor\\.(h|cpp)")
         list(APPEND actors ${src})
+        list(APPEND actor_compiler_flags "--generate-probes")
         if(${src} MATCHES ".*\\.h")
-          if (SUPPORT_DTRACE AND USE_LD STREQUAL "LLD")
-            list(APPEND actor_compiler_flags "--generate-probes")
-          endif()
           string(REPLACE ".actor.h" ".actor.g.h" generated ${src})
         else()
-          if (SUPPORT_DTRACE)
-            list(APPEND actor_compiler_flags "--generate-probes")
-          endif()
           string(REPLACE ".actor.cpp" ".actor.g.cpp" generated ${src})
         endif()
         foreach(s IN LISTS AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
@@ -186,29 +181,15 @@ function(add_flow_target)
         list(APPEND generated_files ${CMAKE_CURRENT_BINARY_DIR}/${generated})
         if(WIN32)
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-            COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags}
+            COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags} > /dev/null
+            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
             COMMENT "Compile actor: ${src}")
         endif()
-      endforeach()
-      list(APPEND sources ${generated})
-      list(APPEND generated_files ${CMAKE_CURRENT_BINARY_DIR}/${generated})
-      if(WIN32)
-        add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
-          DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
-          COMMENT "Compile actor: ${src}")
-      else()
-        add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
-          DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
-          COMMENT "Compile actor: ${src}")
-      endif()
       else()
         list(APPEND sources ${src})
       endif()
