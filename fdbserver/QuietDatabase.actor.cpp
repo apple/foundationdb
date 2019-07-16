@@ -312,11 +312,12 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
 			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
 			// can host data on it.
-			if ((!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
-			     healthyMachineTeams > desiredMachineTeams) ||
-			    (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
-			    ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
-			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0 team on a server
+			//(!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
+			//  healthyMachineTeams > desiredMachineTeams) ||
+			// (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
+			if ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
+			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3) {
 				ret = false;
 
 				if (attempts++ < 10) {
