@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.1.12
+======
+
+Fixes
+-----
+
+* Fixed thread safety issue while writing large keys or values. `(Issue #1846) <https://github.com/apple/foundationdb/issues/1846>`_
+
 6.1.11
 ======
 

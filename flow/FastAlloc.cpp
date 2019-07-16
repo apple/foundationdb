@@ -82,7 +82,7 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	threadInitFunction = f; 
 }
 
-int64_t g_hugeArenaMemory = 0;
+std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
 std::map<std::string, std::pair<int,int>> hugeArenaTraces;
