@@ -289,12 +289,6 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1|.
 
-.. function:: fdb_error_t fdb_future_get_version(FDBFuture* future, int64_t* out_version)
-
-   Extracts a version from an :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
-
-   |future-get-return1| |future-get-return2|.
-
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
    Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
@@ -451,7 +445,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_read_version(FDBTransaction* transaction)
 
-   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_version()` to extract the version into an int64_t that you provide, |future-return2|
+   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_int64()` to extract the version into an int64_t that you provide, |future-return2|
 
    The transaction obtains a snapshot read version automatically at the time of the first call to :func:`fdb_transaction_get_*()` (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.
 

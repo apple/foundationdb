@@ -405,7 +405,7 @@ class TransactionRead(_FDBBase):
 
     def get_read_version(self):
         """Get the read version of the transaction."""
-        return FutureVersion(self.capi.fdb_transaction_get_read_version(self.tpointer))
+        return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
     def get(self, key):
         key = keyToBytes(key)
@@ -689,14 +689,6 @@ class FutureVoid(Future):
         self.block_until_ready()
         self.capi.fdb_future_get_error(self.fpointer)
         return None
-
-
-class FutureVersion(Future):
-    def wait(self):
-        self.block_until_ready()
-        version = ctypes.c_int64()
-        self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(version))
-        return version.value
 
 
 class FutureInt64(Future):

@@ -47,7 +47,7 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		int64_t version;
-		FdbCApi::fdb_error_t error = api->futureGetVersion(f, &version); 
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &version);
 		ASSERT(!error);
 		return version;
 	});
@@ -309,8 +309,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
-	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version", headerVersion < 620);
-	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, "fdb_future_get_int64", headerVersion >= 620);
+	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
