@@ -79,6 +79,23 @@
 #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #endif
 
+/*
+ * Thread-local storage (but keep in mind any platform-specific
+ * restrictions on where this is valid and/or ignored).
+ *
+ * http://en.wikipedia.org/wiki/Thread-local_storage
+ *
+ * SOMEDAY: Intel C++ compiler uses g++ syntax on Linux and MSC syntax
+ * on Windows.
+ */
+#if defined(__GNUG__)
+#define thread_local __thread
+#elif defined(_MSC_VER)
+#define thread_local __declspec(thread)
+#else
+#error Missing thread local storage
+#endif
+
 #if defined(__GNUG__)
 #define force_inline inline __attribute__((__always_inline__))
 #elif defined(_MSC_VER)
