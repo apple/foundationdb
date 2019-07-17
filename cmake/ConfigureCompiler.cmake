@@ -1,5 +1,4 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
-set(PORTABLE_BINARY OFF CACHE BOOL "Create a binary that runs on older OS versions")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
@@ -9,6 +8,7 @@ set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system 
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
+set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
 
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
@@ -130,6 +130,11 @@ else()
     set(CMAKE_MODULE_LINKER_FLAGS "-static-libstdc++ -static-libgcc ${CMAKE_MODULE_LINKER_FLAGS}")
     set(CMAKE_SHARED_LINKER_FLAGS "-static-libstdc++ -static-libgcc ${CMAKE_SHARED_LINKER_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS    "-static-libstdc++ -static-libgcc ${CMAKE_EXE_LINKER_FLAGS}")
+  endif()
+  if(STATIC_LINK_LIBCXX)
+    if (NOT USE_LIBCXX AND NOT APPLE)
+      add_link_options(-static-libstdc++ -static-libgcc)
+    endif()
   endif()
   # Instruction sets we require to be supported by the CPU
   add_compile_options(
