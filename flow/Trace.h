@@ -210,6 +210,7 @@ FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(double, "%g");
+FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
 FORMAT_TRACEABLE(volatile unsigned long, "%lu");
 FORMAT_TRACEABLE(volatile long long, "%lld");
@@ -445,6 +446,15 @@ public:
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
+	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
+	// disables truncation. This should be called before the field whose length you want to change, and it can be
+	// changed multiple times in a single event.
+	TraceEvent& setMaxFieldLength(int maxFieldLength);
+
+	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the default,
+	// a negative value disables length suppression. This should be called before adding details.
+	TraceEvent& setMaxEventLength(int maxEventLength);
+
 	//Cannot call other functions which could disable the trace event afterwords
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
 
@@ -466,6 +476,11 @@ private:
 	const char *type;
 	UID id;
 	Error err;
+
+	int maxFieldLength;
+	int maxEventLength;
+
+	void setSizeLimits();
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
@@ -537,6 +552,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+void flushTraceFileVoid();
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.

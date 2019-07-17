@@ -8,6 +8,12 @@ set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
+set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
+
+set(rel_debug_paths OFF)
+if(RELATIVE_DEBUG_PATHS)
+  set(rel_debug_paths ON)
+endif()
 
 if(USE_GPERFTOOLS)
   find_package(Gperftools REQUIRED)
@@ -73,7 +79,6 @@ if(WIN32)
   add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
-
   set(GCC NO)
   set(CLANG NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
@@ -104,16 +109,20 @@ else()
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
   endif()
 
+  if(rel_debug_paths)
+    add_compile_options("-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=." "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=.")
+  endif()
+
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
-  add_compile_options(-ggdb)
+  add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
     add_compile_options(
-      -fno-omit-frame-pointer -fsanitize=address
+      -fsanitize=address
       -DUSE_ASAN)
-    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
-    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fno-omit-frame-pointer -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
   if(PORTABLE_BINARY)
@@ -162,7 +171,6 @@ else()
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type
-    -fdiagnostics-color=always
     -fPIC)
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(

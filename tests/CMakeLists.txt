@@ -61,8 +61,12 @@ add_fdb_test(TEST_FILES RandomRead.txt IGNORE)
 add_fdb_test(TEST_FILES RandomReadWrite.txt IGNORE)
 add_fdb_test(TEST_FILES ReadAbsent.txt IGNORE)
 add_fdb_test(TEST_FILES ReadHalfAbsent.txt IGNORE)
+add_fdb_test(TEST_FILES RedwoodCorrectnessUnits.txt IGNORE)
+add_fdb_test(TEST_FILES RedwoodCorrectnessBTree.txt IGNORE)
+add_fdb_test(TEST_FILES fast/RedwoodCorrectnessBTree.txt IGNORE)
 add_fdb_test(TEST_FILES RedwoodCorrectness.txt IGNORE)
 add_fdb_test(TEST_FILES RedwoodPerfTests.txt IGNORE)
+add_fdb_test(TEST_FILES SimpleExternalTest.txt)
 add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
 add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
 add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
@@ -99,6 +103,7 @@ add_fdb_test(TEST_FILES fast/IncrementTest.txt)
 add_fdb_test(TEST_FILES fast/InventoryTestAlmostReadOnly.txt)
 add_fdb_test(TEST_FILES fast/InventoryTestSomeWrites.txt)
 add_fdb_test(TEST_FILES fast/KillRegionCycle.txt)
+add_fdb_test(TEST_FILES fast/LocalRatekeeper.txt)
 add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.txt)
 add_fdb_test(TEST_FILES fast/LowLatency.txt)
 add_fdb_test(TEST_FILES fast/MemoryLifetime.txt)
@@ -151,9 +156,6 @@ add_fdb_test(
 add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
-add_fdb_test(
-  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-             restarting/from_6.2.0/SnapTestAttrition-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
              restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)

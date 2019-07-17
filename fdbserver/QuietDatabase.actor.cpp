@@ -277,8 +277,15 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 // Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistributorWorker) {
 	state int attempts = 0;
+	state bool ret = false;
 	loop {
 		try {
+			if (g_simulator.storagePolicy.isValid() &&
+			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
+				// Do not test DD team number for data_hall modes
+				return true;
+			}
+
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
@@ -286,33 +293,69 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
-			int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
-			int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
-			int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
-			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
-			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
-			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
+			state int64_t currentTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeams"));
+			state int64_t desiredTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
+			state int64_t maxTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeams"));
+			state int64_t currentMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeams"));
+			state int64_t healthyMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeams"));
+			state int64_t desiredMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			state int64_t maxMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
-			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
-			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
-				TraceEvent("GetTeamCollectionValid")
-				    .detail("KnobsTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER);
-				return true;
-			}
+			state int64_t minServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamsOnServer"));
+			state int64_t maxServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamsOnServer"));
+			state int64_t minMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamsOnMachine"));
+			state int64_t maxMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamsOnMachine"));
 
-			// The if condition should be consistent with the condition in teamRemover() that decides
-			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber) {
+			// The if condition should be consistent with the condition in serverTeamRemover() and
+			// machineTeamRemover() that decides if redundant teams exist.
+			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
+			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
+			// can host data on it.
+			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0 team on a server
+			//(!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
+			//  healthyMachineTeams > desiredMachineTeams) ||
+			// (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
+			if ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
+			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3) {
+				ret = false;
+
+				if (attempts++ < 10) {
+					wait(delay(60));
+					continue; // We may not receive the most recent TeamCollectionInfo
+				}
+				// If the machineTeamRemover does not remove the machine team with the most machine teams,
+				// we may oscillate between building more server teams by teamBuilder() and removing those teams by
+				// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
+				// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
+				if (!SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
+					TraceEvent(SevWarnAlways, "GetTeamCollectionValid").detail("RemoveMTWithMostTeams", "False");
+					ret = true;
+				}
+
+				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
+				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
+				// TODO: Remove the constraint SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3 to ensure that
+				// the minimun team number per server (and per machine) is always > 0 for any number of replicas
 				TraceEvent("GetTeamCollectionValid")
-				    .detail("CurrentTeamNumber", currentTeamNumber)
-				    .detail("DesiredTeamNumber", desiredTeamNumber)
-				    .detail("MaxTeamNumber", maxTeamNumber)
-				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
-				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
-				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
-				    .detail("MaxMachineTeams", maxMachineTeamNumber);
-				return false;
+				    .detail("CurrentTeams", currentTeams)
+				    .detail("DesiredTeams", desiredTeams)
+				    .detail("MaxTeams", maxTeams)
+				    .detail("CurrentHealthyMachineTeams", healthyMachineTeams)
+				    .detail("DesiredMachineTeams", desiredMachineTeams)
+				    .detail("CurrentMachineTeams", currentMachineTeams)
+				    .detail("MaxMachineTeams", maxMachineTeams)
+				    .detail("MinTeamsOnServer", minServerTeamsOnServer)
+				    .detail("MaxTeamsOnServer", maxServerTeamsOnServer)
+				    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+				    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
+				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+				    .detail("RemoveMTWithMostTeams", SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS);
+				return ret;
 			} else {
 				return true;
 			}

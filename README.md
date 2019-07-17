@@ -25,51 +25,15 @@ Developers interested in using the FoundationDB store for an application can get
 
 ### Compiling from source
 
-Developers on a OS for which there is no binary package, or who would like to start hacking on the code can get started by compiling from source.
+Developers on an OS for which there is no binary package, or who would like
+to start hacking on the code, can get started by compiling from source.
 
 Currently there are two build systems: a collection of Makefiles and a
-CMake-based. Both of them should work for most users and CMake will eventually
-become the only build system available.
-
-## Makefile
-
-#### MacOS
-
-1. Check out this repo on your Mac.
-1. Install the Xcode command-line tools.
-1. Download version 1.67.0 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/).
-1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
-1. Install [Mono](http://www.mono-project.com/download/stable/).
-1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
-1. Navigate to the directory where you checked out the foundationdb repo.
-1. Run `make`.
-
-#### Linux
-
-1. Install [Docker](https://www.docker.com/).
-1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
-
-    ```shell
-    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest
-    ```
-
-1. Navigate to the container's mounted directory which contains the foundationdb repo.
-
-    ```shell
-    cd /docker/dir/path/foundationdb
-    ```
-
-1. Run `make`.
-
-This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
+CMake-based build system. Both of them should currently work for most users,
+and CMake should be the preferred choice as it will eventually become the only
+build system available.
 
 ## CMake
-
-FoundationDB is currently in the process of migrating the build system to cmake.
-The CMake build system is currently used by several developers. However, most of
-the testing and packaging infrastructure still uses the old VisualStudio+Make
-based build system.
 
 To build with CMake, generally the following is required (works on Linux and
 Mac OS - for Windows see below):
@@ -109,7 +73,7 @@ necessary dependencies. After each successful cmake run, cmake will tell you
 which language bindings it is going to build.
 
 
-### Generating compile_commands.json
+### Generating `compile_commands.json`
 
 CMake can build a compilation database for you. However, the default generated
 one is not too useful as it operates on the generated files. When running make,
@@ -120,15 +84,27 @@ directory. This can than be used for tools like
 code-completion and code navigation in flow. It is not yet perfect (it will show
 a few errors) but we are constantly working on improving the development experience.
 
+CMake will not produce a `compile_commands.json`, you must pass
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.  This also enables the target
+`processed_compile_commands`, which rewrites `compile_commands.json` to
+describe the actor compiler source file, not the post-processed output files,
+and places the output file in the source directory.  This file should then be
+picked up automatically by any tooling.
+
+Note that if building inside of the `foundationdb/foundationdb-build` docker
+image, the resulting paths will still be incorrect and require manual fixing.
+One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to
+prevent it from reverting the manual changes.
+
 ### Using IDEs
 
-CMake  has built in support for a number of popular IDEs. However, because flow
+CMake has built in support for a number of popular IDEs. However, because flow
 files are precompiled with the actor compiler, an IDE will not be very useful as
 a user will only be presented with the generated code - which is not what she
 wants to edit and get IDE features for.
 
 The good news is, that it is possible to generate project files for editing
-flow with a supported IDE. There is a cmake option called `OPEN_FOR_IDE` which
+flow with a supported IDE. There is a CMake option called `OPEN_FOR_IDE` which
 will generate a project which can be opened in an IDE for editing. You won't be
 able to build this project, but you will be able to edit the files and get most
 edit and navigation features your IDE supports.
@@ -145,8 +121,9 @@ You should create a second build-directory which you will use for building
 
 ### Linux
 
-There are no special requirements for Linux. However, we are currently working
-on a Docker-based build as well.
+There are no special requirements for Linux.  A docker image can be pulled from
+`foundationdb/foundationdb-build` that has all of FoundationDB's dependencies
+pre-installed, and is what the CI uses to build and test PRs.
 
 If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
@@ -224,3 +201,38 @@ will automatically find it and build with TLS support.
 
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
+
+## Makefile
+
+#### MacOS
+
+1. Check out this repo on your Mac.
+1. Install the Xcode command-line tools.
+1. Download version 1.67.0 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/).
+1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
+1. Install [Mono](http://www.mono-project.com/download/stable/).
+1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
+1. Navigate to the directory where you checked out the foundationdb repo.
+1. Run `make`.
+
+#### Linux
+
+1. Install [Docker](https://www.docker.com/).
+1. Check out the foundationdb repo.
+1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
+
+    ```shell
+    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest
+    ```
+
+1. Run `$ scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash` within the running container.  This enables a more modern compiler, which is required to build FoundationDB.
+1. Navigate to the container's mounted directory which contains the foundationdb repo.
+
+    ```shell
+    cd /docker/dir/path/foundationdb
+    ```
+
+1. Run `make`.
+
+This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
+

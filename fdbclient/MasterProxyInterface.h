@@ -67,15 +67,47 @@ struct MasterProxyInterface {
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
-		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskProxyCommitDispatcher);
-		getStorageServerRejoinInfo.getEndpoint(TaskProxyStorageRejoin);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
+		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
 		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
 	}
 };
 
-struct CommitID {
+// ClientDBInfo is all the information needed by a database client to access the database
+// It is returned (and kept up to date) by the OpenDatabaseRequest interface of ClusterInterface
+struct ClientDBInfo {
+	constexpr static FileIdentifier file_identifier = 5355080;
+	UID id;  // Changes each time anything else changes
+	vector< MasterProxyInterface > proxies;
+	double clientTxnInfoSampleRate;
+	int64_t clientTxnInfoSizeLimit;
+	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+
+	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
+	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		if constexpr (!is_fb_function<Archive>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit);
+	}
+};
+
+struct ProxyForwardReply {
+	Optional<ClientDBInfo> newClientInfo;
+	ProxyForwardReply() {}
+
+	template <class Ar>
+	void serialize(Ar &ar) {
+		serializer(ar, newClientInfo);
+	}
+};
+
+struct CommitID : public ProxyForwardReply {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
@@ -83,7 +115,7 @@ struct CommitID {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId, metadataVersion);
+		serializer(ar, *(ProxyForwardReply*)this, version, txnBatchId, metadataVersion);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
@@ -127,7 +159,7 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 	return total;
 }
 
-struct GetReadVersionReply {
+struct GetReadVersionReply : public ProxyForwardReply {
 	constexpr static FileIdentifier file_identifier = 15709388;
 	Version version;
 	bool locked;
@@ -135,7 +167,7 @@ struct GetReadVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion);
+		serializer(ar, *(ProxyForwardReply*)this, version, locked, metadataVersion);
 	}
 };
 
@@ -169,14 +201,14 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-struct GetKeyServerLocationsReply {
+struct GetKeyServerLocationsReply : public ProxyForwardReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
 	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, arena);
+		serializer(ar, *(ProxyForwardReply*)this, results, arena);
 	}
 };
 

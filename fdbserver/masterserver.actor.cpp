@@ -464,7 +464,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 }
 
 ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILogSystem> logSystem ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Future<Void> trigger =  self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
@@ -605,21 +605,21 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	return confChanges;
 }
 
-ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<PeekSpecialInfo>> locality) {
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<PeekTxsInfo>> locality) {
 	loop {
 		std::pair<int8_t,int8_t> loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
 		Version ver = locality->get().knownCommittedVersion;
 		if(ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
-		locality->set( PeekSpecialInfo(loc.first,loc.second,ver) );
+		locality->set( PeekTxsInfo(loc.first,loc.second,ver) );
 		TraceEvent("UpdatedLocalityForDcId").detail("DcId", dcId).detail("Locality0", loc.first).detail("Locality1", loc.second).detail("Version", ver);
 		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange() );
 	}
 }
 
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
-	state Reference<AsyncVar<PeekSpecialInfo>> myLocality = Reference<AsyncVar<PeekSpecialInfo>>( new AsyncVar<PeekSpecialInfo>(PeekSpecialInfo(tagLocalityInvalid,tagLocalityInvalid,invalidVersion) ) );
+	state Reference<AsyncVar<PeekTxsInfo>> myLocality = Reference<AsyncVar<PeekTxsInfo>>( new AsyncVar<PeekTxsInfo>(PeekTxsInfo(tagLocalityInvalid,tagLocalityInvalid,invalidVersion) ) );
 	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
@@ -630,7 +630,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag, myLocality );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, myLocality );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -675,9 +675,6 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
-	if(self->lastEpochEnd > 0) {
-		self->allTags.push_back(txsTag);
-	}
 
 	if(self->forceRecovery) {
 		self->safeLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
@@ -1017,12 +1014,12 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 	state CoalescedKeyRangeMap<int> key_resolver;
 	key_resolver.insert(allKeys, 0);
 	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskResolutionMetrics));
+		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
 		while(self->resolverChanges.get().size())
 			wait(self->resolverChanges.onChange());
 		state std::vector<Future<int64_t>> futures;
 		for (auto& p : self->resolvers)
-			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskResolutionMetrics)));
+			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
 		wait( waitForAll(futures) );
 		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
 
@@ -1047,7 +1044,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 					req.offset = amount;
 					req.range = range.first;
 
-					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskResolutionMetrics)) );
+					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskPriority::ResolutionMetrics)) );
 					KeyRangeRef moveRange = range.second ? KeyRangeRef( range.first.begin, split.key ) : KeyRangeRef( split.key, range.first.end );
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
 					TraceEvent("MovingResolutionRange").detail("Src", src).detail("Dest", dest).detail("Amount", amount).detail("StartRange", range.first).detail("MoveRange", moveRange).detail("Used", split.used).detail("KeyResolverRanges", key_resolver.size());
@@ -1126,7 +1123,7 @@ ACTOR Future<Void> rejoinRequestHandler( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems, Promise<Void> remoteRecovered ) {
+ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems ) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	loop {
@@ -1170,10 +1167,6 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		}
 		self->registrationTrigger.trigger();
 
-		if(allLogs && remoteRecovered.canBeSet()) {
-			remoteRecovered.send(Void());
-		}
-
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);
@@ -1185,7 +1178,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 }
 
 ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 
@@ -1361,7 +1354,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
 	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)) );
-	if(recoveryCommit.isReady() && recoveryCommit.get().isError()) {
+	if(recoveryCommit.isReady() && ( recoveryCommit.get().isError() || recoveryCommit.get().get().newClientInfo.present() )) {
 		TEST(true);  // Master recovery failed because of the initial commit failed
 		throw master_recovery_failed();
 	}
@@ -1386,8 +1379,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between our
 	//     first commit and the next new TLogs
 
-	state Promise<Void> remoteRecovered;
-	self->addActor.send( trackTlogRecovery(self, oldLogSystems, remoteRecovered) );
+	self->addActor.send( trackTlogRecovery(self, oldLogSystems) );
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);

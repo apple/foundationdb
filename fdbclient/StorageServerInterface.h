@@ -70,7 +70,7 @@ struct StorageServerInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-			if (ar.protocolVersion() >= 0x0FDB00A200090001LL) serializer(ar, watchValue);
+			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
@@ -80,9 +80,9 @@ struct StorageServerInterface {
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
 	void initEndpoints() {
-		getValue.getEndpoint( TaskLoadBalancedEndpoint );
-		getKey.getEndpoint( TaskLoadBalancedEndpoint );
-		getKeyValues.getEndpoint( TaskLoadBalancedEndpoint );
+		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 };
 
@@ -162,6 +162,8 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
+
+	GetKeyValuesReply() : version(invalidVersion), more(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -369,10 +371,11 @@ struct StorageQueuingMetricsReply {
 	Version durableVersion; // latest version durable on storage server
 	double cpuUsage;
 	double diskUsage;
+	double localRateLimit;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage, localRateLimit);
 	}
 };
 

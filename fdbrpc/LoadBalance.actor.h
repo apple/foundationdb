@@ -65,13 +65,15 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	}
 };
 
+// Subclasses must initialize all members in their default constructors
 struct LoadBalancedReply {
 	double penalty;
+	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
 
 	template <class Ar>
 	void serialize(Ar &ar) {
-		serializer(ar, penalty);
+		serializer(ar, penalty, error);
 	}
 };
 
@@ -83,24 +85,41 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
 bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
-	int errCode = result.isError() ? result.getError().code() : error_code_success;
-	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
-	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
-	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
-
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
+	int errCode;
+	if (loadBalancedReply.present()) {
+		errCode = loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code() : error_code_success;
+	}
+	else {
+		errCode = result.isError() ? result.getError().code() : error_code_success;
+	}
+
+	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
+	bool receivedResponse = loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
+	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
-	
-	if(result.present()) {
+
+	if (errCode == error_code_server_overloaded)
+	{
+		return false;
+	}
+
+	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
+		return true;
+	}
+
+	if (!loadBalancedReply.present() && result.present()) {
 		return true;
 	}
 
 	if(receivedResponse) {
-		throw result.getError();
+		throw loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
 	}
 
 	if(atMostOnce && maybeDelivered) {
@@ -108,7 +127,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw result.getError();
+		throw process_behind(); 
 	}
 
 	return false;
@@ -160,7 +179,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {

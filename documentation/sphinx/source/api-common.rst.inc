@@ -45,10 +45,10 @@
     Snapshot reads selectively relax FoundationDB's isolation property, reducing :ref:`conflicts <developer-guide-transaction-conflicts>` but making it harder to reason about concurrency.
 
 .. |snapshot-blurb2| replace::
-    By default, FoundationDB transactions guarantee :ref:`serializable isolation <ACID>`, resulting in a state that is *as if* transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few :ref:`conflicts <developer-guide-transaction-conflicts>` but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.
+    By default, FoundationDB transactions guarantee :ref:`strictly serializable isolation <ACID>`, resulting in a state that is *as if* transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few :ref:`conflicts <developer-guide-transaction-conflicts>` but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.
 
 .. |snapshot-blurb3| replace::
-    Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case. Like serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see :ref:`snapshot isolation`.
+    Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case. Like strictly serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see :ref:`snapshot isolation`.
 
 .. |snapshot-blurb4| replace::
     Snapshot reads also interact with transaction commit a little differently than normal reads. If a snapshot read is outstanding when transaction commit is called that read will immediately return an error. (Normally, transaction commit will wait until outstanding reads return before committing.)
@@ -94,7 +94,7 @@
     By combining these logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction will not conflict due to the operation. This makes atomic operations ideal for operating on keys that are frequently modified. A common example is the use of a key-value pair as a counter.
 
 .. |atomic-ops-warning| replace::
-    If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.
+    If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.
 
 .. |atomic-add1| replace::
     Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
@@ -194,7 +194,7 @@
 
 .. |conflict-range-note| replace::
 
-    Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.
+    Most applications will use the strictly serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.
 
 .. |conflict-range-blurb| replace::
 
@@ -306,6 +306,10 @@
 
     Set the default maximum number of retries for each transaction after which additional calls to |on-error-func| will throw the most recently seen error code. This is equivalent to calling |retry-limit-transaction-option| on each transaction created by this database.
 
+.. |option-db-tr-size-limit-blurb| replace::
+
+    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database.
+
 .. |option-db-tr-timeout-blurb| replace::
 
     Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database. This option can only be called if the API version is at least 610.
@@ -321,6 +325,10 @@
 .. |option-db-snapshot-ryw-disable-blurb| replace::
 
     If this option has been set more times with this database than the disable option, snapshot reads will *not* see the effects of prior writes in the same transaction. Disabling this option is equivalent to calling |snapshot-ryw-disable-transaction-option| on each transaction created by this database.
+
+.. |option-db-tr-transaction-logging-max-field-length-blurb| replace::
+
+    Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This is equivalent to calling |transaction-logging-max-field-length-transaction-option| on each transaction created by this database.
 
 .. |transaction-options-blurb| replace::
 
@@ -393,6 +401,10 @@
 
     Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
 
+..  |option-set-size-limit-blurb| replace::
+
+    Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.
+
 ..  |option-set-timeout-blurb1| replace::
 
     Set a timeout duration in milliseconds after which the transaction automatically to be cancelled. The time is measured from transaction creation (or the most call to |reset-func-name|, if any). Valid parameter values are [0, INT_MAX]. If set to 0, all timeouts will be disabled. Once a transaction has timed out, all pending or future uses of the transaction will |error-raise-type| a :ref:`transaction_timed_out <developer-guide-error-codes>` |error-type|. The transaction can be used again after it is |reset-func-name|.
@@ -403,7 +415,7 @@
 
 .. |option-set-timeout-blurb3| replace::
 
-    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
+    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops. One can set the default timeout for all transactions by calling |timeout-database-option|.
 
 .. |option-next-write-no-write-conflict-range-blurb| replace::
 
@@ -412,6 +424,10 @@
 .. |option-next-write-no-write-conflict-range-note| replace::
 
     Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.
+
+..  |option-set-transaction-logging-max-field-length-blurb| replace::
+
+    Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling |transaction-logging-max-field-length-database-option|.
 
 .. |future-blurb1| replace::
     Many FoundationDB API functions return "future" objects. A brief overview of futures is included in the :doc:`class scheduling tutorial <class-scheduling>`. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.

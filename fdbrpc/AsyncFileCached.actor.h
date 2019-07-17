@@ -67,8 +67,6 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	EvictablePageCache() : pageSize(0), maxPages(0), cacheEvictionType(RANDOM) {}
 
 	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize), cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
-		cacheHits.init(LiteralStringRef("EvictablePageCache.CacheHits"));
-		cacheMisses.init(LiteralStringRef("EvictablePageCache.CacheMisses"));
 		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 
@@ -82,7 +80,6 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 		} else {
 			lruPages.push_back(*page); // new page is considered the most recently used (placed at LRU tail)
 		}
-		++cacheMisses;
 	}
 
 	void updateHit(EvictablePage* page) {
@@ -91,7 +88,6 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 			lruPages.erase(List::s_iterator_to(*page));
 			lruPages.push_back(*page);
 		}
-		++cacheHits;
 	}
 
 	void try_evict() {
@@ -126,8 +122,6 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	List lruPages;
 	int pageSize;
 	int64_t maxPages;
-	Int64MetricHandle cacheHits;
-	Int64MetricHandle cacheMisses;
 	Int64MetricHandle cacheEvictions;
 	const CacheEvictionType cacheEvictionType;
 };
@@ -278,6 +272,8 @@ private:
 	Int64MetricHandle countFileCacheWrites;
 	Int64MetricHandle countFileCacheReadsBlocked;
 	Int64MetricHandle countFileCacheWritesBlocked;
+	Int64MetricHandle countFileCachePageReadsHit;
+	Int64MetricHandle countFileCachePageReadsMissed;
 	Int64MetricHandle countFileCachePageReadsMerged;
 	Int64MetricHandle countFileCacheReadBytes;
 
@@ -286,28 +282,33 @@ private:
 	Int64MetricHandle countCacheWrites;
 	Int64MetricHandle countCacheReadsBlocked;
 	Int64MetricHandle countCacheWritesBlocked;
+	Int64MetricHandle countCachePageReadsHit;
+	Int64MetricHandle countCachePageReadsMissed;
 	Int64MetricHandle countCachePageReadsMerged;
 	Int64MetricHandle countCacheReadBytes;
 
-	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache ) 
+	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache )
 		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
 		if( !g_network->isSimulated() ) {
-			countFileCacheWrites.init(         LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
-			countFileCacheReads.init(          LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
-			countFileCacheWritesBlocked.init(  LiteralStringRef("AsyncFile.CountFileCacheWritesBlocked"), filename);
-			countFileCacheReadsBlocked.init(   LiteralStringRef("AsyncFile.CountFileCacheReadsBlocked"), filename);
+			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
+			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
+			countFileCacheWritesBlocked.init(LiteralStringRef("AsyncFile.CountFileCacheWritesBlocked"), filename);
+			countFileCacheReadsBlocked.init(LiteralStringRef("AsyncFile.CountFileCacheReadsBlocked"), filename);
+			countFileCachePageReadsHit.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsHit"), filename);
+			countFileCachePageReadsMissed.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsMissed"), filename);
 			countFileCachePageReadsMerged.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsMerged"), filename);
-			countFileCacheFinds.init(          LiteralStringRef("AsyncFile.CountFileCacheFinds"), filename);
-			countFileCacheReadBytes.init(      LiteralStringRef("AsyncFile.CountFileCacheReadBytes"), filename);
+			countFileCacheFinds.init(LiteralStringRef("AsyncFile.CountFileCacheFinds"), filename);
+			countFileCacheReadBytes.init(LiteralStringRef("AsyncFile.CountFileCacheReadBytes"), filename);
 
-			countCacheWrites.init(         LiteralStringRef("AsyncFile.CountCacheWrites"));
-			countCacheReads.init(          LiteralStringRef("AsyncFile.CountCacheReads"));
-			countCacheWritesBlocked.init(  LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
-			countCacheReadsBlocked.init(   LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
+			countCacheWrites.init(LiteralStringRef("AsyncFile.CountCacheWrites"));
+			countCacheReads.init(LiteralStringRef("AsyncFile.CountCacheReads"));
+			countCacheWritesBlocked.init(LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
+			countCacheReadsBlocked.init(LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
+			countCachePageReadsHit.init(LiteralStringRef("AsyncFile.CountCachePageReadsHit"));
+			countCachePageReadsMissed.init(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
 			countCachePageReadsMerged.init(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
-			countCacheFinds.init(          LiteralStringRef("AsyncFile.CountCacheFinds"));
-			countCacheReadBytes.init(      LiteralStringRef("AsyncFile.CountCacheReadBytes"));
-
+			countCacheFinds.init(LiteralStringRef("AsyncFile.CountCacheFinds"));
+			countCacheReadBytes.init(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
 		}
 	}
 
@@ -387,10 +388,17 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 		// If there are no active readers then if data is valid or we're replacing all of it we can write directly
 		if (valid || fullPage) {
+			if(!fullPage) {
+				++owner->countFileCachePageReadsHit;
+				++owner->countCachePageReadsHit;
+			}
 			valid = true;
 			memcpy( static_cast<uint8_t*>(this->data) + offset, data, length );
 			return yield();
 		}
+
+		++owner->countFileCachePageReadsMissed;
+		++owner->countCachePageReadsMissed;
 
 		// If data is not valid but no read is in progress, start reading
 		if (notReading.isReady()) {
@@ -410,7 +418,14 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	Future<Void> readZeroCopy() {
 		++zeroCopyRefCount;
-		if (valid) return yield();
+		if (valid) {
+			++owner->countFileCachePageReadsHit;
+			++owner->countCachePageReadsHit;
+			return yield();
+		}
+
+		++owner->countFileCachePageReadsMissed;
+		++owner->countCachePageReadsMissed;
 
 		if (notReading.isReady()) {
 			notReading = readThrough( this );
@@ -428,11 +443,16 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	Future<Void> read( void* data, int length, int offset ) {
 		if (valid) {
+			++owner->countFileCachePageReadsHit;
+			++owner->countCachePageReadsHit;
 			owner->countFileCacheReadBytes += length;
 			owner->countCacheReadBytes += length;
 			memcpy( data, static_cast<uint8_t const*>(this->data) + offset, length );
 			return yield();
 		}
+
+		++owner->countFileCachePageReadsMissed;
+		++owner->countCachePageReadsMissed;
 
 		if (notReading.isReady()) {
 			notReading = readThrough( this );

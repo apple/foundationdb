@@ -72,6 +72,7 @@ public:
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 	int64_t VERSIONS_PER_BATCH;
 	int CONCURRENT_LOG_ROUTER_READS;
+	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
@@ -141,8 +142,12 @@ public:
 	double DEBOUNCE_RECRUITING_DELAY;
 
 	// TeamRemover to remove redundant teams
-	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
+	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
+	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
+
+	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
+	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
 
 	// WrongStoreTypeRemover to remove wrong storage engines
 	int STR_NUM_SERVERS_REMOVED_ONCE; // The number of servers with wrong storage engines to remove
@@ -232,6 +237,8 @@ public:
 	double PROXY_SPIN_DELAY;
 	double UPDATE_REMOTE_LOG_VERSION_INTERVAL;
 	int MAX_TXS_POP_VERSION_HISTORY;
+	double PROXY_FORWARD_DELAY;
+	int MAX_FORWARD_MESSAGES;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -334,6 +341,15 @@ public:
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
 	int MAX_MACHINES_FALLING_BEHIND;
 
+	int MAX_TPS_HISTORY_SAMPLES;
+	int NEEDED_TPS_HISTORY_SAMPLES;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS_BATCH;
+	int64_t DURABILITY_LAG_UNLIMITED_THRESHOLD;
+	double INITIAL_DURABILITY_LAG_MULTIPLIER;
+	double DURABILITY_LAG_REDUCTION_RATE;
+	double DURABILITY_LAG_INCREASE_RATE;
+
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -351,6 +367,10 @@ public:
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
+	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
+	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
+	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
+	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
 	double UPDATE_SHARD_VERSION_INTERVAL;
@@ -361,6 +381,7 @@ public:
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
 	int BYTE_SAMPLE_LOAD_PARALLELISM;
 	double BYTE_SAMPLE_LOAD_DELAY;
+	double BYTE_SAMPLE_START_DELAY;
 	double UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
 
 	//Wait Failure

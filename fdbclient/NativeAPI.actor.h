@@ -36,6 +36,11 @@
 #include "fdbclient/ClientLogEvents.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
+// Unlike BUGGIFY, CLIENT_BUGGIFY can be enabled and disabled at runtime.
+#define CLIENT_BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
+#define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
+
 // Incomplete types that are reference counted
 class DatabaseContext;
 template <> void addref( DatabaseContext* ptr );
@@ -69,8 +74,8 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
-	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
+	static Database createDatabase( std::string connFileName, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
@@ -84,6 +89,8 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+
+	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
 private:
 	Reference<DatabaseContext> db;
@@ -132,7 +139,6 @@ private:
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<ClusterConnectionFile> connectionFile;
 
-	Future<Void> leaderMon;
 	Future<Void> failMon;
 	Future<Void> connected;
 };
@@ -141,9 +147,9 @@ struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
-	uint32_t maxRetries;
 	uint32_t getReadVersionFlags;
-	uint32_t customTransactionSizeLimit;
+	uint32_t sizeLimit;
+	int maxTransactionLoggingFieldLength;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
@@ -160,26 +166,27 @@ struct TransactionOptions {
 
 struct TransactionInfo {
 	Optional<UID> debugID;
-	int taskID;
+	TaskPriority taskID;
 	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
-	TransactionLogInfo() : logLocation(DONT_LOG) {}
-	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
-	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id) {}
+	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
+	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
+	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id), maxFieldLength(0) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
+
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty())
-			event.logEvent(identifier);
+			event.logEvent(identifier, maxFieldLength);
 		}
 
 		if (flushed) {
@@ -197,6 +204,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	bool logsAdded{ false };
 	bool flushed{ false };
 	int logLocation;
+	int maxFieldLength;
 	std::string identifier;
 };
 
@@ -283,11 +291,10 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskDefaultEndpoint ) {}
+	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
-	void onErrorReset();
 	void fullReset();
 	double getBackoff(int errCode);
 	void debugTransaction(UID dID) { info.debugID = dID; }
@@ -298,7 +305,6 @@ public:
 
 	TransactionInfo info;
 	int numErrors;
-	int numRetries;
 
 	std::vector<Reference<Watch>> watches;
 

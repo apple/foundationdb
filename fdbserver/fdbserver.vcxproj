@@ -73,6 +73,7 @@
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
+    <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp" />
     <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp" />
     <ClCompile Include="sqlite\btree.c">
@@ -106,6 +107,7 @@
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp" />
+    <ActorCompiler Include="workloads\SuspendProcesses.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp" />
@@ -155,6 +157,7 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
     <ActorCompiler Include="workloads\SnapTest.actor.cpp" />
     <ActorCompiler Include="workloads\Mako.actor.cpp" />
+    <ActorCompiler Include="workloads\ExternalWorkload.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />

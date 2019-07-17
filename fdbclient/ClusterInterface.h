@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
@@ -52,12 +52,12 @@ struct ClusterInterface {
 	}
 
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskClusterController );
-		failureMonitoring.getEndpoint( TaskFailureMonitor );
-		databaseStatus.getEndpoint( TaskClusterController );
-		ping.getEndpoint( TaskClusterController );
-		getClientWorkers.getEndpoint( TaskClusterController );
-		forceRecovery.getEndpoint( TaskClusterController );
+		openDatabase.getEndpoint( TaskPriority::ClusterController );
+		failureMonitoring.getEndpoint( TaskPriority::FailureMonitor );
+		databaseStatus.getEndpoint( TaskPriority::ClusterController );
+		ping.getEndpoint( TaskPriority::ClusterController );
+		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
+		forceRecovery.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
@@ -155,7 +155,7 @@ struct OpenDatabaseRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A400040001LL);
+			ASSERT(ar.protocolVersion().hasOpenDatabase());
 		}
 		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply,
 				   arena);

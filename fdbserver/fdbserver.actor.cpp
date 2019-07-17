@@ -22,6 +22,7 @@
 // a macro that makes boost interprocess break on Windows.
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
@@ -493,7 +494,7 @@ Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<Stri
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring( &systemMonitor, 5.0, TaskFlushTrace );
+	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
 }
 
 void testIndexedSet();
@@ -983,6 +984,8 @@ int main(int argc, char* argv[]) {
 			}
 			const char *sRole;
 			Optional<uint64_t> ti;
+			std::string argStr;
+			std::vector<std::string> tmpStrings;
 
 			switch (args.OptionId()) {
 				case OPT_HELP:
@@ -1050,10 +1053,14 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				case OPT_PUBLICADDR:
-					publicAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_LISTEN:
-					listenAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
@@ -1425,7 +1432,7 @@ int main(int argc, char* argv[]) {
 			if(buggifyOverride.present())
 				buggifyEnabled = buggifyOverride.get();
 		}
-		enableBuggify( buggifyEnabled );
+		enableBuggify(buggifyEnabled, BuggifyType::General);
 
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
@@ -1523,7 +1530,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
 			g_network = newNet2(useThreadPool, true, useObjectSerializer);
-			FlowTransport::createInstance(1);
+			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
 			if (publicAddressStrs.empty()) {
@@ -1589,6 +1596,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("RandomSeed", randomSeed)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
@@ -1599,7 +1607,9 @@ int main(int argc, char* argv[]) {
 			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
 			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("BuggifyEnabled", buggifyEnabled)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");

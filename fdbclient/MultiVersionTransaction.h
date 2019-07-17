@@ -210,7 +210,7 @@ class MultiVersionDatabase;
 
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
-	MultiVersionTransaction(Reference<MultiVersionDatabase> db);
+	MultiVersionTransaction(Reference<MultiVersionDatabase> db, UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions);
 
 	void cancel();
 	void setVersion(Version v);
@@ -261,10 +261,13 @@ private:
 
 	TransactionInfo getTransaction();
 	void updateTransaction();
+	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
+
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 };
 
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	IClientApi *api;
 	std::string libPath;
 	bool external;
@@ -341,6 +344,7 @@ private:
 		std::vector<Reference<Connector>> connectionAttempts;
 
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
+		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
 		Mutex optionLock;
 	};
 
@@ -369,6 +373,8 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
+
+	static bool apiVersionAtLeast(int minVersion);
 
 private:
 	MultiVersionApi();

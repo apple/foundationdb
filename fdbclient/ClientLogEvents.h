@@ -44,7 +44,7 @@ namespace FdbClientLogEvents {
 		EventType type{ EVENTTYPEEND };
 		double startTs{ 0 };
 
-		void logEvent(std::string id) const {}
+		void logEvent(std::string id, int maxFieldLength) const {}
 	};
 
 	struct EventGetVersion : public Event {
@@ -60,8 +60,10 @@ namespace FdbClientLogEvents {
 
 		double latency;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetVersion").detail("TransactionID", id).detail("Latency", latency);
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetVersion")
+			.detail("TransactionID", id)
+			.detail("Latency", latency);
 		}
 	};
 
@@ -80,8 +82,14 @@ namespace FdbClientLogEvents {
 		int valueSize;
 		Key key;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", key);
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_Get")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("ValueSizeBytes", valueSize)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("Key", key);
 		}
 	};
 
@@ -101,8 +109,15 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", startKey).detail("EndKey", endKey);
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetRange")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("RangeSizeBytes", rangeSize)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("StartKey", startKey)
+			.detail("EndKey", endKey);
 		}
 	};
 
@@ -122,20 +137,38 @@ namespace FdbClientLogEvents {
 		int commitBytes;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id) const {
+		void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
+				TraceEvent("TransactionTrace_Commit_ReadConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", read_range.begin)
+				.detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
+				TraceEvent("TransactionTrace_Commit_WriteConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", write_range.begin)
+				.detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_Commit_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_Commit_Mutation")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Mutation", mutation.toString());
 			}
 
-			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
+			TraceEvent("TransactionTrace_Commit")
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("NumMutations", numMutations)
+			.detail("CommitSizeBytes", commitBytes);
 		}
 	};
 
@@ -153,8 +186,13 @@ namespace FdbClientLogEvents {
 		int errCode;
 		Key key;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", key);
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetError")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("Key", key);
 		}
 	};
 
@@ -173,8 +211,14 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", startKey).detail("EndKey", endKey);
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetRangeError")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("StartKey", startKey)
+			.detail("EndKey", endKey);
 		}
 	};
 
@@ -192,20 +236,36 @@ namespace FdbClientLogEvents {
 		int errCode;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		void logEvent(std::string id) const {
+		void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
+				TraceEvent("TransactionTrace_CommitError_ReadConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", read_range.begin)
+				.detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
+				TraceEvent("TransactionTrace_CommitError_WriteConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", write_range.begin)
+				.detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_CommitError_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_CommitError_Mutation")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Mutation", mutation.toString());
 			}
 
-			TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
+			TraceEvent("TransactionTrace_CommitError")
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode);
 		}
 	};
 }

@@ -68,6 +68,10 @@ class ResultSet(object):
 
         self.tester_results[name] = results
 
+    @staticmethod
+    def _min_tuple(t1, t2):
+        return t1 if fdb.tuple.compare(t1, t2) < 0 else t2
+
     def check_for_errors(self):
         if len(self.tester_results) == 1:
             return (0, False)
@@ -97,7 +101,7 @@ class ResultSet(object):
 
             # If these results aren't using sequence numbers, then we match two results based on whether they share the same key
             else:
-                min_key = min([r.key(self.specification) for r in results.values()])
+                min_key = reduce(ResultSet._min_tuple, [r.key(self.specification) for r in results.values()])
                 results = {i: r for i, r in results.items() if Result.tuples_match(r.key(self.specification), min_key)}
 
             # Increment the indices for those testers which produced a result in this iteration

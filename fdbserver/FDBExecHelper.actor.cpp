@@ -1,11 +1,13 @@
+#if !defined(_WIN32) && !defined(__APPLE__)
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/process.hpp>
+#endif
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
+#if defined(CMAKE_BUILD) || !defined(_WIN32)
 #include "versions.h"
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -81,6 +83,13 @@ void ExecCmdValueString::dbgPrint() {
 	return;
 }
 
+#if defined(_WIN32) || defined(__APPLE__)
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
+{
+	wait(delay(0.0));
+	return 0;
+}
+#else
 ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
 {
 	state std::string argsString;
@@ -136,6 +145,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 		.detail("Error", err);
 	return err;
 }
+#endif
 
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role) {
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
