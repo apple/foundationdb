@@ -479,10 +479,12 @@ void initHelp() {
 		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
-	helpMap["exclude"] = CommandHelp(
-		"exclude <ADDRESS>*",
-		"exclude servers from the database",
-		"If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all database state has been safely moved away from the specified servers.");
+	helpMap["exclude"] =
+	    CommandHelp("exclude [no_wait] <ADDRESS>*", "exclude servers from the database",
+	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
+	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
+	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
+	                "command returns \nimmediately without checking if the exclusions have completed successfully.");
 	helpMap["include"] = CommandHelp(
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
@@ -1981,13 +1983,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		printf("To find out whether it is safe to remove one or more of these\n"
 			   "servers from the cluster, type `exclude <addresses>'.\n"
 			   "To return one of these servers to the cluster, type `include <addresses>'.\n");
+
+		return false;
 	} else {
 		state std::vector<AddressExclusion> addresses;
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
+		state bool waitForAllExcluded = true;
 		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
 			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
+			} else if (*t == LiteralStringRef("no_wait")) {
+				waitForAllExcluded = false;
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
@@ -2089,13 +2096,16 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		wait( makeInterruptable(excludeServers(db,addresses)) );
 
-		printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
-		printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+		if (waitForAllExcluded) {
+			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
+			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+		}
 
 		if(warn.isValid())
 			warn.cancel();
-		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
+		state std::set<NetworkAddress> notExcludedServers =
+		    wait(makeInterruptable(checkForExcludingServers(db, addresses, waitForAllExcluded)));
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for(auto addr : workers)
@@ -2122,9 +2132,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 
 			printf("\n");
-		}
-		else
+		} else if (notExcludedServers.empty()) {
 			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
+		} else {
+			printf("\nWARNING: Exclusion in progress. It is not safe to remove the following machines\n"
+			       "or processes from the cluster:\n");
+			for (auto addr : notExcludedServers) {
+				if (addr.port == 0)
+					printf("  %s\n", addr.ip.toString().c_str());
+				else
+					printf("  %s\n", addr.toString().c_str());
+			}
+		}
 
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
@@ -2138,8 +2157,9 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		if (foundCoordinator)
 			printf("Type `help coordinators' for information on how to change the\n"
 				   "cluster's coordination servers before removing them.\n");
+
+		return false;
 	}
-	return false;
 }
 
 ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
