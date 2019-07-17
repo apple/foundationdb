@@ -1081,8 +1081,6 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 				tag.id = tag.id % logData->logRouterTags;
 			}
 			if(tag.locality == tagLocalityTxs) {
-				// TODO: When TLogVersion is threaded into the TLog, this should be replaced with a >V4 check,
-				// as txsTag is improperly correspondingly overridden in TLog recruitment requests.
 				if (logData->txsTags > 0) {
 					tag.id = tag.id % logData->txsTags;
 				} else {

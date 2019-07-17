@@ -267,7 +267,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->logRouterTags = lsConf.logRouterTags;
 		logSystem->txsTags = lsConf.txsTags;
-		ASSERT( !(lsConf.txsTags > 0 && lsConf.tLogs[0].tLogVersion < TLogVersion::V4) );
 		logSystem->recruitmentID = lsConf.recruitmentID;
 		logSystem->stopped = lsConf.stopped;
 		if(useRecoveredAt) {
