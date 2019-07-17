@@ -1236,6 +1236,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Tag(tagLocalityTxs, deterministicRandom()->randomInt(0, txsTags));
 	}
 
+	virtual TLogVersion getTLogVersion() const {
+		return tLogs[0]->tLogVersion;
+	}
+
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
 		state Future<Void> waitFailure;
 		loop {

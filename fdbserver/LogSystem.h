@@ -712,6 +712,10 @@ struct ILogSystem {
 
 	virtual Tag getRandomTxsTag() const = 0;
 
+	// Returns the TLogVersion of the current generation of TLogs.
+	// (This only exists because getLogSystemConfig is a significantly more expensive call.)
+	virtual TLogVersion getTLogVersion() const = 0;
+
 	virtual void stopRejoins() = 0;
 
 	// Returns the pseudo tag to be popped for the given process class. If the
@@ -760,7 +764,11 @@ struct LogPushData : NonCopyable {
 	}
 
 	void addTxsTag() {
-		next_message_tags.push_back( logSystem->getRandomTxsTag() );
+		if ( logSystem->getTLogVersion() >= TLogVersion::V4 ) {
+			next_message_tags.push_back( logSystem->getRandomTxsTag() );
+		} else {
+			next_message_tags.push_back( txsTag );
+		}
 	}
 
 	// addTag() adds a tag for the *next* message to be added
