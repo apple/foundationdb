@@ -1524,6 +1524,9 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 			state std::vector<Future<Void>> watchFutures;
 			for(int i = 0; i < config.regions.size(); i++) {
 				if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+					TraceEvent("WaitForFullReplication")
+						.detail("DecodedReplicas", replicasFutures[i].get().present() ? decodeDatacenterReplicasValue(replicasFutures[i].get().get()) : -1)
+						.detail("ConfigReplicas", config.storageTeamSize);
 					watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
 				}
 			}
