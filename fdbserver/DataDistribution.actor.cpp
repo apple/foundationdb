@@ -583,7 +583,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> initializationDoneActor;
 	Promise<Void> serverTrackerErrorOut;
 	AsyncVar<int> recruitingStream;
-	AsyncTrigger restartRemoveWrongStoreType; // Remove the storage server with wrong store type
 	Debouncer restartRecruiting;
 
 	int healthyTeamCount;
@@ -2293,7 +2292,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state vector<Reference<TCServerInfo>> serversToRemove;
 	
 	loop {
-		wait( delay(1.0) || self->restartRemoveWrongStoreType.onTrigger() );
+		wait( delay(1.0) );
 		TraceEvent("WrongStoreTypeRemoverStartLoop", self->distributorId).detail("Primary", self->primary).detail("ServerInfoSize", self->server_info.size()).detail("SysRestoreType", self->configuration.storageServerStoreType);
 		serversToRemove.clear();
 		for ( server = self->server_info.begin(); server != self->server_info.end(); ++server ) {
@@ -2317,11 +2316,11 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 		for ( auto& s : serversToRemove ) {
 			if ( s.isValid() ) {
+				s->toRemove++; // The server's location will not be excluded
 				s->wrongStoreTypeRemoved.trigger();
 				//wait( delay(10) );
 			}
 			ASSERT(s->toRemove >= 0);
-			s->toRemove++; // The server's location will not be excluded
 		}
 
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
@@ -2882,7 +2881,9 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 		} else {
 			server->storeType = type;
 		}
-		server->toRemove = 0;
+		if ( server->storeType == self->configuration.storageServerStoreType ) {
+			server->toRemove = 0; // In case sys config is changed back to the server's storeType
+		}
 		if( server->storeType == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) ) {
 			wait(Future<Void>(Never()));
 		}
@@ -2937,6 +2938,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
+		// TODO: We probably do not need this if statement
 		if ( server->toRemove >= 1 ) {
 			TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
 					.detail("StoreType", server->storeType).detail("ConfigStoreType", self->configuration.storageServerStoreType)
@@ -2963,9 +2965,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 
 		self->server_status.set( interf.id(), *status );
 		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id()).detail("Unhealthy", status->isUnhealthy());
-		// if ( !server->isCorrectStoreType(self->configuration.storageServerStoreType) ) {
-		// 	self->restartRemoveWrongStoreType.trigger();
-		// }
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2974,11 +2973,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 			ASSERT(!inHealthyZone);
 			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
 		} else if(!inHealthyZone) {
-			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);
-			// This only signal the healthy change. it does not necessarily mean the server failed
-			// server->storeType = KeyValueStoreType::INVALID;
-			// status->isUndesired = true;
-			// status->isWrongConfiguration = true;
+			healthChanged = waitFailureClientStrict(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, TaskDataDistribution);			
 		}
 		choose {
 			when ( wait(healthChanged) ) {
@@ -2992,7 +2987,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 				}
 				if ( status->isFailed ) { // A failed SS storeType will be marked as invalid
 					//TraceEvent("InvalidStoreType").detail("Server", server->id).detail("IsFailed", status->isFailed);
-					//server->storeType = KeyValueStoreType::INVALID;
+					server->storeType = KeyValueStoreType::INVALID;
 					status->isUndesired = true;
 					status->isWrongConfiguration = true;
 				}
@@ -3008,9 +3003,9 @@ ACTOR Future<Void> storageServerFailureTracker(
 				status->isUndesired = true;
 				status->isWrongConfiguration = true;
 				// TODO: Do we really need to call this?
-				self->restartRecruiting.trigger();
-				self->doBuildTeams = true;
-				self->restartTeamBuilder.trigger();
+				// self->restartRecruiting.trigger();
+				// self->doBuildTeams = true;
+				// self->restartTeamBuilder.trigger();
 			}
 		}
 	}
@@ -3060,6 +3055,7 @@ ACTOR Future<Void> storageServerTracker(
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					//ASSERT(i.first == i.second->id); //MX: TO enable the assert
 					// When a wrongStoreType server colocate with a correct StoreType server, we should not mark the correct one as unhealthy
+					// TODO: We should not need i.second->toRemove == 0  because this loop should be triggered after failureTracker returns
 					if ( !self->server_status.get( i.second->id ).isUnhealthy() && i.second->toRemove == 0 ) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
@@ -3359,7 +3355,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 		try {
 			numSSPerAddr.clear();
 			hasWrongStoreType = false;
-			hasHealthyTeam = (self->healthyTeamCount != 0); //MX: healthyTeamCount is incorrect! A healthy team may still be a team with wrongStoreType servers. Will those wrongStoreType team be used as dest. in moveShard()?
+			hasHealthyTeam = (self->healthyTeamCount != 0);
 			RecruitStorageRequest rsr;
 			std::set<AddressExclusion> exclusions;
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
@@ -3415,9 +3411,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 						TraceEvent(SevWarnAlways, "StorageRecruiterTooManySSOnSameAddrMX", self->distributorId).detail("Primary", self->primary).detail("Addr", candidateSSAddr.toString()).detail("NumExistingSS", numExistingSS);
 					}
 					self->addActor.send(initializeStorage(self, candidateWorker));
-					fCandidateWorker = Never();
-					self->doBuildTeams = true;
-					self->restartTeamBuilder.trigger();
+					// fCandidateWorker = Never();
+					// self->doBuildTeams = true;
+					// self->restartTeamBuilder.trigger();
 				}
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
