@@ -1221,15 +1221,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual bool hasRemoteLogs() {
+	virtual bool hasRemoteLogs() const {
 		return logRouterTags > 0 || pseudoLocalities.size() > 0;
 	}
 
-	virtual Tag getRandomRouterTag() {
+	virtual Tag getRandomRouterTag() const {
 		return Tag(tagLocalityLogRouter, deterministicRandom()->randomInt(0, logRouterTags));
 	}
 
-	virtual Tag getRandomTxsTag() {
+	virtual Tag getRandomTxsTag() const {
 		if(txsTags==0) {
 			return txsTag;
 		}

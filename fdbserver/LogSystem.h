@@ -706,11 +706,11 @@ struct ILogSystem {
 
 	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) = 0;
 
-	virtual bool hasRemoteLogs() = 0;
+	virtual bool hasRemoteLogs() const = 0;
 
-	virtual Tag getRandomRouterTag() = 0;
+	virtual Tag getRandomRouterTag() const = 0;
 
-	virtual Tag getRandomTxsTag() = 0;
+	virtual Tag getRandomTxsTag() const = 0;
 
 	virtual void stopRejoins() = 0;
 
