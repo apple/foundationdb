@@ -1690,7 +1690,7 @@ void ReadYourWritesTransaction::clear( const KeyRef& key ) {
 	
 	KeyRangeRef r = singleKeyRange( key, arena );
 	approximateSize += r.expectedSize() + sizeof(KeyRangeRef) +
-	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2 * key.expectedSize() + 1 : 0);
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + r.expectedSize() : 0);
 
 	//SOMEDAY: add an optimized single key clear to write map
 	writes.clear(r, addWriteConflict);
