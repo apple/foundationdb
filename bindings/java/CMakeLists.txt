@@ -141,9 +141,33 @@ target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
 set(CMAKE_JNI_TARGET TRUE)
-set(JAR_VERSION "${FDB_MAJOR}.${FDB_MINOR}.${FDB_REVISION}")
+
+# build a manifest file
+set(JAR_VERSION "${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
+string(TIMESTAMP BND_LAST_MODIFIED_SEC "%s")
+set(MANIFEST_TEXT "Manifest-Version: 1.0
+Bnd-LastModified: ${BND_LAST_MODIFIED_SEC}000
+Build-Jdk: ${Java_VERSION_STRING}
+Built-By: CMake ${CMAKE_VERSION}
+Bundle-Description: FoundationDB Java bindings and API
+Bundle-ManifestVersion: 2
+Bundle-Name: fdb-java
+Bundle-SymbolicName: com.apple.foundationdb
+Bundle-Version: ${JAR_VERSION}
+Created-By: CMake ${CMAKE_VERSION}
+Implementation-Title: fdb-java
+Implementation-Version: ${CURRENT_GIT_VERSION}
+Specification-Title: FoundationDB Java bindings and API
+Specification-Version: ${JAR_VERSION}
+")
+
+# write the manifest file
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF)
+set(MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF/MANIFEST.MF)
+file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
+
 add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
-  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION})
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
 add_dependencies(fdb-java fdb_java_options fdb_java)
 add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
 add_dependencies(foundationdb-tests fdb_java_options)
@@ -201,7 +225,7 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(copy_lib unpack_jar)
   set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
   add_custom_command(OUTPUT ${target_jar}
-    COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
+    COMMAND ${Java_JAR_EXECUTABLE} cfm ${target_jar} ${unpack_dir}/META-INF/MANIFEST.MF .
     WORKING_DIRECTORY ${unpack_dir}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
