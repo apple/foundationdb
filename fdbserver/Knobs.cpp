@@ -404,7 +404,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
-	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,					20.0 );
+	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 	
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
