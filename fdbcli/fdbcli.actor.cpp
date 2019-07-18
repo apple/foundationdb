@@ -634,7 +634,7 @@ std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::string serverID) {
 	if(serverID == "")
 		return "unknown";
-		
+
 	for (auto proc : processesMap.obj()){
 		try {
 			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
@@ -2609,7 +2609,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
-			wait(makeInterruptable(checkStatus(Void(), db->getConnectionFile())));
+			Future<Void> checkStatusF = checkStatus(Void(), ccf);
+			Future<Void> checkDDStatusF = checkDataDistributionStatus(db, true);
+			wait(makeInterruptable(success(checkStatusF) && success(checkDDStatusF)));
 		}
 		else {
 			printf("\n");
@@ -2617,13 +2619,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		printf("Welcome to the fdbcli. For help, type `help'.\n");
 		validOptions = options->getValidOptions();
-	}
-
-	try {
-		wait(waitOrError((checkDataDistributionStatus(db, true)), delay(5)));
-	} catch (Error& e) {
-		printf("WARN: Failed to check data distribution status. Once the database is available, you can check manually "
-		       "using command 'datadistribution status'");
 	}
 
 	state bool is_error = false;
@@ -3003,7 +2998,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						wait( makeInterruptable( printHealthyZone(db) ) );
 					}
 					else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						wait(makeInterruptable(clearHealthyZone(db, true)));
+						bool clearResult = wait(makeInterruptable(clearHealthyZone(db, true)));
+						is_error = !clearResult;
 					}
 					else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
 						double seconds;
@@ -3013,7 +3009,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							wait( makeInterruptable( setHealthyZone( db, tokens[2], seconds ) ) );
+							bool setResult = wait(makeInterruptable(setHealthyZone(db, tokens[2], seconds)));
+							is_error = !setResult;
 						}
 					} else {
 						printUsage(tokens[0]);
@@ -3463,7 +3460,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Data distribution is turned off.\n");
 						} else if (tokencmp(tokens[1], "disable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								wait(makeInterruptable(setHealthyZone(db, ignoreSSFailure, 0)));
+								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
 								printf("Data distribution is disabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));

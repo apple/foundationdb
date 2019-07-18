@@ -1344,33 +1344,37 @@ ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnl
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Optional<Value> overallSwitch = wait(tr.get(dataDistributionModeKey));
-			state int currentMode = -1;
-			state Optional<Value> healthyZoneValue = wait(tr.get(healthyZoneKey));
-			state Optional<Value> rebalanceDDIgnoreValue = wait(tr.get(rebalanceDDIgnoreKey));
-			if (overallSwitch.present()) {
-				BinaryReader rd(overallSwitch.get(), Unversioned());
+			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
+			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
+			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
+			wait(success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF));
+			if (overallSwitchF.get().present()) {
+				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
+				int currentMode;
 				rd >> currentMode;
 				if (currentMode == 0) {
 					printf("WARNING: Data distribution is off.\n");
+					return Void();
 				}
-			} else {
-				currentMode = 1;
 			}
-			if (currentMode == 1 && !printWarningOnly) {
+			if (!printWarningOnly) {
 				printf("Data distribution is on.\n");
 			}
-			if (healthyZoneValue.present() && decodeHealthyZoneValue(healthyZoneValue.get()).first == ignoreSSFailure) {
-				if (currentMode == 1) {
+			if (healthyZoneValueF.get().present()) {
+				auto healthyZoneKV = decodeHealthyZoneValue(healthyZoneValueF.get().get());
+				if (healthyZoneKV.first == ignoreSSFailuresZoneString) {
 					printf("WARNING: Data distribution is currently turned on but disabled for all storage server "
 					       "failures.\n");
+				} else {
+					printf("WARNING: Data distribution is currently turned on but zone %s is under maintenance and "
+					       "will continue for %" PRId64 " seconds.\n",
+					       healthyZoneKV.first.toString().c_str(),
+					       (healthyZoneKV.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 				}
 			}
-			if (rebalanceDDIgnoreValue.present()) {
-				if (currentMode == 1) {
-					printf("WARNING: Data distribution is currently turned on but MoutainChopper and ValleyFiller are "
-					       "currently disabled.\n");
-				}
+			if (rebalanceDDIgnoreValueF.get().present()) {
+				printf("WARNING: Data distribution is currently turned on but shard size balancing is currently "
+				       "disabled.\n");
 			}
 			return Void();
 		} catch (Error& e) {
@@ -1387,9 +1391,9 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 			Optional<Value> val = wait( tr.get(healthyZoneKey) );
 			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
 				printf("No ongoing maintenance.\n");
-			} else if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailure) {
-				printf("Data distribution has been disabled for all storage server failures in this cluster. No "
-				       "ongoing maintenance.\n");
+			} else if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
+				       "maintenance mode is not active.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
 				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
@@ -1401,44 +1405,44 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 	}
 }
 
-ACTOR Future<Void> clearHealthyZone(Database cx, bool calledFromCli) {
+ACTOR Future<bool> clearHealthyZone(Database cx, bool calledFromCli) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
-			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailure) {
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				if (calledFromCli) {
-					printf("Data distribution has been disabled for all storage server failures in this cluster and "
-					       "thus you cannot use this command until you turn on DD by running 'datadistribution on'\n");
+					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
-				return Void();
+				return false;
 			}
 
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
-			return Void();
+			return true;
 		} catch( Error &e ) {
 			wait(tr.onError(e));
 		}
 	}
 }
 
-ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds ) {
+ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
-			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailure) {
-				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
-				       "you cannot use this command until you turn on DD by running 'datadistribution on'\n");
-				return Void();
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage server "
+				       "failures. Use 'datadistribution on' to reenable data distribution.\n");
+				return false;
 			}
 			Version readVersion = wait(tr.getReadVersion());
 			tr.set(healthyZoneKey, healthyZoneValue(zoneId, readVersion + (seconds*CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
 			wait(tr.commit());
-			return Void();
+			return true;
 		} catch( Error &e ) {
 			wait(tr.onError(e));
 		}
@@ -1450,7 +1454,6 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance)
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 			if (ignoreRebalance) {
 				tr.set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
 			} else {
@@ -1490,7 +1493,12 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 			tr.set( dataDistributionModeKey, wr.toValue() );
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
-				tr.clear(healthyZoneKey);
+				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
+				if (currentHealthyZoneValue.present() &&
+				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
+					// only clear the key if it is currently being used to disable all SS failure data movement
+					tr.clear(healthyZoneKey);
+				}
 				tr.clear(rebalanceDDIgnoreKey);
 			}
 			wait( tr.commit() );

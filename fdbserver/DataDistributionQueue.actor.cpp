@@ -1169,13 +1169,13 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state Transaction tr(self->cx);
 	loop {
 		try {
+			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 			if (val.present()) {
 				continue;
 			}
-			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
 			if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
@@ -1223,13 +1223,13 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state Transaction tr(self->cx);
 	loop {
 		try {
+			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 			if (val.present()) {
 				continue;
 			}
-			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
 			if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(

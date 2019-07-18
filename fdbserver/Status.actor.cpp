@@ -2163,7 +2163,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if(loadResult.present()) {
 			statusObj["full_replication"] = loadResult.get().fullReplication;
 			if(loadResult.get().healthyZone.present()) {
-				if (loadResult.get().healthyZone.get() != ignoreSSFailure) {
+				if (loadResult.get().healthyZone.get() != ignoreSSFailuresZoneString) {
 					statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
 					statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
 				} else {

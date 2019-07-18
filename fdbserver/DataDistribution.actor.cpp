@@ -393,7 +393,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
-				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailure) {
+				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
 					result->initHealthyZoneValue = Optional<Key>(p.first);
 				} else {
 					result->initHealthyZoneValue = Optional<Key>();
@@ -611,7 +611,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
-	Future<Void> clearHealthyZoneFuture;
+	Future<bool> clearHealthyZoneFuture;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -647,7 +647,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
-	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
+	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(true),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
@@ -2879,11 +2879,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.keys = shards[i];
 						rs.priority = maxPriority;
 
-						// Failed server or excluded server should not trigger DD if SS failures are set to be ignored
-						if (rs.priority == PRIORITY_TEAM_UNHEALTHY ||
-						    rs.priority == PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+						// Failed server should not trigger DD if SS failures are set to be ignored
+						if (rs.priority == PRIORITY_TEAM_UNHEALTHY) {
 							ASSERT_WE_THINK(!(self->healthyZone.get().present() &&
-							                  (self->healthyZone.get().get() == ignoreSSFailure)));
+							                  (self->healthyZone.get().get() == ignoreSSFailuresZoneString)));
 						}
 						self->output.send(rs);
 						if(deterministicRandom()->random01() < 0.01) {
@@ -3071,8 +3070,9 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			state Future<Void> healthyZoneTimeout = Never();
 			if(val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
-				if (p.first == ignoreSSFailure) {
+				if (p.first == ignoreSSFailuresZoneString) {
 					// healthyZone is now overloaded for DD diabling purpose, which does not timeout
+					TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId);
 					healthyZoneTimeout = Never();
 				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
@@ -3082,11 +3082,17 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 						self->healthyZone.set(p.first);
 					}
 				} else if (self->healthyZone.get().present()) {
-					TraceEvent("MaintenanceZoneEnd", self->distributorId);
+					// maintenance hits timeout
+					TraceEvent("MaintenanceZoneEndTimeout", self->distributorId);
 					self->healthyZone.set(Optional<Key>());
 				}
 			} else if(self->healthyZone.get().present()) {
-				TraceEvent("MaintenanceZoneEnd", self->distributorId);
+				// `healthyZone` has been cleared
+				if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
+					TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId);
+				} else {
+					TraceEvent("MaintenanceZoneEndManualClear", self->distributorId);
+				}
 				self->healthyZone.set(Optional<Key>());
 			}
 
@@ -3152,11 +3158,11 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 			if (interf.locality.zoneId() == self->healthyZone.get()) {
 				status->isFailed = false;
 				inHealthyZone = true;
-			} else if (self->healthyZone.get().get() == ignoreSSFailure) {
+			} else if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 				// Ignore all SS failures
 				status->isFailed = false;
-				status->isUndesired = false;
-				status->isWrongConfiguration = false;
+				// status->isUndesired = false;
+				// status->isWrongConfiguration = false;
 				inHealthyZone = true;
 				TraceEvent("SSFailureTracker", self->distributorId)
 				    .suppressFor(1.0)
@@ -3196,15 +3202,15 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 					self->doBuildTeams = true;
 				}
 				if (status->isFailed && self->healthyZone.get().present()) {
-					if (self->healthyZone.get().get() == ignoreSSFailure) {
+					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 						// Ignore the failed storage server
 						TraceEvent("SSFailureTracker", self->distributorId)
 						    .detail("IgnoredFailure", "InsideChooseWhen")
 						    .detail("ServerID", interf.id())
 						    .detail("Status", status->toString());
 						status->isFailed = false;
-						status->isUndesired = false;
-						status->isWrongConfiguration = false;
+						// status->isUndesired = false;
+						// status->isWrongConfiguration = false;
 					} else if (self->clearHealthyZoneFuture.isReady()) {
 						self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
 						TraceEvent("MaintenanceZoneCleared", self->distributorId);
@@ -4066,7 +4072,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					}
 					if (unhealthy) {
 						ASSERT_WE_THINK(!(initData->initHealthyZoneValue.present() &&
-						                  (initData->initHealthyZoneValue.get() == ignoreSSFailure)));
+						                  (initData->initHealthyZoneValue.get() == ignoreSSFailuresZoneString)));
 					}
 					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
 				}

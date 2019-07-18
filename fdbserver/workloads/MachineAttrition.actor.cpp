@@ -187,10 +187,13 @@ struct MachineAttritionWorkload : TestWorkload {
 				state Future<Void> resetHealthyZone;
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
-					wait( setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01()*20 ) );
+					bool _ =
+					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
+					// }
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
 					TEST(true); // Disable DD for all storage server failures
-					wait(setHealthyZone(cx, ignoreSSFailure, 0)); // duration doesn't matter since this won't timeout
+					bool _ = wait(setHealthyZone(cx, ignoreSSFailuresZoneString,
+					                             0)); // duration doesn't matter since this won't timeout
 					resetHealthyZone = resetHealthyZoneAfter(cx, deterministicRandom()->random01() * 5);
 				}
 

@@ -621,7 +621,7 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 }
 
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
-const StringRef ignoreSSFailure = LiteralStringRef("IgnoreSSFailures");
+const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
