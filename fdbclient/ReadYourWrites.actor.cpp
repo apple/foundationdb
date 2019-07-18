@@ -1448,10 +1448,10 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 				switch(op[i].type) {
 					case MutationRef::SetValue:
 						if (op[i].value.present()) {
-						    tr.set(it.beginKey().assertRef(), op[i].value.get(), false);
-					    } else {
-						    tr.clear(it.beginKey().assertRef(), false);
-					    }
+							tr.set(it.beginKey().assertRef(), op[i].value.get(), false);
+						} else {
+							tr.clear(it.beginKey().assertRef(), false);
+						}
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1467,8 +1467,8 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 					case MutationRef::MinV2:
 					case MutationRef::AndV2:
 					case MutationRef::CompareAndClear:
-					    tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
-					    break;
+						tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
+						break;
 					default:
 						break;
 				}
@@ -1582,8 +1582,9 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 			throw client_invalid_operation();
 	}
 
-	approximateSize += k.expectedSize() + v.expectedSize() + sizeof(MutationRef);
-	if(options.readYourWritesDisabled) {
+	approximateSize += k.expectedSize() + v.expectedSize() + sizeof(MutationRef) +
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2 * key.expectedSize() + 1 : 0);
+	if (options.readYourWritesDisabled) {
 		return tr.atomicOp(k, v, (MutationRef::Type) operationType, addWriteConflict);
 	}
 

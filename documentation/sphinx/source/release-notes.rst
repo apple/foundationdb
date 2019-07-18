@@ -26,7 +26,7 @@ Status
 Bindings
 --------
 
-* C: Added ``fdb_transaction_get_approximate_size`` to get the approximated transaction size before commit. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
+* Added a new API to get the approximated transaction size before commit, e.g., ``fdb_transaction_get_approximate_size`` in the C binding. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: ``fdb_future_get_version`` has been renamed to ``fdb_future_get_int64``. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Fix issue with finalizers running too early that could lead to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
