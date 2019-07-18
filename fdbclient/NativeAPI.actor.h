@@ -149,6 +149,7 @@ struct TransactionOptions {
 	double maxBackoff;
 	uint32_t getReadVersionFlags;
 	uint32_t sizeLimit;
+	int maxTransactionLoggingFieldLength;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
@@ -174,17 +175,18 @@ struct TransactionInfo {
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
-	TransactionLogInfo() : logLocation(DONT_LOG) {}
-	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
-	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id) {}
+	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
+	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
+	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id), maxFieldLength(0) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
+
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty())
-			event.logEvent(identifier);
+			event.logEvent(identifier, maxFieldLength);
 		}
 
 		if (flushed) {
@@ -202,6 +204,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	bool logsAdded{ false };
 	bool flushed{ false };
 	int logLocation;
+	int maxFieldLength;
 	std::string identifier;
 };
 

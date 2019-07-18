@@ -283,22 +283,22 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeamNumber"));
-			int64_t desiredTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeamNumber"));
-			int64_t maxTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumber"));
-			int64_t currentMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber"));
-			int64_t healthyMachineTeamCount = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber"));
-			int64_t desiredMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
-			int64_t maxMachineTeamNumber = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
+			int64_t currentTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeams"));
+			int64_t desiredTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
+			int64_t maxTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeams"));
+			int64_t currentMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeams"));
+			int64_t healthyMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeams"));
+			int64_t desiredMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			int64_t maxMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
-			int64_t minServerTeamOnServer =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamNumberOnServer"));
-			int64_t maxServerTeamOnServer =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamNumberOnServer"));
-			int64_t minMachineTeamOnMachine =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamNumberOnMachine"));
-			int64_t maxMachineTeamOnMachine =
-			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamNumberOnMachine"));
+			int64_t minServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamsOnServer"));
+			int64_t maxServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamsOnServer"));
+			int64_t minMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamsOnMachine"));
+			int64_t maxMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamsOnMachine"));
 
 			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
 			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
@@ -309,22 +309,22 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			// The if condition should be consistent with the condition in teamRemover() that decides
 			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber ||
-			    (minMachineTeamOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
-				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
+			if (healthyMachineTeams > desiredMachineTeams ||
+			    (minMachineTeamsOnMachine <= 0 && SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3)) {
+				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamsOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
 				TraceEvent("GetTeamCollectionValid")
-				    .detail("CurrentTeamNumber", currentTeamNumber)
-				    .detail("DesiredTeamNumber", desiredTeamNumber)
-				    .detail("MaxTeamNumber", maxTeamNumber)
-				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
-				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
-				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
-				    .detail("MaxMachineTeams", maxMachineTeamNumber)
-				    .detail("MinTeamNumberOnServer", minServerTeamOnServer)
-				    .detail("MaxTeamNumberOnServer", maxServerTeamOnServer)
-				    .detail("MinMachineTeamNumberOnMachine", minMachineTeamOnMachine)
-				    .detail("MaxMachineTeamNumberOnMachine", maxMachineTeamOnMachine)
+				    .detail("CurrentTeams", currentTeams)
+				    .detail("DesiredTeams", desiredTeams)
+				    .detail("MaxTeams", maxTeams)
+				    .detail("CurrentHealthyMachineTeams", healthyMachineTeams)
+				    .detail("DesiredMachineTeams", desiredMachineTeams)
+				    .detail("CurrentMachineTeams", currentMachineTeams)
+				    .detail("MaxMachineTeams", maxMachineTeams)
+				    .detail("MinTeamsOnServer", minServerTeamsOnServer)
+				    .detail("MaxTeamsOnServer", maxServerTeamsOnServer)
+				    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+				    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER);
 				return false;

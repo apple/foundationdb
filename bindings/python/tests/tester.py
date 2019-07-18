@@ -128,9 +128,13 @@ class Instruction:
 
 
 def test_db_options(db):
+    db.options.set_location_cache_size(100001)
     db.options.set_max_watches(100001)
     db.options.set_datacenter_id("dc_id")
     db.options.set_machine_id("machine_id")
+    db.options.set_snapshot_ryw_enable()
+    db.options.set_snapshot_ryw_disable()
+    db.options.set_transaction_logging_max_field_length(1000)
     db.options.set_transaction_timeout(100000)
     db.options.set_transaction_timeout(0)
     db.options.set_transaction_timeout(0)
@@ -138,8 +142,6 @@ def test_db_options(db):
     db.options.set_transaction_size_limit(100000)
     db.options.set_transaction_retry_limit(10)
     db.options.set_transaction_retry_limit(-1)
-    db.options.set_snapshot_ryw_enable()
-    db.options.set_snapshot_ryw_disable()
 
 
 @fdb.transactional
@@ -151,6 +153,7 @@ def test_options(tr):
     tr.options.set_read_your_writes_disable()
     tr.options.set_read_system_keys()
     tr.options.set_access_system_keys()
+    tr.options.set_transaction_logging_max_field_length(1000)
     tr.options.set_timeout(60 * 1000)
     tr.options.set_retry_limit(50)
     tr.options.set_max_retry_delay(100)
@@ -545,8 +548,6 @@ class Tester:
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
-                        db.options.set_location_cache_size(100001)
-
                         test_db_options(db)
                         test_options(db)
                         test_watches(db)

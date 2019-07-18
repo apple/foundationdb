@@ -27,6 +27,7 @@
 #include <functional>
 #include <vector>
 #include <variant>
+#include <boost/variant.hpp>
 
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
@@ -150,12 +151,12 @@ struct struct_like_traits : std::false_type {
 };
 
 template <class... Alternatives>
-struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
-	using Member = std::variant<Alternatives...>;
+struct union_like_traits<boost::variant<Alternatives...>> : std::true_type {
+	using Member = boost::variant<Alternatives...>;
 	using alternatives = pack<Alternatives...>;
 	template <class Context>
 	static uint8_t index(const Member& variant, Context&) {
-		return variant.index();
+		return variant.which();
 	}
 	template <class Context>
 	static bool empty(const Member& variant, Context&) {
@@ -164,7 +165,7 @@ struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
 
 	template <int i, class Context>
 	static const index_t<i, alternatives>& get(const Member& variant, Context&) {
-		return std::get<index_t<i, alternatives>>(variant);
+		return boost::get<index_t<i, alternatives>>(variant);
 	}
 
 	template <size_t i, class Alternative, class Context>

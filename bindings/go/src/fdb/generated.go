@@ -280,6 +280,23 @@ func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
 
+// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
+func (o DatabaseOptions) SetSnapshotRywEnable() error {
+	return o.setOpt(26, nil)
+}
+
+// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
+func (o DatabaseOptions) SetSnapshotRywDisable() error {
+	return o.setOpt(27, nil)
+}
+
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This sets the ``transaction_logging_max_field_length`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o DatabaseOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
+}
+
 // Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
 //
 // Parameter: value in milliseconds of timeout
@@ -306,16 +323,6 @@ func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
 // Parameter: value in bytes
 func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
-}
-
-// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
-func (o DatabaseOptions) SetSnapshotRywEnable() error {
-	return o.setOpt(26, nil)
-}
-
-// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
-func (o DatabaseOptions) SetSnapshotRywDisable() error {
-	return o.setOpt(27, nil)
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
@@ -410,6 +417,13 @@ func (o TransactionOptions) SetDebugTransactionIdentifier(param string) error {
 // Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output.
 func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
+}
+
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o TransactionOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
 }
 
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.

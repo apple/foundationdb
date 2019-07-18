@@ -84,13 +84,13 @@ function(add_fdb_test)
   if (NOT "${ADD_FDB_TEST_TEST_NAME}" STREQUAL "")
     set(test_name ${ADD_FDB_TEST_TEST_NAME})
   endif()
-  math(EXPR test_idx "${CURRENT_TEST_INDEX} + 1")
+  math(EXPR test_idx "${CURRENT_TEST_INDEX} + ${NUM_TEST_FILES}")
   set(CURRENT_TEST_INDEX "${test_idx}" PARENT_SCOPE)
   # set(<var> <value> PARENT_SCOPE) doesn't set the
   # value in this scope (only in the parent scope). So
   # if the value was undefined before, it will still be
   # undefined.
-  math(EXPR assigned_id "${test_idx} - 1")
+  math(EXPR assigned_id "${test_idx} - ${NUM_TEST_FILES}")
   if(ADD_FDB_TEST_UNIT)
     message(STATUS
       "ADDING UNIT TEST ${assigned_id} ${test_name}")
