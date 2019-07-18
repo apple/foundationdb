@@ -312,25 +312,23 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
 			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
 			// can host data on it.
+			//
+			// If the machineTeamRemover does not remove the machine team with the most machine teams,
+			// we may oscillate between building more server teams by teamBuilder() and removing those teams by
+			// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
+			// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
+			//
 			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0 team on a server
 			//(!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
 			//  healthyMachineTeams > desiredMachineTeams) ||
 			// (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
 			if ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
-			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3) {
+			     SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
 				ret = false;
 
 				if (attempts++ < 10) {
 					wait(delay(60));
 					continue; // We may not receive the most recent TeamCollectionInfo
-				}
-				// If the machineTeamRemover does not remove the machine team with the most machine teams,
-				// we may oscillate between building more server teams by teamBuilder() and removing those teams by
-				// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
-				// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
-				if (!SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
-					TraceEvent(SevWarnAlways, "GetTeamCollectionValid").detail("RemoveMTWithMostTeams", "False");
-					ret = true;
 				}
 
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test

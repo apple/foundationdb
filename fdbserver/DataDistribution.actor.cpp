@@ -164,8 +164,6 @@ public:
 		return ss.str();
 	}
 
-	bool existServerWithOnly1Team();
-
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
 };
 
@@ -347,17 +345,6 @@ private:
 		return Void();
 	}
 };
-
-bool TCMachineTeamInfo::existServerWithOnly1Team() {
-	for (const auto& st : serverTeams) {
-		for (const auto& s : st->getServers()) {
-			if (s->teams.size() <= 1) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
 
 struct ServerStatus {
 	bool isFailed;
@@ -1663,9 +1650,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (EXPENSIVE_VALIDATION) {
 				ASSERT(isServerTeamCountCorrect(mt));
 			}
-			if (mt->existServerWithOnly1Team()) {
-				continue;
-			}
+
 			if (mt->serverTeams.size() < minNumProcessTeams) {
 				minNumProcessTeams = mt->serverTeams.size();
 				retMT = mt;
@@ -1683,10 +1668,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 
 		for (auto& mt : machineTeams) {
-			// Do not remove a machine team if it cause 0 server team on a server
-			if (mt->existServerWithOnly1Team()) {
-				continue;
-			}
 			// The representative team number for the machine team mt is
 			// the minimum number of machine teams of a machine in the team mt
 			int representNumMachineTeams = std::numeric_limits<int>::max();
@@ -2848,12 +2829,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				self->zeroHealthyTeams->set(true);
 			}
 		}
-		// Q: Why adding this will fail the ASSERT?
-		// if (lastOptimal) {
-		// 	self->optimalTeamCount--;
-		// 	ASSERT( self->optimalTeamCount >= 0 );
-		// 	self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
-		// }
+		if (lastOptimal) {
+			self->optimalTeamCount--;
+			ASSERT( self->optimalTeamCount >= 0 );
+			self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+		}
 		throw;
 	}
 }
