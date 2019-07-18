@@ -654,7 +654,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
 
 	if (now() - self->lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT) {
-		limits->tpsLimit = 1;
+		limits->tpsLimit = 0.0;
 		limitReason = limitReason_t::storage_server_list_fetch_failed;
 		reasonID = UID();
 		TraceEvent(SevWarnAlways, "RkSSListFetchTimeout").suppressFor(1.0);
