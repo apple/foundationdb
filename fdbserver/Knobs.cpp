@@ -393,7 +393,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
 	init( MAX_MACHINES_FALLING_BEHIND,                             1 );
 
-	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,					20.0 );
+	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 	
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
