@@ -71,7 +71,7 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
-	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
+	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 
 	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
@@ -79,7 +79,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 
 	onMainThreadVoid([db, connFile, apiVersion](){ 
 		try {
-			Database::createDatabase(connFile, apiVersion, false, LocalityData(), db).extractPtr();
+			Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db).extractPtr();
 		}
 		catch(Error &e) {
 			new (db) DatabaseContext(e);
