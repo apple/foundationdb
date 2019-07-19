@@ -729,7 +729,7 @@ ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Stand
 	loop {
 		if (input->get().size()) {
 			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin());
+				ObjectReader reader(input->get().begin(), IncludeVersion());
 				T res;
 				reader.deserialize(res);
 				output->set(res);

@@ -2373,7 +2373,7 @@ struct CLIOptions {
 	bool trace;
 	std::string traceDir;
 	std::string traceFormat;
-	bool useObjectSerializer = false;
+	bool useObjectSerializer = true;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
