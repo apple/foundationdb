@@ -378,6 +378,12 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						continue;
 					}
 
+					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
+						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						    .suppressFor(1.0)
+						    .detail("Size", transactionSize)
+						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
+					}
 					++commitData->stats.txnCommitIn;
 
 					if(req.debugID.present()) {
