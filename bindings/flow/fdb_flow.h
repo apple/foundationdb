@@ -112,6 +112,7 @@ namespace FDB {
 
 		virtual Future<Void> commit() = 0;
 		virtual Version getCommittedVersion() = 0;
+		virtual Future<int64_t> getApproximateSize() = 0;
 		virtual Future<FDBStandalone<StringRef>> getVersionstamp() = 0;
 	};
 

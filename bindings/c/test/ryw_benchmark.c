@@ -224,7 +224,7 @@ void runTests(struct ResultSet *rs) {
 	checkError(fdb_future_block_until_ready(f), "block for read version", rs);
 
 	int64_t version;
-	checkError(fdb_future_get_version(f, &version), "get version", rs);
+	checkError(fdb_future_get_int64(f, &version), "get version", rs);
 	fdb_future_destroy(f);
 
 	insertData(tr);

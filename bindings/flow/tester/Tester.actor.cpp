@@ -18,15 +18,17 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/fdbrpc.h"
-#include "flow/DeterministicRandom.h"
-#include "bindings/flow/Tuple.h"
-#include "bindings/flow/FDBLoanerTypes.h"
-
 #include "Tester.actor.h"
+#include <cinttypes>
 #ifdef  __linux__
 #include <string.h>
 #endif
+
+#include "bindings/flow/Tuple.h"
+#include "bindings/flow/FDBLoanerTypes.h"
+#include "fdbrpc/fdbrpc.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;
@@ -292,7 +294,7 @@ ACTOR Future<Void> printFlowTesterStack(FlowTesterStack* stack) {
 	state int idx;
 	for (idx = stack->data.size() - 1; idx >= 0; --idx) {
 		Standalone<StringRef> value = wait(stack->data[idx].value);
-		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index, printable(value).c_str());
+		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index, value.printable().c_str());
 	}
 	return Void();
 }
@@ -702,6 +704,20 @@ struct GetCommittedVersionFunc : InstructionFunc {
 };
 const char* GetCommittedVersionFunc::name = "GET_COMMITTED_VERSION";
 REGISTER_INSTRUCTION_FUNC(GetCommittedVersionFunc);
+
+// GET_APPROXIMATE_SIZE
+struct GetApproximateSizeFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		int64_t _ = wait(instruction->tr->getApproximateSize());
+		(void) _;  // disable unused variable warning
+		data->stack.pushTuple(LiteralStringRef("GOT_APPROXIMATE_SIZE"));
+		return Void();
+	}
+};
+const char* GetApproximateSizeFunc::name = "GET_APPROXIMATE_SIZE";
+REGISTER_INSTRUCTION_FUNC(GetApproximateSizeFunc);
 
 // GET_VERSIONSTAMP
 struct GetVersionstampFunc : InstructionFunc {
@@ -1638,7 +1654,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				op = op.substr(0, op.size() - 9);
 
 			// printf("[==========]%ld/%ld:%s:%s: isDatabase:%d, isSnapshot:%d, stack count:%ld\n",
-				// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(), printable(StringRef(data->instructions[idx].value)).c_str(),
+				// idx, data->instructions.size(), StringRef(data->instructions[idx].key).printable().c_str(), StringRef(data->instructions[idx].value).printable().c_str(),
 				// isDatabase, isSnapshot, data->stack.data.size());
 
 			//wait(printFlowTesterStack(&(data->stack)));

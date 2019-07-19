@@ -120,8 +120,13 @@ extern "C" {
     fdb_future_get_error( FDBFuture* f );
 #endif
 
+#if FDB_API_VERSION < 620
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_version( FDBFuture* f, int64_t* out_version );
+#endif
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_int64( FDBFuture* f, int64_t* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
@@ -224,6 +229,13 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_transaction_get_committed_version( FDBTransaction* tr,
                                            int64_t* out_version );
+
+    // This function intentionally returns an FDBFuture instead of an integer directly,
+    // so that calling this API can see the effect of previous mutations on the transaction.
+    // Specifically, mutations are applied asynchronously by the main thread. In order to
+    // see them, this call has to be serviced by the main thread too.
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 

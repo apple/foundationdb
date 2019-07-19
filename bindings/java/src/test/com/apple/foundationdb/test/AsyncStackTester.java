@@ -282,6 +282,11 @@ public class AsyncStackTester {
 
 			return AsyncUtil.DONE;
 		}
+		else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
+			return inst.tr.getApproximateSize().thenAcceptAsync(size -> {
+				inst.push("GOT_APPROXIMATE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_VERSIONSTAMP) {
 			try {
 				inst.push(inst.tr.getVersionstamp());

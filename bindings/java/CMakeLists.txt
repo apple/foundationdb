@@ -25,11 +25,11 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
+  src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
-  src/main/com/apple/foundationdb/FutureVersion.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
   src/main/com/apple/foundationdb/KeySelector.java

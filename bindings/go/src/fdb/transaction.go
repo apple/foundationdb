@@ -372,6 +372,16 @@ func (t Transaction) GetVersionstamp() FutureKey {
 	return &futureKey{future: newFuture(C.fdb_transaction_get_versionstamp(t.ptr))}
 }
 
+func (t *transaction) getApproximateSize() FutureInt64 {
+	return &futureInt64{
+		future: newFuture(C.fdb_transaction_get_approximate_size(t.ptr)),
+	}
+}
+
+func (t Transaction) GetApproximateSize() FutureInt64 {
+	return t.getApproximateSize()
+}
+
 // Reset rolls back a transaction, completely resetting it to its initial
 // state. This is logically equivalent to destroying the transaction and
 // creating a new one.

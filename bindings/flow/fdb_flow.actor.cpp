@@ -20,11 +20,12 @@
 
 #include "fdb_flow.h"
 
-#include "flow/DeterministicRandom.h"
-#include "flow/SystemMonitor.h"
-
 #include <stdio.h>
 #include <cinttypes>
+
+#include "flow/DeterministicRandom.h"
+#include "flow/SystemMonitor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace FDB;
 
@@ -147,6 +148,7 @@ namespace FDB {
 
 		void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
+		Future<int64_t> getApproximateSize() override;
 		Future<Void> onError(Error const& e) override;
 
 		void cancel() override;
@@ -290,7 +292,7 @@ namespace FDB {
 		return backToFuture<Version>( fdb_transaction_get_read_version( tr ), [](Reference<CFuture> f){
 				Version value;
 
-				throw_on_error( fdb_future_get_version( f->f, &value ) );
+				throw_on_error( fdb_future_get_int64( f->f, &value ) );
 
 				return value;
 			} );
@@ -408,6 +410,14 @@ namespace FDB {
 		}
 	}
 
+	Future<int64_t> TransactionImpl::getApproximateSize() {
+		return backToFuture<int64_t>(fdb_transaction_get_approximate_size(tr), [](Reference<CFuture> f) {
+			int64_t size = 0;
+			throw_on_error(fdb_future_get_int64(f->f, &size));
+			return size;
+		});
+	}
+
 	Future<Void> TransactionImpl::onError(Error const& e) {
 		return backToFuture< Void >( fdb_transaction_on_error( tr, e.code() ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
@@ -422,4 +432,5 @@ namespace FDB {
 	void TransactionImpl::reset() {
 		fdb_transaction_reset( tr );
 	}
-}
+
+}  // namespace FDB
