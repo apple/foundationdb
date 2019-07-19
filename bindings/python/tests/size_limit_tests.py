@@ -34,8 +34,6 @@ def setValueWithLimit(tr, key, value, limit):
     tr[key] = value
 
 def test_size_limit_option(db):
-    db.options.set_transaction_timeout(2000)  # 2 seconds
-    db.options.set_transaction_retry_limit(3)
     value = b'a' * 1024
 
     setValue(db, b't1', value)
@@ -94,5 +92,7 @@ def test_get_approximate_size(tr):
 if __name__ == '__main__':
     clusterFile = sys.argv[1]
     db = fdb.open(clusterFile)
+    db.options.set_transaction_timeout(2000)  # 2 seconds
+    db.options.set_transaction_retry_limit(3)
     test_size_limit_option(db)
     test_get_approximate_size(db)
