@@ -18,34 +18,34 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbclient/SystemData.h"
-#include "fdbrpc/sim_validation.h"
-#include "fdbclient/Notified.h"
-#include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbclient/SystemData.h"
-#include "flow/Stats.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/Atomic.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Notified.h"
+#include "fdbclient/SystemData.h"
+#include "fdbrpc/sim_validation.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/ConflictSet.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Knobs.h"
+#include "flow/Stats.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -381,7 +381,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
 						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
-						    .detail("Size", transactionSize)
+						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
 					}
 					++commitData->stats.txnCommitIn;
