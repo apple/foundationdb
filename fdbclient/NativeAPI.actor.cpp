@@ -1871,6 +1871,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
 
+			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
 			if( reverse && (begin-1).isDefinitelyLess(shard.begin) &&
