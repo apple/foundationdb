@@ -82,21 +82,23 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	threadInitFunction = f; 
 }
 
-int64_t g_hugeArenaMemory = 0;
+std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
 std::map<std::string, std::pair<int,int>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
-	auto& info = hugeArenaTraces[platform::get_backtrace()];
-	info.first++;
-	info.second+=size;
-	if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
-		for(auto& it : hugeArenaTraces) {
-			TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+	if(TraceEvent::isNetworkThread()) {
+		auto& info = hugeArenaTraces[platform::get_backtrace()];
+		info.first++;
+		info.second+=size;
+		if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
+			for(auto& it : hugeArenaTraces) {
+				TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+			}
+			hugeArenaLastLogged = now();
+			hugeArenaTraces.clear();
 		}
-		hugeArenaLastLogged = now();
-		hugeArenaTraces.clear();
 	}
 }
 
