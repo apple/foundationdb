@@ -1420,13 +1420,16 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+                                                                bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return Void();
+	if (!excl.size()) return inProgressExclusion;
 
 	loop {
 		state Transaction tr(cx);
+
 		try {
 			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
@@ -1439,11 +1442,12 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
 			state bool ok = true;
+			inProgressExclusion.clear();
 			for(auto& s : serverList) {
 				auto addr = decodeServerListValue( s.value ).address();
 				if ( addressExcluded(exclusions, addr) ) {
 					ok = false;
-					break;
+					inProgressExclusion.insert(addr);
 				}
 			}
 
@@ -1454,24 +1458,27 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 				for( auto const& log : logs.first ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 				for( auto const& log : logs.second ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 			}
 
-			if (ok) return Void();
+			if (ok) return inProgressExclusion;
+			if (!waitForAllExcluded) break;
 
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			wait( tr.onError(e) );
 		}
 	}
+
+	return inProgressExclusion;
 }
 
 ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
