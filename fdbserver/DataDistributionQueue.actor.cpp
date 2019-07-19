@@ -286,6 +286,7 @@ int getWorkFactor( RelocateData const& relocation ) {
 		return WORK_FULL_UTILIZATION / relocation.src.size() / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
+// Data movement's resource control: Do not overload source servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
 bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
@@ -354,10 +355,10 @@ struct DDQueueData {
 	std::set<RelocateData, std::greater<RelocateData>> fetchingSourcesQueue;
 	std::set<RelocateData, std::greater<RelocateData>> fetchKeysComplete;
 	KeyRangeActorMap getSourceActors;
-	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>> queue;
+	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>> queue; //Key UID is serverID, value is the serverID's set of RelocateData to relocate
 
 	KeyRangeMap< RelocateData > inFlight;
-	KeyRangeActorMap inFlightActors;
+	KeyRangeActorMap inFlightActors; //Key: RelocatData, Value: Actor to move the data
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -547,7 +548,10 @@ struct DDQueueData {
 					ASSERT(servers.size() > 0);
 				}
 
-				//If the size of keyServerEntries is large, then just assume we are using all storage servers
+				// If the size of keyServerEntries is large, then just assume we are using all storage servers
+				// Why the size can be large? 
+				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
+				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
 					Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
 					ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
@@ -783,12 +787,16 @@ struct DDQueueData {
 				}
 			}
 
+			// Data movement avoids overloading source servers in moving data.
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if( !canLaunch( rd, teamSize, busymap, cancellableRelocations ) ) {
 				//logRelocation( rd, "SkippingQueuedRelocation" );
 				continue;
 			}
+
+			// From now on, the source servers for the RelocateData rd have enough resource to move the data away,
+			// because they do not have too much inflight data movement.
 
 			//logRelocation( rd, "LaunchingRelocation" );
 
@@ -845,7 +853,7 @@ struct DDQueueData {
 extern bool noUnseed;
 
 // This actor relocates the specified keys to a good place.
-// These live in the inFlightActor key range map.
+// The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd )
 {
 	state Promise<Void> errorOut( self->error );
@@ -992,6 +1000,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
+			// Move keys from source to destination by chaning the serverKeyList and keyServerList system keys
 			state Future<Void> doMoveKeys = moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, dataMovementComplete, &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock, self->teamCollections.size() > 1, relocateShardInterval.pairID );
 			state Future<Void> pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch );
 			try {
@@ -1082,6 +1091,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	}
 }
 
+// Move a random shard of sourceTeam's to destTeam if sourceTeam has much more data than destTeam
 ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<IDataDistributionTeam> sourceTeam, Reference<IDataDistributionTeam> destTeam, bool primary ) {
 	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		return false;
@@ -1229,6 +1239,7 @@ ACTOR Future<Void> dataDistributionQueue(
 
 			// For the given servers that caused us to go around the loop, find the next item(s) that can be launched.
 			if( launchData.startTime != -1 ) {
+				// Launch dataDistributionRelocator actor to relocate the launchData
 				self.launchQueuedWork( launchData );
 				launchData = RelocateData();
 			}
@@ -1252,6 +1263,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					launchQueuedWorkTimeout = Never();
 				}
 				when ( RelocateData results = waitNext( self.fetchSourceServersComplete.getFuture() ) ) {
+					// This when is triggered by queueRelocation() which is triggered by sending self.input
 					self.completeSourceFetch( results );
 					launchData = results;
 				}
