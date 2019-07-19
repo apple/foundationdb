@@ -2377,16 +2377,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 };
 
-ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self) {
+ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
+	state int waitCount = 0;
 	loop {
 		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
 			// processingUnhealthy: true when there exists data movement
 			TraceEvent("WaitUntilHealthyStalled", self->distributorId).detail("Primary", self->primary).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+			waitCount = 0;
 		}
 		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskPriority::Low)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
-			return Void();
+			if (extraDelay <= 0.01 || waitCount >= 1) {
+				// Return healthy if we do not need extraDelay or when DD are healthy in at least two consecutive check
+				return Void();
+			} else {
+				wait(delay(extraDelay, TaskPriority::Low));
+				waitCount++;
+			}
 		}
 	}
 }
@@ -2537,7 +2545,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// To avoid removing server teams too fast, which is unlikely happen though
 		wait(delay(removeServerTeamDelay));
 
-		wait(waitUntilHealthy(self));
+		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between
 		// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
