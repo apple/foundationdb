@@ -3149,8 +3149,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	data->byteSampleRecovery = restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
-	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality) ) );
-	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fShardAssigned, fShardAvailable) ) );
+	wait( waitForAll( std::vector{ fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality } ) );
+	wait( waitForAll( std::vector{ fShardAssigned, fShardAvailable } ) );
 	wait( byteSampleSampleRecovered.getFuture() );
 	TraceEvent("RestoringDurableState", data->thisServerID);
 
