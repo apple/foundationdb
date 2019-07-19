@@ -90,17 +90,6 @@ T sorted(T range) {
 }
 
 template <class T>
-inline std::vector<T>& operator , (std::vector<T>& v, T a) {
-	v.push_back(a);
-	return v;
-}
-
-template <class T>
-inline std::vector<T>& operator , (std::vector<T> && v, T a) {
-	return (const_cast<std::vector<T>&>(v), a);
-}
-
-template <class T>
 ErrorOr<T> errorOr( T t ) {
 	return ErrorOr<T>(t);
 }
