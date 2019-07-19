@@ -52,10 +52,10 @@ enum {
 
 	// Set removing_redundant_team priority lower than merge/split_shard_priority,
 	// so that removing redundant teams does not block merge/split shards.
-	PRIORITY_TEAM_REDUNDANT  = 210,
+	PRIORITY_TEAM_REDUNDANT  = 200,
 
-	PRIORITY_MERGE_SHARD     = 240,
-	PRIORITY_SPLIT_SHARD     = 250,
+	PRIORITY_MERGE_SHARD     = 340,
+	PRIORITY_SPLIT_SHARD     = 350,
 
 	PRIORITY_TEAM_UNHEALTHY  = 800,
 	PRIORITY_TEAM_2_LEFT     = 809,
