@@ -1224,7 +1224,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
 			
-			if(movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+			if(movingHighestPriority < PRIORITY_TEAM_UNHEALTHY) {
 				highestPriority = movingHighestPriority;
 			} else if(partitionsInFlight > 0) {
 				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
@@ -1267,16 +1267,16 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
+			}			
+			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_repartitioning";
+				stateSectionObj["description"] = "Repartitioning.";
 			}
 			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "optimizing_team_collections";
 				stateSectionObj["description"] = "Optimizing team collections";
-			}
-			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
-				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "healthy_repartitioning";
-				stateSectionObj["description"] = "Repartitioning.";
 			}
 			else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
 				stateSectionObj["healthy"] = true;
