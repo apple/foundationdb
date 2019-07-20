@@ -382,14 +382,14 @@ struct DDQueueData {
 		// ensure a team remover will not start before the previous one finishes removing a team and move away data
 		// NOTE: split and merge shard have higher priority. If they have to wait for unhealthyRelocations = 0,
 		// deadlock may happen: split/merge shard waits for unhealthyRelocations, while blocks team_redundant.
-		if(priority >= PRIORITY_TEAM_UNHEALTHY || priority == PRIORITY_TEAM_REDUNDANT) {
+		if (priority >= PRIORITY_TEAM_UNHEALTHY || priority == PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
 		}
 		priority_relocations[priority]++;
 	}
 	void finishRelocation(int priority) {
-		if(priority >= PRIORITY_TEAM_UNHEALTHY || priority == PRIORITY_TEAM_REDUNDANT) {
+		if (priority >= PRIORITY_TEAM_UNHEALTHY || priority == PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations--;
 			ASSERT(unhealthyRelocations >= 0);
 			if(unhealthyRelocations == 0) {
@@ -600,7 +600,8 @@ struct DDQueueData {
 			if( foundActiveFetching || foundActiveRelocation ) {
 				rd.wantsNewServers |= rrs.wantsNewServers;
 				rd.startTime = std::min( rd.startTime, rrs.startTime );
-				if( (rrs.priority >= PRIORITY_TEAM_UNHEALTHY || rrs.priority == PRIORITY_TEAM_REDUNDANT) && rd.changesBoundaries() )
+				if ((rrs.priority >= PRIORITY_TEAM_UNHEALTHY || rrs.priority == PRIORITY_TEAM_REDUNDANT) &&
+				    rd.changesBoundaries())
 					rd.priority = std::max( rd.priority, rrs.priority );
 			}
 
@@ -759,11 +760,9 @@ struct DDQueueData {
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges( rd.keys );
 			for(auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
-				if(fetchKeysComplete.count( it->value() ) &&
-				   inFlightActors.liveActorAt( it->range().begin ) &&
-						!rd.keys.contains( it->range() ) &&
-						it->value().priority >= rd.priority &&
-						(rd.priority < PRIORITY_TEAM_UNHEALTHY || rd.priority  == PRIORITY_TEAM_REDUNDANT)) {
+				if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
+				    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
+				    (rd.priority < PRIORITY_TEAM_UNHEALTHY || rd.priority == PRIORITY_TEAM_REDUNDANT)) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
 						.detail("KeyBegin", it->value().keys.begin)
 						.detail("KeyEnd", it->value().keys.end)
