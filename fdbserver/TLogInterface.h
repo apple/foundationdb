@@ -268,7 +268,7 @@ struct TLogDisablePopRequest {
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
-	TLogDisablePopRequest() {}
+	TLogDisablePopRequest() = default;
 	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
 
 	template <class Ar>
@@ -284,7 +284,7 @@ struct TLogEnablePopRequest {
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
-	TLogEnablePopRequest() {}
+	TLogEnablePopRequest() = default;
 	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
 
 	template <class Ar>
@@ -302,7 +302,7 @@ struct TLogSnapRequest {
 	StringRef role;
 
 	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
-	TLogSnapRequest() : snapPayload() {}
+	TLogSnapRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

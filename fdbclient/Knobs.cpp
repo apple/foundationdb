@@ -142,9 +142,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( CLEAR_LOG_RANGE_COUNT,                   1500); // transaction size / (size of '\xff\x02/blog/' + size of UID + size of hash result) = 200,000 / (8 + 16 + 8)
 
-	// Disk snapshot based backup
-	init( SNAP_CREATE_TIMEOUT,                      300);
-
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );

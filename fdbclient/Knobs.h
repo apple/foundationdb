@@ -143,9 +143,6 @@ public:
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
 
-	// Disk snapshot based backup
-	double SNAP_CREATE_TIMEOUT;
-
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
