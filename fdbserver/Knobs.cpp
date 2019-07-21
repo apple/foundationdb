@@ -82,7 +82,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
-	init( SNAP_CREATE_MAX_TIMEOUT,                              60.0 );
+	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );

@@ -268,7 +268,7 @@ struct WorkerSnapRequest {
 	StringRef role;
 
 	WorkerSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
-	WorkerSnapRequest() : snapPayload() {}
+	WorkerSnapRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

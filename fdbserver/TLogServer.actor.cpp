@@ -1171,7 +1171,7 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 
 ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
 	if (self->ignorePopRequest) {
-		TraceEvent("IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
 
 		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
 			|| to > self->toBePopped[inputTag]) {
@@ -2181,7 +2181,7 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 		snapReq.reply.sendError(operation_failed());
 		return Void();
 	}
-	state ExecCmdValueString snapArg(snapReq.snapPayload);
+	ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
 		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
 		int err = wait(execHelper(&snapArg, self->dataFolder, role.toString(), 2 /* version */));
@@ -2204,10 +2204,10 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
 		TraceEvent("TLogExecHelperError").error(e, true /*includeCancelled */);
-		if (e.code() == error_code_operation_cancelled) {
-			snapReq.reply.sendError(broken_promise());
-		} else {
+		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
+		} else {
+			throw e;
 		}
 	}
 	return Void();
@@ -2313,7 +2313,6 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				req.reply.sendError( tlog_stopped() );
 		}
 		when( TLogDisablePopRequest req = waitNext( tli.disablePopRequest.getFuture() ) ) {
-			self->ignorePopRequest = true;
 			if (self->ignorePopUid != "") {
 				TraceEvent(SevWarn, "TLogPopDisableonDisable")
 					.detail("IgnorePopUid", self->ignorePopUid)
@@ -2325,6 +2324,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				req.reply.sendError(operation_failed());
 			} else {
 				//FIXME: As part of reverting snapshot V1, make ignorePopUid a UID instead of string
+				self->ignorePopRequest = true;
 				self->ignorePopUid = req.snapUID.toString();
 				self->ignorePopDeadline = g_network->now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 				req.reply.send(Void());
