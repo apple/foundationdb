@@ -11,6 +11,8 @@ Features
 Performance
 -----------
 
+* Handle large packets better. `(PR #1684) <https://github.com/apple/foundationdb/pull/1684>`_.
+
 Fixes
 -----
 
@@ -28,6 +30,7 @@ Status
 Bindings
 --------
 
+* Add a transaction size limit for both database option and transaction option. `(PR #1725) <https://github.com/apple/foundationdb/pull/1725>`_.
 * Added a new API to get the approximated transaction size before commit, e.g., ``fdb_transaction_get_approximate_size`` in the C binding. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: ``fdb_future_get_version`` has been renamed to ``fdb_future_get_int64``. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * Go: The Go bindings now require Go version 1.11 or later.
