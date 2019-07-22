@@ -37,7 +37,7 @@ Bindings
 Other Changes
 -------------
 
-* Trace files are now ordered lexicographically ``(PR #1828) <https://github.com/apple/foundationdb/pull/1828>``. This means that the filename format for traces did change.
+* Trace files are now ordered lexicographically. This means that the filename format for trace files did change. `(PR #1828) <https://github.com/apple/foundationdb/pull/1828>`_.
 
 Earlier release notes
 ---------------------
