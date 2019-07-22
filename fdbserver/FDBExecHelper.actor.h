@@ -52,7 +52,7 @@ private: // data
 ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime);
 
 // helper to run all the work related to running the exec command
-ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role, int version);
+ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role);
 
 // returns true if the execUID op is in progress
 bool isExecOpInProgress(UID execUID);

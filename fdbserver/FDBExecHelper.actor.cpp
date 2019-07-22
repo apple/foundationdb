@@ -153,11 +153,11 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 }
 #endif
 
-ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role, int snapVersion) {
+ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role) {
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
 	state int err = 0;
 	state Future<int> cmdErr;
-	state double maxWaitTime = (snapVersion == 2) ? SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT : 3.0;
+	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	if (!g_network->isSimulated()) {
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
@@ -183,13 +183,8 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		// copy the files
 		state std::string folderFrom = folder + "/.";
 		state std::string folderTo = folder + "-snap-" + uidStr.toString();
-		double maxSimDelayTime = 1.0;
-		if (snapVersion == 1) {
-			folderTo = folder + "-snap-" + uidStr.toString();
-		} else {
-			folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
-			maxSimDelayTime = 10.0;
-		}
+		double maxSimDelayTime = 10.0;
+		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(folderTo);
