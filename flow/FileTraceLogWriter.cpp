@@ -107,7 +107,7 @@ void FileTraceLogWriter::open() {
 			indexWidth = unsigned(::floor(log10f(float(index))));
 
 			UNSTOPPABLE_ASSERT(indexWidth < 10);
-			finalname = format("%s.%c.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+			finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
