@@ -37,7 +37,7 @@ private:
 
 	uint64_t maxLogsSize;
 	int traceFileFD;
-	int index;
+	unsigned index;
 
 	std::function<void()> onError;
 
