@@ -659,7 +659,7 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
 		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
-		int err = wait(execHelper(&snapArg, snapFolder.toString(), role.toString(), 2 /* version */));
+		int err = wait(execHelper(&snapArg, snapFolder.toString(), role.toString()));
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
 			.detail("Uid", uidStr)
@@ -1227,25 +1227,6 @@ ACTOR Future<Void> workerServer(
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
-			}
-			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
-				state ExecCmdValueString execArg(req.execPayload);
-				try {
-					int err = wait(execHelper(&execArg, coordFolder, "role=coordinator", 1 /*version*/));
-					StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-					auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
-					auto te = TraceEvent("ExecTraceCoordinators");
-					te.detail("Uid", uidStr.toString());
-					te.detail("Status", err);
-					te.detail("Role", "coordinator");
-					te.detail("Value", coordFolder);
-					te.detail("ExecPayload", execArg.getCmdValueString().toString());
-					te.trackLatest(tokenStr.c_str());
-					req.reply.send(Void());
-				} catch (Error& e) {
-					TraceEvent("ExecHelperError").error(e);
-					req.reply.sendError(broken_promise());
-				}
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				Standalone<StringRef> snapFolder = StringRef(folder);

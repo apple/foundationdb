@@ -2371,45 +2371,6 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	TEST(true); //NativeAPI atomic operation
 }
 
-ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayload, Optional<UID> debugID) {
-	try {
-		if (debugID.present()) {
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
-		}
-
-		state ExecRequest req(execPayload, debugID);
-		if (debugID.present()) {
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-									"NativeAPI.executeCoordinators.Inside loop");
-		}
-		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::execReq, req, cx->taskID));
-		if (debugID.present())
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-									"NativeAPI.executeCoordinators.After");
-		return Void();
-	} catch (Error& e) {
-		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
-		throw;
-	}
-}
-
-void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayload) {
-	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayload.toString());
-
-	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
-	if (cmdPayload.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
-
-	auto& req = tr;
-
-	// Helps with quickly finding the exec op in a tlog batch
-	setOption(FDBTransactionOptions::FIRST_IN_BATCH);
-
-	auto& t = req.transaction;
-	auto r = singleKeyRange(cmdType, req.arena);
-	auto v = ValueRef(req.arena, cmdPayload);
-	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
-}
-
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 	auto &req = tr;
 	auto &t = req.transaction;
@@ -3440,105 +3401,6 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
 }
 
-ACTOR Future<Void> snapCreateVersion1(Database inputCx, StringRef snapCmd, UID snapUID) {
-	state Transaction tr(inputCx);
-	state DatabaseContext* cx = inputCx.getPtr();
-	// remember the client ID before the snap operation
-	state UID preSnapClientUID = cx->clientInfo->get().id;
-
-	TraceEvent("SnapCreateEnter")
-	    .detail("SnapCmd", snapCmd.toString())
-	    .detail("UID", snapUID)
-	    .detail("PreSnapClientUID", preSnapClientUID);
-
-	StringRef snapCmdArgs = snapCmd;
-	StringRef snapCmdPart = snapCmdArgs.eat(":");
-	Standalone<StringRef> snapUIDRef(snapUID.toString());
-	state Standalone<StringRef> snapPayloadRef = snapCmdPart
-		.withSuffix(LiteralStringRef(":uid="))
-		.withSuffix(snapUIDRef)
-		.withSuffix(LiteralStringRef(","))
-		.withSuffix(snapCmdArgs);
-	state Standalone<StringRef>
-		tLogCmdPayloadRef = LiteralStringRef("empty-binary:uid=").withSuffix(snapUIDRef);
-	// disable popping of TLog
-	tr.reset();
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.execute(execDisableTLogPop, tLogCmdPayloadRef);
-			wait(timeoutError(tr.commit(), 10));
-			break;
-		} catch (Error& e) {
-			TraceEvent("DisableTLogPopFailed").error(e);
-			wait(tr.onError(e));
-		}
-	}
-
-	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
-
-	// snap the storage and Tlogs
-	// if we retry the below command in failure cases with the same snapUID
-	// then the snapCreate can end up creating multiple snapshots with
-	// the same name which needs additional handling, hence we fail in
-	// failure cases and let the caller retry with different snapUID
-	tr.reset();
-	try {
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr.execute(execSnap, snapPayloadRef);
-		wait(tr.commit());
-	} catch (Error& e) {
-		TraceEvent("SnapCreateErroSnapTLogStorage").error(e);
-		throw;
-	}
-
-	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
-
-	if (BUGGIFY) {
-		int32_t toDelay = deterministicRandom()->randomInt(1, 30);
-		wait(delay(toDelay));
-	}
-
-	// enable popping of the TLog
-	tr.reset();
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.execute(execEnableTLogPop, tLogCmdPayloadRef);
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			TraceEvent("EnableTLogPopFailed").error(e);
-			wait(tr.onError(e));
-		}
-	}
-
-	TraceEvent("SnapCreateAfterUnlockingTLogs").detail("UID", snapUID);
-
-	// snap the coordinators
-	try {
-		Future<Void> exec = executeCoordinators(cx, snapPayloadRef, snapUID);
-		wait(timeoutError(exec, 5.0));
-	} catch (Error& e) {
-		TraceEvent("SnapCreateErrorSnapCoords").error(e);
-		throw;
-	}
-
-	TraceEvent("SnapCreateAfterSnappingCoords").detail("UID", snapUID);
-
-	// if the client IDs did not change then we have a clean snapshot
-	UID postSnapClientUID = cx->clientInfo->get().id;
-	if (preSnapClientUID != postSnapClientUID) {
-		TraceEvent("UID mismatch")
-		    .detail("SnapPreSnapClientUID", preSnapClientUID)
-		    .detail("SnapPostSnapClientUID", postSnapClientUID);
-		throw coordinators_changed();
-	}
-
-	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
-	return Void();
-}
-
 ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
 	TraceEvent("NativeAPI.SnapshotDatabaseEnter")
 		.detail("SnapPayload", snapPayload)
@@ -3563,11 +3425,11 @@ ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef sna
 	return Void();
 }
 
-ACTOR Future<Void> snapCreateVersion2(Database cx, StringRef snapCmd, UID snapUID) {
+ACTOR Future<Void> snapCreateCore(Database cx, StringRef snapCmd, UID snapUID) {
 	// remember the client ID before the snap operation
 	state UID preSnapClientUID = cx->clientInfo->get().id;
 
-	TraceEvent("SnapCreateEnterVersion2")
+	TraceEvent("SnapCreateCoreEnter")
 	    .detail("SnapCmd", snapCmd.toString())
 	    .detail("UID", snapUID)
 	    .detail("PreSnapClientUID", preSnapClientUID);
@@ -3585,7 +3447,7 @@ ACTOR Future<Void> snapCreateVersion2(Database cx, StringRef snapCmd, UID snapUI
 		Future<Void> exec = snapshotDatabase(Reference<DatabaseContext>::addRef(cx.getPtr()), snapPayloadRef, snapUID, snapUID);
 		wait(exec);
 	} catch (Error& e) {
-		TraceEvent("SnapshotDatabaseErrorVersion2")
+		TraceEvent("SnapCreateCoreError")
 			.detail("SnapCmd", snapCmd.toString())
 			.detail("UID", snapUID)
 			.error(e);
@@ -3595,27 +3457,23 @@ ACTOR Future<Void> snapCreateVersion2(Database cx, StringRef snapCmd, UID snapUI
 	UID postSnapClientUID = cx->clientInfo->get().id;
 	if (preSnapClientUID != postSnapClientUID) {
 		// if the client IDs changed then we fail the snapshot
-		TraceEvent("UIDMismatchVersion2")
+		TraceEvent("SnapCreateCoreUIDMismatch")
 		    .detail("SnapPreSnapClientUID", preSnapClientUID)
 		    .detail("SnapPostSnapClientUID", postSnapClientUID);
 		throw coordinators_changed();
 	}
 
-	TraceEvent("SnapCreateExitVersion2")
+	TraceEvent("SnapCreateCoreExit")
 	    .detail("SnapCmd", snapCmd.toString())
 	    .detail("UID", snapUID)
 	    .detail("PreSnapClientUID", preSnapClientUID);
 	return Void();
 }
 
-ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID, int version) {
-	if (version == 1) {
-		wait(snapCreateVersion1(cx, snapCmd, snapUID));
-		return Void();
-	}
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 	state int oldMode = wait( setDDMode( cx, 0 ) );
 	try {
-		wait(snapCreateVersion2(cx, snapCmd, snapUID));
+		wait(snapCreateCore(cx, snapCmd, snapUID));
 	} catch (Error& e) {
 		state Error err = e;
 		wait(success( setDDMode( cx, oldMode ) ));
