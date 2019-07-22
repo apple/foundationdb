@@ -56,8 +56,6 @@ public:
 	void sync();
 
 	static void extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index);
-	static bool compareTraceFileName (std::string const& f1, std::string const& f2);
-	static bool reverseCompareTraceFileName(std::string f1, std::string f2);
 
 	void cleanupTraceFiles();
 };
