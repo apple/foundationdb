@@ -840,6 +840,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
+	self->masterProxiesChangeTrigger.trigger();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 	self->cluster->getClusterInterface()->set({});
