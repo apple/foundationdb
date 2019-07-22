@@ -47,7 +47,7 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		int64_t version;
-		FdbCApi::fdb_error_t error = api->futureGetVersion(f, &version); 
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &version);
 		ASSERT(!error);
 		return version;
 	});
@@ -195,6 +195,20 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
+	if(!api->transactionGetApproximateSize) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->transactionGetApproximateSize(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t size = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
+		ASSERT(!error);
+		return size;
+	});
+}
+
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
@@ -287,6 +301,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
+	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 620);
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
@@ -294,7 +309,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
-	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
+	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
@@ -593,6 +608,12 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	}
 
 	return invalidVersion;
+}
+
+ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getApproximateSize() : ThreadFuture<int64_t>(Never());
+	return abortableFuture(f, tr.onChange);
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {

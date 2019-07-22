@@ -405,7 +405,7 @@ class TransactionRead(_FDBBase):
 
     def get_read_version(self):
         """Get the read version of the transaction."""
-        return FutureVersion(self.capi.fdb_transaction_get_read_version(self.tpointer))
+        return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
     def get(self, key):
         key = keyToBytes(key)
@@ -540,6 +540,10 @@ class Transaction(TransactionRead):
         version = ctypes.c_int64()
         self.capi.fdb_transaction_get_committed_version(self.tpointer, ctypes.byref(version))
         return version.value
+
+    def get_approximate_size(self):
+        """Get the approximate commit size of the transaction."""
+        return FutureInt64(self.capi.fdb_transaction_get_approximate_size(self.tpointer))
 
     def get_versionstamp(self):
         return Key(self.capi.fdb_transaction_get_versionstamp(self.tpointer))
@@ -687,12 +691,12 @@ class FutureVoid(Future):
         return None
 
 
-class FutureVersion(Future):
+class FutureInt64(Future):
     def wait(self):
         self.block_until_ready()
-        version = ctypes.c_int64()
-        self.capi.fdb_future_get_version(self.fpointer, ctypes.byref(version))
-        return version.value
+        value = ctypes.c_int64()
+        self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
+        return value.value
 
 
 class FutureKeyValueArray(Future):
@@ -1359,9 +1363,9 @@ def init_c_api():
     _capi.fdb_future_get_error.restype = int
     _capi.fdb_future_get_error.errcheck = check_error_code
 
-    _capi.fdb_future_get_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
-    _capi.fdb_future_get_version.restype = ctypes.c_int
-    _capi.fdb_future_get_version.errcheck = check_error_code
+    _capi.fdb_future_get_int64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
+    _capi.fdb_future_get_int64.restype = ctypes.c_int
+    _capi.fdb_future_get_int64.errcheck = check_error_code
 
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
@@ -1452,6 +1456,9 @@ def init_c_api():
     _capi.fdb_transaction_get_committed_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
     _capi.fdb_transaction_get_committed_version.restype = ctypes.c_int
     _capi.fdb_transaction_get_committed_version.errcheck = check_error_code
+
+    _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p

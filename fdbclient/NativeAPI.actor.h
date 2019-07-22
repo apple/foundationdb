@@ -67,7 +67,7 @@ struct NetworkOptions {
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(false) {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(true) {}
 };
 
 class Database {
@@ -287,6 +287,7 @@ public:
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
+	uint32_t getSize();
 	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 

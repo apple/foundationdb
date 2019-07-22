@@ -290,13 +290,22 @@ int64_t run_op_getreadversion(FDBTransaction *transaction) {
   } while (err && retry--);
 
   if (err) {
-    fprintf(stderr, "ERROR: fdb_transaction_get_version: %s\n", fdb_get_error(err));
+    fprintf(stderr, "ERROR: fdb_transaction_get_read_version: %s\n", fdb_get_error(err));
     return -1;
   }
 
+#if FDB_API_VERSION < 620
   err = fdb_future_get_version(f, &rv);
+#else
+  err = fdb_future_get_int64(f, &rv);
+#endif
+
   if (err) {
+#if FDB_API_VERSION < 620
     fprintf(stderr, "ERROR: fdb_future_get_version: %s\n", fdb_get_error(err));
+#else
+    fprintf(stderr, "ERROR: fdb_future_get_int64: %s\n", fdb_get_error(err));
+#endif
   }
   fdb_future_destroy(f);
   return rv;

@@ -106,6 +106,10 @@ function(add_fdb_test)
   if (ENABLE_BUGGIFY)
     set(BUGGIFY_OPTION "-B")
   endif()
+  set(VALGRIND_OPTION "")
+  if (USE_VALGRIND)
+    set(VALGRIND_OPTION "--use-valgrind")
+  endif()
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
   add_test(NAME ${test_name}
     COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
@@ -120,6 +124,7 @@ function(add_fdb_test)
     --seed ${SEED}
     --test-number ${assigned_id}
     ${BUGGIFY_OPTION}
+    ${VALGRIND_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 	get_filename_component(test_dir_full ${first_file} DIRECTORY)

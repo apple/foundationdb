@@ -246,10 +246,10 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 			}
 			in.serializedInfo = rndString;
 		}
-		ObjectWriter writer;
+		ObjectWriter writer(IncludeVersion());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, IncludeVersion());
 		reader.deserialize(out);
 		ASSERT(in.forward == out.forward);
 		ASSERT(in.changeID == out.changeID);
@@ -268,10 +268,10 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objIn(leaderInfo);
 	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objOut;
 	Standalone<StringRef> copy;
-	ObjectWriter writer;
+	ObjectWriter writer(IncludeVersion());
 	writer.serialize(objIn);
 	copy = writer.toStringRef();
-	ArenaObjectReader reader(copy.arena(), copy);
+	ArenaObjectReader reader(copy.arena(), copy, IncludeVersion());
 	reader.deserialize(objOut);
 
 	ASSERT(!objOut.isError());

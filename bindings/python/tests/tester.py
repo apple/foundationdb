@@ -48,7 +48,7 @@ from cancellation_timeout_tests import test_retry_limits
 from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
-from size_limit_tests import test_size_limit_option
+from size_limit_tests import test_size_limit_option, test_get_approximate_size
 
 random.seed(0)
 
@@ -478,6 +478,9 @@ class Tester:
                 elif inst.op == six.u("GET_COMMITTED_VERSION"):
                     self.last_version = inst.tr.get_committed_version()
                     inst.push(b"GOT_COMMITTED_VERSION")
+                elif inst.op == six.u("GET_APPROXIMATE_SIZE"):
+                    approximate_size = inst.tr.get_approximate_size().wait()
+                    inst.push(b"GOT_APPROXIMATE_SIZE")
                 elif inst.op == six.u("GET_VERSIONSTAMP"):
                     inst.push(inst.tr.get_versionstamp())
                 elif inst.op == six.u("TUPLE_PACK"):
@@ -561,6 +564,7 @@ class Tester:
                         test_predicates()
 
                         test_size_limit_option(db)
+                        test_get_approximate_size(db)
 
                     except fdb.FDBError as e:
                         print("Unit tests failed: %s" % e.description)

@@ -224,7 +224,7 @@ void runTests(struct ResultSet *rs) {
 	checkError(fdb_future_block_until_ready(f), "block for read version", rs);
 
 	int64_t version;
-	checkError(fdb_future_get_version(f, &version), "get version", rs);
+	checkError(fdb_future_get_int64(f, &version), "get version", rs);
 	fdb_future_destroy(f);
 
 	insertData(tr);
@@ -244,7 +244,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	checkError(fdb_select_api_version(610), "select API version", rs);
+	checkError(fdb_select_api_version(620), "select API version", rs);
 	printf("Running RYW Benchmark test at client version: %s\n", fdb_get_client_version());
 
 	keys = generateKeys(numKeys, keySize);

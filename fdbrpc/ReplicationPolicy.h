@@ -70,13 +70,6 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 		return keys;
 	}
 	virtual void attributeKeys(std::set<std::string>*) const = 0;
-
-	// For flatbuffers, IReplicationPolicy is just encoded as a string using
-	// |serializeReplicationPolicy|. |writer| is a member of IReplicationPolicy
-	// so that this string outlives all calls to
-	// dynamic_size_traits<Reference<IReplicationPolicy>>::save
-	mutable BinaryWriter writer{ IncludeVersion() };
-	mutable bool alreadyWritten = false;
 };
 
 template <class Archive>
@@ -283,40 +276,35 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 
 template <>
 struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
-	static Block save(const Reference<IReplicationPolicy>& value) {
-		if (value.getPtr() == nullptr) {
-			static BinaryWriter writer{ IncludeVersion() };
-			writer = BinaryWriter{ IncludeVersion() };
-			serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
-			return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(writer.getData())),
-			                  writer.getLength());
-		}
-		if (!value->alreadyWritten) {
-			serializeReplicationPolicy(value->writer, const_cast<Reference<IReplicationPolicy>&>(value));
-			value->alreadyWritten = true;
-		}
-		return unownedPtr(const_cast<const uint8_t*>(reinterpret_cast<uint8_t*>(value->writer.getData())),
-		                  value->writer.getLength());
+private:
+	using T = Reference<IReplicationPolicy>;
+
+public:
+	template <class Context>
+	static size_t size(const T& value, Context& context) {
+		// size gets called multiple times. If this becomes a performance problem, we can perform the
+		// serialization once and cache the result as a mutable member of IReplicationPolicy
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		return writer.getLength();
 	}
 
-	static void serialization_done(const Reference<IReplicationPolicy>& value) {
-		if (value.getPtr() == nullptr) {
-			return;
-		}
-		value->alreadyWritten = false;
-		value->writer = BinaryWriter{ IncludeVersion() };
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t* out, const T& value, Context& context) {
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		memcpy(out, writer.getData(), writer.getLength());
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
+	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
 		StringRef str(buf, sz);
-		BinaryReader reader(str, IncludeVersion());
-		serializeReplicationPolicy(reader, value);
+		BinaryReader reader(str, AssumeVersion(context.protocolVersion()));
+		::load(reader, value);
 	}
 };
-
-static_assert(detail::has_serialization_done<dynamic_size_traits<Reference<IReplicationPolicy>>>::value);
 
 #endif

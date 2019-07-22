@@ -413,7 +413,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (toKill.size()) {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "Wait For Server Exclusion").detail("Addresses", describe(toKill)).detail("ClusterAvailable", g_simulator.isAvailable());
-			wait( waitForExcludedServers( cx, toKillArray ) );
+			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("DesiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
 

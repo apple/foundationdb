@@ -67,4 +67,5 @@ void unregisterTLog(UID uid);
 // checks if there is any non-stopped TLog instance
 bool isTLogInSameNode();
 
+#include "flow/unactorcompiler.h"
 #endif

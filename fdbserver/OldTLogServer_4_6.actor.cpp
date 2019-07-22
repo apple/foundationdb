@@ -1240,8 +1240,8 @@ namespace oldTLog_4_6 {
 
 		// FIXME: metadata in queue?
 
-		wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-		wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fRecoverCounts) ) );
+		wait( waitForAll( std::vector{fFormat} ) );
+		wait( waitForAll( std::vector{fVers, fRecoverCounts} ) );
 
 		if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 			TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", fFormat.get().get()).detail("Expected", persistFormat.value.toString());

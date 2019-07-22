@@ -98,6 +98,7 @@ public:
 
 	Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
+	int64_t getApproximateSize() { return approximateSize; }
 	Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
@@ -140,6 +141,7 @@ private:
 	Promise<Void> resetPromise;
 	AndFuture reading;
 	int retries;
+	int64_t approximateSize;
 	Future<Void> timeoutActor;
 	double creationTime;
 	bool commitStarted;
@@ -149,7 +151,7 @@ private:
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)
 	void updateConflictMap( KeyRangeRef const& keys, WriteMap::iterator& it ); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
-	void writeRangeToNativeTransaction( KeyRangeRef const& keys );
+	void writeRangeToNativeTransaction(KeyRangeRef const& keys);
 
 	void resetRyow(); // doesn't reset the encapsulated transaction, or creation time/retry state
 	KeyRef getMaxReadKey();
