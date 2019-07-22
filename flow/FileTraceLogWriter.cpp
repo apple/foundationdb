@@ -93,23 +93,22 @@ void FileTraceLogWriter::open() {
 	// this allows one process to write 10 billion log files
 	// this should be enough - if not we could make the base larger...
 	ASSERT(index > 0);
+	auto indexWidth = unsigned(::floor(log10f(float(index))));
 
-	int indexWidth = int(::floor(log10f(float(index)) + 1.0));
-	char indexWidthC;
-	UNSTOPPABLE_ASSERT(indexWidth < 62); // we don't use `0` so we can only use 61 chars
-	if (indexWidth < 10) {
-		indexWidthC = '0' + indexWidth;
-	} else if (indexWidth < 36) {
-		indexWidthC = 'A' + (indexWidth - 10);
-	} else {
-		indexWidthC = 'a' - (indexWidth - 36);
-	}
+	// index is at most 2^32 - 1. 2^32 - 1 < 10^10 - therefore
+	// log10(index) < 10
+	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
-	auto finalname = format("%s.%c.%d.%s", basename.c_str(), indexWidthC, index, extension.c_str());
+	auto finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
 	while ( (traceFileFD = __open( finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE )) == -1 ) {
 		lastError(errno);
-		if (errno == EEXIST)
-			finalname = format("%s.%c.%d.%s", basename.c_str(), indexWidthC, ++index, extension.c_str());
+		if (errno == EEXIST) {
+			++index;
+			indexWidth = unsigned(::floor(log10f(float(index))));
+
+			UNSTOPPABLE_ASSERT(indexWidth < 10);
+			finalname = format("%s.%c.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
 
@@ -140,14 +139,6 @@ void FileTraceLogWriter::roll() {
 
 void FileTraceLogWriter::sync() {
 	__fsync(traceFileFD);
-}
-
-void FileTraceLogWriter::extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index) {
-	int split = filename.find_last_of('.', filename.size() - 5);
-	root = filename.substr(0, split);
-	if(sscanf(filename.substr(split + 1, filename.size() - split - 4).c_str(), "%d", &index) == EOF) {
-		index = -1;
-	}
 }
 
 void FileTraceLogWriter::cleanupTraceFiles() {

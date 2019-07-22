@@ -37,7 +37,7 @@ private:
 
 	uint64_t maxLogsSize;
 	int traceFileFD;
-	unsigned index;
+	uint32_t index;
 
 	std::function<void()> onError;
 
@@ -54,8 +54,6 @@ public:
 	void close();
 	void roll();
 	void sync();
-
-	static void extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index);
 
 	void cleanupTraceFiles();
 };
