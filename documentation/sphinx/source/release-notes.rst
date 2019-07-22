@@ -34,6 +34,8 @@ Bindings
 Other Changes
 -------------
 
+* Clients will throw ``transaction_too_old`` when attempting to read if ``setVersion`` was called with a version smaller than the smallest read version obtained from the cluster. This is a protection against reading from the wrong cluster in multi-cluster scenarios. `(PR #1413) <https://github.com/apple/foundationdb/pull/1413>`
+
 Earlier release notes
 ---------------------
 * :doc:`6.1 (API Version 610) </old-release-notes/release-notes-610>`
