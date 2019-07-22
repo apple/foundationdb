@@ -75,6 +75,7 @@ namespace FdbClientLogEvents {
 		}
 	};
 
+	// Version V2 of EventGetVersion starting at 6.2
 	struct EventGetVersion_V2 : public Event {
 		EventGetVersion_V2(double ts, double lat, uint32_t type) : Event(GET_VERSION_LATENCY, ts), latency(lat) {
 			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {

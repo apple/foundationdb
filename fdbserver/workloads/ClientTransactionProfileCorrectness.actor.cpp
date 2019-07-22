@@ -123,40 +123,26 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		switch (event)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
-		{
 			parser->parseGetVersion(reader);
 			break;
-		}
 		case FdbClientLogEvents::GET_LATENCY:
-		{
 			parser->parseGet(reader);
 			break;
-		}
 		case FdbClientLogEvents::GET_RANGE_LATENCY:
-		{
 			parser->parseGetRange(reader);
 			break;
-		}
 		case FdbClientLogEvents::COMMIT_LATENCY:
-		{
 			parser->parseCommit(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_GET:
-		{
 			parser->parseErrorGet(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_GET_RANGE:
-		{
 			parser->parseErrorGetRange(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_COMMIT:
-		{
 			parser->parseErrorCommit(reader);
 			break;
-		}
 		default:
 			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
 			return false;
