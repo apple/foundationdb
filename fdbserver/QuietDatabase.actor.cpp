@@ -136,8 +136,7 @@ int64_t getPoppedVersionLag( const TraceEventFields& md ) {
 }
 
 ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	state Future<std::vector<WorkerDetails>> workersFuture = getWorkers(dbInfo);
-	state std::vector<WorkerDetails> workers = wait(workersFuture);
+	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 	Optional<Value> coordinators = wait(
 		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
@@ -149,9 +148,9 @@ ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<As
 	if (!coordinators.present()) {
 		throw operation_failed();
 	}
-	state std::vector<NetworkAddress> coordinatorsAddr =
+	std::vector<NetworkAddress> coordinatorsAddr =
 		ClusterConnectionString(coordinators.get().toString()).coordinators();
-	state std::set<NetworkAddress> coordinatorsAddrSet;
+	std::set<NetworkAddress> coordinatorsAddrSet;
 	for (const auto & addr : coordinatorsAddr) {
 		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
 		coordinatorsAddrSet.insert(addr);
