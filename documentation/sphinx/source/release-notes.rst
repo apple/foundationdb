@@ -11,6 +11,8 @@ Features
 
 * CMake is now our official build system. The Makefile based build system is deprecated.
 
+* Foundationdb now uses the flatbuffers serialization format for all network messages by default. This can be controlled with the ``--object-serializer`` cli argument or ``use_object_serializer`` network option. Note that network communications only work if the each peer has the same object serializer setting. `(PR 1090) <https://github.com/apple/foundationdb/pull/1090>`_.
+
 Performance
 -----------
 
