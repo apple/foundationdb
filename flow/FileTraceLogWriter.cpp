@@ -92,7 +92,7 @@ void FileTraceLogWriter::open() {
 
 	// this allows one process to write 10 billion log files
 	// this should be enough - if not we could make the base larger...
-	ASSERT(index > 0 && index < 10);
+	ASSERT(index > 0);
 
 	int indexWidth = int(::floor(log10f(float(index)) + 1.0));
 	char indexWidthC;
