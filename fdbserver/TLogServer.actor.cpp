@@ -983,9 +983,15 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	}
 	state Version upTo = to;
 	int8_t tagLocality = inputTag.locality;
-	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
-		tagLocality = tagLocalityLogRouter;
+	if (isPseudoLocality(tagLocality)) {
+		if (logData->logSystem->get().isValid()) {
+			upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
+			tagLocality = tagLocalityLogRouter;
+		} else {
+			// TODO: if this happens, need to save the popped version? or discard the pop?
+			printf("TLogPopNoLogSystem %s, Locality %d, Version %ld", self->dbgid.toString().c_str(), tagLocality,
+			       upTo);
+		}
 	}
 	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);

@@ -73,11 +73,11 @@ struct LogRouterData {
 		}
 	};
 
-	UID dbgid;
+	const UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
-	Version startVersion;
+	const Version startVersion;
 	Version minKnownCommittedVersion;
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
@@ -108,7 +108,7 @@ struct LogRouterData {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, Version knownCommittedVersion) {
-		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, knownCommittedVersion) );
+		Reference<TagData> newTagData(new TagData(tag, popped, knownCommittedVersion));
 		tag_data[tag.id] = newTagData;
 		return newTagData;
 	}
@@ -221,21 +221,17 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = self->version.get() + 1;
 	state Version lastVer = 0;
-	state std::vector<int> tags;
 
 	loop {
-		loop {
-			choose {
-				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
-					break;
+		loop choose {
+			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(dbInfoChange)) { // FIXME: does this actually happen?
+				if (self->logSystem->get()) {
+					r = self->logSystem->get()->peekLogRouter(self->dbgid, tagAt, self->routerTag);
+				} else {
+					r = Reference<ILogSystem::IPeekCursor>();
 				}
-				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
-					if( self->logSystem->get() )
-						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
-					else
-						r = Reference<ILogSystem::IPeekCursor>();
-					dbInfoChange = self->logSystem->onChange();
-				}
+				dbInfoChange = self->logSystem->onChange();
 			}
 		}
 
@@ -275,7 +271,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 			TagsAndMessage tagAndMsg;
 			tagAndMsg.message = r->getMessageWithTags();
-			tags.clear();
+			std::vector<int> tags;
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
 			tagAndMsg.tags.reserve(arena, tags.size());
 			for (const auto& t : tags) {

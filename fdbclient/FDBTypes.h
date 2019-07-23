@@ -48,6 +48,10 @@ enum {
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
 
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
+
 #pragma pack(push, 1)
 struct Tag {
 	int8_t locality;

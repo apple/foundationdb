@@ -30,11 +30,12 @@
 
 struct BackupData {
 	const UID myId;
-	const Tag tag;
+	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const Version startVersion;
 	Version endVersion;  // mutable in a new epoch, i.e., end version for this epoch is known.
 	const LogEpoch epoch;
 	Version minKnownCommittedVersion;
+	Version poppedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<TagsAndMessage> messages;
@@ -42,11 +43,20 @@ struct BackupData {
 	NotifiedVersion version;
 	AsyncTrigger backupDone;
 
+	CounterCollection cc;
+	Future<Void> logger;
+
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), startVersion(req.startVersion),
 	    endVersion(req.endVersion.present() ? req.endVersion.get() : std::numeric_limits<Version>::max()),
-	    epoch(req.epoch), minKnownCommittedVersion(invalidVersion), version(invalidVersion) {
+	    epoch(req.epoch), minKnownCommittedVersion(invalidVersion), poppedVersion(invalidVersion),
+	    version(req.startVersion - 1), cc("BackupWorker", id.toString()) {
 		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
+
+		specialCounter(cc, "PoppedVersion", [this]() { return this->poppedVersion; });
+		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
+		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
+		                       "BackupWorkerMetrics");
 	}
 };
 
@@ -71,28 +81,33 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 // Uploads self->messages to cloud storage.
 ACTOR Future<Void> uploadData(BackupData* self) {
 	state Version popVersion = invalidVersion;
-	state Version lastPopVersion = 0;
 
 	loop {
 		ASSERT(self->messages.size() == self->versions.size());
-		// TODO: upload messages
 		while (!self->messages.empty()) {
 			popVersion = std::max(popVersion, self->versions[0]);
+			// TODO: consume the messages
 			self->messages.erase(self->messages.begin());
 			self->versions.erase(self->versions.begin());
 		}
+		// TODO: upload messages
 		Future<Void> savedProgress = Void();
-		if (self->logSystem.get() && popVersion > lastPopVersion) {
-			const Tag popTag = self->logSystem.get()->getPseudoPopTag(self->tag, ProcessClass::BackupClass);
-			self->logSystem.get()->pop(popVersion, popTag);
-			lastPopVersion = popVersion;
-			TraceEvent("BackupWorkerPop", self->myId).detail("V", popVersion).detail("Tag", self->tag.toString());
+		if (self->logSystem.get() && popVersion > self->poppedVersion) {
 			savedProgress = saveProgress(self, popVersion);
 		}
-		if (lastPopVersion >= self->endVersion) {
+		wait(delay(30) && savedProgress); // TODO: knobify the delay of 30s
+		if (self->logSystem.get() && popVersion > self->poppedVersion) {
+			const Tag popTag = self->logSystem.get()->getPseudoPopTag(self->tag, ProcessClass::BackupClass);
+			self->logSystem.get()->pop(popVersion, popTag);
+			self->poppedVersion = popVersion;
+			TraceEvent("BackupWorkerPop", self->myId)
+			    .detail("V", popVersion)
+			    .detail("Tag", self->tag.toString())
+			    .detail("PopTag", popTag.toString());
+		}
+		if (self->poppedVersion >= self->endVersion) {
 			self->backupDone.trigger();
 		}
-		wait(delay(30) && savedProgress);  // TODO: knobify the delay of 30s
 	}
 }
 
@@ -122,6 +137,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
 		// TODO: avoid peeking uncommitted messages
+		// Should we wait until knownCommittedVersion == startVersion - 1 ? In this way, we know previous
+		// epoch has finished and then starting for this epoch.
 		while (r->hasMessage()) {
 			lastVersion = r->version().version;
 			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
@@ -140,14 +157,15 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch r
 	state UID lastMasterID(0,0);
 	loop {
 		bool isDisplaced =
-		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
-		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		    (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED);
+		// (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
 		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasBackupWorker(self->myId);
 		if (isDisplaced) {
 			TraceEvent("BackupWorkerDisplaced", self->myId)
 			    .detail("RecoveryCount", recoveryCount)
+			    .detail("PoppedVersion", self->poppedVersion)
 			    .detail("DBRecoveryCount", db->get().recoveryCount)
-				.detail("RecoveryState", (int)db->get().recoveryState);
+			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
 		}
 		if (db->get().master.id() != lastMasterID) {

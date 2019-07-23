@@ -695,9 +695,13 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	}
 	state Version upTo = to;
 	int8_t tagLocality = inputTag.locality;
-	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
-		tagLocality = tagLocalityLogRouter;
+	if (isPseudoLocality(tagLocality)) {
+		if (logData->logSystem->get().isValid()) {
+			upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
+			tagLocality = tagLocalityLogRouter;
+		} else {
+			TraceEvent("TLogPopNoLogSystem", self->dbgid).detail("Locality", tagLocality).detail("Version", upTo);
+		}
 	}
 	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);

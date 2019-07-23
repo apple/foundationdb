@@ -250,7 +250,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			break;
 
 		case ProcessClass::BackupClass:
-			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tag.locality) > 0) {
+			if (tag.locality == tagLocalityBackup) {
+				ASSERT(pseudoLocalities.count(tag.locality) > 0);
 				tag.locality = tagLocalityBackup;
 			}
 			break;
@@ -261,18 +262,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return tag;
 	}
 
-	bool isPseudoLocality(int8_t locality) override {
-		return pseudoLocalities.count(locality) > 0;
-	}
+	bool hasPseudoLocality(int8_t locality) override { return pseudoLocalities.count(locality) > 0; }
 
 	Version popPseudoLocalityTag(int8_t locality, Version upTo) override {
-		ASSERT(isPseudoLocality(locality));
+		ASSERT(hasPseudoLocality(locality));
 		auto& localityVersion = pseudoLocalityPopVersion[locality];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
 		for (const auto& it : pseudoLocalityPopVersion) {
 			minVersion = std::min(minVersion, it.second);
 		}
+		TraceEvent("Pop").detail("L", locality).detail("Version", upTo).detail("PopVersion", minVersion);
 		return minVersion;
 	}
 
@@ -1323,6 +1323,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return tLogs[0]->tLogVersion;
 	}
 
+	int getLogRouterTags() const override { return logRouterTags; }
+
+	Version getStartVersion() const override {
+		ASSERT(tLogs.size() > 0);
+		return tLogs[0]->startVersion;
+	}
+
+	std::map<LogEpoch, Version> getEpochEndVersions() const override {
+		std::map<LogEpoch, Version> epochEndVersion;
+		for (const auto old : oldLogData) {
+			epochEndVersion[old.epoch] = old.epochEnd;
+		}
+		return epochEndVersion;
+	}
+
+	void setBackupWorkers(std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers) override {
+		ASSERT(tLogs.size() > 0);
+		tLogs[0]->backupWorkers = backupWorkers;
+	}
+
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
 		state Future<Void> waitFailure;
 		loop {
@@ -1868,47 +1888,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return localTags;
 	}
 
-	ACTOR static Future<Void> loadBackupProgress() {
-		// get a map of UID -> recoveryCount, savedVersion
-		// for each old epoch:
-		//    if savedVersion >= epochEnd - 1 = knownCommittedVersion
-		//        skip or remove this entry
-		//    else
-		//        recover/backup [savedVersion + 1, epochEnd - 1]
-		//        use the old recoveryCount and tag. Make sure old worker stopped.
-		return Void();
-	}
-
-	ACTOR static Future<Void> recruitBackupWorkers(Reference<TagPartitionedLogSystem> logSystem,
-	                                               RecruitFromConfigurationReply recruits, LogEpoch recoveryCount) {
-		if (recruits.backupWorkers.size() == 0) return Void();
-
-		std::vector<Future<BackupInterface>> initializationReplies;
-		for (int i = 0; i < logSystem->logRouterTags; i++) {
-			const auto& worker = recruits.backupWorkers[i % recruits.backupWorkers.size()];
-			InitializeBackupRequest req(g_random->randomUniqueID());
-			req.epoch = recoveryCount;
-			req.routerTag = Tag(tagLocalityLogRouter, i);
-			req.startVersion = logSystem->tLogs[0]->startVersion;
-			TraceEvent("BackupRecruitment")
-			    .detail("WorkerID", worker.id())
-			    .detail("Epoch", recoveryCount)
-			    .detail("StartVersion", req.startVersion);
-			initializationReplies.push_back(transformErrors(
-			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
-			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    master_recovery_failed()));
-		}
-
-		std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
-		for (const auto& interf : newRecruits) {
-			logSystem->tLogs[0]->backupWorkers.emplace_back(
-			    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
-		}
-
-		return Void();
-	}
-
 	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t remoteLocality, std::vector<Tag> allTags ) {
 		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
@@ -2075,6 +2054,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->expectedLogSets++;
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
 			logSystem->addPseudoLocality(tagLocalityBackup);
+			TraceEvent("AddPseudoLocality", logSystem->getDebugID())
+			    .detail("Locality1", "LogRouterMapped")
+			    .detail("Locality2", "Backup");
 		}
 
 		logSystem->tLogs.emplace_back(new LogSet());
@@ -2240,7 +2222,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < recr.tLogs.size(); i++ )
 			initializationReplies.push_back( transformErrors( throwErrorOr( recr.tLogs[i].tLog.getReplyUnlessFailedFor( reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
-		state Future<Void> recruitBackup = recruitBackupWorkers(logSystem, recr, recoveryCount);
 		state std::vector<Future<Void>> recoveryComplete;
 
 		if(region.satelliteTLogReplicationFactor > 0) {
@@ -2314,7 +2295,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		wait( waitForAll( initializationReplies ) || oldRouterRecruitment );
-		wait(recruitBackup);
 
 		for( int i = 0; i < initializationReplies.size(); i++ ) {
 			logSystem->tLogs[0]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
