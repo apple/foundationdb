@@ -8,6 +8,8 @@ Release Notes
 Features
 --------
 
+* CMake is now our official build system. The Makefile based build system is deprecated.
+
 Performance
 -----------
 
@@ -38,6 +40,9 @@ Other Changes
 -------------
 
 * Trace files are now ordered lexicographically. This means that the filename format for trace files did change. `(PR #1828) <https://github.com/apple/foundationdb/pull/1828>`_.
+* FoundationDB can now be built with clang and libc++ on Linux `(PR #1666) <https://github.com/apple/foundationdb/pull/1666>`_.
+* Added experimental framework to run C and Java clients in simulator `(PR #1678) <https://github.com/apple/foundationdb/pull/1678>`_.
+* Added new network option for client buggify which will randomly throw expected exceptions in the client. Intended for client testing `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
 
 Earlier release notes
 ---------------------
