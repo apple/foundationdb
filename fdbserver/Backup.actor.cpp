@@ -51,7 +51,7 @@ struct BackupData {
 	    endVersion(req.endVersion.present() ? req.endVersion.get() : std::numeric_limits<Version>::max()),
 	    epoch(req.epoch), minKnownCommittedVersion(invalidVersion), poppedVersion(invalidVersion),
 	    version(req.startVersion - 1), cc("BackupWorker", id.toString()) {
-		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "PoppedVersion", [this]() { return this->poppedVersion; });
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
@@ -121,7 +121,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 	loop {
 		loop choose {
-			when (wait(r ? r->getMore(TaskTLogCommit) : Never())) {
+			when (wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
 				break;
 			}
 			when (wait(logSystemChange)) {

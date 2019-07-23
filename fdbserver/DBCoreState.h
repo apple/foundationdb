@@ -74,7 +74,7 @@ struct CoreTLogSet {
 		} else {
 			serializer(ar, tLogVersion);
 		}
-		if (ar.protocolVersion() > 0x0FDB00B061070001LL) {
+		if (ar.protocolVersion().hasBackupWorker()) {
 			serializer(ar, backupWorkers);
 		}
 	}

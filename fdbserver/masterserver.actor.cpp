@@ -1234,7 +1234,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 }
 
 ACTOR Future<std::vector<std::tuple<UID, LogEpoch, Version>>> getBackupProgress(Reference<MasterData> self) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Transaction tr(cx);
 
 	loop {
@@ -1273,7 +1273,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	const Version startVersion = self->logSystem->getStartVersion();
 	for (int i = 0; i < logRouterTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
-		InitializeBackupRequest req(g_random->randomUniqueID());
+		InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 		req.epoch = epoch;
 		req.routerTag = Tag(tagLocalityLogRouter, i);
 		req.startVersion = startVersion;
