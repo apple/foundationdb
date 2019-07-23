@@ -1668,6 +1668,7 @@ ACTOR Future<Void> masterProxyServerCore(
 			req.reply.send(rep);
 		}
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
+			TraceEvent(SevDebug, "SnapMasterEnqueue");
 			addActor.send(proxySnapCreate(snapReq, &commitData));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {

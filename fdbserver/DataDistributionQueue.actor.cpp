@@ -1096,8 +1096,11 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 		relocationComplete.send( rd );
 
-		if( e.code() != error_code_actor_cancelled )
-			errorOut.sendError(e);
+		if( e.code() != error_code_actor_cancelled ) {
+			if (errorOut.canBeSet()) {
+				errorOut.sendError(e);
+			}
+		}
 		throw;
 	}
 }
