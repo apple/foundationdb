@@ -299,17 +299,19 @@ you are holding the corresponding future.
 
 1. Introduction
 
-    The rough goal is to be able to introduce a field to a network message
-    without requiring a protocol-incompatible upgrade. In order for this to work,
+    The goal is to have a more robust serialization protocol.  One feature of
+    flatbuffers is that you can add a new field to a network message without
+    requiring a protocol-incompatible upgrade. In order for this to work,
     correctness must not depend on that field always being present. This can be
     tested in simulation by randomly (use buggify) default-initializing that
     field when deserializing. Once you make a protocol-incompatible upgrade you
     can rely on the field always being present in the new protocol, just like
-    before. Currently we are using a custom flatbuffers implementation so to that
-    we can present (roughly) the same serialization api as before. Currently the
-    ObjectSerializer is only used for network messages, but that may change.
-    Flatbuffers was selected because it is (relatively) simple among protocols
-    providing forwards/backwards compatibility, and its binary format is [well
+    before. Currently we are using a custom flatbuffers implementation so to
+    that we can present (roughly) the same serialization api as before.
+    Currently the ObjectSerializer is only used for network messages, but that
+    may change.  Flatbuffers was selected because it is (relatively) simple
+    among protocols providing forwards/backwards compatibility, and its binary
+    format is [well
     documented](https://github.com/dvidelabs/flatcc/blob/master/doc/binary-format.md)
 
 1. Correspondence to flatbuffers IDL
@@ -380,8 +382,10 @@ you are holding the corresponding future.
     [File identifiers](https://google.github.io/flatbuffers/md__schemas.html)
     are used to sanity check that the message you're deserializing is of the
     schema you expect. You can give a type `T` a file identifier by making
-    `T::file_identifier` a static member of type `FileIdentifier`. You don't
-    need to change the file identifier for a type when evolving its schema.
+    `T::file_identifier` a static member of type `FileIdentifier`. If you don't
+    control `T`, you can specialize the `FileIdentifierFor` template. See
+    `flow/FileIdentifier.h` for examples. You don't need to change the file
+    identifier for a type when evolving its schema.
 
 1. Schema evolution
 
@@ -392,7 +396,7 @@ you are holding the corresponding future.
 
     - Two tables are compatible if one table's fields are all compatible with a prefix of the other table's fields.
     - Two vectors are compatible if their element types are compatible.
-    - Two unions are compatible if one unions's fields are all compatible with a prefix of the other unions's fields.
+    - Two unions are compatible if one union's fields are all compatible with a prefix of the other union's fields.
     - Two scalar types are only compatible if they are equal.
 
 1. Deprecation
