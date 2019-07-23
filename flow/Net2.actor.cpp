@@ -437,9 +437,16 @@ private:
 	}
 };
 
+#if BOOST_VERSION >= 107000
+#define GET_IO_SERVICE(s) ((boost::asio::io_context&)(s).get_executor().context())
+#else
+#define GET_IO_SERVICE(s) ((s).get_io_service())
+#endif
+
 class Listener : public IListener, ReferenceCounted<Listener> {
-	NetworkAddress listenAddress;
-	tcp::acceptor acceptor;
+        NetworkAddress listenAddress;
+        tcp::acceptor acceptor;
+
 
 public:
 	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
@@ -459,7 +466,7 @@ public:
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
-		state Reference<Connection> conn( new Connection( self->acceptor.get_io_service() ) );
+        state Reference<Connection> conn( new Connection( GET_IO_SERVICE(self->acceptor) ) );
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			BindPromise p("N2_AcceptError", UID());

@@ -184,6 +184,10 @@ else()
   include(CPack)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  add_link_options(-lexecinfo)
+endif()
+
 ################################################################################
 # process compile commands for IDE
 ################################################################################

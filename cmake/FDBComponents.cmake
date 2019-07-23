@@ -25,8 +25,9 @@ endif()
 ################################################################################
 
 set(WITH_JAVA OFF)
-find_package(JNI 1.8 REQUIRED)
-find_package(Java 1.8 COMPONENTS Development)
+#FreeBSD not finding OpenJDK temporarily commented out
+#find_package(JNI 1.8 REQUIRED)
+#find_package(Java 1.8 COMPONENTS Development)
 if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND)
   set(WITH_JAVA ON)
   include(UseJava)
