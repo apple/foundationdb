@@ -8,6 +8,8 @@ Release Notes
 Features
 --------
 
+* Added local ratekeeper, to throttle reads at a per-storage-process level. `(PR #1447) <https://github.com/apple/foundationdb/pull/1477>`_.
+
 Performance
 -----------
 
