@@ -762,7 +762,7 @@ struct DDQueueData {
 			for(auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
 				if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
 				    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
-				    (rd.priority < PRIORITY_TEAM_UNHEALTHY || rd.priority == PRIORITY_TEAM_REDUNDANT)) {
+				    rd.priority < PRIORITY_TEAM_UNHEALTHY) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
 						.detail("KeyBegin", it->value().keys.begin)
 						.detail("KeyEnd", it->value().keys.end)
