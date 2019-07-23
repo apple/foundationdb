@@ -393,9 +393,11 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				BinaryReader rd( mode.get(), Unversioned() );
 				rd >> result->mode;
 			}
-			if (!result->mode) // result->mode can be changed to 0 when we disable data distribution
+			if (!result->mode || !isDDEnabled()) {
+				// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
+				TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD");
 				return result;
-
+			}
 
 			state Future<vector<ProcessData>> workers = getWorkers(&tr);
 			state Future<Standalone<RangeResultRef>> serverList = tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY );
@@ -3685,12 +3687,21 @@ ACTOR Future<Void> waitForDataDistributionEnabled( Database cx ) {
 
 		try {
 			Optional<Value> mode = wait( tr.get( dataDistributionModeKey ) );
-			if (!mode.present()) return Void();
+			if (!mode.present() && isDDEnabled()) {
+				TraceEvent("WaitForDDEnabledSucceeded");
+				return Void();
+			}
 			if (mode.present()) {
 				BinaryReader rd( mode.get(), Unversioned() );
 				int m;
 				rd >> m;
-				if (m) return Void();
+				TraceEvent(SevDebug, "WaitForDDEnabled")
+					.detail("Mode", m)
+					.detail("IsDDEnabled()", isDDEnabled());
+				if (m && isDDEnabled()) {
+					TraceEvent("WaitForDDEnabledSucceeded");
+					return Void();
+				}
 			}
 
 			tr.reset();
@@ -3705,18 +3716,32 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 	loop {
 		try {
 			Optional<Value> mode = wait( tr.get( dataDistributionModeKey ) );
-			if (!mode.present()) return true;
+			if (!mode.present() && isDDEnabled()) return true;
 			if (mode.present()) {
 				BinaryReader rd( mode.get(), Unversioned() );
 				int m;
 				rd >> m;
-				if (m) return true;
+				if (m && isDDEnabled()) {
+					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
+						.detail("Mode", m)
+						.detail("IsDDEnabled()", isDDEnabled());
+					return true;
+				}
 			}
 			// SOMEDAY: Write a wrapper in MoveKeys.actor.h
 			Optional<Value> readVal = wait( tr.get( moveKeysLockOwnerKey ) );
 			UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			if( currentOwner != dataDistributionModeLock )
+			if( isDDEnabled() && (currentOwner != dataDistributionModeLock ) ) {
+				TraceEvent(SevDebug, "IsDDEnabledSucceeded")
+					.detail("CurrentOwner", currentOwner)
+					.detail("DDModeLock", dataDistributionModeLock)
+					.detail("IsDDEnabled", isDDEnabled());
 				return true;
+			}
+			TraceEvent(SevDebug, "IsDDEnabledFailed")
+				.detail("CurrentOwner", currentOwner)
+				.detail("DDModeLock", dataDistributionModeLock)
+				.detail("IsDDEnabled", isDDEnabled());
 			return false;
 		} catch (Error& e) {
 			wait( tr.onError(e) );
@@ -3885,7 +3910,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					TraceEvent("DDInitGotInitialDD", self->ddId).detail("B","").detail("E", "").detail("Src", "[no items]").detail("Dest", "[no items]").trackLatest("InitialDD");
 				}
 
-				if (initData->mode) break; // mode may be set true by system operator using fdbcli
+				if (initData->mode && isDDEnabled()) {
+					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
+					break;
+				}
 				TraceEvent("DataDistributionDisabled", self->ddId);
 
 				TraceEvent("MovingData", self->ddId)
@@ -3987,7 +4015,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			if( e.code() != error_code_movekeys_conflict )
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
-			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled);
+			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
 			if( ddEnabled )
 				throw err;
 		}
@@ -4092,6 +4120,12 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 
 ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Future<Void> dbInfoChange = db->onChange();
+	if (!setDDEnabled(false, snapReq.snapUID)) {
+		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails here
+		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck");
+		snapReq.reply.sendError(operation_failed());
+		return Void();
+	}
 	double delayTime = g_network->isSimulated() ? 70.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	try {
 		choose {
@@ -4122,9 +4156,13 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
+			// enable DD should always succeed
+			ASSERT(setDDEnabled(true, snapReq.snapUID));
 			throw e;
 		}
 	}
+	// enable DD should always succeed
+	ASSERT(setDDEnabled(true, snapReq.snapUID));
 	return Void();
 }
 

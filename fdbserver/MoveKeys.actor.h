@@ -47,6 +47,12 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock );
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
 
+bool isDDEnabled();
+// checks if the in-memory DDEnabled flag is set
+
+bool setDDEnabled(bool status, UID snapUID);
+// sets the in-memory DDEnabled flag
+
 void seedShardServers(
 	Arena& trArena,
 	CommitTransactionRef &tr,
