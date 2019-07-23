@@ -8,6 +8,7 @@ Release Notes
 Features
 --------
 * Improved team collection for data distribution that builds a balanced number of teams per server and gurantees that each server has at least one team. `(PR #1785) <https://github.com/apple/foundationdb/pull/1785>`_.
+* Added the option to have data distribution FetchKeys to run at a lower priority by setting the knob ``FETCH_KEYS_LOWER_PRIORITY`` `(PR #1791) <https://github.com/apple/foundationdb/pull/1791>`_.
 
 Performance
 -----------
@@ -41,6 +42,7 @@ Other Changes
 -------------
 
 * Trace files are now ordered lexicographically. This means that the filename format for trace files did change. `(PR #1828) <https://github.com/apple/foundationdb/pull/1828>`_.
+* Added two knobs ``LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED`` and ``LOAD_BALANCE_DC_ID_LOCALITY_ENABLED`` allowing locality-based decision-making to be toggled on/off during load balancing. `(PR #1820) <https://github.com/apple/foundationdb/pull/1820>`_.
 
 Earlier release notes
 ---------------------
