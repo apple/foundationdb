@@ -4145,7 +4145,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
-				//self->addActor.send(ddSnapCreate(snapReq, db));
 				actors.add(ddSnapCreate(snapReq, db));
 			}
 		}
