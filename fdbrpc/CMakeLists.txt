@@ -56,6 +56,8 @@ if(NOT WIN32)
     else()
       list(APPEND FDBRPC_SRCS libcoroutine/context.c libeio/eio.c)
     endif()
+  else()
+    list(APPEND FDBRPC_SRCS libcoroutine/context.c libeio/eio.c)
   endif()
 endif()
 
