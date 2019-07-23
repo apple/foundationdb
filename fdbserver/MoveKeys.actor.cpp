@@ -220,7 +220,7 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 
 // keyServer: map from keys to destination servers
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have), complete(already has), ""()
-// MXQ: What does serverKeys[dest][keys] mean?
+// MXQ: What does serverKeys[dest][keys] mean? It seems having the same meaning with serverKeys[servers][keys]?
 
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
@@ -784,7 +784,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 		}
 	}
 }
-// Q: What is the conditation that a SS can be removed?
+// A SS can be removed only if all data (shards) on the SS have been moved away from the SS.
 ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 	state Standalone<RangeResultRef> keys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, 2 ) );
 
@@ -795,6 +795,7 @@ ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 		ASSERT(false);
 	}
 
+	// DEBUG purpose
 	if ( !(keys[0].value == serverKeysFalse && keys[1].key == allKeys.end) ) {
 		Standalone<RangeResultRef> allKeys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, CLIENT_KNOBS->TOO_MANY ) );
 		TraceEvent("CanNOTRemove").detail("KeysNum", allKeys.size());

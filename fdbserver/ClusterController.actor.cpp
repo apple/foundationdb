@@ -2523,9 +2523,6 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 			TraceEvent("CCDataDistributorDied", self->id)
 			.detail("DistributorId", self->db.serverInfo->get().distributor.get().id());
 			self->db.clearInterf(ProcessClass::DataDistributorClass);
-			// Clear the outstanding storage recruitment request
-			TraceEvent("CC_DataDistributorDied", self->id).detail("ClearOutstandingStorageRequest", self->outstandingStorageRequests.size());
-			//self->outstandingStorageRequests.clear();
 		} else {
 			self->recruitingDistributor = true;
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );

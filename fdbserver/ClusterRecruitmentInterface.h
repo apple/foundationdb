@@ -163,12 +163,11 @@ struct RecruitStorageRequest {
 	std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
 	std::vector<Optional<Standalone<StringRef>>> includeDCs;
 	bool criticalRecruitment;							//< True if machine classes are to be ignored
-	bool cancelOutstandingRecruit = false;						// When a new DD is created, we should cancel the recruitments sent to CC by old DD.
 	ReplyPromise< RecruitStorageReply > reply;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, cancelOutstandingRecruit, reply);
+		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, reply);
 	}
 };
 

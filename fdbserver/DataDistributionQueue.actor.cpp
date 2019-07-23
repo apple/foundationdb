@@ -288,9 +288,7 @@ int getWorkFactor( RelocateData const& relocation ) {
 		return WORK_FULL_UTILIZATION / relocation.src.size() / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
-// MXQ: This ensure source servers will not be overloaded. But is it possible we may have thunder-herd effect that many src servers suddently move data to the same dst server team?
-// 		The thuder-herd effect may happen when a dst server team's data was removed suddenly (e.g., at the end of backup which clear a large range)
-// return true if servers are not too busy to launch the relocation
+// This ensure source servers will not be overloaded.
 bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
 	// assert this has not already been launched
@@ -782,7 +780,7 @@ struct DDQueueData {
 				continue;
 			}
 
-			// MXQ: What is the if condition?
+			// MXQ: What does the if mean in the following comment?
 			// Because the busyness of a server is decreased when a superseding relocation is issued, we
 			//  need to consider what the busyness of a server WOULD be if
 			auto containedRanges = inFlight.containedRanges( rd.keys );
@@ -916,7 +914,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 						foundTeams = false;
 						break;
 					}
-					if(!bestTeam.get()->isHealthy()) { //Assume getTeam() only return healthy team that has correctStoreType. 
+					if(!bestTeam.get()->isHealthy()) {
 						allHealthy = false;
 					} else {
 						anyHealthy = true;

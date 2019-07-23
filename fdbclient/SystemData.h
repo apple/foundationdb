@@ -121,7 +121,7 @@ UID decodeProcessClassKeyOld( KeyRef const& key );
 //   "\xff/conf/[[option]]" := "value"
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
-// Storage engine's store type
+// Debug purpose: Storage engine's store type
 extern const KeyRef storeTypeConfig;
 
 //   "\xff/conf/excluded/1.2.3.4" := ""
