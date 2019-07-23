@@ -377,6 +377,11 @@ you are holding the corresponding future.
       don't need to call `T::serialize` multiple times when serializing, but
       this would complicate the implementation.
 
+   - In a call to `serializer`, arenas must come after any members whose memory
+     the arena owns. It's safe to reorder an arena in a `serializer` call
+     because arenas are ignored for the flatbuffers schema. (Future work)
+     Enforce that no fields appear after an arena at compile time.
+
 1. File identifiers
 
     [File identifiers](https://google.github.io/flatbuffers/md__schemas.html)
