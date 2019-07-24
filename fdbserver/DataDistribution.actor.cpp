@@ -2466,6 +2466,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state int numServersRemoved = 0;
 	state std::map<UID, Reference<TCServerInfo>>::iterator server;
 	state vector<Reference<TCServerInfo>> serversToRemove;
+	state int i = 0;
 	
 	loop {
 		wait( delay(1.0) );
@@ -2485,19 +2486,21 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			}
 		}
 
-		for ( auto& s : serversToRemove ) {
+		for ( i = 0; i < serversToRemove.size(); i++ ) {
+			Reference<TCServerInfo> s = serversToRemove[i];
 			if ( s.isValid() ) {
 				s->toRemove++; // The server's location will not be excluded
 				s->wrongStoreTypeRemoved.trigger();
-				//wait( delay(10) );
+				ASSERT(s->toRemove >= 0);
+				wait( delay(1.0) );
 			}
-			ASSERT(s->toRemove >= 0);
 		}
 
 		if ( !serversToRemove.empty() || self->healthyTeamCount == 0 ) {
 			TraceEvent("WrongStoreTypeRemover").detail("KickTeamBuilder", "Start");
 			self->restartRecruiting.trigger();
 			self->doBuildTeams = true;
+			wait( delay(5.0) ); // I have to add delay here; otherwise, it will immediately go to the next loop and print WrongStoreTypeRemoverStartLoop. Why?! 
 		}
 
 	}
