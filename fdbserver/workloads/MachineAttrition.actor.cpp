@@ -37,10 +37,11 @@ static std::set<int> const& normalAttritionErrors() {
 
 ACTOR Future<Void> resetHealthyZoneAfter(Database cx, double duration) {
 	state Transaction tr(cx);
+	state Future<Void> deleyF = delay(duration);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(delay(duration));
+			wait(deleyF);
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
 			return Void();
@@ -184,7 +185,7 @@ struct MachineAttritionWorkload : TestWorkload {
 
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
-				state Future<Void> resetHealthyZone;
+				state Future<Void> resetHealthyZone = Future<Void>(Void());
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
 					bool _ =
@@ -225,11 +226,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				if(!self->replacement)
 					self->machines.pop_back();
 
-				if (resetHealthyZone.isValid()) {
-					wait(delay(meanDelay - delayBeforeKill) && resetHealthyZone);
-				} else {
-					wait(delay(meanDelay - delayBeforeKill));
-				}
+				wait(delay(meanDelay - delayBeforeKill) && resetHealthyZone);
+
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}

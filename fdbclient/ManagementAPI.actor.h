@@ -184,8 +184,8 @@ ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, 
 ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnly = false);
 ACTOR Future<Void> printHealthyZone( Database cx );
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
-ACTOR Future<bool> clearHealthyZone(Database cx, bool calledFromCli = false);
-ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds);
+ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
+ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
 
 ACTOR Future<Void> waitForPrimaryDC( Database  cx, StringRef  dcId );
 

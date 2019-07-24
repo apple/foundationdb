@@ -2881,7 +2881,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 						// Failed server should not trigger DD if SS failures are set to be ignored
 						if (rs.priority == PRIORITY_TEAM_UNHEALTHY) {
-							ASSERT_WE_THINK(!(self->healthyZone.get().present() &&
+							ASSERT_WE_THINK(!(!badTeam && self->healthyZone.get().present() &&
 							                  (self->healthyZone.get().get() == ignoreSSFailuresZoneString)));
 						}
 						self->output.send(rs);
@@ -4069,10 +4069,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
-					}
-					if (unhealthy) {
-						ASSERT_WE_THINK(!(initData->initHealthyZoneValue.present() &&
-						                  (initData->initHealthyZoneValue.get() == ignoreSSFailuresZoneString)));
 					}
 					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
 				}

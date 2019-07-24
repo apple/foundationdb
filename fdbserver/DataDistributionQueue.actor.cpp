@@ -1167,15 +1167,20 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
+	state double sinceLastRead = 0;
+	state bool skipCurrentLoop = false;
 	loop {
 		try {
-			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-			if (val.present()) {
-				continue;
+			state Future<Void> deleyF = delay(checkDelay, TaskPriority::DataDistributionLaunch);
+			if (sinceLastRead > 1) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
+				sinceLastRead = 0;
+				skipCurrentLoop = val.present();
 			}
+			wait(deleyF);
+			sinceLastRead += checkDelay;
+			if (skipCurrentLoop) continue;
 			if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
@@ -1221,15 +1226,20 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
+	state double sinceLastRead = 0;
+	state bool skipCurrentLoop = false;
 	loop {
 		try {
-			wait(delay(checkDelay, TaskPriority::DataDistributionLaunch));
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-			if (val.present()) {
-				continue;
+			state Future<Void> deleyF = delay(checkDelay, TaskPriority::DataDistributionLaunch);
+			if (sinceLastRead > 1) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
+				sinceLastRead = 0;
+				skipCurrentLoop = val.present();
 			}
+			wait(deleyF);
+			sinceLastRead += checkDelay;
+			if (skipCurrentLoop) continue;
 			if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(

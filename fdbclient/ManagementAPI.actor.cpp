@@ -1405,14 +1405,16 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 	}
 }
 
-ACTOR Future<bool> clearHealthyZone(Database cx, bool calledFromCli) {
+ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
-			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
-				if (calledFromCli) {
+			if (!clearSSFailureZoneString && val.present() &&
+			    decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				if (printWarning) {
 					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
 					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
@@ -1428,15 +1430,18 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool calledFromCli) {
 	}
 }
 
-ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds) {
+ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
-				printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage server "
-				       "failures. Use 'datadistribution on' to reenable data distribution.\n");
+				if (printWarning) {
+					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+				}
 				return false;
 			}
 			Version readVersion = wait(tr.getReadVersion());
