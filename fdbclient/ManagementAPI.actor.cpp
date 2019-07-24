@@ -1403,11 +1403,12 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 					rd >> oldMode;
 				}
 			}
-			if (!mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			}
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 
 			tr.set( dataDistributionModeKey, wr.toValue() );
 
