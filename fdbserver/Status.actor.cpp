@@ -35,6 +35,28 @@
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues,
+               Optional<UID>& issueID) {
+	if (issues.size()) {
+		auto& e = issueMap[addr];
+		e.first = issues;
+		e.second = deterministicRandom()->randomUniqueID();
+		issueID = e.second;
+	} else {
+		issueMap.erase(addr);
+		issueID = Optional<UID>();
+	}
+}
+
+void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID) {
+	if (!issueID.present()) {
+		return;
+	}
+	if (issueMap.count(addr) && issueMap[addr].second == issueID.get()) {
+		issueMap.erase( addr );
+	}
+}
+
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
@@ -844,8 +866,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
-									std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap) {
+/*
+static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap) {
 	JsonBuilderObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -871,7 +893,6 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
 			cli["address"] = client.toString();
 			ASSERT(clientStatusInfoMap.find(client) != clientStatusInfoMap.end());
 			cli["log_group"] = clientStatusInfoMap[client].traceLogGroup;
-			cli["connected_coordinators"]  = (int) clientStatusInfoMap[client].connectedCoordinatorsNum;
 			clients.push_back(cli);
 		}
 
@@ -885,6 +906,7 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
 
 	return clientStatus;
 }
+*/
 
 ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
 	state JsonBuilderObject message;
@@ -1939,9 +1961,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		Database cx,
 		vector<WorkerDetails> workers,
 		ProcessIssuesMap workerIssues,
-		ProcessIssuesMap clientIssues,
-		ClientVersionMap clientVersionMap,
-		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
@@ -2191,7 +2210,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), 
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap, clientStatusInfoMap);
+		//statusObj["clients"] = clientStatusFetcher(clientStatusInfoMap);
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
@@ -2216,12 +2235,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["recovery_state"] = recoveryStateStatus;
 
 		// cluster messages subsection;
+		/*
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientIssues);
 		if (clientIssuesArr.size() > 0) {
 			JsonBuilderObject clientIssueMessage = JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
 			messages.push_back(clientIssueMessage);
 		}
+		*/
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.
 		if (!status_incomplete_reasons.empty())

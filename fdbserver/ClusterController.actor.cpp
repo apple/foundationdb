@@ -90,10 +90,8 @@ public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
 		Reference<AsyncVar<ServerDBInfo>> serverInfo;
-		ProcessIssuesMap clientsWithIssues, workersWithIssues;
+		ProcessIssuesMap workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
-		ClientVersionMap clientVersionMap;
-		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
@@ -1269,28 +1267,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 	}
 }
 
-void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues,
-               Optional<UID>& issueID) {
-	if (issues.size()) {
-		auto& e = issueMap[addr];
-		e.first = issues;
-		e.second = deterministicRandom()->randomUniqueID();
-		issueID = e.second;
-	} else {
-		issueMap.erase(addr);
-		issueID = Optional<UID>();
-	}
-}
-
-void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID) {
-	if (!issueID.present()) {
-		return;
-	}
-	if (issueMap.count(addr) && issueMap[addr].second == issueID.get()) {
-		issueMap.erase( addr );
-	}
-}
-
 ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID knownServerInfoID,
                                         Standalone<VectorRef<StringRef>> issues,
                                         std::vector<NetworkAddress> incompatiblePeers,
@@ -1317,18 +1293,12 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID k
 ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, UID knownClientInfoID,
                                        Standalone<VectorRef<StringRef>> issues,
                                        Standalone<VectorRef<ClientVersionRef>> supportedVersions,
-                                       int connectedCoordinatorsNum, Standalone<StringRef> traceLogGroup,
+                                       Standalone<StringRef> traceLogGroup,
                                        ReplyPromise<ClientDBInfo> reply) {
-	// NOTE: The client no longer expects this function to return errors
-	state Optional<UID> issueID;
-	setIssues(db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
-
-	if(supportedVersions.size() > 0) {
-		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
+	if(db->clientInfo->get().id != knownClientInfoID) {
+		reply.send( db->clientInfo->get() );
+		return Void();
 	}
-
-
-	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(traceLogGroup.toString(), connectedCoordinatorsNum);
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1336,10 +1306,6 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, UID kn
 			when (wait( delayJittered( 300 ) )) { break; }  // The client might be long gone!
 		}
 	}
-
-	removeIssues(db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issueID);
-	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
-	db->clientStatusInfoMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -2075,7 +2041,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.clientStatusInfoMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -2641,8 +2607,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send(clusterOpenDatabase(&self.db, req.knownClientInfoID, req.issues, req.supportedVersions,
-			                                       req.connectedCoordinatorsNum, req.traceLogGroup, req.reply));
+			self.addActor.send(clusterOpenDatabase(&self.db, req.knownClientInfoID, req.issues, req.supportedVersions, req.traceLogGroup, req.reply));
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );

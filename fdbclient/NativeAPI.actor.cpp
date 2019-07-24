@@ -214,7 +214,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 		TraceEvent ev("TransactionMetrics", cx->dbId);
 
 		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-			.detail("Cluster", cx->cluster && cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString() : "")
+			.detail("Cluster", cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString() : "")
 			.detail("Internal", cx->internal);
 
 		cx->cc.logToTraceEvent(ev);
@@ -505,10 +505,9 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
-DatabaseContext::DatabaseContext(
-	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+DatabaseContext::DatabaseContext( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
 	TaskPriority taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, bool internal, int apiVersion ) 
-	: cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
+	: connFile(connFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
 	lockAware(lockAware), apiVersion(apiVersion), provisional(false), cc("TransactionMetrics"),
 	transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
 	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
@@ -519,6 +518,7 @@ DatabaseContext::DatabaseContext(
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
 {
 	dbId = deterministicRandom()->randomUniqueID();
+	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -546,108 +546,8 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
 	internal(false) {}
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
-	try {
-		state Optional<double> incorrectTime;
-		state Future<Void> leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
-		loop {
-			OpenDatabaseRequest req;
-			req.knownClientInfoID = outInfo->get().id;
-			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
-			req.connectedCoordinatorsNum = connectedCoordinatorsNumDelayed->get();
-			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
-
-			ClusterConnectionString fileConnectionString;
-			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
-				req.issues.push_back_deep(req.arena, LiteralStringRef("incorrect_cluster_file_contents"));
-				std::string connectionString = ccf->getConnectionString().toString();
-				if(!incorrectTime.present()) {
-					incorrectTime = now();
-				}
-				if(ccf->canGetFilename()) {
-					// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
-					TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-						.detail("Filename", ccf->getFilename())
-						.detail("ConnectionStringFromFile", fileConnectionString.toString())
-						.detail("CurrentConnectionString", connectionString);
-				}
-			}
-			else {
-				incorrectTime = Optional<double>();
-			}
-
-			choose {
-				when( ClientDBInfo ni = wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().openDatabase.getReply( req ) ) : Never() ) ) {
-					outInfo->set(ni);
-
-					loop {
-						TraceEvent("ClientInfoChange").detail("ChangeID", outInfo->get().id);
-						if (outInfo->get().proxies.empty()) {
-							TraceEvent("ClientInfo_NoProxiesReturned").detail("ChangeID", outInfo->get().id);
-							break;
-						} else if (!FlowTransport::transport().isClient()) {
-							break;
-						}
-
-						state vector<Future<Void>> onProxyFailureVec;
-						bool skipWaitForProxyFail = false;
-						for (const auto& proxy : outInfo->get().proxies) {
-							if (proxy.provisional) {
-								skipWaitForProxyFail = true;
-								break;
-							}
-
-							onProxyFailureVec.push_back(
-						    IFailureMonitor::failureMonitor().onStateEqual(
-						        proxy.getConsistentReadVersion.getEndpoint(), FailureStatus()) ||
-						    IFailureMonitor::failureMonitor().onStateEqual(proxy.commit.getEndpoint(), FailureStatus()) ||
-						    IFailureMonitor::failureMonitor().onStateEqual(
-						        proxy.getKeyServersLocations.getEndpoint(), FailureStatus()) ||
-						    IFailureMonitor::failureMonitor().onStateEqual(
-						        proxy.getStorageServerRejoinInfo.getEndpoint(), FailureStatus()));
-						}
-						if (skipWaitForProxyFail) break;
-
-						leaderMon = Void();
-						state Future<Void> anyFailures = waitForAny(onProxyFailureVec);
-						wait(anyFailures || outInfo->onChange());
-						if(anyFailures.isReady()) {
-							leaderMon = ccf ? monitorLeader(ccf, clusterInterface) : Void();
-							break;
-						}
-					}
-				}
-				when( wait( clusterInterface->onChange() ) ) {
-					if(clusterInterface->get().present())
-						TraceEvent("ClientInfo_CCInterfaceChange").detail("CCID", clusterInterface->get().get().id());
-				}
-				when( wait( connectedCoordinatorsNumDelayed->onChange() ) ) {}
-			}
-		}
-	} catch( Error& e ) {
-		TraceEvent(SevError, "MonitorClientInfoError")
-			.error(e)
-			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
-			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
-
-		throw;
-	}
-}
-
-// Create database context and monitor the cluster status;
-// Notify client when cluster info (e.g., cluster controller) changes
-Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality) {
-	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0));
-	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
-	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface, connectedCoordinatorsNum));
-	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNumDelayed);
-
-	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, true));
-}
-
-Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion) {
-	return Database( new DatabaseContext( Reference<Cluster>(nullptr), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion ) );
+Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion) {
+	return Database( new DatabaseContext( Reference<ClusterConnectionFile>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion ) );
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -811,61 +711,16 @@ void DatabaseContext::removeWatch() {
 }
 
 Future<Void> DatabaseContext::onConnected() {
-	ASSERT(cluster);
-	return cluster->onConnected();
+	return connected;
 }
 
 Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
-	ASSERT(cluster);
-	return cluster->getConnectionFile();
-}
-
-Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
-	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0)); // Number of connected coordinators for the client
-	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
-	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNum, apiVersion));
-	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo, connectedCoordinatorsNumDelayed);
-
-	DatabaseContext *db;
-	if(preallocatedDb) {
-		db = new (preallocatedDb) DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
-	}
-	else {
-		db = new DatabaseContext(cluster, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
-	}
-
-	return Database(db);
-}
-
-Database Database::createDatabase( std::string connFileName, int apiVersion, bool internal, LocalityData const& clientLocality ) {
-	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
-	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
-}
-
-const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
-	ASSERT(db);
-	return db->transactionDefaults;
+	return connFile;
 }
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
-Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion )
-	: clusterInterface(new AsyncVar<Optional<ClusterInterface>>())
-{
-	init(connFile, true, connectedCoordinatorsNum, apiVersion);
-}
-
-Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum)
-	: clusterInterface(clusterInterface)
-{
-	init(connFile, true, connectedCoordinatorsNum);
-}
-
-void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion ) {
-	connectionFile = connFile;
-	connected = clusterInterface->onChange();
-
+Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
 	if(!g_network)
 		throw network_not_setup();
 
@@ -895,19 +750,31 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 			systemMonitor();
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace ) );
 		}
-
-		failMon = failureMonitorClient( clusterInterface, false );
 	}
+
+
+	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
+	Future<Void> clientInfoMonitor = monitorProxies(connFile, clientInfo);
+
+	DatabaseContext *db;
+	if(preallocatedDb) {
+		db = new (preallocatedDb) DatabaseContext(connFile, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
+	}
+	else {
+		db = new DatabaseContext(connFile, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion);
+	}
+
+	return Database(db);
 }
 
-Cluster::~Cluster() {}
-
-Reference<AsyncVar<Optional<struct ClusterInterface>>> Cluster::getClusterInterface() {
-	return clusterInterface;
+Database Database::createDatabase( std::string connFileName, int apiVersion, bool internal, LocalityData const& clientLocality ) {
+	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
+	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
 }
 
-Future<Void> Cluster::onConnected() {
-	return connected;
+const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
+	ASSERT(db);
+	return db->transactionDefaults;
 }
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {

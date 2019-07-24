@@ -148,7 +148,6 @@ struct OpenDatabaseRequest {
 	StringRef traceLogGroup;
 	VectorRef<StringRef> issues;
 	VectorRef<ClientVersionRef> supportedVersions;
-	int connectedCoordinatorsNum; // Number of coordinators connected by the client
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
@@ -157,7 +156,7 @@ struct OpenDatabaseRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().hasOpenDatabase());
 		}
-		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply,
+		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, reply,
 				   arena);
 	}
 };

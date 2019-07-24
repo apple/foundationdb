@@ -1048,7 +1048,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		cx = DatabaseContext::create(ci, Reference<ClusterConnectionFile>(), locality);
+		cx = openDBOnServer(dbInfo);
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");

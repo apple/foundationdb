@@ -364,30 +364,28 @@ ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
 }
 
 UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
+UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 );
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
-	: getLeader( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_GETLEADER) )
+	: getLeader( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_GETLEADER) ),
+    openDatabase( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_OPENDATABASE) )
 {
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 	getLeader.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination );
+	openDatabase.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_OPENDATABASE, TaskPriority::Coordination );
 }
 
 // Nominee is the worker among all workers that are considered as leader by a coordinator
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
-ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
-	state bool hasCounted = false;
+ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info ) {
 	loop {
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskPriority::CoordinationReply ) );
-		if (li.present() && !hasCounted && connectedCoordinatorsNum.isValid()) {
-			connectedCoordinatorsNum->set(connectedCoordinatorsNum->get() + 1);
-			hasCounted = true;
-		}
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
+		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Key", key.printable());
 
 		if (li != *info) {
 			*info = li;
@@ -453,14 +451,13 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 struct MonitorLeaderInfo {
 	bool hasConnected;
 	Reference<ClusterConnectionFile> intermediateConnFile;
-	int generation;
 
-	MonitorLeaderInfo() : hasConnected(false), generation(0) {}
-	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false), generation(0) {}
+	MonitorLeaderInfo() : hasConnected(false) {}
+	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
 };
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info,  Reference<AsyncVar<int>> connectedCoordinatorsNum) {
+ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info ) {
 	state ClientCoordinators coordinators( info.intermediateConnFile );
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -471,7 +468,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
 	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], info.generation, connectedCoordinatorsNum) );
+		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
 	allActors = waitForAll(actors);
 
 	loop {
@@ -502,15 +499,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	}
 }
 
-ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
+ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		// set the AsyncVar to 0
-		if (connectedCoordinatorsNum.isValid()) connectedCoordinatorsNum->set(0);
-		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info, connectedCoordinatorsNum) );
+		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info ) );
 		info = _info;
-		info.generation++;
-
 	}
 }
 
@@ -530,5 +523,144 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 				}
 			}
 		}
+	}
+}
+
+OpenDatabaseRequest ClientData::getRequest() {
+	OpenDatabaseRequest req;
+	req.knownClientInfoID = clientInfo->get().id;
+	return req;
+}
+
+ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader, ClientData* clientData ) {
+	while( !knownLeader->get().present() ) {
+		wait( knownLeader->onChange() );
+	}
+	
+	loop {
+		TraceEvent("SendMessageToCC", knownLeader->get().get().clientInterface.id()).detail("ClientID", clientData->clientInfo->get().id);
+		choose {
+			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( clientData->getRequest() ) ) ) ) {
+					TraceEvent("GotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
+				clientData->clientInfo->set(ni);
+			}
+			when( wait( knownLeader->onChange() ) ) {}
+		}
+	}
+}
+
+ACTOR Future<Void> monitorLeaderForProxies( Value serializedInfo, ClientData* clientData ) {
+	state vector< ClientLeaderRegInterface > clientLeaderServers;
+	state AsyncTrigger nomineeChange;
+	state std::vector<Optional<LeaderInfo>> nominees;
+	state Future<Void> allActors;
+	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(new AsyncVar<Optional<ClusterControllerClientInterface>>{});
+	state ClusterConnectionString cs(serializedInfo.toString());
+	try {
+		for(auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
+			clientLeaderServers.push_back( ClientLeaderRegInterface( *s ) );
+		}
+
+		nominees.resize(clientLeaderServers.size());
+
+		std::vector<Future<Void>> actors;
+		// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
+		for(int i=0; i<clientLeaderServers.size(); i++) {
+			TraceEvent("MonitorLeaderForProxiesMon").detail("Addr", clientLeaderServers[i].openDatabase.getEndpoint().getPrimaryAddress()).detail("Key", cs.clusterKey().printable());
+			actors.push_back( monitorNominee( cs.clusterKey(), clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
+		}
+		actors.push_back( getClientInfoFromLeader( knownLeader, clientData ) );
+		allActors = waitForAll(actors);
+
+		loop {
+			Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+			TraceEvent("MonitorLeaderForProxiesChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1)).detail("Key", cs.clusterKey().printable());
+			if (leader.present()) {
+				if( leader.get().first.forward ) {
+					ClientDBInfo outInfo;
+					outInfo.id = deterministicRandom()->randomUniqueID();
+					outInfo.forward = leader.get().first.serializedInfo;
+					clientData->clientInfo->set(outInfo);
+					TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", serializedInfo.toString());
+					return Void();
+				}
+
+				if (leader.get().first.serializedInfo.size()) {
+					if (g_network->useObjectSerializer()) {
+						ObjectReader reader(leader.get().first.serializedInfo.begin());
+						ClusterControllerClientInterface res;
+						reader.deserialize(res);
+						TraceEvent("MonitorLeaderForProxiesParse1", res.clientInterface.id()).detail("Key", cs.clusterKey().printable());
+						knownLeader->set(res);
+					} else {
+						ClusterControllerClientInterface res =  BinaryReader::fromStringRef<ClusterControllerClientInterface>( leader.get().first.serializedInfo, IncludeVersion() );
+						TraceEvent("MonitorLeaderForProxiesParse2", res.clientInterface.id()).detail("Key", cs.clusterKey().printable());
+						knownLeader->set(res);
+					}
+				}
+			}
+			wait( nomineeChange.onTrigger() || allActors );
+		}
+	} catch( Error &e ) {
+		TraceEvent("MonitorLeaderForProxiesError").error(e,true).detail("Key", cs.clusterKey().printable()).backtrace();
+		throw e;
+	}
+}
+
+// Leader is the process that will be elected by coordinators as the cluster controller
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info ) {
+	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = cs.coordinators();
+	state int idx = 0;
+	state int successIdx = 0;
+	deterministicRandom()->randomShuffle(addrs);
+	try {
+		loop {
+			state ClientLeaderRegInterface clientLeaderServer( addrs[idx] );
+			state OpenDatabaseCoordRequest req;
+			req.key = cs.clusterKey();
+			req.serializedInfo = info.intermediateConnFile->getConnectionString().toString();
+			req.knownClientInfoID = clientInfo->get().id;
+
+			TraceEvent("MPOG_Start").detail("Addr", addrs[idx]).detail("Key", cs.clusterKey().printable());
+			state ErrorOr<ClientDBInfo> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
+			TraceEvent("MPOG_Reply").detail("Addr", addrs[idx]).detail("Present", rep.present()).detail("Key", cs.clusterKey().printable()).detail("Proxy0", rep.present() && rep.get().proxies.size() ? rep.get().proxies[0].id() : UID());
+			if (rep.present()) {
+				if( rep.get().forward.present() ) {
+					TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+					info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(rep.get().forward.get().toString())));
+					return info;
+				}
+				if(connFile != info.intermediateConnFile) {
+					if(!info.hasConnected) {
+						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection").detail("Filename", connFile->getFilename())
+							.detail("ConnectionStringFromFile", connFile->getConnectionString().toString())
+							.detail("CurrentConnectionString", info.intermediateConnFile->getConnectionString().toString());
+					}
+					connFile->setConnectionString(info.intermediateConnFile->getConnectionString());
+					info.intermediateConnFile = connFile;
+				}
+
+				info.hasConnected = true;
+				connFile->notifyConnected();
+
+				clientInfo->set( rep.get() );
+				successIdx = idx;
+			} else if(idx == successIdx) {
+				wait(delay(1.0));
+			}
+			idx = (idx+1)%addrs.size();
+		}
+	} catch (Error &e) {
+		TraceEvent("MPOG_Error").error(e,true).detail("Key", cs.clusterKey().printable());
+		throw e;
+	}
+}
+
+ACTOR Future<Void> monitorProxies( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo ) {
+	state MonitorLeaderInfo info(connFile);
+	loop {
+		MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile, clientInfo, info ) );
+		info = _info;
 	}
 }
