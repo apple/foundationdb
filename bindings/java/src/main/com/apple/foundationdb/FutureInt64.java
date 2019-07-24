@@ -1,9 +1,9 @@
 /*
- * FutureVersion.java
+ * FutureInt64.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,16 +22,16 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-class FutureVersion extends NativeFuture<Long> {
-	FutureVersion(long cPtr, Executor executor) {
+class FutureInt64 extends NativeFuture<Long> {
+	FutureInt64(long cPtr, Executor executor) {
 		super(cPtr);
 		registerMarshalCallback(executor);
 	}
 
 	@Override
 	protected Long getIfDone_internal(long cPtr) throws FDBException {
-		return FutureVersion_get(cPtr);
+		return FutureInt64_get(cPtr);
 	}
 
-	private native long FutureVersion_get(long cPtr) throws FDBException;
+	private native long FutureInt64_get(long cPtr) throws FDBException;
 }

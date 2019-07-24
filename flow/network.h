@@ -74,6 +74,7 @@ enum class TaskPriority {
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
 	TLogSpilledPeekReply = 2800,
+	FetchKeys = 2500,
 	Low = 2000,
 
 	Min = 1000,
@@ -99,25 +100,36 @@ class Void;
 template<class T> class Optional;
 
 struct IPAddress {
-	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
-	// only the first 32bits are relevant and rest are initialized to
-	// 0.
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
 	              "IPAddressStore must be std::array<uint8_t, 16>");
 
+private:
+	struct IsV6Visitor : boost::static_visitor<> {
+		bool result = false;
+		void operator() (const IPAddressStore&) { result = true; }
+		void operator() (const uint32_t&) { result = false; }
+	};
+public:
+	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
+	// only the first 32bits are relevant and rest are initialized to
+	// 0.
 	IPAddress() : addr(uint32_t(0)) {}
 	explicit IPAddress(const IPAddressStore& v6addr) : addr(v6addr) {}
 	explicit IPAddress(uint32_t v4addr) : addr(v4addr) {}
 
-	bool isV6() const { return std::holds_alternative<IPAddressStore>(addr); }
+	bool isV6() const {
+		IsV6Visitor visitor;
+		boost::apply_visitor(visitor, addr);
+		return visitor.result;
+	}
 	bool isV4() const { return !isV6(); }
 	bool isValid() const;
 
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
-	uint32_t toV4() const { return std::get<uint32_t>(addr); }
-	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
+	uint32_t toV4() const { return boost::get<uint32_t>(addr); }
+	const IPAddressStore& toV6() const { return boost::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -158,7 +170,7 @@ struct IPAddress {
 	}
 
 private:
-	std::variant<uint32_t, IPAddressStore> addr;
+	boost::variant<uint32_t, IPAddressStore> addr;
 };
 
 template<>

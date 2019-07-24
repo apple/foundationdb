@@ -36,6 +36,7 @@
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -230,7 +231,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -249,7 +251,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -330,7 +333,9 @@
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled"
                ]
             },
             "issues":[

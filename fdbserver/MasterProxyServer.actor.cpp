@@ -18,34 +18,34 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbclient/SystemData.h"
-#include "fdbrpc/sim_validation.h"
-#include "fdbclient/Notified.h"
-#include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbclient/SystemData.h"
-#include "flow/Stats.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/Atomic.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Notified.h"
+#include "fdbclient/SystemData.h"
+#include "fdbrpc/sim_validation.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/ConflictSet.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Knobs.h"
+#include "flow/Stats.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -378,6 +378,12 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						continue;
 					}
 
+					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
+						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						    .suppressFor(1.0)
+						    .detail("Size", bytes)
+						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
+					}
 					++commitData->stats.txnCommitIn;
 
 					if(req.debugID.present()) {
@@ -986,7 +992,7 @@ ACTOR Future<Void> commitBatch(
 	bool firstMessage = true;
 	for(auto m : msg.messages) {
 		if(firstMessage) {
-			toCommit.addTag(txsTag);
+			toCommit.addTxsTag();
 		}
 		toCommit.addMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
@@ -1033,7 +1039,7 @@ ACTOR Future<Void> commitBatch(
 
 		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
-	self->logSystem->pop(msg.popTo, txsTag);
+	self->logSystem->popTxs(msg.popTo);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1505,7 +1511,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 
 			while(self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {
 				self->lastTxsPop = self->txsPopVersions.front().second;
-				self->logSystem->pop(self->txsPopVersions.front().second, txsTag, 0, tagLocalityRemoteLog);
+				self->logSystem->popTxs(self->txsPopVersions.front().second, tagLocalityRemoteLog);
 				self->txsPopVersions.pop_front();
 			}
 
@@ -1563,7 +1569,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
+	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
@@ -1595,7 +1601,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
-				commitData.logSystem->pop(commitData.lastTxsPop, txsTag, 0, tagLocalityRemoteLog);
+				commitData.logSystem->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
 			}
 
 			Optional<LatencyBandConfig> newLatencyBandConfig = commitData.db->get().latencyBandConfig;

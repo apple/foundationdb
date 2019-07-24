@@ -472,6 +472,7 @@ public:
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
+		Counter readsRejected;
 
 		LatencyBands readLatencyBands;
 
@@ -500,6 +501,7 @@ public:
 			fetchWaitingCount("FetchWaitingCount", cc),
 			fetchExecutingMS("FetchExecutingMS", cc),
 			fetchExecutingCount("FetchExecutingCount", cc),
+			readsRejected("ReadsRejected", cc),
 			readLatencyBands("ReadLatencyMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
@@ -508,7 +510,7 @@ public:
 			specialCounter(cc, "DurableVersion", [self](){ return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self](){ return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
-			specialCounter(cc, "LocalRatekeeper", [self]{ return self->currentRate(); });
+			specialCounter(cc, "LocalRate", [self]{ return self->currentRate() * 100; });
 
 			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
@@ -646,6 +648,7 @@ public:
 		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE, rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
 			//request.error = future_version();
 			sendErrorWithPenalty(request.reply, server_overloaded(), getPenalty());
+			++counters.readsRejected;
 			return Void();
 		}
 		return fun(this, request);
@@ -677,7 +680,7 @@ bool validateRange( StorageServer::VersionedData::ViewAtVersion const& view, Key
 	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
 	// * Old mutations are erased: All items in versionedData.atLatest() have insertVersion() > durableVersion()
 
-	TraceEvent("ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
+	//TraceEvent("ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
 	KeyRef k;
 	bool ok = true;
 	bool kIsClear = false;
@@ -1028,7 +1031,7 @@ ACTOR Future<Void> getShardStateQ( StorageServer* data, GetShardStateRequest req
 	return Void();
 }
 
-void merge( Arena& arena, VectorRef<KeyValueRef>& output, VectorRef<KeyValueRef> const& base,
+void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output, VectorRef<KeyValueRef> const& base,
 	        StorageServer::VersionedData::iterator& start, StorageServer::VersionedData::iterator const& end,
 			int versionedDataCount, int limit, bool stopAtEndOfBase, int limitBytes = 1<<30 )
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
@@ -1345,7 +1348,14 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, TaskPriority::DefaultEndpoint) );
+	TaskPriority taskType = TaskPriority::DefaultEndpoint;
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
+		taskType = TaskPriority::FetchKeys;
+	// } else if (false) {
+	// 	// Placeholder for up-prioritizing fetches for important requests
+	// 	taskType = TaskPriority::DefaultDelay;
+	}
+	wait( delay(0, taskType) );
 
 	try {
 		if( req.debugID.present() )
@@ -1837,6 +1847,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 
 	ASSERT(!cx->switchable);
 	tr.setVersion( version );
+	tr.info.taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
 
 	try {
@@ -3147,8 +3158,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	data->byteSampleRecovery = restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
-	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality) ) );
-	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fShardAssigned, fShardAvailable) ) );
+	wait( waitForAll( std::vector{ fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality } ) );
+	wait( waitForAll( std::vector{ fShardAssigned, fShardAvailable } ) );
 	wait( byteSampleSampleRecovered.getFuture() );
 	TraceEvent("RestoringDurableState", data->thisServerID);
 

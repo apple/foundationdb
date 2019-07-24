@@ -1973,6 +1973,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
 
+			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
 			if( reverse && (begin-1).isDefinitelyLess(shard.begin) &&
@@ -2937,7 +2938,7 @@ Future<Void> Transaction::commitMutations() {
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
 
-		size_t transactionSize = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() + tr.transaction.write_conflict_ranges.expectedSize();
+		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
 				.suppressFor(1.0)
@@ -3107,6 +3108,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			else {
 				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
+				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
 			break;
 
@@ -3118,6 +3120,20 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			else {
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before logging the transaction");
 				throw client_invalid_operation();
+			}
+			break;
+
+		case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
+			validateOptionValue(value, true);
+			{
+				int maxFieldLength = extractIntOption(value, -1, std::numeric_limits<int32_t>::max());
+				if(maxFieldLength == 0) {
+					throw invalid_option_value();
+				}
+				options.maxTransactionLoggingFieldLength = maxFieldLength;
+			}
+			if(trLogInfo) {
+				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
 			break;
 
@@ -3248,12 +3264,12 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion) {
+ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion) {
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion(startTime, latency));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, flags & GetReadVersionRequest::FLAG_PRIORITY_MASK));
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
@@ -3278,7 +3294,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion);
+		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion);
 	}
 	return readVersion;
 }
@@ -3288,6 +3304,12 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 		return transaction_invalid_version();
 	}
 	return versionstampPromise.getFuture();
+}
+
+uint32_t Transaction::getSize() {
+	auto s = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
+	       tr.transaction.write_conflict_ranges.expectedSize();
+	return s;
 }
 
 Future<Void> Transaction::onError( Error const& e ) {

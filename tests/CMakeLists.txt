@@ -43,6 +43,7 @@ add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
 add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
 add_fdb_test(TEST_FILES BlobStore.txt IGNORE)
 add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
+add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
 add_fdb_test(TEST_FILES DiskDurability.txt IGNORE)
 add_fdb_test(TEST_FILES FileSystem.txt IGNORE)
 add_fdb_test(TEST_FILES Happy.txt IGNORE)
@@ -156,9 +157,6 @@ add_fdb_test(
 add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
-add_fdb_test(
-  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-             restarting/from_6.2.0/SnapTestAttrition-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
              restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)

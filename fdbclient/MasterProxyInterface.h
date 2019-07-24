@@ -165,6 +165,8 @@ struct GetReadVersionReply : public ProxyForwardReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
+	GetReadVersionReply() : version(invalidVersion), locked(false) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, *(ProxyForwardReply*)this, version, locked, metadataVersion);

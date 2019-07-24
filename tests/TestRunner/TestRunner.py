@@ -268,12 +268,20 @@ def run_simulation_test(basedir, options):
     fdbserver = os.path.join(basedir, 'bin', 'fdbserver')
     pargs = [fdbserver,
              '-r', options.testtype]
+    seed = 0
+    if options.seed is not None:
+        pargs.append('-s')
+        seed = int(options.seed, 0)
+        if options.test_number:
+            idx = int(options.test_number)
+            seed = ((seed + idx) % (2**32-2)) + 1
+        pargs.append("{}".format(seed))
     if options.testtype == 'test':
         pargs.append('-C')
         pargs.append(os.path.join(args.builddir, 'fdb.cluster'))
     else:
         pargs.append('-S')
-        pargs.append('off')
+        pargs.append('on' if seed % 2 == 0 else 'off')
     td = TestDirectory(basedir)
     if options.buggify:
         pargs.append('-b')
@@ -282,12 +290,10 @@ def run_simulation_test(basedir, options):
     pargs.append(options.log_format)
     test_dir = td.get_current_test_dir()
     if options.seed is not None:
-        pargs.append('-s')
         seed = int(options.seed, 0)
         if options.test_number:
             idx = int(options.test_number)
             seed = ((seed + idx) % (2**32-2)) + 1
-        pargs.append("{}".format(seed))
     wd = os.path.join(test_dir,
                       'test_{}'.format(options.name.replace('/', '_')))
     os.mkdir(wd)
@@ -295,14 +301,24 @@ def run_simulation_test(basedir, options):
     first = True
     for testfile in options.testfile:
         tmp = list(pargs)
+        # old_binary is not under test, so don't run under valgrind
+        valgrind_args = []
         if first and options.old_binary is not None and len(options.testfile) > 1:
             _logger.info("Run old binary at {}".format(options.old_binary))
             tmp[0] = options.old_binary
+        elif options.use_valgrind:
+            valgrind_args = ['valgrind', '--error-exitcode=99', '--']
         if not first:
             tmp.append('-R')
+            if seed is not None:
+                seed = ((seed + 1) % (2**32-2))
         first = False
+        if seed is not None:
+            tmp.append('-s')
+            tmp.append("{}".format(seed))
         tmp.append('-f')
         tmp.append(testfile)
+        tmp = valgrind_args + tmp
         command = ' '.join(tmp)
         _logger.info("COMMAND: {}".format(command))
         proc = subprocess.Popen(tmp,
@@ -311,23 +327,24 @@ def run_simulation_test(basedir, options):
                                 cwd=wd)
         proc.wait()
         return_codes[command] = proc.returncode
-        if proc.returncode != 0:
-            break
-    outfile = os.path.join(test_dir, 'traces.{}'.format(options.log_format))
-    res = True
-    if options.aggregate_traces == 'NONE':
-        res = process_traces(basedir, options.name,
-                             wd, None, 'NONE', options.symbolicate,
-                             options.log_format, return_codes, options.seed)
-    else:
-        with open(outfile, 'a') as f:
-            os.lockf(f.fileno(), os.F_LOCK, 0)
-            pos = f.tell()
+        outfile = os.path.join(test_dir, 'traces.{}'.format(options.log_format))
+        res = True
+        if options.aggregate_traces == 'NONE':
             res = process_traces(basedir, options.name,
-                                 wd, f, options.aggregate_traces, options.symbolicate,
+                                 wd, None, 'NONE', options.symbolicate,
                                  options.log_format, return_codes, options.seed)
-            f.seek(pos)
-            os.lockf(f.fileno(), os.F_ULOCK, 0)
+
+        else:
+            with open(outfile, 'a') as f:
+                os.lockf(f.fileno(), os.F_LOCK, 0)
+                pos = f.tell()
+                res = process_traces(basedir, options.name,
+                                     wd, f, options.aggregate_traces, options.symbolicate,
+                                     options.log_format, return_codes, options.seed)
+                f.seek(pos)
+                os.lockf(f.fileno(), os.F_ULOCK, 0)
+        if proc.returncode != 0 or res == False:
+            break
     if options.keep_logs == 'NONE' or options.keep_logs == 'FAILED' and res:
         print("Deleting old logs in {}".format(wd))
         traces = get_traces(wd, options.log_format)
@@ -377,6 +394,8 @@ if __name__ == '__main__':
     parser.add_argument('--keep-simdirs', default='NONE',
                         choices=['NONE', 'FAILED', 'ALL'])
     parser.add_argument('testfile', nargs="+", help='The tests to run')
+    parser.add_argument('--use-valgrind', action='store_true', default=False,
+                        help='Run under valgrind')
     args = parser.parse_args()
     init_logging(args.loglevel, args.logdir)
     basedir = os.getcwd()

@@ -316,19 +316,19 @@ Single datacenter modes
 +==============================+==+=================+=================+================+
 | Best for                     |  | 1-2 machines    | 3-4 machines    | 5+ machines    | 
 +------------------------------+--+-----------------+-----------------+----------------+
-| Replication                  |  | 1 copy          | 2 copy          | 3 copy         |
+| Total Replicas               |  | 1 copy          | 2 copies        | 3 copies       |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # live machines              |  |                 |                 |                |
+| Live machines required       |  |                 |                 |                |
 | to make progress             |  | 1               | 2               | 3              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Minimum # of machines        |  |                 |                 |                |
+| Required machines            |  |                 |                 |                |
 | for fault tolerance          |  | impossible      | 3               | 4              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Ideal # of                   |  |                 |                 |                |
+| Ideal number of              |  |                 |                 |                |
 | coordination servers         |  | 1               | 3               | 5              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # simultaneous failures      |  |                 |                 |                |
-| after which data may be lost |  | any machine     | 2+ machines     | 3+ machines    |
+| Simultaneous failures        |  |                 |                 |                |
+| after which data may be lost |  | any process     | 2+ machines     | 3+ machines    |
 +------------------------------+--+-----------------+-----------------+----------------+
 
 In the three single datacenter redundancy modes, FoundationDB replicates data across the required number of machines in the cluster, but without aiming for datacenter redundancy. Although machines may be placed in more than one datacenter, the cluster will not be tolerant of datacenter-correlated failures. 

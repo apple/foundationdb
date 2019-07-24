@@ -22,7 +22,7 @@ import fdb
 import sys
 
 if __name__ == '__main__':
-    fdb.api_version(610)
+    fdb.api_version(620)
 
 @fdb.transactional
 def setValue(tr, key, value):
@@ -34,8 +34,6 @@ def setValueWithLimit(tr, key, value, limit):
     tr[key] = value
 
 def test_size_limit_option(db):
-    db.options.set_transaction_timeout(2000)  # 2 seconds
-    db.options.set_transaction_retry_limit(3)
     value = b'a' * 1024
 
     setValue(db, b't1', value)
@@ -68,9 +66,33 @@ def test_size_limit_option(db):
     except fdb.FDBError as e:
         assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
 
+@fdb.transactional
+def test_get_approximate_size(tr):
+    tr[b'key1'] = b'value1'
+    s1 = tr.get_approximate_size().wait()
+
+    tr[b'key2'] = b'value2'
+    s2 = tr.get_approximate_size().wait()
+    assert(s1 < s2)
+
+    tr.clear(b'key3')
+    s3 = tr.get_approximate_size().wait()
+    assert(s2 < s3)
+
+    tr.add_read_conflict_key(b'key3+')
+    s4 = tr.get_approximate_size().wait()
+    assert(s3 < s4)
+
+    tr.add_write_conflict_key(b'key4')
+    s5 = tr.get_approximate_size().wait()
+    assert(s4 < s5)
+
 # Expect a cluster file as input. This test will write to the FDB cluster, so
 # be aware of potential side effects.
 if __name__ == '__main__':
     clusterFile = sys.argv[1]
     db = fdb.open(clusterFile)
+    db.options.set_transaction_timeout(2000)  # 2 seconds
+    db.options.set_transaction_retry_limit(3)
     test_size_limit_option(db)
+    test_get_approximate_size(db)
