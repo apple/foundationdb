@@ -41,6 +41,8 @@ public:
 	double FAILURE_EMERGENCY_DELAY;
 	double FAILURE_MAX_GENERATIONS;
 
+	double COORDINATOR_RECONNECTION_DELAY;
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;

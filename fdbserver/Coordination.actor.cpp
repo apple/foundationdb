@@ -209,38 +209,31 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	try {
-		if(db->clientInfo->get().id != req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
-			TraceEvent("OpenDatabaseCoordReply").detail("Forward", db->clientInfo->get().forward.present()).detail("Key", req.key.printable());
-			req.reply.send( db->clientInfo->get() );
-			return Void();
-		}
-		++(*clientCount);
-		hasConnectedClients->set(true);
-		
-		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup.toString(), req.supportedVersions, req.issues);
-
-		TraceEvent("OpenDatabaseCoordWait").detail("Key", req.key.printable());
-		while (db->clientInfo->get().id == req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
-			choose {
-				when (wait( db->clientInfo->onChange() )) {}
-				when (wait( delayJittered( 300 ) )) { break; }  // The client might be long gone!
-			}
-		}
-
-		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
-
+	if(db->clientInfo->get().id != req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
 		req.reply.send( db->clientInfo->get() );
-
-		if(--(*clientCount) == 0) {
-			hasConnectedClients->set(false);
-		}
-		TraceEvent("OpenDatabaseCoordReply").detail("Forward", db->clientInfo->get().forward.present()).detail("Key", req.key.printable()).detail("Proxy0", db->clientInfo->get().proxies.size() ? db->clientInfo->get().proxies[0].id() : UID());
 		return Void();
-	} catch( Error &e ) {
-		TraceEvent("OpenDatabaseCoordError").error(e,true).detail("Key", req.key.printable());
-		throw;
 	}
+	++(*clientCount);
+	hasConnectedClients->set(true);
+	
+	db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup.toString(), req.supportedVersions, req.issues);
+
+	while (db->clientInfo->get().id == req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
+		choose {
+			when (wait( db->clientInfo->onChange() )) {}
+			when (wait( delayJittered( 300 ) )) { break; }  // The client might be long gone!
+		}
+	}
+
+	db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+
+	req.reply.send( db->clientInfo->get() );
+
+	if(--(*clientCount) == 0) {
+		hasConnectedClients->set(false);
+	}
+
+	return Void();
 }
 
 // This actor implements a *single* leader-election register (essentially, it ignores
@@ -261,134 +254,129 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state ActorCollection actors(false);
 	state Future<Void> leaderMon;
 
-	try {
-		loop choose {
-			when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
-				if(!leaderMon.isValid()) {
-					leaderMon = monitorLeaderForProxies(req.serializedInfo, &clientData);
-				}
-				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+	loop choose {
+		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
+			if(!leaderMon.isValid()) {
+				leaderMon = monitorLeaderForProxies(req.serializedInfo, &clientData);
 			}
-			when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
-				if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
-					req.reply.send( currentNominee.get() );
-				} else {
-					notify.push_back( req.reply );
-					if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-						TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-						for (uint32_t i=0; i<notify.size(); i++)
-							notify[i].send( currentNominee.get() );
-						notify.clear();
-					} else if(!nextInterval.isValid()) {
-						nextInterval = delay(0);
-					}
-				}
-			}
-			when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
-				if(!nextInterval.isValid()) {
+			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+		}
+		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
+			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
+				req.reply.send( currentNominee.get() );
+			} else {
+				notify.push_back( req.reply );
+				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+					for (uint32_t i=0; i<notify.size(); i++)
+						notify[i].send( currentNominee.get() );
+					notify.clear();
+				} else if(!nextInterval.isValid()) {
 					nextInterval = delay(0);
 				}
-				//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
-				availableCandidates.erase( LeaderInfo(req.prevChangeID) );
-				availableCandidates.insert( req.myInfo );
-				if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
-					req.reply.send( currentNominee.get() );
+			}
+		}
+		when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
+			if(!nextInterval.isValid()) {
+				nextInterval = delay(0);
+			}
+			//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
+			availableCandidates.erase( LeaderInfo(req.prevChangeID) );
+			availableCandidates.insert( req.myInfo );
+			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
+				req.reply.send( currentNominee.get() );
+			} else {
+				notify.push_back( req.reply );
+				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+					for (uint32_t i=0; i<notify.size(); i++)
+						notify[i].send( currentNominee.get() );
+					notify.clear();
+				}
+			}
+		}
+		when (LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
+			if(!nextInterval.isValid()) {
+				nextInterval = delay(0);
+			}
+			//TODO: use notify to only send a heartbeat once per interval
+			availableLeaders.erase( LeaderInfo(req.prevChangeID) );
+			availableLeaders.insert( req.myInfo );
+			req.reply.send( currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) );
+		}
+		when (ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
+			LeaderInfo newInfo;
+			newInfo.forward = true;
+			newInfo.serializedInfo = req.conn.toString();
+			for(unsigned int i=0; i<notify.size(); i++)
+				notify[i].send( newInfo );
+			notify.clear();
+			ClientDBInfo outInfo;
+			outInfo.id = deterministicRandom()->randomUniqueID();
+			outInfo.forward = req.conn.toString();
+			clientData.clientInfo->set(outInfo);
+			req.reply.send( Void() );
+			ASSERT(!hasConnectedClients->get());
+			return Void();
+		}
+		when ( wait(nextInterval.isValid() ? nextInterval : Never()) ) {
+			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
+				!currentNominee.present())
+			{
+				// Our state is back to the initial state, so we can safely stop this actor
+				TraceEvent("EndingLeaderNomination").detail("Key", key).detail("HasConnectedClients", hasConnectedClients->get());
+				if(!hasConnectedClients->get()) {
+					return Void();
 				} else {
-					notify.push_back( req.reply );
-					if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-						TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-						for (uint32_t i=0; i<notify.size(); i++)
-							notify[i].send( currentNominee.get() );
-						notify.clear();
+					nextInterval = Future<Void>();
+				}
+			} else {
+				Optional<LeaderInfo> nextNominee;
+				if( availableCandidates.size() && (!availableLeaders.size() || availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin())) ) {
+					nextNominee = *availableCandidates.begin();
+				} else if( availableLeaders.size() ) {
+					nextNominee = *availableLeaders.begin();
+				}
+
+				if( !currentNominee.present() || !nextNominee.present() || !currentNominee.get().equalInternalId(nextNominee.get()) || nextNominee.get() > currentNominee.get() ) {
+					TraceEvent("NominatingLeader").detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
+					.detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID()).detail("Key", printable(key));
+					for(unsigned int i=0; i<notify.size(); i++)
+						notify[i].send( nextNominee );
+					notify.clear();
+				}
+
+				currentNominee = nextNominee;
+
+				if( availableLeaders.size() ) {
+					nextInterval = delay( SERVER_KNOBS->POLLING_FREQUENCY );
+					if(leaderIntervalCount++ > 5) {
+						candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 					}
+				} else {
+					nextInterval = delay( candidateDelay );
+					candidateDelay = std::min(SERVER_KNOBS->CANDIDATE_MAX_DELAY, candidateDelay * SERVER_KNOBS->CANDIDATE_GROWTH_RATE);
+					leaderIntervalCount = 0;
 				}
+
+				availableLeaders.clear();
+				availableCandidates.clear();
 			}
-			when (LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
-				if(!nextInterval.isValid()) {
-					nextInterval = delay(0);
-				}
-				//TODO: use notify to only send a heartbeat once per interval
-				availableLeaders.erase( LeaderInfo(req.prevChangeID) );
-				availableLeaders.insert( req.myInfo );
-				req.reply.send( currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) );
+		}
+		when( wait(notifyCheck) ) {
+			notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
+			if(!notify.empty() && currentNominee.present()) {
+				notify.front().send( currentNominee.get() );
+				notify.pop_front();
 			}
-			when (ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
-				LeaderInfo newInfo;
-				newInfo.forward = true;
-				newInfo.serializedInfo = req.conn.toString();
-				for(unsigned int i=0; i<notify.size(); i++)
-					notify[i].send( newInfo );
-				notify.clear();
-				ClientDBInfo outInfo;
-				outInfo.id = deterministicRandom()->randomUniqueID();
-				outInfo.forward = req.conn.toString();
-				clientData.clientInfo->set(outInfo);
-				req.reply.send( Void() );
-				ASSERT(!hasConnectedClients->get());
+		}
+		when( wait(hasConnectedClients->onChange()) ) {
+			if(!hasConnectedClients->get() && !nextInterval.isValid()) {
+				TraceEvent("LeaderRegisterUnneeded").detail("Key", key);
 				return Void();
 			}
-			when ( wait(nextInterval.isValid() ? nextInterval : Never()) ) {
-				if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
-					!currentNominee.present())
-				{
-					// Our state is back to the initial state, so we can safely stop this actor
-					TraceEvent("EndingLeaderNomination").detail("Key", key).detail("HasConnectedClients", hasConnectedClients->get());
-					if(!hasConnectedClients->get()) {
-						return Void();
-					} else {
-						nextInterval = Future<Void>();
-					}
-				} else {
-					Optional<LeaderInfo> nextNominee;
-					if( availableCandidates.size() && (!availableLeaders.size() || availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin())) ) {
-						nextNominee = *availableCandidates.begin();
-					} else if( availableLeaders.size() ) {
-						nextNominee = *availableLeaders.begin();
-					}
-
-					if( !currentNominee.present() || !nextNominee.present() || !currentNominee.get().equalInternalId(nextNominee.get()) || nextNominee.get() > currentNominee.get() ) {
-						TraceEvent("NominatingLeader").detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
-						.detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID()).detail("Key", printable(key));
-						for(unsigned int i=0; i<notify.size(); i++)
-							notify[i].send( nextNominee );
-						notify.clear();
-					}
-
-					currentNominee = nextNominee;
-
-					if( availableLeaders.size() ) {
-						nextInterval = delay( SERVER_KNOBS->POLLING_FREQUENCY );
-						if(leaderIntervalCount++ > 5) {
-							candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
-						}
-					} else {
-						nextInterval = delay( candidateDelay );
-						candidateDelay = std::min(SERVER_KNOBS->CANDIDATE_MAX_DELAY, candidateDelay * SERVER_KNOBS->CANDIDATE_GROWTH_RATE);
-						leaderIntervalCount = 0;
-					}
-
-					availableLeaders.clear();
-					availableCandidates.clear();
-				}
-			}
-			when( wait(notifyCheck) ) {
-				notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
-				if(!notify.empty() && currentNominee.present()) {
-					notify.front().send( currentNominee.get() );
-					notify.pop_front();
-				}
-			}
-			when( wait(hasConnectedClients->onChange()) ) {
-				if(!hasConnectedClients->get() && !nextInterval.isValid()) {
-					TraceEvent("LeaderRegisterUnneeded").detail("Key", key);
-					return Void();
-				}
-			}
-			when( wait(actors.getResult()) ) {}
 		}
-	} catch (Error &e ) {
-		TraceEvent("LeaderRegisterError").error(e,true);
-		throw e;
+		when( wait(actors.getResult()) ) {}
 	}
 }
 
@@ -485,7 +473,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			TraceEvent("OpenDatabaseCoordReq").detail("Forward", forward.present()).detail("Key", req.key.printable());
 			if( forward.present() ) {
 				ClientDBInfo info;
 				info.forward = forward.get().serializedInfo;

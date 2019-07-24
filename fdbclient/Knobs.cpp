@@ -42,6 +42,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
 
+	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
