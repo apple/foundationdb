@@ -208,14 +208,16 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	return Void();
 }
 
-ACTOR Future<Void> openDatabase(ClientData* db, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
+ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
 	try {
 		if(db->clientInfo->get().id != req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
 			TraceEvent("OpenDatabaseCoordReply").detail("Forward", db->clientInfo->get().forward.present()).detail("Key", req.key.printable());
 			req.reply.send( db->clientInfo->get() );
 			return Void();
 		}
+		++(*clientCount);
 		hasConnectedClients->set(true);
+		
 		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup.toString(), req.supportedVersions, req.issues);
 
 		TraceEvent("OpenDatabaseCoordWait").detail("Key", req.key.printable());
@@ -229,7 +231,8 @@ ACTOR Future<Void> openDatabase(ClientData* db, Reference<AsyncVar<bool>> hasCon
 		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 
 		req.reply.send( db->clientInfo->get() );
-		if(!db->clientStatusInfoMap.size()) {
+
+		if(--(*clientCount) == 0) {
 			hasConnectedClients->set(false);
 		}
 		TraceEvent("OpenDatabaseCoordReply").detail("Forward", db->clientInfo->get().forward.present()).detail("Key", req.key.printable()).detail("Proxy0", db->clientInfo->get().proxies.size() ? db->clientInfo->get().proxies[0].id() : UID());
@@ -253,6 +256,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state int leaderIntervalCount = 0;
 	state Future<Void> notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
 	state ClientData clientData;
+	state int clientCount = 0;
 	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	state ActorCollection actors(false);
 	state Future<Void> leaderMon;
@@ -263,7 +267,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				if(!leaderMon.isValid()) {
 					leaderMon = monitorLeaderForProxies(req.serializedInfo, &clientData);
 				}
-				actors.add(openDatabase(&clientData, hasConnectedClients, req));
+				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 			}
 			when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 				if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
@@ -315,11 +319,13 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				for(unsigned int i=0; i<notify.size(); i++)
 					notify[i].send( newInfo );
 				notify.clear();
+				ClientDBInfo outInfo;
+				outInfo.id = deterministicRandom()->randomUniqueID();
+				outInfo.forward = req.conn.toString();
+				clientData.clientInfo->set(outInfo);
 				req.reply.send( Void() );
-				TraceEvent("EndingLeaderNomination2").detail("Key", key).detail("HasConnectedClients", hasConnectedClients->get());
-				if(!hasConnectedClients->get()) {
-					return Void();
-				}
+				ASSERT(!hasConnectedClients->get());
+				return Void();
 			}
 			when ( wait(nextInterval.isValid() ? nextInterval : Never()) ) {
 				if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
