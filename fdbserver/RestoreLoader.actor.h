@@ -62,7 +62,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		role = RestoreRole::Loader;
 	}
 
-	~RestoreLoaderData() {} = default;
+	~RestoreLoaderData() = default;
 
 	std::string describeNode() {
 		std::stringstream ss;
@@ -101,7 +101,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 };
 
 
-ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreLoaderInterface loaderInterf, Database cx);
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif

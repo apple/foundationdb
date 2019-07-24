@@ -36,6 +36,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreWorker.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -57,10 +58,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
-	// Temporary variables to hold files and data to restore
-	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
-	std::vector<RestoreFileFR> files; // Backup files to be parsed and applied: range and log files in 1 version batch
-
 	int batchIndex;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
@@ -81,7 +78,8 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		return ss.str();
 	}
 
-	void buildVersionBatches() {
+	// Split allFiles into multiple versionBatches based on files' version
+	void buildVersionBatches(const std::vector<RestoreFileFR>& allFiles, std::map<Version, VersionBatch>& versionBatches) {
 		// A version batch includes a log file 
 		// Because log file's verion range does not overlap, we use log file's version range as the version range of a version batch
 		// Create a version batch for a log file
@@ -133,7 +131,8 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
-	void constructFilesWithVersionRange() {
+	// Parse file's name to get beginVersion and endVersion of the file; and assign files to allFiles
+	void constructFilesWithVersionRange(std::vector<RestoreFileFR> &files, std::vector<RestoreFileFR>& allFiles) {
 		printf("[INFO] constructFilesWithVersionRange for num_files:%ld\n", files.size());
 		allFiles.clear();
 		for (int i = 0; i <  files.size(); i++) {
@@ -176,7 +175,7 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 	}
 };
 
-ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx);
+ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif

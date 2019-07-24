@@ -37,7 +37,9 @@
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx);
 
-ACTOR Future<Void> restoreApplierCore(Reference<RestoreApplierData> self, RestoreApplierInterface applierInterf, Database cx) {
+ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
+	state Reference<RestoreApplierData> self = Reference<RestoreApplierData>( new RestoreApplierData(applierInterf.id(), nodeIndex) );
+
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
 	state double lastLoopTopTime;

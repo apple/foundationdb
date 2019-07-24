@@ -206,7 +206,10 @@
     <ActorCompiler Include="RestoreRoleCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-     <ActorCompiler Include="RestoreMaster.actor.h">
+    <ActorCompiler Include="RestoreWorker.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreMaster.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="RestoreLoader.actor.h">

@@ -32,9 +32,10 @@ bool isRangeMutation(MutationRef m);
 void splitMutation(Reference<RestoreLoaderData> self,  MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) ;
 void _parseSerializedMutation(VersionedMutationsMap *kvOps, SerializedMutationListMap *mutationMap, bool isSampling = false);
 
+ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, bool isSampling = false);
-ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap *kvOps, bool isRangeFile, Version startVersion, Version endVersion);
+ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap *kvOps, bool isRangeFile, Version startVersion, Version endVersion);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(SerializedMutationListMap *mutationMap,
 									std::map<Standalone<StringRef>, uint32_t> *mutationPartMap,
  									Reference<IBackupContainer> bc, Version version,
@@ -46,7 +47,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 									std::string fileName, int64_t readOffset_input, int64_t readLen_input,KeyRange restoreRange);	
 
 
-ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreLoaderInterface loaderInterf, Database cx) {
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx) {
+	state Reference<RestoreLoaderData> self = Reference<RestoreLoaderData>( new RestoreLoaderData(loaderInterf.id(), nodeIndex) );
+
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
 	state double lastLoopTopTime;
@@ -66,6 +69,10 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 				when ( RestoreSimpleRequest req = waitNext(loaderInterf.heartbeat.getFuture()) ) {
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, loaderInterf.id()));
+				}
+				when ( RestoreSysInfoRequest req = waitNext(loaderInterf.updateRestoreSysInfo.getFuture()) ) {
+					requestTypeStr = "updateRestoreSysInfo";
+					actors.add( handleRestoreSysInfoRequest(req, self) );
 				}
 				when ( RestoreSetApplierKeyRangeVectorRequest req = waitNext(loaderInterf.setApplierKeyRangeVectorRequest.getFuture()) ) {
 					requestTypeStr = "setApplierKeyRangeVectorRequest";
@@ -97,6 +104,24 @@ ACTOR Future<Void> restoreLoaderCore(Reference<RestoreLoaderData> self, RestoreL
 
 	return Void();
 }
+
+// Assume: Only update the local data if it (applierInterf) has not been set
+ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self) {
+	TraceEvent("FastRestore").detail("HandleRestoreSysInfoRequest", self->id());
+	ASSERT(self.isValid());
+	
+	// The loader has received the appliers interfaces
+	if ( !self->appliersInterf.empty() ) {
+		req.reply.send(RestoreCommonReply(self->id()));
+		return Void();
+	}
+
+	self->appliersInterf = req.sysInfo.appliers;
+	
+	req.reply.send(RestoreCommonReply(self->id()) );
+	return Void();
+}
+
 
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req, Reference<RestoreLoaderData> self) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
@@ -139,7 +164,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		_parseSerializedMutation(&kvOps, &mutationMap);
 	}
 	
-	wait( registerMutationsToApplier(self, &kvOps, param.isRangeFile, param.prevVersion, param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
+	wait( sendMutationsToApplier(self, &kvOps, param.isRangeFile, param.prevVersion, param.endVersion) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
 	TraceEvent("FastRestore").detail("Loader", self->id()).detail("FinishLoadingFile", param.filename);
 	
@@ -160,14 +185,14 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 }
 
 // TODO: This function can be revised better
-ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
+ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self,
 									VersionedMutationsMap *pkvOps,
 									bool isRangeFile, Version startVersion, Version endVersion) {
     state VersionedMutationsMap &kvOps = *pkvOps;
 	state int kvCount = 0;
 	state int splitMutationIndex = 0;
 
-	TraceEvent("FastRestore").detail("RegisterMutationToApplier", self->id()).detail("IsRangeFile", isRangeFile)
+	TraceEvent("FastRestore").detail("SendMutationToApplier", self->id()).detail("IsRangeFile", isRangeFile)
 			.detail("StartVersion", startVersion).detail("EndVersion", endVersion);
 
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
@@ -233,7 +258,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
 			}
 		} // Mutations at the same version
 
-		// Register the mutations to appliers for each version
+		// Send the mutations to appliers for each version
 		for (auto &applierID : applierIDs) {
 			requests.push_back( std::make_pair(applierID, RestoreSendMutationVectorVersionedRequest(prevVersion, commitVersion, isRangeFile, applierMutationsBuffer[applierID])) );
 			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
@@ -245,7 +270,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreLoaderData> self,
 		prevVersion = commitVersion;
 	} // all versions of mutations
 
-	TraceEvent("FastRestore").detail("LoaderRegisterMutationOnAppliers", kvCount);
+	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
 	return Void();
 }
 
@@ -433,7 +458,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
  	while(rangeStart < rangeEnd && !restoreRange.contains(blockData[rangeStart].key)) {
 		++rangeStart;
 	}
- 	// Side end backwaself, stop if something at (rangeEnd-1) is found in range
+ 	// Side end from back, stop if something at (rangeEnd-1) is found in range
  	while(rangeEnd > rangeStart && !restoreRange.contains(blockData[rangeEnd - 1].key)) {
 		--rangeEnd;
 	}

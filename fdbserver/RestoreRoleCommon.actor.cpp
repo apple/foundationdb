@@ -37,7 +37,7 @@ struct RestoreWorkerData;
 // id is the id of the worker to be monitored	
 // This actor is used for both restore loader and restore applier
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
-	wait( delay(g_random->random01() + 0.01) ); // Random jitter reduces heat beat monitor's pressure
+	wait( delayJittered(5.0) ); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id));
 
 	return Void();

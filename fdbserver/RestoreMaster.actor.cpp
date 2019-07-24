@@ -36,10 +36,14 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR static Future<Void> _clearDB(Database cx);
-ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
+ACTOR static Future<Void> _collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* output_files, Database cx, RestoreRequest request);
+
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx);
+ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx, RestoreRequest request, VersionBatch versionBatch);
 
+ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker, Reference<RestoreMasterData> masterData);
+ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterWorker, Reference<RestoreMasterData> masterData);
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
@@ -48,6 +52,80 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterD
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
 void dummySampleWorkload(Reference<RestoreMasterData> self);
+
+
+ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
+	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
+
+	// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
+	wait( recruitRestoreRoles(masterWorker, self) );
+
+	wait( distributeRestoreSysInfo(masterWorker, self) );
+
+	wait( startProcessRestoreRequests(self, cx) );
+
+	return Void();
+}
+
+// RestoreWorker that has restore master role: Recruite a role for each worker
+ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker, Reference<RestoreMasterData> masterData)  {
+	TraceEvent("FastRestore").detail("RecruitRestoreRoles", masterWorker->workerInterfaces.size())
+			.detail("NumLoaders", opConfig.num_loaders).detail("NumAppliers", opConfig.num_appliers);
+
+	ASSERT( masterData.isValid() );
+	ASSERT( opConfig.num_loaders > 0 && opConfig.num_appliers > 0 );
+	ASSERT( opConfig.num_loaders + opConfig.num_appliers <= masterWorker->workerInterfaces.size() ); // We assign 1 role per worker for now
+	
+	// Assign a role to each worker
+	state int nodeIndex = 0;
+	state RestoreRole role;
+	std::map<UID, RestoreRecruitRoleRequest> requests;
+	for (auto &workerInterf : masterWorker->workerInterfaces)  {
+		if ( nodeIndex >= 0 && nodeIndex < opConfig.num_appliers ) { 
+			// [0, numApplier) are appliers
+			role = RestoreRole::Applier;
+		} else if ( nodeIndex >= opConfig.num_appliers && nodeIndex < opConfig.num_loaders + opConfig.num_appliers ) {
+			// [numApplier, numApplier + numLoader) are loaders
+			role = RestoreRole::Loader;
+		}
+
+		TraceEvent("FastRestore").detail("Role", getRoleStr(role)).detail("WorkerNode", workerInterf.first);
+		requests[workerInterf.first] = RestoreRecruitRoleRequest(role, nodeIndex);
+		nodeIndex++;
+	}
+	
+	state std::vector<RestoreRecruitRoleReply> replies;
+	wait( getBatchReplies(&RestoreWorkerInterface::recruitRole, masterWorker->workerInterfaces, requests, &replies) );
+	for (auto& reply : replies) {
+		if ( reply.role == RestoreRole::Applier ) {
+			ASSERT_WE_THINK(reply.applier.present());
+			masterData->appliersInterf[reply.applier.get().id()] = reply.applier.get();
+		} else if ( reply.role == RestoreRole::Loader ) {
+			ASSERT_WE_THINK(reply.loader.present());
+			masterData->loadersInterf[reply.loader.get().id()] = reply.loader.get();
+		} else {
+			TraceEvent(SevError, "FastRestore").detail("RecruitRestoreRoles_InvalidRole", reply.role);
+		}
+	}
+	TraceEvent("FastRestore").detail("RecruitRestoreRolesDone", masterWorker->workerInterfaces.size());
+
+	return Void();
+}
+
+ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterWorker, Reference<RestoreMasterData> masterData) {
+	ASSERT( masterData.isValid() );
+	ASSERT( !masterData->loadersInterf.empty() );
+	RestoreSysInfo sysInfo(masterData->appliersInterf);
+	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
+	for (auto &loader : masterData->loadersInterf) {
+		requests.push_back( std::make_pair(loader.first, RestoreSysInfoRequest(sysInfo)) );
+	}
+	
+	TraceEvent("FastRestore").detail("DistributeRestoreSysInfoToLoaders", masterData->loadersInterf.size());
+	wait( sendBatchRequests(&RestoreLoaderInterface::updateRestoreSysInfo, masterData->loadersInterf, requests) );
+	
+	return Void();
+}
 
 // The server of the restore master. It drives the restore progress with the following steps:
 // 1) Lock database and clear the normal keyspace
@@ -58,10 +136,8 @@ void dummySampleWorkload(Reference<RestoreMasterData> self);
 // 3.3) Construct requests of which file should be loaded by which loader, and send requests to loaders;
 // 4) After process all restore requests, finish restore by cleaning up the restore related system key
 //    and ask all restore roles to quit.
-ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Database cx) {
-	state int checkNum = 0;
+ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
 	state UID randomUID = g_random->randomUniqueID();
-
 	TraceEvent("FastRestore").detail("RestoreMaster", "WaitOnRestoreRequests");
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
 
@@ -70,20 +146,25 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 	wait( _clearDB(cx) );
 
 	// Step: Perform the restore requests
-	for ( auto &it : restoreRequests ) {
-		TraceEvent("FastRestore").detail("RestoreRequestInfo", it.toString());
-		Version ver = wait( processRestoreRequest(it, self, cx) );
+	state int restoreIndex = 0;
+	try {
+		for ( restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++ ) {
+			RestoreRequest& request = restoreRequests[restoreIndex];
+			TraceEvent("FastRestore").detail("RestoreRequestInfo", request.toString());
+			Version ver = wait( processRestoreRequest(request, self, cx) );
+		}
+	} catch(Error &e) {
+		TraceEvent(SevError, "FastRestoreFailed").detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 	}
-
+	
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
 	wait( notifyRestoreCompleted(self, cx) );
 
 	try {
 		wait( unlockDatabase(cx,randomUID) );
 	} catch(Error &e) {
-		printf(" unlockDB fails. uid:%s\n", randomUID.toString().c_str());
+		TraceEvent(SevError, "UnlockDBFailed").detail("UID",  randomUID.toString());
 	}
-	
 
 	TraceEvent("FastRestore").detail("RestoreMasterComplete", self->id());
 
@@ -91,9 +172,15 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreMasterData> self, Databas
 }
 
 ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Reference<RestoreMasterData> self, Database cx) {
-	wait( _collectBackupFiles(self, cx, request) );
-	self->constructFilesWithVersionRange();
-	self->buildVersionBatches();
+	state std::vector<RestoreFileFR> files;
+	state std::vector<RestoreFileFR> allFiles;
+
+	self->initBackupContainer(request.url);
+
+	wait( _collectBackupFiles(self->bc, &files, cx, request) ); // Get all backup files' description and save them to files
+	self->constructFilesWithVersionRange(files, allFiles); // Assign modified files to allFiles
+	self->buildVersionBatches(allFiles, self->versionBatches);  // Divide files into version batches
+
 	state std::map<Version, VersionBatch>::iterator versionBatch;
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
 		wait( initializeVersionBatch(self) );
@@ -237,10 +324,10 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 	return restoreRequests;
 }
 
-// NOTE: This function can now get the backup file descriptors
-ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self, Database cx, RestoreRequest request) {
-	self->initBackupContainer(request.url);
-	state BackupDescription desc = wait(self->bc->describeBackup());
+// Collect the backup files' description into output_files by reading the backupContainer bc.
+ACTOR static Future<Void> _collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* output_files, Database cx, RestoreRequest request) {
+	state std::vector<RestoreFileFR> &files = *output_files;
+	state BackupDescription desc = wait(bc->describeBackup());
 
 	// TODO: Delete this and see if it works
 	wait(desc.resolveVersionTimes(cx));
@@ -249,27 +336,27 @@ ACTOR static Future<Void> _collectBackupFiles(Reference<RestoreMasterData> self,
 	if(request.targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 		request.targetVersion = desc.maxRestorableVersion.get();
 
-	Optional<RestorableFileSet> restorable = wait(self->bc->getRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
 	if(!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestore").detail("NotRestorable", request.targetVersion);
 		throw restore_missing_data();
 	}
 
-	if (!self->files.empty()) {
-		TraceEvent(SevError, "FastRestore").detail("ClearOldFiles", self->files.size());
-		self->files.clear();
+	if (!files.empty()) {
+		TraceEvent(SevError, "FastRestore").detail("ClearOldFiles", files.size());
+		files.clear();
 	}
 
  	for(const RangeFile &f : restorable.get().ranges) {
  		TraceEvent("FastRestore").detail("RangeFile", f.toString());
 		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
- 		self->files.push_back(file);
+ 		files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
  		TraceEvent("FastRestore").detail("LogFile", f.toString());
 		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
-		self->files.push_back(file);
+		files.push_back(file);
  	}
 
 	return Void();

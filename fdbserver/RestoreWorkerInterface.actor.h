@@ -57,11 +57,14 @@ struct RestoreSysInfo;
 struct RestoreApplierInterface;
 
 
+// RestoreSysInfo includes information each (type of) restore roles should know.
+// At this moment, it only include appliers. We keep the name for future extension.
+// TODO: If it turns out this struct only has appliers in the final version, we will rename it to a more specific name, e.g., AppliersMap
 struct RestoreSysInfo {
 	std::map<UID, RestoreApplierInterface> appliers;
 
 	RestoreSysInfo() = default;
-	explicit RestoreSysInfo(std::map<UID, RestoreApplierInterface> appliers) : appliers(appliers) {}
+	explicit RestoreSysInfo(const std::map<UID, RestoreApplierInterface> appliers) : appliers(appliers) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -74,7 +77,6 @@ struct RestoreWorkerInterface {
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreRecruitRoleRequest> recruitRole;
-	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
 	RequestStream<RestoreSimpleRequest> terminateWorker;
 
 	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
@@ -87,7 +89,6 @@ struct RestoreWorkerInterface {
 	void initEndpoints() {
 		heartbeat.getEndpoint( TaskClusterController );
 		recruitRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
-		updateRestoreSysInfo.getEndpoint(TaskClusterController);
 		terminateWorker.getEndpoint( TaskClusterController ); 
 
 		interfID = g_random->randomUniqueID();
@@ -95,7 +96,7 @@ struct RestoreWorkerInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, interfID, heartbeat, updateRestoreSysInfo, recruitRole, terminateWorker);
+		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
 	}
 };
 
@@ -125,6 +126,7 @@ struct RestoreRoleInterface {
 
 struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreSimpleRequest> heartbeat;
+	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
 	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 	RequestStream<RestoreLoadFileRequest> loadFile;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
@@ -143,6 +145,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	void initEndpoints() {
 		heartbeat.getEndpoint( TaskClusterController );
+		updateRestoreSysInfo.getEndpoint( TaskClusterController );
 		setApplierKeyRangeVectorRequest.getEndpoint( TaskClusterController ); 
 		loadFile.getEndpoint( TaskClusterController ); 
 		initVersionBatch.getEndpoint( TaskClusterController );
@@ -152,7 +155,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, * (RestoreRoleInterface*) this, heartbeat,
+		serializer(ar, * (RestoreRoleInterface*) this, heartbeat, updateRestoreSysInfo,
 				setApplierKeyRangeVectorRequest, loadFile,
 				initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
