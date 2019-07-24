@@ -324,7 +324,7 @@ public:
 			TraceEvent(SevDebug, "LocalRatekeeperChange", thisServerID)
 				.detail("Old", old_rate)
 				.detail("New", res)
-				.detail("NDV", versionLag);
+				.detail("NonDurableVersions", versionLag);
 			old_rate = res;
 		}
 		return res;
