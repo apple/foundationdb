@@ -30,6 +30,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -1523,6 +1524,85 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	}
 }
 
+
+ACTOR Future<Void>
+proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData)
+{
+	TraceEvent("SnapMasterProxy.SnapReqEnter")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	try {
+		// whitelist check
+		ExecCmdValueString execArg(snapReq.snapPayload);
+		StringRef binPath = execArg.getBinaryPath();
+		if (!isWhitelisted(commitData->whitelistedBinPathVec, binPath)) {
+			TraceEvent("SnapMasterProxy.WhiteListCheckFailed")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw transaction_not_permitted();
+		}
+		// db fully recovered check
+		if (commitData->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
+			// Cluster is not fully recovered and needs TLogs
+			// from previous generation for full recovery.
+			// Currently, snapshot of old tlog generation is not
+			// supported and hence failing the snapshot request until
+			// cluster is fully_recovered.
+			TraceEvent("SnapMasterProxy.ClusterNotFullyRecovered")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw cluster_not_fully_recovered();
+		}
+
+		auto result =
+			commitData->txnStateStore->readValue(LiteralStringRef("log_anti_quorum").withPrefix(configKeysPrefix)).get();
+		int logAntiQuorum = 0;
+		if (result.present()) {
+			logAntiQuorum = atoi(result.get().toString().c_str());
+		}
+		// FIXME: logAntiQuorum not supported, remove it later,
+		// In version2, we probably don't need this limtiation, but this needs to be tested.
+		if (logAntiQuorum > 0) {
+			TraceEvent("SnapMasterProxy.LogAnitQuorumNotSupported")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw txn_exec_log_anti_quorum();
+		}
+
+		// send a snap request to DD
+		if (!commitData->db->get().distributor.present()) {
+			TraceEvent(SevWarnAlways, "DataDistributorNotPresent");
+			throw operation_failed();
+		}
+		state Future<ErrorOr<Void>> ddSnapReq =
+			commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
+		try {
+			wait(throwErrorOr(ddSnapReq));
+		} catch (Error& e) {
+			TraceEvent("SnapMasterProxy.DDSnapResponseError")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID)
+				.error(e, true /*includeCancelled*/ );
+			throw e;
+		}
+		snapReq.reply.send(Void());
+	} catch (Error& e) {
+		TraceEvent("SnapMasterProxy.SnapReqError")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled*/);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	TraceEvent("SnapMasterProxy.SnapReqExit")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	return Void();
+}
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -1712,6 +1792,9 @@ ACTOR Future<Void> masterProxyServerCore(
 					execReq.reply.sendError(broken_promise());
 				}
 			}
+		}
+		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
+			addActor.send(proxySnapCreate(snapReq, &commitData));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;

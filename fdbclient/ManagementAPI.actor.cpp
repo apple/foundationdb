@@ -1403,11 +1403,12 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 					rd >> oldMode;
 				}
 			}
-			if (!mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			}
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 
 			tr.set( dataDistributionModeKey, wr.toValue() );
 
@@ -1481,27 +1482,23 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd, int version) {
 	state int retryCount = 0;
 
 	loop {
 		state UID snapUID = deterministicRandom()->randomUniqueID();
 		try {
-			wait(snapCreate(cx, snapCmd, snapUID));
-			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
+			wait(snapCreate(cx, snapCmd, snapUID, version));
 			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-			break;
+			return snapUID;
 		} catch (Error& e) {
 			++retryCount;
 			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
 			if (retryCount > 3) {
-				fprintf(stderr, "Snapshot create failed, %d (%s)."
-						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
 				throw;
 			}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {

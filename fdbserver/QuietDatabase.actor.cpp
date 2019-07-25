@@ -22,8 +22,10 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -133,6 +135,39 @@ int64_t getPoppedVersionLag( const TraceEventFields& md ) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	Optional<Value> coordinators = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(coordinatorsKey);
+						  }));
+	if (!coordinators.present()) {
+		throw operation_failed();
+	}
+	std::vector<NetworkAddress> coordinatorsAddr =
+		ClusterConnectionString(coordinators.get().toString()).coordinators();
+	std::set<NetworkAddress> coordinatorsAddrSet;
+	for (const auto & addr : coordinatorsAddr) {
+		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
+		coordinatorsAddrSet.insert(addr);
+	}
+
+	vector<WorkerInterface> result;
+	for(const auto & worker : workers) {
+		NetworkAddress primary = worker.interf.address();
+		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
+			|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+			result.push_back(worker.interf);
+		}
+	}
+	return result;
+}
+
 // This is not robust in the face of a TLog failure
 ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
@@ -193,6 +228,42 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			wait( tr.onError(e) );
 		}
 	}
+}
+
+ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool localOnly ) {
+	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
+	state std::map<NetworkAddress, WorkerInterface> workersMap;
+	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	for(const auto & worker : workers) {
+		workersMap[worker.interf.address()] = worker.interf;
+	}
+	Optional<Value> regionsValue = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+						  }));
+	ASSERT(regionsValue.present());
+	int usableRegions = atoi(regionsValue.get().toString().c_str());
+	auto masterDcId = dbInfo->get().master.locality.dcId();
+
+	vector<WorkerInterface> result;
+	for (const auto & server : servers) {
+		TraceEvent(SevDebug, "DcIdInfo")
+			.detail("ServerLocalityID", server.locality.dcId())
+			.detail("MasterDcID", masterDcId);
+		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
+			auto itr = workersMap.find(server.address());
+			if(itr == workersMap.end()) {
+				TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
+				throw operation_failed();
+			}
+			result.push_back(itr->second);
+		}
+	}
+	return result;
 }
 
 //Gets the maximum size of all the storage server queues
