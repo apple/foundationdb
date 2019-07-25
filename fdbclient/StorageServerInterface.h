@@ -50,7 +50,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
-	RequestStream<struct GetPhysicalMetricsRequest> getPhysicalMetrics;
+	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
@@ -69,11 +69,11 @@ struct StorageServerInterface {
 
 		if constexpr (!is_fb_function<Ar>) {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -340,21 +340,24 @@ struct SplitMetricsRequest {
 	}
 };
 
-struct GetPhysicalMetricsReply {
+struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
 	StorageMetrics free;
 	StorageMetrics capacity;
+	double bytesInputRate;
+
+	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity);
+		serializer(ar, load, free, capacity, bytesInputRate);
 	}
 };
 
-struct GetPhysicalMetricsRequest {
+struct GetStorageMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 13290999;
-	ReplyPromise<GetPhysicalMetricsReply> reply;
+	ReplyPromise<GetStorageMetricsReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
