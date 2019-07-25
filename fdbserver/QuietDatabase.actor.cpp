@@ -348,8 +348,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
-			if (g_simulator.storagePolicy.isValid() &&
-			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
+			if (!g_network->isSimulated() || 
+				(g_simulator.storagePolicy.isValid() &&
+			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos)) {
 				// Do not test DD team number for data_hall modes
 				return true;
 			}
@@ -427,6 +428,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			}
 
 		} catch (Error& e) {
+			if(e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent("QuietDatabaseFailure", dataDistributorWorker.id())
 			    .detail("Reason", "Failed to extract GetTeamCollectionValid information");
 			attempts++;
