@@ -215,6 +215,9 @@
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
     <ClInclude Include="RestoreUtil.h" />
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ActorCompiler Include="RestoreRoleCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
@@ -231,9 +234,6 @@
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="RestoreCommon.actor.h">
-      <EnableCompile>false</EnableCompile>
-    </ActorCompiler>
-    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="ServerDBInfo.h" />
