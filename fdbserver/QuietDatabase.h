@@ -38,6 +38,8 @@ Future<vector<StorageServerInterface>> getStorageServers( Database const& cx, bo
 Future<vector<WorkerDetails>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0 );
 Future<WorkerInterface> getMasterWorker( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> repairDeadDatacenter(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string const& context);
+Future<vector<WorkerInterface>> getStorageWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, bool const& localOnly );
+Future<vector<WorkerInterface>> getCoordWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -18,21 +18,24 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/DatabaseContext.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
 #include <set>
 #include <sstream>
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/Replication.h"
-#include "flow/UnitTest.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 class TCTeamInfo;
@@ -3997,9 +4000,134 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	TraceEvent("SnapDataDistributor.SnapReqEnter")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	try {
+		// disable tlog pop on local tlog nodes
+		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
+		std::vector<Future<Void>> disablePops;
+		for (const auto & tlog : tlogs) {
+			disablePops.push_back(
+				transformErrors(throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))), operation_failed())
+				);
+		}
+		wait(waitForAll(disablePops));
+
+		TraceEvent("SnapDataDistributor.AfterDisableTLogPop")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap local storage nodes
+		std::vector<WorkerInterface> storageWorkers = wait(getStorageWorkers(cx, db, true /* localOnly */));
+		TraceEvent("SnapDataDistributor.GotStorageWorkers")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		std::vector<Future<Void>> storageSnapReqs;
+		for (const auto & worker : storageWorkers) {
+			storageSnapReqs.push_back(
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))), operation_failed())
+				);
+		}
+		wait(waitForAll(storageSnapReqs));
+
+		TraceEvent("SnapDataDistributor.AfterSnapStorage")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap local tlog nodes
+		std::vector<Future<Void>> tLogSnapReqs;
+		for (const auto & tlog : tlogs) {
+			tLogSnapReqs.push_back(
+				transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))), operation_failed())
+				);
+		}
+		wait(waitForAll(tLogSnapReqs));
+
+		TraceEvent("SnapDataDistributor.AfterTLogStorage")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// enable tlog pop on local tlog nodes
+		std::vector<Future<Void>> enablePops;
+		for (const auto & tlog : tlogs) {
+			enablePops.push_back(
+				transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), operation_failed())
+				);
+		}
+		wait(waitForAll(enablePops));
+
+		TraceEvent("SnapDataDistributor.AfterEnableTLogPops")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap the coordinators
+		std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, db));
+		TraceEvent("SnapDataDistributor.GotCoordWorkers")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		std::vector<Future<Void>> coordSnapReqs;
+		for (const auto & worker : coordWorkers) {
+			coordSnapReqs.push_back(
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))), operation_failed())
+				);
+		}
+		wait(waitForAll(coordSnapReqs));
+		TraceEvent("SnapDataDistributor.AfterSnapCoords")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+	} catch (Error& e) {
+		TraceEvent("SnapDataDistributor.SnapReqExit")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled */);
+		throw e;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	state Future<Void> dbInfoChange = db->onChange();
+	double delayTime = g_network->isSimulated() ? 70.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
+	try {
+		choose {
+			when (wait(dbInfoChange)) {
+				TraceEvent("SnapDDCreateDBInfoChanged")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.sendError(operation_failed());
+			}
+			when (wait(ddSnapCreateCore(snapReq, db))) {
+				TraceEvent("SnapDDCreateSuccess")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.send(Void());
+			}
+			when (wait(delay(delayTime))) {
+				TraceEvent("SnapDDCreateTimedOut")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.sendError(operation_failed());
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent("SnapDDCreateError")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled */);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state ActorCollection actors(false);
+	self->addActor.send(actors.getResult());
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
@@ -4015,6 +4143,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(Void());
 				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
 				break;
+			}
+			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
+				actors.add(ddSnapCreate(snapReq, db));
 			}
 		}
 	}

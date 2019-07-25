@@ -2170,7 +2170,19 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 }
 
 ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
-	wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
+	try {
+		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, 2 /* version */)));
+		int version = 2;
+		if (version == 1) {
+			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
+		} else {
+			printf("Snapshots create succeeded with UID: %s\n", snapUID.toString().c_str());
+		}
+	} catch (Error& e) {
+		fprintf(stderr, "Snapshot create failed, %d (%s)."
+				" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+		return true;
+	}
 	return false;
 }
 
