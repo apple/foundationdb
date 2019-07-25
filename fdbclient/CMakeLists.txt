@@ -8,7 +8,6 @@ set(FDBCLIENT_SRCS
   BackupContainer.actor.cpp
   BackupContainer.h
   BlobStore.actor.cpp
-  ClientDBInfo.h
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
@@ -80,13 +79,13 @@ set(FDBCLIENT_SRCS
   libb64/cdecode.c
   libb64/cencode.c
   md5/md5.c
-  sha1/SHA1.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
+  sha1/SHA1.cpp)
 
+set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
-add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS})
+add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc)

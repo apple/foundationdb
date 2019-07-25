@@ -22,10 +22,8 @@
 
 package fdb
 
-/*
- #define FDB_API_VERSION 610
- #include <foundationdb/fdb_c.h>
-*/
+// #define FDB_API_VERSION 620
+// #include <foundationdb/fdb_c.h>
 import "C"
 
 import (
@@ -216,7 +214,10 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 	tr.Options().SetLockAware()
 
 	bk, ek := er.FDBRangeKeys()
-	ffer := KeyRange{append(Key("\xFF/keyServers/"), bk.FDBKey()...), append(Key("\xFF/keyServers/"), ek.FDBKey()...)}
+	ffer := KeyRange{
+		append(Key("\xFF/keyServers/"), bk.FDBKey()...),
+		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
+	}
 
 	kvs, e := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
 	if e != nil {

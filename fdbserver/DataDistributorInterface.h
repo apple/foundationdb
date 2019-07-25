@@ -25,9 +25,11 @@
 #include "fdbrpc/Locality.h"
 
 struct DataDistributorInterface {
+	constexpr static FileIdentifier file_identifier = 12383874;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
+	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
@@ -44,11 +46,12 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltDataDistributor, locality);
+		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq);
 	}
 };
 
 struct HaltDataDistributorRequest {
+	constexpr static FileIdentifier file_identifier = 1904127;
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
@@ -58,6 +61,24 @@ struct HaltDataDistributorRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct DistributorSnapRequest
+{
+	constexpr static FileIdentifier file_identifier = 22204900;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit DistributorSnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit DistributorSnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
 	}
 };
 

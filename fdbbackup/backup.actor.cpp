@@ -42,6 +42,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <cinttypes>
 #include <algorithm>	// std::transform
 #include <string>
 #include <iostream>
@@ -118,37 +119,40 @@ enum {
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
 
-	OPT_TRACE_FORMAT
+	OPT_TRACE_FORMAT,
+	OPT_USE_OBJECT_SERIALIZER
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
-	SO_END_OF_OPTIONS
+	    SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
@@ -174,6 +178,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -241,6 +247,8 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -271,6 +279,8 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -302,6 +312,8 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -333,6 +345,8 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -360,6 +374,8 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -389,6 +405,8 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -426,6 +444,8 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -457,6 +477,8 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -521,6 +543,8 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -563,6 +587,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -600,6 +626,8 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
@@ -630,6 +658,8 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -663,6 +693,8 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -694,6 +726,8 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -727,6 +761,8 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -756,6 +792,8 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -781,7 +819,6 @@ const KeyRef exeFastRestoreAgent = LiteralStringRef("fastrestore_agent"); // mus
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
-extern void flushTraceFileVoid();
 extern const char* getHGVersion();
 
 #ifdef _WIN32
@@ -799,7 +836,7 @@ void parentWatcher(void *parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", (long long) currentProtocolVersion);
+	printf("protocol %llx\n", (long long) currentProtocolVersion.version());
 }
 
 const char *BlobCredentialInfo =
@@ -832,6 +869,10 @@ static void printAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -907,6 +948,17 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -954,6 +1006,17 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --add_prefix PREFIX\n");
 	printf("                 Prefix to add to the restored keys\n");
 	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1035,6 +1098,10 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -1071,6 +1138,17 @@ static void printDBBackupUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
@@ -1314,7 +1392,6 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
 		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey());
-		state int i = 0;
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1504,7 +1581,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 }
 
 ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
-										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
+										std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1545,7 +1622,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				}
 			}
 
-			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * deterministicRandom()->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
 			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
@@ -1560,7 +1637,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	std::string id = nondeterministicRandom()->randomUniqueID().toString();
 	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
 	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
@@ -2001,23 +2078,13 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
 	if(ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
 
 	if(targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
-		throw restore_error();
-	}
-
-	if(destClusterFile.empty()) {
-		fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-		throw restore_error();
-	}
-
-	if(!fileExists(destClusterFile)) {
-		fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", destClusterFile.c_str());
 		throw restore_error();
 	}
 
@@ -2037,12 +2104,11 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
+		printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
 		targetVersion = v;
 	}
 
 	try {
-		state Database db = Database::createDatabase(destClusterFile, Database::API_VERSION_LATEST);
 		state FileBackupAgent backupAgent;
 
 		state Reference<IBackupContainer> bc = openBackupContainer(exeRestore.toString().c_str(), container);
@@ -2062,7 +2128,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
-				printf("Using target restore version %lld\n", targetVersion);
+				printf("Using target restore version %" PRId64 "\n", targetVersion);
 		}
 
 		if (performRestore) {
@@ -2070,18 +2136,18 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
-				printf("Restored to version %lld\n", restoredVersion);
+				printf("Restored to version %" PRId64 "\n", restoredVersion);
 			}
 		}
 		else {
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
 
 			if(!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld.  Describe backup for more information.\n", targetVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 ".  Describe backup for more information.\n", targetVersion);
 				throw restore_invalid_version();
 			}
 
-			printf("Backup can be used to restore to version %lld\n", targetVersion);
+			printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
 		}
 
 	}
@@ -2188,7 +2254,7 @@ ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationConta
 		}
 	}
 
-	printf("Scanning version range %lld to %lld\n", beginVersion, endVersion);
+	printf("Scanning version range %" PRId64 " to %" PRId64 "\n", beginVersion, endVersion);
 	BackupFileList files = wait(c->dumpFileList(beginVersion, endVersion));
 	files.toStream(stdout);
 
@@ -2240,9 +2306,9 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : "") );
 
 		if(endVersion < 0)
-			printf("All data before %lld versions (%lld days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			printf("All data before %" PRId64 " versions (%" PRId64 " days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
-			printf("All data before version %lld has been deleted.\n", endVersion);
+			printf("All data before version %" PRId64 " has been deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2580,7 +2646,7 @@ Version parseVersion(const char *str) {
 	}
 
 	Version ver;
-	if(sscanf(str, "%lld", &ver) != 1) {
+	if(sscanf(str, "%" SCNd64, &ver) != 1) {
 		fprintf(stderr, "Could not parse version: %s\n", str);
 		flushAndExit(FDB_EXIT_ERROR);
 	}
@@ -2824,6 +2890,7 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
+		bool useObjectSerializer = true;
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -2934,6 +3001,18 @@ int main(int argc, char* argv[]) {
 					}
 					traceFormat = args->OptionArg();
 					break;
+				case OPT_USE_OBJECT_SERIALIZER: {
+					std::string s = args->OptionArg();
+					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+					if (s == "on" || s == "true" || s == "1") {
+						useObjectSerializer = true;
+					} else if (s == "off" || s == "false" || s == "0") {
+						useObjectSerializer = false;
+					} else {
+						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+					}
+					break;
+				}
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;
@@ -3286,6 +3365,11 @@ int main(int argc, char* argv[]) {
 			setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 		}
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+		// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as
+		// zero = false, non-zero = true.
+		setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
+		                 useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
+		                                     : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
 
 		// deferred TLS options
 		if (tlsCertPath.size()) {
@@ -3362,11 +3446,14 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");
 
@@ -3412,7 +3499,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				db = Database::createDatabase(ccf, -1, localities);
+				db = Database::createDatabase(ccf, -1, true, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -3434,7 +3521,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(sourceCcf, -1, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, true, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -3560,9 +3647,26 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			}
 
+			if(restoreClusterFileDest.empty()) {
+				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+				return FDB_EXIT_ERROR;
+			}
+
+			if(!fileExists(restoreClusterFileDest)) {
+				fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+				return FDB_EXIT_ERROR;
+			}
+
+			try {
+				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+			} catch(Error &e) {
+				fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+				return FDB_EXIT_ERROR;
+			}
+
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runRestore(restoreClusterFileDest, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
+					f = stopAfter( runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
 					break;
 				case RESTORE_WAIT:
 					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
@@ -3799,7 +3903,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<StringRef> restoreTag(tagName.toString() + "_" + std::to_string(restoreIndex));
 			bool locked = true;
-			struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(bc->getURL()), true, targetVersion, true, range, Key(), Key(), locked, g_random->randomUniqueID());
+			struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(bc->getURL()), true, targetVersion, true, range, Key(), Key(), locked, deterministicRandom()->randomUniqueID());
 			tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 			tr->set(restoreRequestTriggerKey, restoreRequestTriggerValue(1)); //backupRanges.size = 1 because we only support restoring 1 range in real mode
 			wait(tr->commit()); // Trigger fast restore

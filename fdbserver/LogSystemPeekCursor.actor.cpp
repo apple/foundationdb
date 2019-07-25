@@ -25,14 +25,14 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
-			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(g_random->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), parallelGetMore(parallelGetMore) {
+			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false), parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
 }
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag )
-			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), rawLength(rawLength), hasMsg(hasMsg), randomID(g_random->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), parallelGetMore(false)
+			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), rawLength(rawLength), hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false)
 {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
@@ -47,7 +47,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, rawLength, hasMsg, poppedVersion, tag ) );
 }
 
-void ILogSystem::ServerPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::ServerPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	rd.setProtocolVersion(version);
 }
 
@@ -133,7 +133,7 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
-ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
+ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self, TaskPriority taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
 		wait( Future<Void>(Never()));
 		throw internal_error();
@@ -146,8 +146,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	loop {
 		state Version expectedBegin = self->messageVersion.version;
 		try {
-			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
-				self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
+			if (self->parallelGetMore || self->onlySpilled) {
+				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
+					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
+				}
+			} else if (self->futureResults.size() == 0) {
+				return Void();
 			}
 
 			choose {
@@ -158,6 +162,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
 					self->results = res;
+					self->onlySpilled = res.onlySpilled;
 					if(res.popped.present())
 						self->poppedVersion = std::min( std::max(self->poppedVersion, res.popped.get()), self->end.version );
 					self->rd = ArenaReader( self->results.arena, self->results.messages, Unversioned() );
@@ -170,8 +175,9 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				}
 				when( wait( self->interfaceChanged ) ) {
 					self->interfaceChanged = self->interf->onChange();
-					self->randomID = g_random->randomUniqueID();
+					self->randomID = deterministicRandom()->randomUniqueID();
 					self->sequence = 0;
+					self->onlySpilled = false;
 					self->futureResults.clear();
 				}
 			}
@@ -182,7 +188,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			} else if(e.code() == error_code_timed_out) {
 				TraceEvent("PeekCursorTimedOut", self->randomID);
 				self->interfaceChanged = self->interf->onChange();
-				self->randomID = g_random->randomUniqueID();
+				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
 				self->futureResults.clear();
 			} else {
@@ -192,7 +198,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	}
 }
 
-ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
+ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, TaskPriority taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
 		wait( Future<Void>(Never()));
 		throw internal_error();
@@ -201,8 +207,9 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int ta
 		loop {
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ?
-					brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked), taskID) ) : Never() ) ) {
+					brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled), taskID) ) : Never() ) ) {
 					self->results = res;
+					self->onlySpilled = res.onlySpilled;
 					if(res.popped.present())
 						self->poppedVersion = std::min( std::max(self->poppedVersion, res.popped.get()), self->end.version );
 					self->rd = ArenaReader( self->results.arena, self->results.messages, Unversioned() );
@@ -213,7 +220,9 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int ta
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when( wait( self->interf->onChange() ) ) {}
+				when( wait( self->interf->onChange() ) ) {
+					self->onlySpilled = false;
+				}
 			}
 		}
 	} catch( Error &e ) {
@@ -225,12 +234,16 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int ta
 	}
 }
 
-Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
+Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	//TraceEvent("SPC_GetMore", randomID).detail("HasMessage", hasMessage()).detail("More", !more.isValid() || more.isReady()).detail("MessageVersion", messageVersion.toString()).detail("End", end.toString());
 	if( hasMessage() )
 		return Void();
 	if( !more.isValid() || more.isReady() ) {
-		more = parallelGetMore ? serverPeekParallelGetMore(this, taskID) : serverPeekGetMore(this, taskID);
+		if (parallelGetMore || onlySpilled || futureResults.size()) {
+			more = serverPeekParallelGetMore(this, taskID);
+		} else {
+			more = serverPeekGetMore(this, taskID);
+		}
 	}
 	return more;
 }
@@ -238,7 +251,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
 ACTOR Future<Void> serverPeekOnFailed( ILogSystem::ServerPeekCursor* self ) {
 	loop {
 		choose {
-			when( wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onDisconnectOrFailure( self->interf->get().interf().peekMessages.getEndpoint() ) : Never() ) ) { return Void(); }
+			when( wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onStateEqual( self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus() ) : Never() ) ) { return Void(); }
 			when( wait( self->interf->onChange() ) ) {}
 		}
 	}
@@ -268,13 +281,13 @@ Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin )
 	: serverCursors(serverCursors), bestServer(-1), readQuorum(serverCursors.size()), tag(invalidTag), currentCursor(0), hasNextMessage(false),
-	messageVersion(begin), randomID(g_random->randomUniqueID()), tLogReplicationFactor(0) {
+	messageVersion(begin), randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(0) {
 	sortedVersions.resize(serverCursors.size());
 }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end,
 	bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor )
-	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(g_random->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
+	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
 	if(tLogPolicy) {
 		logSet = Reference<LogSet>( new LogSet() );
 		logSet->tLogPolicy = tLogPolicy;
@@ -293,7 +306,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<O
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor )
 	: serverCursors(serverCursors), bestServer(bestServer), readQuorum(readQuorum), currentCursor(0), hasNextMessage(false), messageVersion(messageVersion), nextVersion(nextVersion), logSet(logSet),
-	randomID(g_random->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
+	randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
 	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
 }
@@ -306,7 +319,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor ) );
 }
 
-void ILogSystem::MergedPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::MergedPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	for( auto it : serverCursors )
 		if( it->hasMessage() )
 			it->setProtocolVersion( version );
@@ -431,7 +444,7 @@ void ILogSystem::MergedPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
-ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion, int taskID) {
+ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion, TaskPriority taskID) {
 	loop {
 		//TraceEvent("MPC_GetMoreA", self->randomID).detail("Start", startVersion.toString());
 		if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
@@ -452,7 +465,7 @@ ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMess
 	}
 }
 
-Future<Void> ILogSystem::MergedPeekCursor::getMore(int taskID) {
+Future<Void> ILogSystem::MergedPeekCursor::getMore(TaskPriority taskID) {
 	if(!serverCursors.size())
 		return Never();
 	
@@ -497,7 +510,7 @@ Version ILogSystem::MergedPeekCursor::popped() {
 }
 
 ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore )
-	: logSets(logSets), bestSet(bestSet), bestServer(bestServer), tag(tag), currentCursor(0), currentSet(bestSet), hasNextMessage(false), messageVersion(begin), useBestSet(true), randomID(g_random->randomUniqueID()) {
+	: logSets(logSets), bestSet(bestSet), bestServer(bestServer), tag(tag), currentCursor(0), currentSet(bestSet), hasNextMessage(false), messageVersion(begin), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()) {
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for( int i = 0; i < logSets.size(); i++ ) {
@@ -512,7 +525,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& 
 
 ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, std::vector< std::vector< Reference<IPeekCursor> > > const& serverCursors, LogMessageVersion const& messageVersion, int bestSet, int bestServer, 
 	Optional<LogMessageVersion> nextVersion, bool useBestSet ) : logSets(logSets), serverCursors(serverCursors), messageVersion(messageVersion), bestSet(bestSet), bestServer(bestServer), nextVersion(nextVersion), currentSet(bestSet), currentCursor(0),
-	hasNextMessage(false), useBestSet(useBestSet), randomID(g_random->randomUniqueID()) {
+	hasNextMessage(false), useBestSet(useBestSet), randomID(deterministicRandom()->randomUniqueID()) {
 	int maxServers = 0;
 	for( int i = 0; i < logSets.size(); i++ ) {
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
@@ -532,7 +545,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::SetPeekCursor::cloneNoMore() {
 	return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet ) );
 }
 
-void ILogSystem::SetPeekCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::SetPeekCursor::setProtocolVersion( ProtocolVersion version ) {
 	for( auto& cursors : serverCursors ) {
 		for( auto& it : cursors ) {
 			if( it->hasMessage() ) {
@@ -692,7 +705,7 @@ void ILogSystem::SetPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
-ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion, int taskID) {
+ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion, TaskPriority taskID) {
 	loop {
 		//TraceEvent("LPC_GetMore1", self->randomID).detail("Start", startVersion.toString()).detail("Tag", self->tag);
 		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isActive()) {
@@ -753,7 +766,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 	}
 }
 
-Future<Void> ILogSystem::SetPeekCursor::getMore(int taskID) {
+Future<Void> ILogSystem::SetPeekCursor::getMore(TaskPriority taskID) {
 	auto startVersion = version();
 	calcHasMessage();
 	if( hasMessage() )
@@ -797,7 +810,7 @@ Version ILogSystem::SetPeekCursor::popped() {
 	return poppedVersion;
 }
 
-ILogSystem::MultiCursor::MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds ) : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
+ILogSystem::MultiCursor::MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds, bool needsPopped ) : cursors(cursors), epochEnds(epochEnds), needsPopped(needsPopped), poppedVersion(0) {
 	for(int i = 0; i < std::min<int>(cursors.size(),SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
 		cursors[cursors.size()-i-1]->getMore();
 	}
@@ -807,7 +820,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MultiCursor::cloneNoMore() {
 	return cursors.back()->cloneNoMore();
 }
 
-void ILogSystem::MultiCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::MultiCursor::setProtocolVersion( ProtocolVersion version ) {
 	cursors.back()->setProtocolVersion(version);
 }
 
@@ -841,17 +854,17 @@ const std::vector<Tag>& ILogSystem::MultiCursor::getTags() {
 
 void ILogSystem::MultiCursor::advanceTo(LogMessageVersion n) {
 	while( cursors.size() > 1 && n >= epochEnds.back() ) {
-		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
+		if(needsPopped) poppedVersion = std::max(poppedVersion, cursors.back()->popped());
 		cursors.pop_back();
 		epochEnds.pop_back();
 	}
 	cursors.back()->advanceTo(n);
 }
 
-Future<Void> ILogSystem::MultiCursor::getMore(int taskID) {
+Future<Void> ILogSystem::MultiCursor::getMore(TaskPriority taskID) {
 	LogMessageVersion startVersion = cursors.back()->version();
 	while( cursors.size() > 1 && cursors.back()->version() >= epochEnds.back() ) {
-		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
+		if(needsPopped) poppedVersion = std::max(poppedVersion, cursors.back()->popped());
 		cursors.pop_back();
 		epochEnds.pop_back();
 	}
@@ -882,10 +895,11 @@ Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
 }
 
 Version ILogSystem::MultiCursor::popped() {
+	ASSERT(needsPopped);
 	return std::max(poppedVersion, cursors.back()->popped());
 }
 
-ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool collectTags ) : cursors(cursors), messageVersion(begin), end(end), collectTags(collectTags), hasNextMessage(false), messageIndex(0) {
+ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags ) : cursors(cursors), messageVersion(begin), end(end), withTags(withTags), collectTags(collectTags), hasNextMessage(false), messageIndex(0) {
 	messages.reserve(10000);
 }
 
@@ -918,7 +932,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::BufferedCursor::cloneNoMore() {
 	return Reference<ILogSystem::IPeekCursor>();
 }
 
-void ILogSystem::BufferedCursor::setProtocolVersion( uint64_t version ) {
+void ILogSystem::BufferedCursor::setProtocolVersion( ProtocolVersion version ) {
 	for(auto& c : cursors) {
 		c->setProtocolVersion(version);
 	}
@@ -948,15 +962,17 @@ void ILogSystem::BufferedCursor::nextMessage() {
 }
 
 StringRef ILogSystem::BufferedCursor::getMessage() {
-	ASSERT(false);
-	return StringRef();
+	ASSERT(!withTags);
+	return messages[messageIndex].message;
 }
 
 StringRef ILogSystem::BufferedCursor::getMessageWithTags() {
+	ASSERT(withTags);
 	return messages[messageIndex].message;
 }
 
 const std::vector<Tag>& ILogSystem::BufferedCursor::getTags() {
+	ASSERT(withTags);
 	return messages[messageIndex].tags;
 }
 
@@ -964,14 +980,14 @@ void ILogSystem::BufferedCursor::advanceTo(LogMessageVersion n) {
 	ASSERT(false);
 }
 
-ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, int taskID ) {
+ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, TaskPriority taskID ) {
 	loop {
 		wait(yield());
 		if(cursor->version().version >= maxVersion) {
 			return Void();
 		}
 		while(cursor->hasMessage()) {
-			self->messages.push_back(ILogSystem::BufferedCursor::BufferedMessage(cursor->arena(), self->collectTags ? cursor->getMessage() : cursor->getMessageWithTags(), cursor->getTags(), cursor->version()));
+			self->messages.push_back(ILogSystem::BufferedCursor::BufferedMessage(cursor->arena(), (!self->withTags || self->collectTags) ? cursor->getMessage() : cursor->getMessageWithTags(), !self->withTags ? std::vector<Tag>() : cursor->getTags(), cursor->version()));
 			cursor->nextMessage();
 			if(cursor->version().version >= maxVersion) {
 				return Void();
@@ -981,7 +997,7 @@ ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Refe
 	}
 }
 
-ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID ) {
+ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriority taskID ) {
 	if( self->messageVersion.version >= self->end ) {
 		wait( Future<Void>(Never()));
 		throw internal_error();
@@ -1005,7 +1021,11 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 	}
 	self->messageIndex = 0;
 	self->hasNextMessage = self->messages.size() > 0;
-	self->messageVersion = LogMessageVersion(targetVersion);
+	Version minVersion = self->end;
+	for(auto& cursor : self->cursors) {
+		minVersion = std::min(minVersion, cursor->version().version);
+	}
+	self->messageVersion = LogMessageVersion(minVersion);
 
 	if(self->collectTags) {
 		self->combineMessages();
@@ -1015,7 +1035,7 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 	return Void();
 }
 
-Future<Void> ILogSystem::BufferedCursor::getMore(int taskID) {
+Future<Void> ILogSystem::BufferedCursor::getMore(TaskPriority taskID) {
 	if( hasMessage() )
 		return Void();
 	return bufferedGetMore(this, taskID);

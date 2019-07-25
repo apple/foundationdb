@@ -63,6 +63,8 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   actorcompiler.h
   error_definitions.h
+  flat_buffers.h
+  flat_buffers.cpp
   flow.cpp
   flow.h
   genericactors.actor.cpp
@@ -70,6 +72,7 @@ set(FLOW_SRCS
   network.cpp
   network.h
   serialize.h
+  serialize.cpp
   stacktrace.amalgamation.cpp
   stacktrace.h
   version.cpp)
@@ -86,6 +89,9 @@ elseif(WIN32)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+if(USE_VALGRIND)
+  target_link_libraries(flow PUBLIC Valgrind)
+endif()
 if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()

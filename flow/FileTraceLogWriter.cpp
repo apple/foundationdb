@@ -28,7 +28,7 @@
 #define __write ::write
 #define __close ::close
 #define __fsync ::fsync
-#define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL
+#define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
 #define TRACEFILE_MODE 0664
 #elif defined(_WIN32)
 #include <windows.h>
@@ -46,6 +46,7 @@
 #endif
 
 #include <fcntl.h>
+#include <cmath>
 
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
 	: directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), onError(onError) {}
@@ -87,11 +88,27 @@ void FileTraceLogWriter::write(const std::string& str) {
 void FileTraceLogWriter::open() {
 	cleanupTraceFiles();
 
-	auto finalname = format("%s.%d.%s", basename.c_str(), ++index, extension.c_str());
+	++index;
+
+	// this allows one process to write 10 billion log files
+	// this should be enough - if not we could make the base larger...
+	ASSERT(index > 0);
+	auto indexWidth = unsigned(::floor(log10f(float(index))));
+
+	// index is at most 2^32 - 1. 2^32 - 1 < 10^10 - therefore
+	// log10(index) < 10
+	UNSTOPPABLE_ASSERT(indexWidth < 10);
+
+	auto finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
 	while ( (traceFileFD = __open( finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE )) == -1 ) {
 		lastError(errno);
-		if (errno == EEXIST)
-			finalname = format("%s.%d.%s", basename.c_str(), ++index, extension.c_str());
+		if (errno == EEXIST) {
+			++index;
+			indexWidth = unsigned(::floor(log10f(float(index))));
+
+			UNSTOPPABLE_ASSERT(indexWidth < 10);
+			finalname = format("%s.%d.%d.%s", basename.c_str(), indexWidth, index, extension.c_str());
+		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
 
@@ -124,36 +141,6 @@ void FileTraceLogWriter::sync() {
 	__fsync(traceFileFD);
 }
 
-void FileTraceLogWriter::extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index) {
-	int split = filename.find_last_of('.', filename.size() - 5);
-	root = filename.substr(0, split);
-	if(sscanf(filename.substr(split + 1, filename.size() - split - 4).c_str(), "%d", &index) == EOF) {
-		index = -1;
-	}
-}
-
-bool FileTraceLogWriter::compareTraceFileName (std::string const& f1, std::string const& f2) {
-	std::string root1;
-	std::string root2;
-
-	int index1;
-	int index2;
-
-	extractTraceFileNameInfo(f1, root1, index1);
-	extractTraceFileNameInfo(f2, root2, index2);
-
-	if(root1 != root2)
-		return root1 < root2;
-	if(index1 != index2)
-		return index1 < index2;
-
-	return f1 < f2;
-}
-
-bool FileTraceLogWriter::reverseCompareTraceFileName(std::string f1, std::string f2) {
-	return compareTraceFileName(f2, f1);
-}
-
 void FileTraceLogWriter::cleanupTraceFiles() {
 	// Setting maxLogsSize=0 disables trace file cleanup based on dir size
 	if(!g_network->isSimulated() && maxLogsSize > 0) {
@@ -168,7 +155,7 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 			}
 
 			// reverse sort, so we preserve the most recent files and delete the oldest
-			std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), FileTraceLogWriter::reverseCompareTraceFileName);
+			std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), std::greater<std::string>());
 
 			uint64_t runningTotal = 0;
 			std::vector<std::string>::iterator fileListIterator = existingTraceFiles.begin();

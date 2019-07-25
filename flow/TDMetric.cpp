@@ -152,7 +152,7 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 		return 0;
 
 	uint64_t t = explicitTime ? explicitTime : timer_int();
-	double x = g_random->random01();
+	double x = deterministicRandom()->random01();
 	
 	int64_t l = 0;
 	if (x == 0.0)

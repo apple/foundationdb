@@ -20,6 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
+#include "fdbrpc/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -90,32 +91,45 @@ struct PageChecksumCodec {
 
 		char *pData = (char *)data;
 		int dataLen = pageLen - sizeof(SumType);
-		SumType sum;
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
-		// Write sum directly to page or to sum variable based on mode
-		SumType *sumOut = write ? pSumInPage : &sum;
-		sumOut->part1 = pageNumber; //DO NOT CHANGE
-		sumOut->part2 = 0x5ca1ab1e;
-		hashlittle2(pData, dataLen, &sumOut->part1, &sumOut->part2);
-
-		// Verify if not in write mode
-		if(!write && sum != *pSumInPage) {
-			if(!silent)
-				TraceEvent (SevError, "SQLitePageChecksumFailure")
-					.error(checksum_failed())
-					.detail("CodecPageSize", pageSize)
-					.detail("CodecReserveSize", reserveSize)
-					.detail("Filename", filename)
-					.detail("PageNumber", pageNumber)
-					.detail("PageSize", pageLen)
-					.detail("ChecksumInPage", pSumInPage->toString())
-					.detail("ChecksumCalculated", sum.toString());
-
-			return false;
+		if (write) {
+			// Always write a CRC32 checksum for new pages
+			pSumInPage->part1 = 0; // Indicates CRC32 is being used
+			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			return true;
 		}
 
-		return true;
+		SumType sum;
+		if (pSumInPage->part1 == 0) {
+			// part1 being 0 indicates with high probability that a CRC32 checksum
+			// was used, so check that first. If this checksum fails, there is still
+			// some chance the page was written with hashlittle2, so fall back to checking
+			// hashlittle2
+			sum.part1 = 0;
+			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (sum == *pSumInPage) return true;
+		}
+
+		SumType hashLittle2Sum;
+		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
+		hashLittle2Sum.part2 = 0x5ca1ab1e;
+		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
+		if (hashLittle2Sum == *pSumInPage) return true;
+
+		if (!silent) {
+			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			trEvent.error(checksum_failed())
+			    .detail("CodecPageSize", pageSize)
+			    .detail("CodecReserveSize", reserveSize)
+			    .detail("Filename", filename)
+			    .detail("PageNumber", pageNumber)
+			    .detail("PageSize", pageLen)
+			    .detail("ChecksumInPage", pSumInPage->toString())
+			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+		}
+		return false;
 	}
 
 	static void * codec(void *vpSelf, void *data, Pgno pageNumber, int op) {
@@ -222,7 +236,7 @@ struct SQLiteDB : NonCopyable {
 	}
 
 	void checkError( const char* context, int rc ) {
-		//if (g_random->random01() < .001) rc = SQLITE_INTERRUPT;
+		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
@@ -1292,7 +1306,7 @@ void SQLiteDB::open(bool writable) {
 			// Either we died partway through creating this DB, or died partway through deleting it, or someone is monkeying with our files
 			// Create a new blank DB by backing up the WAL file (just in case it is important) and then hitting the next case
 			walFile = file_not_found();
-			renameFile( walpath, walpath + "-old-" + g_random->randomUniqueID().toString() );
+			renameFile( walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString() );
 			ASSERT_WE_THINK(false);  //< This code should not be hit in FoundationDB at the moment, because worker looks for databases to open by listing .fdb files, not .fdb-wal files
 			//TEST(true);  // Replace a partially constructed or destructed DB
 		}
@@ -1324,6 +1338,16 @@ void SQLiteDB::open(bool writable) {
 	// Note that VFSAsync will also call g_network->open (including for the WAL), so its flags are important, too
 	int result = sqlite3_open_v2(apath.c_str(), &db, (writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY), NULL);
 	checkError("open", result);
+
+	int chunkSize;
+	if( !g_network->isSimulated() ) {
+		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
+	} else if( BUGGIFY ) {
+		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
+	} else {
+		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
+	}
+	checkError("setChunkSize", sqlite3_file_control(db, nullptr, SQLITE_FCNTL_CHUNK_SIZE, &chunkSize));
 
 	btree = db->aDb[0].pBt;
 	initPagerCodec();
@@ -1431,7 +1455,12 @@ public:
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
 
-	Future<Void> doClean();
+	struct SpringCleaningWorkPerformed {
+		int lazyDeletePages = 0;
+		int vacuumedPages = 0;
+	};
+
+	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
 
 private:
@@ -1661,7 +1690,7 @@ private:
 			cursor = new Cursor(conn, true);
 			checkFreePages();
 			++writesComplete;
-			if (t3-a.issuedTime > 10.0*g_random->random01())
+			if (t3-a.issuedTime > 10.0*deterministicRandom()->random01())
 				TraceEvent("KVCommit10sSample", dbgid).detail("Queued", t1-a.issuedTime).detail("Commit", t2-t1).detail("Checkpoint", t3-t2);
 
 			diskBytesUsed = waitForAndGet( conn.dbFile->size() ) + waitForAndGet( conn.walFile->size() );
@@ -1704,15 +1733,17 @@ private:
 		}
 
 		struct SpringCleaningAction : TypedAction<Writer, SpringCleaningAction>, FastAllocated<SpringCleaningAction> {
-			ThreadReturnPromise<Void> result;
-			virtual double getTimeEstimate() { return SERVER_KNOBS->SPRING_CLEANING_TIME_ESTIMATE; }
+			ThreadReturnPromise<SpringCleaningWorkPerformed> result;
+			virtual double getTimeEstimate() { 
+				return std::max(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE, SERVER_KNOBS->SPRING_CLEANING_VACUUM_TIME_ESTIMATE);
+			}
 		};
 		void action(SpringCleaningAction& a) {
 			double s = now();
-			double end = now() + SERVER_KNOBS->SPRING_CLEANING_TIME_ESTIMATE;
+			double lazyDeleteEnd = now() + SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE;
+			double vacuumEnd = now() + SERVER_KNOBS->SPRING_CLEANING_VACUUM_TIME_ESTIMATE;
 
-			int lazyDeletePages = 0;
-			int vacuumedPages = 0;
+			SpringCleaningWorkPerformed workPerformed;
 
 			double lazyDeleteTime = 0;
 			double vacuumTime = 0;
@@ -1722,21 +1753,26 @@ private:
 
 			loop {
 				double begin = now();
-				bool canDelete = !freeTableEmpty && (now() < end || lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MIN_LAZY_DELETE_PAGES) && lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES;
-				bool canVacuum = !vacuumFinished && (now() < end || vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MIN_VACUUM_PAGES) && vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MAX_VACUUM_PAGES;
+				bool canDelete = !freeTableEmpty 
+				                 && (now() < lazyDeleteEnd || workPerformed.lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MIN_LAZY_DELETE_PAGES) 
+				                 && workPerformed.lazyDeletePages < SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES;
+
+				bool canVacuum = !vacuumFinished 
+				                 && (now() < vacuumEnd || workPerformed.vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MIN_VACUUM_PAGES) 
+				                 && workPerformed.vacuumedPages < SERVER_KNOBS->SPRING_CLEANING_MAX_VACUUM_PAGES;
 
 				if(!canDelete && !canVacuum) {
 					break;
 				}
 
-				if(canDelete && (!canVacuum || g_random->random01() < lazyDeleteBatchProbability)) {
+				if(canDelete && (!canVacuum || deterministicRandom()->random01() < lazyDeleteBatchProbability)) {
 					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
 					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
 
-					int pagesToDelete = std::max(1, std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE, SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - lazyDeletePages));
+					int pagesToDelete = std::max(1, std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE, SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - workPerformed.lazyDeletePages));
 					int pagesDeleted = cursor->lazyDelete(pagesToDelete) ;
 					freeTableEmpty = (pagesDeleted != pagesToDelete);
-					lazyDeletePages += pagesDeleted;
+					workPerformed.lazyDeletePages += pagesDeleted;
 					lazyDeleteTime += now() - begin;
 				}
 				else {
@@ -1747,7 +1783,7 @@ private:
 
 					vacuumFinished = conn.vacuum();
 					if(!vacuumFinished) {
-						++vacuumedPages;
+						++workPerformed.vacuumedPages;
 					}
 
 					vacuumTime += now() - begin;
@@ -1758,19 +1794,19 @@ private:
 
 			freeListPages = conn.freePages();
 
-			TEST(lazyDeletePages > 0); // Pages lazily deleted
-			TEST(vacuumedPages > 0); // Pages vacuumed
+			TEST(workPerformed.lazyDeletePages > 0); // Pages lazily deleted
+			TEST(workPerformed.vacuumedPages > 0); // Pages vacuumed
 			TEST(vacuumTime > 0); // Time spent vacuuming
 			TEST(lazyDeleteTime > 0); // Time spent lazy deleting
 
 			++springCleaningStats.springCleaningCount;
-			springCleaningStats.lazyDeletePages += lazyDeletePages;
-			springCleaningStats.vacuumedPages += vacuumedPages;
+			springCleaningStats.lazyDeletePages += workPerformed.lazyDeletePages;
+			springCleaningStats.vacuumedPages += workPerformed.vacuumedPages;
 			springCleaningStats.springCleaningTime += now() - s;
 			springCleaningStats.vacuumTime += vacuumTime;
 			springCleaningStats.lazyDeleteTime += lazyDeleteTime;
 
-			a.result.send(Void());
+			a.result.send(workPerformed);
 			++writesComplete;
 			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
 				TraceEvent("SpringCleaningActionFinished", dbgid).detail("Elapsed", now()-s);
@@ -1849,9 +1885,22 @@ IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, Key
 }
 
 ACTOR Future<Void> cleanPeriodically( KeyValueStoreSQLite* self ) {
+	wait(delayJittered(SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL));
 	loop {
-		wait( delayJittered(SERVER_KNOBS->CLEANING_INTERVAL) );
-		wait( self->doClean() );
+		KeyValueStoreSQLite::SpringCleaningWorkPerformed workPerformed = wait(self->doClean());
+
+		double duration = std::numeric_limits<double>::max();
+		if (workPerformed.lazyDeletePages >= SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE) {
+			duration = std::min(duration, SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_INTERVAL);
+		}
+		if (workPerformed.vacuumedPages > 0) {
+			duration = std::min(duration, SERVER_KNOBS->SPRING_CLEANING_VACUUM_INTERVAL);
+		}
+		if (duration == std::numeric_limits<double>::max()) {
+			duration = SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL;
+		}
+
+		wait(delayJittered(duration));
 	}
 }
 
@@ -1888,8 +1937,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	readCursors.resize(64); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskWrite);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskWrite);
 	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
@@ -1914,8 +1963,8 @@ StorageBytes KeyValueStoreSQLite::getStorageBytes() {
 
 void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskRead);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for(int i=0; i<nReadThreads; i++)
 		readThreads->addThread( new Reader(filename, type==KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]) );
 	g_network->setCurrentTask(taskId);
@@ -1957,7 +2006,7 @@ Future<Standalone<VectorRef<KeyValueRef>>> KeyValueStoreSQLite::readRange( KeyRa
 	readThreads->post(p);
 	return f;
 }
-Future<Void> KeyValueStoreSQLite::doClean() {
+Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
 	++writesRequested;
 	auto p = new Writer::SpringCleaningAction;
 	auto f = p->result.getFuture();

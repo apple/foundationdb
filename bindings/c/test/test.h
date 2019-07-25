@@ -26,8 +26,10 @@
 #include <string.h>
 #include <pthread.h>
 
+#include <inttypes.h>
+
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 #endif
 
 #include <foundationdb/fdb_c.h>
@@ -125,7 +127,7 @@ void addError(struct ResultSet *rs, const char *message) {
 void writeResultSet(struct ResultSet *rs) {
 	uint64_t id = ((uint64_t)rand() << 32) + rand();
 	char name[100];
-	sprintf(name, "fdb-c_result-%llu.json", id);
+	sprintf(name, "fdb-c_result-%" SCNu64 ".json", id);
 	FILE *fp = fopen(name, "w");
 	if(!fp) {
 		fprintf(stderr, "Could not open results file %s\n", name);

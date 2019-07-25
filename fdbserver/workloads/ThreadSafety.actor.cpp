@@ -38,7 +38,7 @@ struct ThreadInfo {
 	Promise<Void> done;
 	DeterministicRandom random;
 
-	ThreadInfo(int id, ThreadSafetyWorkload *self) : id(id), self(self), random(g_random->randomInt(1, 1e9)) { }
+	ThreadInfo(int id, ThreadSafetyWorkload *self) : id(id), self(self), random(deterministicRandom()->randomInt(1, 1e9)) { }
 };
 
 // A thread barrier implementation. Reached() method blocks until the required number of threads reach it.
@@ -157,7 +157,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		Reference<IDatabase> dbRef = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = dbRef;
 
-		if(g_random->coinflip()) {
+		if(deterministicRandom()->coinflip()) {
 			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}

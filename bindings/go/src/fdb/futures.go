@@ -22,22 +22,20 @@
 
 package fdb
 
-/*
- #cgo LDFLAGS: -lfdb_c -lm
- #define FDB_API_VERSION 610
- #include <foundationdb/fdb_c.h>
- #include <string.h>
-
- extern void unlockMutex(void*);
-
- void go_callback(FDBFuture* f, void* m) {
-     unlockMutex(m);
- }
-
- void go_set_callback(void* f, void* m) {
-     fdb_future_set_callback(f, (FDBCallback)&go_callback, m);
- }
-*/
+//  #cgo LDFLAGS: -lfdb_c -lm
+//  #define FDB_API_VERSION 620
+//  #include <foundationdb/fdb_c.h>
+//  #include <string.h>
+//
+//  extern void unlockMutex(void*);
+//
+//  void go_callback(FDBFuture* f, void* m) {
+//      unlockMutex(m);
+//  }
+//
+//  void go_set_callback(void* f, void* m) {
+//      fdb_future_set_callback(f, (FDBCallback)&go_callback, m);
+//  }
 import "C"
 
 import (
@@ -100,15 +98,18 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 	m.Lock()
 }
 
-func (f future) BlockUntilReady() {
+func (f *future) BlockUntilReady() {
+	defer runtime.KeepAlive(f)
 	fdb_future_block_until_ready(f.ptr)
 }
 
-func (f future) IsReady() bool {
+func (f *future) IsReady() bool {
+	defer runtime.KeepAlive(f)
 	return C.fdb_future_is_ready(f.ptr) != 0
 }
 
-func (f future) Cancel() {
+func (f *future) Cancel() {
+	defer runtime.KeepAlive(f)
 	C.fdb_future_cancel(f.ptr)
 }
 
@@ -140,6 +141,8 @@ type futureByteSlice struct {
 
 func (f *futureByteSlice) Get() ([]byte, error) {
 	f.o.Do(func() {
+		defer runtime.KeepAlive(f.future)
+
 		var present C.fdb_bool_t
 		var value *C.uint8_t
 		var length C.int
@@ -195,6 +198,8 @@ type futureKey struct {
 
 func (f *futureKey) Get() (Key, error) {
 	f.o.Do(func() {
+		defer runtime.KeepAlive(f.future)
+
 		var value *C.uint8_t
 		var length C.int
 
@@ -241,7 +246,9 @@ type futureNil struct {
 	*future
 }
 
-func (f futureNil) Get() error {
+func (f *futureNil) Get() error {
+	defer runtime.KeepAlive(f.future)
+
 	f.BlockUntilReady()
 	if err := C.fdb_future_get_error(f.ptr); err != 0 {
 		return Error{int(err)}
@@ -250,7 +257,7 @@ func (f futureNil) Get() error {
 	return nil
 }
 
-func (f futureNil) MustGet() {
+func (f *futureNil) MustGet() {
 	if err := f.Get(); err != nil {
 		panic(err)
 	}
@@ -272,7 +279,9 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 	return C.GoBytes(src, size)
 }
 
-func (f futureKeyValueArray) Get() ([]KeyValue, bool, error) {
+func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
+	defer runtime.KeepAlive(f.future)
+
 	f.BlockUntilReady()
 
 	var kvs *C.FDBKeyValue
@@ -316,17 +325,20 @@ type futureInt64 struct {
 	*future
 }
 
-func (f futureInt64) Get() (int64, error) {
+func (f *futureInt64) Get() (int64, error) {
+	defer runtime.KeepAlive(f.future)
+
 	f.BlockUntilReady()
 
 	var ver C.int64_t
-	if err := C.fdb_future_get_version(f.ptr, &ver); err != 0 {
+	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
 		return 0, Error{int(err)}
 	}
+
 	return int64(ver), nil
 }
 
-func (f futureInt64) MustGet() int64 {
+func (f *futureInt64) MustGet() int64 {
 	val, err := f.Get()
 	if err != nil {
 		panic(err)
@@ -356,7 +368,9 @@ type futureStringSlice struct {
 	*future
 }
 
-func (f futureStringSlice) Get() ([]string, error) {
+func (f *futureStringSlice) Get() ([]string, error) {
+	defer runtime.KeepAlive(f.future)
+
 	f.BlockUntilReady()
 
 	var strings **C.char
@@ -375,7 +389,7 @@ func (f futureStringSlice) Get() ([]string, error) {
 	return ret, nil
 }
 
-func (f futureStringSlice) MustGet() []string {
+func (f *futureStringSlice) MustGet() []string {
 	val, err := f.Get()
 	if err != nil {
 		panic(err)

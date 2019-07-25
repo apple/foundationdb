@@ -49,7 +49,8 @@ struct FastRestoreOpConfig {
 };
 extern FastRestoreOpConfig opConfig;
 
-struct RestoreCommonReply { 
+struct RestoreCommonReply {
+	constexpr static FileIdentifier file_identifier = 56140435;
 	UID id; // unique ID of the server who sends the reply
 	
 	RestoreCommonReply() = default;
@@ -68,6 +69,8 @@ struct RestoreCommonReply {
 };
 
 struct RestoreSimpleRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 83557801;
+
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSimpleRequest() = default;

@@ -20,7 +20,7 @@
 
 # -*- mode: makefile; -*-
 
-flow_CFLAGS := -I$(BOOSTDIR) -I. -DUSE_UCONTEXT
+flow_CFLAGS := -isystem$(BOOSTDIR) -I. -DUSE_UCONTEXT
 flow_LDFLAGS :=
 
 ifeq ($(PLATFORM),osx)

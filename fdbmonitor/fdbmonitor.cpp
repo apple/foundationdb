@@ -46,6 +46,7 @@
 #include <sys/time.h>
 #include <stdlib.h>
 
+#include <cinttypes>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -377,7 +378,7 @@ public:
 	Command() : argv(NULL) { }
 	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
-		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
+		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%" PRIu64, section.c_str(), id);
 		ssection = _ssection;
 
 		for ( auto p : pipes ) {

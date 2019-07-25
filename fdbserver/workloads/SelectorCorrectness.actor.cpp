@@ -67,7 +67,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> SelectorCorrectnessSetup( Database cx, SelectorCorrectnessWorkload* self ) {
-		state Value myValue = StringRef(format( "%010d", g_random->randomInt( 0, 10000000 ) ));
+		state Value myValue = StringRef(format( "%010d", deterministicRandom()->randomInt( 0, 10000000 ) ));
 		state Transaction tr(cx);
 
 		if(!self->testReadYourWrites) {
@@ -87,7 +87,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 					for(int i = 0; i < self->maxKeySpace; i+=4) 
 						tr.set(StringRef(format( "%010d", i ) ),myValue);
 					for(int i = 2; i < self->maxKeySpace; i+=4) 
-						if(g_random->random01() > 0.5)
+						if(deterministicRandom()->random01() > 0.5)
 							tr.set(StringRef(format( "%010d", i ) ),myValue);
 
 					wait( tr.commit() );
@@ -125,19 +125,19 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 			trRYOW.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			if( self->testReadYourWrites ) {
-				myValue = StringRef(format( "%010d", g_random->randomInt( 0, 10000000 ) ));
+				myValue = StringRef(format( "%010d", deterministicRandom()->randomInt( 0, 10000000 ) ));
 				for(int i = 2; i < self->maxKeySpace; i+=4)
 					trRYOW.set(StringRef(format( "%010d", i ) ),myValue);
 				for(int i = 0; i < self->maxKeySpace; i+=4)
-					if(g_random->random01() > 0.5)
+					if(deterministicRandom()->random01() > 0.5)
 						trRYOW.set(StringRef(format( "%010d", i ) ),myValue);
 			}
 
 			try {
-				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
-					j = g_random->randomInt(0,2);
+				for(i = 0; i < deterministicRandom()->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
+					j = deterministicRandom()->randomInt(0,2);
 					if( j < 1 ) {
-						state int searchInt = g_random->randomInt( 0, self->maxKeySpace );
+						state int searchInt = deterministicRandom()->randomInt( 0, self->maxKeySpace );
 						myKeyA = format( "%010d", searchInt );
 
 						if(self->testReadYourWrites) {
@@ -152,17 +152,17 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							}
 						}
 					} else {
-						int a = g_random->randomInt( 2, self->maxKeySpace );
-						int b = g_random->randomInt( 2, 2*self->maxKeySpace );
+						int a = deterministicRandom()->randomInt( 2, self->maxKeySpace );
+						int b = deterministicRandom()->randomInt( 2, 2*self->maxKeySpace );
 						int abmax = std::max(a,b);
 						int abmin = std::min(a,b)-1;
 						myKeyA = format( "%010d", abmin );
 						myKeyB = format( "%010d", abmax );
-						onEqualA = g_random->randomInt( 0, 2 ) != 0;
-						onEqualB = g_random->randomInt( 0, 2 ) != 0;
-						offsetA = 1;//-1*g_random->randomInt( 0, self->maxOffset );
-						offsetB = g_random->randomInt( 1, self->maxOffset );
-						reverse = g_random->random01() > 0.5 ? false : true;
+						onEqualA = deterministicRandom()->randomInt( 0, 2 ) != 0;
+						onEqualB = deterministicRandom()->randomInt( 0, 2 ) != 0;
+						offsetA = 1;//-1*deterministicRandom()->randomInt( 0, self->maxOffset );
+						offsetB = deterministicRandom()->randomInt( 1, self->maxOffset );
+						reverse = deterministicRandom()->random01() > 0.5 ? false : true;
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
 						state int expectedSize = (std::min( abmax + 2*offsetB - (abmax%2==1 ? 1 : (onEqualB ? 0 : 2)), self->maxKeySpace ) - ( std::max( abmin + 2*offsetA - (abmin%2==1 ? 1 : (onEqualA ? 0 : 2)), 0 ) ))/2;

@@ -19,6 +19,7 @@
  */
 
 #include "Tester.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace FDB;
 
@@ -107,7 +108,7 @@ struct DirectoryCreateSubspaceFunc : InstructionFunc {
 		state Tuple path = wait(popTuple(data));
 		Tuple rawPrefix = wait(data->stack.waitAndPop());
 
-		logOp(format("Created subspace at %s: %s", tupleToString(path).c_str(), printable(rawPrefix.getString(0)).c_str()));
+		logOp(format("Created subspace at %s: %s", tupleToString(path).c_str(), rawPrefix.getString(0).printable().c_str()));
 		data->directoryData.push(new Subspace(path, rawPrefix.getString(0)));
 		return Void();
 	}
@@ -133,7 +134,7 @@ struct DirectoryCreateLayerFunc : InstructionFunc {
 		else {
 			Subspace* nodeSubspace = data->directoryData.directoryList[index1].subspace.get();
 			Subspace* contentSubspace = data->directoryData.directoryList[index2].subspace.get();
-			logOp(format("Create directory layer: node_subspace (%d) = %s, content_subspace (%d) = %s, allow_manual_prefixes = %d", index1, printable(nodeSubspace->key()).c_str(), index2, printable(nodeSubspace->key()).c_str(), allowManualPrefixes));
+			logOp(format("Create directory layer: node_subspace (%d) = %s, content_subspace (%d) = %s, allow_manual_prefixes = %d", index1, nodeSubspace->key().printable().c_str(), index2, nodeSubspace->key().printable().c_str(), allowManualPrefixes));
 			data->directoryData.push(Reference<IDirectory>(new DirectoryLayer(*nodeSubspace, *contentSubspace, allowManualPrefixes)));
 		}
 
@@ -158,7 +159,7 @@ struct DirectoryChangeFunc : InstructionFunc {
 
 		if(LOG_DIRS) {
 			DirectoryOrSubspace d = data->directoryData.directoryList[data->directoryData.directoryListIndex];
-			printf("Changed directory to %d (%s @\'%s\')\n", data->directoryData.directoryListIndex, d.typeString().c_str(), d.directory.present() ? pathToString(d.directory.get()->getPath()).c_str() : printable(d.subspace.get()->key()).c_str());
+			printf("Changed directory to %d (%s @\'%s\')\n", data->directoryData.directoryListIndex, d.typeString().c_str(), d.directory.present() ? pathToString(d.directory.get()->getPath()).c_str() : d.subspace.get()->key().printable().c_str());
 			fflush(stdout);
 		}
 
@@ -192,7 +193,7 @@ struct DirectoryCreateOrOpenFunc : InstructionFunc {
 		Standalone<StringRef> layer = layerTuple.getType(0) == Tuple::NULL_TYPE ? StringRef() : layerTuple.getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("create_or_open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str()));
+		logOp(format("create_or_open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), layer.printable().c_str()));
 
 		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, layer] () {
 			return directory->createOrOpen(instruction->tr, path, layer);
@@ -217,7 +218,7 @@ struct DirectoryCreateFunc : InstructionFunc {
 		Optional<Standalone<StringRef>> prefix = args[1].getType(0) == Tuple::NULL_TYPE ? Optional<Standalone<StringRef>>() : args[1].getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("create %s: layer=%s, prefix=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str(), prefix.present() ? printable(prefix.get()).c_str() : "<not present>"));
+		logOp(format("create %s: layer=%s, prefix=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), layer.printable().c_str(), prefix.present() ? prefix.get().printable().c_str() : "<not present>"));
 
 		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, layer, prefix] () {
 			return directory->create(instruction->tr, path, layer, prefix);
@@ -241,7 +242,7 @@ struct DirectoryOpenFunc : InstructionFunc {
 		Standalone<StringRef> layer = layerTuple.getType(0) == Tuple::NULL_TYPE ? StringRef() : layerTuple.getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str()));
+		logOp(format("open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), layer.printable().c_str()));
 		Reference<DirectorySubspace> dirSubspace = wait(directory->open(instruction->tr, path, layer));
 		data->directoryData.push(dirSubspace);
 
@@ -433,7 +434,7 @@ struct DirectoryUnpackKeyFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple key = wait(data->stack.waitAndPop());
 		Subspace *subspace = data->directoryData.subspace();
-		logOp(format("Unpack %s in subspace with prefix %s", printable(key.getString(0)).c_str(), printable(subspace->key()).c_str()));
+		logOp(format("Unpack %s in subspace with prefix %s", key.getString(0).printable().c_str(), subspace->key().printable().c_str()));
 		Tuple tuple = subspace->unpack(key.getString(0));
 		for(int i = 0; i < tuple.size(); ++i) {
 			data->stack.push(tuple.subTuple(i, i+1).pack());
@@ -483,7 +484,7 @@ struct DirectoryOpenSubspaceFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple tuple = wait(popTuple(data));
 		Subspace *subspace = data->directoryData.subspace();
-		logOp(format("open_subspace %s (at %s)", tupleToString(tuple).c_str(), printable(subspace->key()).c_str()));
+		logOp(format("open_subspace %s (at %s)", tupleToString(tuple).c_str(), subspace->key().printable().c_str()));
 		Subspace *child = new Subspace(subspace->subspace(tuple));
 		data->directoryData.push(child);
 

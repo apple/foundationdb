@@ -20,10 +20,12 @@
 
 #include "fdb_flow.h"
 
+#include <stdio.h>
+#include <cinttypes>
+
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
-
-#include <stdio.h>
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace FDB;
 
@@ -33,14 +35,14 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(610);
+	API *fdb = FDB::API::selectAPIVersion(620);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr = db->createTransaction();
 
 	// tr->setVersion(1);
 
 	Version ver = wait( tr->getReadVersion() );
-	printf("%lld\n", ver);
+	printf("%" PRId64 "\n", ver);
 
 	state std::vector< Future<Version> > versions;
 
@@ -76,21 +78,15 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(610);
+	API *fdb = FDB::API::selectAPIVersion(620);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
-
-	int randomSeed = platform::getRandomSeed();
-
-	g_random = new DeterministicRandom(randomSeed);
-	g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-	g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
 	g_network = newNet2( false );
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
 	systemMonitor();
-	uncancellable(recurring(&systemMonitor, 5.0, TaskFlushTrace));
+	uncancellable(recurring(&systemMonitor, 5.0, TaskPriority::FlushTrace));
 
 	Future<Void> t = _test();
 
@@ -152,6 +148,7 @@ namespace FDB {
 
 		void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
+		Future<int64_t> getApproximateSize() override;
 		Future<Void> onError(Error const& e) override;
 
 		void cancel() override;
@@ -184,7 +181,7 @@ namespace FDB {
 	}
 
 	void backToFutureCallback( FDBFuture* f, void* data ) {
-		g_network->onMainThread( Promise<Void>((SAV<Void>*)data), TaskDefaultOnMainThread ); // SOMEDAY: think about this priority
+		g_network->onMainThread( Promise<Void>((SAV<Void>*)data), TaskPriority::DefaultOnMainThread ); // SOMEDAY: think about this priority
 	}
 
 	// backToFuture<Type>( FDBFuture*, (FDBFuture* -> Type) ) -> Future<Type>
@@ -295,7 +292,7 @@ namespace FDB {
 		return backToFuture<Version>( fdb_transaction_get_read_version( tr ), [](Reference<CFuture> f){
 				Version value;
 
-				throw_on_error( fdb_future_get_version( f->f, &value ) );
+				throw_on_error( fdb_future_get_int64( f->f, &value ) );
 
 				return value;
 			} );
@@ -413,6 +410,14 @@ namespace FDB {
 		}
 	}
 
+	Future<int64_t> TransactionImpl::getApproximateSize() {
+		return backToFuture<int64_t>(fdb_transaction_get_approximate_size(tr), [](Reference<CFuture> f) {
+			int64_t size = 0;
+			throw_on_error(fdb_future_get_int64(f->f, &size));
+			return size;
+		});
+	}
+
 	Future<Void> TransactionImpl::onError(Error const& e) {
 		return backToFuture< Void >( fdb_transaction_on_error( tr, e.code() ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
@@ -428,15 +433,4 @@ namespace FDB {
 		fdb_transaction_reset( tr );
 	}
 
-	std::string printable( const StringRef& val ) {
-		std::string s;
-		for(int i=0; i<val.size(); i++) {
-			uint8_t b = val[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
-		}
-		return s;
-	}
-
-}
+}  // namespace FDB

@@ -90,17 +90,6 @@ T sorted(T range) {
 }
 
 template <class T>
-inline std::vector<T>& operator , (std::vector<T>& v, T a) {
-	v.push_back(a);
-	return v;
-}
-
-template <class T>
-inline std::vector<T>& operator , (std::vector<T> && v, T a) {
-	return (const_cast<std::vector<T>&>(v), a);
-}
-
-template <class T>
 ErrorOr<T> errorOr( T t ) {
 	return ErrorOr<T>(t);
 }
@@ -175,7 +164,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 	loop {
 		if (i == results.size()) return Void();
 		try {
-			T r = wait( results[i] );
+			wait(success(results[i]));
 		} catch (...) {
 		}
 		i++;
@@ -183,7 +172,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 }
 
 ACTOR template <class T>
-Future<T> timeout( Future<T> what, double time, T timedoutValue, int taskID = TaskDefaultDelay ) {
+Future<T> timeout( Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	Future<Void> end = delay( time, taskID );
 	choose {
 		when( T t = wait( what ) ) { return t; }
@@ -201,7 +190,7 @@ Future<Optional<T>> timeout( Future<T> what, double time ) {
 }
 
 ACTOR template <class T>
-Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDelay ) {
+Future<T> timeoutError( Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	Future<Void> end = delay( time, taskID );
 	choose {
 		when( T t = wait( what ) ) { return t; }
@@ -209,8 +198,9 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 	}
 }
 
+
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
+Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
 	try {
 		state T t = wait( what );
 		wait( delay( time, taskID ) );
@@ -223,7 +213,7 @@ Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDe
 }
 
 ACTOR template<class Func>
-Future<Void> recurring( Func what, double interval, int taskID = TaskDefaultDelay ) {
+Future<Void> recurring( Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	loop choose {
 		when ( wait( delay( interval, taskID ) ) ) { what(); }
 	}
@@ -736,11 +726,18 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output ) {
+ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
 	loop {
-		if (input->get().size())
-			output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-		else
+		if (input->get().size()) {
+			if (useObjSerializer) {
+				ObjectReader reader(input->get().begin(), IncludeVersion());
+				T res;
+				reader.deserialize(res);
+				output->set(res);
+			} else {
+				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
+			}
+		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
 	}
@@ -944,7 +941,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 }
 
 ACTOR template <class T>
-Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
+Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	if (results.empty() && required == 0) return Void();
 	wait(quorum(results, required));
 	choose {
@@ -1024,13 +1021,14 @@ ACTOR template <class T> Future<Void> onEqual( Future<T> in, T equalTo ) {
 ACTOR template <class T>
 Future<Void> success( Future<T> of ) {
 	T t = wait( of );
+	(void)t;
 	return Void();
 }
 
 ACTOR template <class T>
 Future<Void> ready( Future<T> f ) {
 	try {
-		T _ = wait( f );
+		wait(success(f));
 	} catch (...) {
 	}
 	return Void();
@@ -1251,7 +1249,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	FlowLock() : permits(1), active(0) {}
 	explicit FlowLock(int64_t permits) : permits(permits), active(0) {}
 
-	Future<Void> take(int taskID = TaskDefaultYield, int64_t amount = 1) {
+	Future<Void> take(TaskPriority taskID = TaskPriority::DefaultYield, int64_t amount = 1) {
 		if (active + amount <= permits || active == 0) {
 			active += amount;
 			return safeYieldActor(this, taskID, amount);
@@ -1290,7 +1288,7 @@ private:
 	int64_t active;
 	Promise<Void> broken_on_destruct;
 
-	ACTOR static Future<Void> takeActor(FlowLock* lock, int taskID, int64_t amount) {
+	ACTOR static Future<Void> takeActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
 		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
 
 		try {
@@ -1303,7 +1301,7 @@ private:
 			throw;
 		}
 		try {
-			double duration = BUGGIFY_WITH_PROB(.001) ? g_random->random01()*FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY : 0.0;
+			double duration = BUGGIFY_WITH_PROB(.001) ? deterministicRandom()->random01()*FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY : 0.0;
 			choose{ when(wait(delay(duration, taskID))) {}  // So release()ing the lock doesn't cause arbitrary code to run on the stack
 					when(wait(lock->broken_on_destruct.getFuture())) {} }
 			return Void();
@@ -1322,7 +1320,7 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, int taskID, int64_t amount) {
+	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
 		try {
 			choose{
 				when(wait(yield(taskID))) {}
@@ -1343,7 +1341,7 @@ private:
 };
 
 ACTOR template <class T>
-Future<Void> yieldPromiseStream( FutureStream<T> input, PromiseStream<T> output, int taskID = TaskDefaultYield ) {
+Future<Void> yieldPromiseStream( FutureStream<T> input, PromiseStream<T> output, TaskPriority taskID = TaskPriority::DefaultYield ) {
 	loop {
 		T f = waitNext( input );
 		output.send( f );

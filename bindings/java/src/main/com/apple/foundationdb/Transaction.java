@@ -261,6 +261,15 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	CompletableFuture<byte[]> getVersionstamp();
 
 	/**
+	 * Returns a future that will contain the approximated size of the commit, which is the
+	 * summation of mutations, read conflict ranges, and write conflict ranges. This can be
+	 * called multiple times before transaction commit.
+	 *
+	 * @return a future that will contain the approximated size of the commit.
+	 */
+	CompletableFuture<Long> getApproximateSize();
+
+	/**
 	 * Resets a transaction and returns a delayed signal for error recovery.  If the error
 	 *  encountered by the {@code Transaction} could not be recovered from, the returned
 	 *  {@code CompletableFuture} will be set to an error state.

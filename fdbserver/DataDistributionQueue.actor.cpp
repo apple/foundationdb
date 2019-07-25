@@ -46,12 +46,13 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData() : startTime(-1), priority(-1), workFactor(0), wantsNewServers(false), interval("QueuedRelocation") {}
-	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(g_random->randomUniqueID()), workFactor(0),
+	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), startTime(now()), randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
 		wantsNewServers(
 			rs.priority == PRIORITY_REBALANCE_SHARD ||
 			rs.priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-			rs.priority == PRIORITY_SPLIT_SHARD ), interval("QueuedRelocation") {}
+			rs.priority == PRIORITY_SPLIT_SHARD ||
+			rs.priority == PRIORITY_TEAM_REDUNDANT ), interval("QueuedRelocation") {}
 
 	bool operator> (const RelocateData& rhs) const {
 		return priority != rhs.priority ? priority > rhs.priority : ( startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId );
@@ -511,9 +512,9 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == PRIORITY_MERGE_SHARD ) {
-			wait( delay( 0.5, TaskDataDistribution - 2 ) );
+			wait( delay( 0.5, decrementPriority(decrementPriority(TaskPriority::DataDistribution )) ) );
 		} else {
-			wait( delay( 0.0001, TaskDataDistributionLaunch ) );
+			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
 
 		loop {
@@ -827,7 +828,7 @@ struct DDQueueData {
 
 			//logRelocation( rd, "LaunchedRelocation" );
 		}
-		if( now() - startTime > .001 && g_random->random01()<0.001 )
+		if( now() - startTime > .001 && deterministicRandom()->random01()<0.001 )
 			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime );
 
 		/*if( startedHere > 0 ) {
@@ -932,7 +933,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				    .detail("Count", stuckCount)
 				    .detail("TeamCollectionId", tciIndex)
 				    .detail("NumOfTeamCollections", self->teamCollections.size());
-				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
+				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch ) );
 			}
 
 			state std::vector<UID> destIds;
@@ -949,7 +950,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					// We randomly choose a server in bestTeams[i] as the shard's destination and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
-					int idx = g_random->randomInt(0, serverIds.size());
+					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
 					for(int j = 0; j < serverIds.size(); j++) {
@@ -992,7 +993,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			state Future<Void> doMoveKeys = moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, dataMovementComplete, &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock, self->teamCollections.size() > 1, relocateShardInterval.pairID );
-			state Future<Void> pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
+			state Future<Void> pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch );
 			try {
 				loop {
 					choose {
@@ -1015,7 +1016,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 									self->dataTransferComplete.send(rd);
 								}
 							}
-							pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
+							pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch );
 						}
 						when( wait( signalledTransferComplete ? Never() : dataMovementComplete.getFuture() ) ) {
 							self->fetchKeysComplete.insert( rd );
@@ -1065,7 +1066,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			} else {
 				TEST(true);  // move to removed server
 				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
-				wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskDataDistributionLaunch ) );
+				wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch ) );
 			}
 		}
 	} catch (Error& e) {
@@ -1091,7 +1092,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	if( !shards.size() )
 		return false;
 
-	state KeyRange moveShard = g_random->randomChoice( shards );
+	state KeyRange moveShard = deterministicRandom()->randomChoice( shards );
 	StorageMetrics metrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(moveShard)) ) );
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);
@@ -1124,7 +1125,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	loop {
-		wait( delay(checkDelay, TaskDataDistributionLaunch) );
+		wait( delay(checkDelay, TaskPriority::DataDistributionLaunch) );
 		if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 			state Optional<Reference<IDataDistributionTeam>> randomTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, false, true ) ) ) );
 			if( randomTeam.present() ) {
@@ -1159,7 +1160,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	loop {
-		wait( delay(checkDelay, TaskDataDistributionLaunch) );
+		wait( delay(checkDelay, TaskPriority::DataDistributionLaunch) );
 		if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 			state Optional<Reference<IDataDistributionTeam>> randomTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, false, false ) ) ) );
 			if( randomTeam.present() ) {
@@ -1243,7 +1244,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation( rs, serversToLaunchFrom );
 					if(wasEmpty && !serversToLaunchFrom.empty())
-						launchQueuedWorkTimeout = delay(0, TaskDataDistributionLaunch);
+						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 				}
 				when ( wait(launchQueuedWorkTimeout) ) {
 					self.launchQueuedWork( serversToLaunchFrom );
@@ -1257,7 +1258,7 @@ ACTOR Future<Void> dataDistributionQueue(
 				when ( RelocateData done = waitNext( self.dataTransferComplete.getFuture() ) ) {
 					complete( done, self.busymap );
 					if(serversToLaunchFrom.empty() && !done.src.empty())
-						launchQueuedWorkTimeout = delay(0, TaskDataDistributionLaunch);
+						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 					serversToLaunchFrom.insert(done.src.begin(), done.src.end());
 				}
 				when ( RelocateData done = waitNext( self.relocationComplete.getFuture() ) ) {
@@ -1265,7 +1266,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					self.finishRelocation(done.priority);
 					self.fetchKeysComplete.erase( done );
 					//self.logRelocation( done, "ShardRelocatorDone" );
-					actors.add( tag( delay(0, TaskDataDistributionLaunch), done.keys, rangesComplete ) );
+					actors.add( tag( delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete ) );
 					if( g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60 ) {
 						TraceEvent(SevWarnAlways, "RelocationDurationTooLong").detail("Duration", now() - done.startTime);
 						debug_setCheckRelocationDuration(false);

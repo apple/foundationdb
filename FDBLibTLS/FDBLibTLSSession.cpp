@@ -19,6 +19,8 @@
  */
 
 #include "FDBLibTLS/FDBLibTLSSession.h"
+
+#include "flow/flow.h"
 #include "flow/Trace.h"
 
 #include <openssl/bio.h>
@@ -60,7 +62,7 @@ static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, v
 
 FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uidptr) :
 	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
-	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false) {
+	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), lastVerifyFailureLogged(0.0) {
 	if (uidptr)
 		uid = * (UID*) uidptr;
 
@@ -243,11 +245,11 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
 		TraceEvent(SevError, "FDBLibTLSOutOfMemory", uid);
-		reason = "FDBLibTLSOutOfMemory";
+		reason = "Out of memory";
 		goto err;
 	}
 	if (!X509_STORE_CTX_init(store_ctx, NULL, sk_X509_value(certs, 0), certs)) {
-		reason = "FDBLibTLSStoreCtxInit";
+		reason = "Store ctx init";
 		goto err;
 	}
 	X509_STORE_CTX_trusted_stack(store_ctx, policy->roots);
@@ -256,31 +258,31 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 		X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
 	if (X509_verify_cert(store_ctx) <= 0) {
 		const char *errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
-		reason = "FDBLibTLSVerifyCert VerifyError " + std::string(errstr);
+		reason = "Verify cert error: " + std::string(errstr);
 		goto err;
 	}
 
 	// Check subject criteria.
 	cert = sk_X509_value(store_ctx->chain, 0);
 	if ((subject = X509_get_subject_name(cert)) == NULL) {
-		reason = "FDBLibTLSCertSubjectError";
+		reason = "Cert subject error";
 		goto err;
 	}
 	for (auto &pair: verify->subject_criteria) {
 		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
-			reason = "FDBLibTLSCertSubjectMatchFailure";
+			reason = "Cert subject match failure";
 			goto err;
 		}
 	}
 
 	// Check issuer criteria.
 	if ((issuer = X509_get_issuer_name(cert)) == NULL) {
-		reason = "FDBLibTLSCertIssuerError";
+		reason = "Cert issuer error";
 		goto err;
 	}
 	for (auto &pair: verify->issuer_criteria) {
 		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
-			reason = "FDBLibTLSCertIssuerMatchFailure";
+			reason = "Cert issuer match failure";
 			goto err;
 		}
 	}
@@ -288,12 +290,12 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 	// Check root criteria - this is the subject of the final certificate in the stack.
 	cert = sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1);
 	if ((subject = X509_get_subject_name(cert)) == NULL) {
-		reason = "FDBLibTLSRootSubjectError";
+		reason = "Root subject error";
 		goto err;
 	}
 	for (auto &pair: verify->root_criteria) {
 		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
-			reason = "FDBLibTLSRootSubjectMatchFailure";
+			reason = "Root subject match failure";
 			goto err;
 		}
 	}
@@ -342,8 +344,11 @@ bool FDBLibTLSSession::verify_peer() {
 
 	if (!rc) {
 		// log the various failure reasons
-		for (std::string reason : verify_failure_reasons) {
-			TraceEvent(reason.c_str(), uid).suppressFor(1.0);
+		if(now() - lastVerifyFailureLogged > 1.0) {
+			for (std::string reason : verify_failure_reasons) {
+				lastVerifyFailureLogged = now();
+				TraceEvent("FDBLibTLSVerifyFailure", uid).detail("Reason", reason);
+			}
 		}
 	}
 

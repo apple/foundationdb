@@ -63,7 +63,6 @@ struct UnitTestWorkload : TestWorkload {
 
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
-		state int allTestCount = 0;
 
 		for (auto t = g_unittests.tests; t != NULL; t = t->next) {
 			if (StringRef(t->name).startsWith(self->testPattern)) {
@@ -72,7 +71,7 @@ struct UnitTestWorkload : TestWorkload {
 			}
 		}
 		fprintf(stdout, "Found %zu tests\n", tests.size());
-		g_random->randomShuffle(tests);
+		deterministicRandom()->randomShuffle(tests);
 		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) 
 			tests.resize(self->testRunLimit);
 

@@ -24,11 +24,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
 
-ACTOR void simDeliverDuplicate( Standalone<StringRef> data, Endpoint destination ) {
-	wait( delay( g_random->random01() * FLOW_KNOBS->MAX_DELIVER_DUPLICATE_DELAY ) );
-	FlowTransport::transport().sendUnreliable( SerializeSourceRaw(data), destination );
-}
-
 ACTOR Future<Void> disableConnectionFailuresAfter( double time, std::string context ) {
 	wait( delay(time) );
 

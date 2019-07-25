@@ -50,17 +50,17 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5);
 		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
-		abortAndRestartAfter = getOption(options, LiteralStringRef("abortAndRestartAfter"), g_random->random01() < 0.5 ? g_random->random01() * (restoreAfter - backupAfter) + backupAfter : 0.0);
-		differentialBackup = getOption(options, LiteralStringRef("differentialBackup"), g_random->random01() < 0.5 ? true : false);
+		abortAndRestartAfter = getOption(options, LiteralStringRef("abortAndRestartAfter"), deterministicRandom()->random01() < 0.5 ? deterministicRandom()->random01() * (restoreAfter - backupAfter) + backupAfter : 0.0);
+		differentialBackup = getOption(options, LiteralStringRef("differentialBackup"), deterministicRandom()->random01() < 0.5 ? true : false);
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"),
-			differentialBackup ? g_random->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
+			differentialBackup ? deterministicRandom()->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 
 		KeyRef beginRange;
 		KeyRef endRange;
-		UID randomID = g_nondeterministic_random->randomUniqueID();
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
@@ -75,7 +75,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			// MX:Q: why the range endpoints (the range interval) are randomly generated? Won't this cause unbalanced range interval in backup?
 			std::set<std::string> rangeEndpoints;
 			while (rangeEndpoints.size() < backupRangesCount * 2) {
-				rangeEndpoints.insert(g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
+				rangeEndpoints.insert(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 			}
 
 			// Create ranges from the keys, in order, to prevent overlaps
@@ -295,9 +295,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
 			wait( backupAgent->taskBucket->changePause(cx, true) );
-			wait( delay(30*g_random->random01()) );
+			wait( delay(30*deterministicRandom()->random01()) );
 			wait( backupAgent->taskBucket->changePause(cx, false) );
-			wait( delay(120*g_random->random01()) );
+			wait( delay(120*deterministicRandom()->random01()) );
 		}
 	}
 
@@ -313,7 +313,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> doBackup(BackupAndParallelRestoreCorrectnessWorkload* self, double startDelay, FileBackupAgent* backupAgent, Database cx,
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submittted) {
 
-		state UID	randomID = g_nondeterministic_random->randomUniqueID();
+		state UID	randomID = nondeterministicRandom()->randomUniqueID();
 
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		wait( delay( startDelay ));
@@ -337,7 +337,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state Future<Void> status = statusLoop(cx, tag.toString());
 
 		try {
-			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
@@ -479,7 +479,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			.detail("BackupAfter", self->backupAfter).detail("RestoreAfter", self->restoreAfter)
 			.detail("AbortAndRestartAfter", self->abortAndRestartAfter).detail("DifferentialAfter", self->stopDifferentialAfter);
 
-		state UID	randomID = g_nondeterministic_random->randomUniqueID();
+		state UID	randomID = nondeterministicRandom()->randomUniqueID();
 		if(self->allowPauses && BUGGIFY) {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
@@ -531,7 +531,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), g_random->randomInt(0, 100), self->backupTag.toString(), self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100), self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID).error(e).detail("BackupTag", printable(self->backupTag));
@@ -544,7 +544,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {
-				if (g_random->random01() < 0.5) {
+				if (deterministicRandom()->random01() < 0.5) {
 					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
 					// TODO: To support restore even after we attempt dirty restore. Not implemented in the 1st version fast restore
 					//wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
@@ -564,14 +564,14 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				state Version targetVersion = -1;
 				if(desc.maxRestorableVersion.present()) {
-					if( g_random->random01() < 0.1 ) {
+					if( deterministicRandom()->random01() < 0.1 ) {
 						targetVersion = desc.minRestorableVersion.get();
 					}
-					else if( g_random->random01() < 0.1 ) {
+					else if( deterministicRandom()->random01() < 0.1 ) {
 						targetVersion = desc.maxRestorableVersion.get();
 					}
-					else if( g_random->random01() < 0.5 ) {
-						targetVersion = g_random->randomInt64(desc.minRestorableVersion.get(), desc.contiguousLogEnd.get());
+					else if( deterministicRandom()->random01() < 0.5 ) {
+						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(), desc.contiguousLogEnd.get());
 					}
 				}
 
@@ -593,7 +593,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 							restoreTags.push_back(restoreTag);
 							// Register the request request in DB, which will be picked up by restore worker leader
-							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, g_random->randomUniqueID());
+							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, deterministicRandom()->randomUniqueID());
 							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 						}
 						tr1.set(restoreRequestTriggerKey, restoreRequestTriggerValue(self->backupRanges.size()));
@@ -608,7 +608,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
 					TraceEvent(SevError, "FastRestore").detail("Buggify", "NotImplementedYet");
-					wait(delay(g_random->randomInt(0, 10)));
+					wait(delay(deterministicRandom()->randomInt(0, 10)));
 					for(restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
 						FileBackupAgent::ERestoreState rs = wait(backupAgent.abortRestore(cx, restoreTags[restoreIndex]));
 						// The restore may have already completed, or the abort may have been done before the restore

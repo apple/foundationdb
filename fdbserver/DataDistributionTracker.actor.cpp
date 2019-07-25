@@ -140,7 +140,7 @@ ACTOR Future<Void> trackShardBytes(
 		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize,
 		bool addToSizeEstimate = true)
 {
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardBytesStarting")
 		.detail("TrackerID", trackerID)
@@ -260,7 +260,7 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys,
 	}
 
 	wait( waitForAll( sizes ) );
-	wait( yield(TaskDataDistribution) );
+	wait( yield(TaskPriority::DataDistribution) );
 
 	int64_t newShardsStartingSize = 0;
 	for ( int i = 0; i < sizes.size(); i++ )
@@ -281,7 +281,7 @@ struct HasBeenTrueFor : NonCopyable {
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, TaskDataDistribution - 1 ) || cleared.getFuture();
+			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -327,7 +327,7 @@ ACTOR Future<Void> shardSplitter(
 	//}
 	int numShards = splitKeys.size() - 1;
 
-	if( g_random->random01() < 0.01 ) {
+	if( deterministicRandom()->random01() < 0.01 ) {
 		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
 			.detail("Begin", keys.begin)
 			.detail("End", keys.end)
@@ -339,7 +339,7 @@ ACTOR Future<Void> shardSplitter(
 	}
 
 	if( numShards > 1 ) {
-		int skipRange = g_random->randomInt(0, numShards);
+		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
 		for( int i = 0; i < skipRange; i++ )
@@ -361,7 +361,7 @@ ACTOR Future<Void> shardSplitter(
 
 		self->sizeChanges.add( changeSizes( self, keys, shardSize->get().get().bytes ) );
 	} else {
-		wait( delay(1.0, TaskDataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
+		wait( delay(1.0, TaskPriority::DataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
 	}
 	return Void();
 }
@@ -529,7 +529,7 @@ ACTOR Future<Void> shardTracker(
 		wait( yieldedFuture(self->maxShardSize->onChange()) );
 
 	// Since maxShardSize will become present for all shards at once, avoid slow tasks with a short delay
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("ShardTracker", self->distributorId)
 		.detail("Begin", keys.begin)
@@ -546,7 +546,7 @@ ACTOR Future<Void> shardTracker(
 
 			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
 			// delay(0) mitigates the resulting SlowTask
-			wait( delay(0, TaskDataDistribution) );
+			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
@@ -593,12 +593,12 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self, Reference<I
 
 	//This line reduces the priority of shard initialization to prevent interference with failure monitoring.
 	//SOMEDAY: Figure out what this priority should actually be
-	wait( delay( 0.0, TaskDataDistribution ) );
+	wait( delay( 0.0, TaskPriority::DataDistribution ) );
 
 	state int s;
 	for(s=0; s<initData->shards.size()-1; s++) {
 		restartShardTrackers( self, KeyRangeRef( initData->shards[s].key, initData->shards[s+1].key ) );
-		wait( yield( TaskDataDistribution ) );
+		wait( yield( TaskPriority::DataDistribution ) );
 	}
 
 	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, allKeys.end), 0 );

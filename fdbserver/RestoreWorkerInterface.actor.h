@@ -32,6 +32,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/FDBTypes.h"
@@ -61,6 +62,7 @@ struct RestoreApplierInterface;
 // At this moment, it only include appliers. We keep the name for future extension.
 // TODO: If it turns out this struct only has appliers in the final version, we will rename it to a more specific name, e.g., AppliersMap
 struct RestoreSysInfo {
+	constexpr static FileIdentifier file_identifier = 68098739;
 	std::map<UID, RestoreApplierInterface> appliers;
 
 	RestoreSysInfo() = default;
@@ -73,6 +75,7 @@ struct RestoreSysInfo {
 };
 
 struct RestoreWorkerInterface {
+	constexpr static FileIdentifier file_identifier = 99601798;
 	UID interfID;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
@@ -87,11 +90,11 @@ struct RestoreWorkerInterface {
 	NetworkAddress address() const { return recruitRole.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskClusterController );
-		recruitRole.getEndpoint( TaskClusterController );// Q: Why do we need this? 
-		terminateWorker.getEndpoint( TaskClusterController ); 
+		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		recruitRole.getEndpoint( TaskPriority::LoadBalancedEndpoint );// Q: Why do we need this? 
+		terminateWorker.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
 
-		interfID = g_random->randomUniqueID();
+		interfID = deterministicRandom()->randomUniqueID();
 	}
 
 	template <class Ar>
@@ -101,6 +104,7 @@ struct RestoreWorkerInterface {
 };
 
 struct RestoreRoleInterface {
+	constexpr static FileIdentifier file_identifier = 62531339;
 	UID nodeID;
 	RestoreRole role;
 
@@ -125,6 +129,8 @@ struct RestoreRoleInterface {
 };
 
 struct RestoreLoaderInterface : RestoreRoleInterface {
+	constexpr static FileIdentifier file_identifier = 84244651;
+
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
 	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
@@ -138,19 +144,19 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	RestoreLoaderInterface () {
 		role = RestoreRole::Loader;
-		nodeID = g_random->randomUniqueID();
+		nodeID = deterministicRandom()->randomUniqueID();
 	}
 
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskClusterController );
-		updateRestoreSysInfo.getEndpoint( TaskClusterController );
-		setApplierKeyRangeVectorRequest.getEndpoint( TaskClusterController ); 
-		loadFile.getEndpoint( TaskClusterController ); 
-		initVersionBatch.getEndpoint( TaskClusterController );
-		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
-		finishRestore.getEndpoint( TaskClusterController ); 
+		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		updateRestoreSysInfo.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		setApplierKeyRangeVectorRequest.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		loadFile.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		initVersionBatch.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		collectRestoreRoleInterfaces.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		finishRestore.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
 	}
 
 	template <class Ar>
@@ -163,6 +169,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 
 struct RestoreApplierInterface : RestoreRoleInterface {
+	constexpr static FileIdentifier file_identifier = 54253048;
+
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSendMutationVectorVersionedRequest> sendMutationVector;
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
@@ -176,18 +184,18 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 
 	RestoreApplierInterface() {
 		role = RestoreRole::Applier;
-		nodeID = g_random->randomUniqueID();
+		nodeID = deterministicRandom()->randomUniqueID();
 	}
 
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskClusterController );
-		sendMutationVector.getEndpoint( TaskClusterController ); 
-		applyToDB.getEndpoint( TaskClusterController ); 
-		initVersionBatch.getEndpoint( TaskClusterController );
-		collectRestoreRoleInterfaces.getEndpoint( TaskClusterController ); 
-		finishRestore.getEndpoint( TaskClusterController ); 
+		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		sendMutationVector.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		applyToDB.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		initVersionBatch.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		collectRestoreRoleInterfaces.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		finishRestore.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
 	}
 
 	template <class Ar>
@@ -203,6 +211,8 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 
 // TODO: MX: It is probably better to specify the (beginVersion, endVersion] for each loadingParam. beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
+	constexpr static FileIdentifier file_identifier = 17023837;
+
 	bool isRangeFile;
 	Key url;
 	Version prevVersion;
@@ -241,6 +251,8 @@ struct LoadingParam {
 };
 
 struct RestoreRecruitRoleReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 30310092;
+
 	UID id;
 	RestoreRole role;
 	Optional<RestoreLoaderInterface> loader;
@@ -270,6 +282,8 @@ struct RestoreRecruitRoleReply : TimedRequest {
 };
 
 struct RestoreRecruitRoleRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 87022360;
+
 	RestoreRole role;
 	int nodeIndex; // Each role is a node
 
@@ -295,6 +309,8 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 };
 
 struct RestoreSysInfoRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 75960741;
+
 	RestoreSysInfo sysInfo;
 
 	ReplyPromise<RestoreCommonReply> reply;
@@ -317,6 +333,8 @@ struct RestoreSysInfoRequest : TimedRequest {
 
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 26557364;
+
 	LoadingParam param;
 
 	ReplyPromise<RestoreCommonReply> reply;
@@ -337,6 +355,8 @@ struct RestoreLoadFileRequest : TimedRequest {
 };
 
 struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 69764565;
+
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	bool isRangeFile;
 	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
@@ -361,6 +381,8 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 
 struct RestoreVersionBatchRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018413;
+
 	int batchID;
 
 	ReplyPromise<RestoreCommonReply> reply;
@@ -381,6 +403,8 @@ struct RestoreVersionBatchRequest : TimedRequest {
 };
 
 struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 92038306;
+
 	std::map<Standalone<KeyRef>, UID> range2Applier;
 	
 	ReplyPromise<RestoreCommonReply> reply;
@@ -401,6 +425,8 @@ struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
 };
 
 struct RestoreRequest {
+	constexpr static FileIdentifier file_identifier = 49589770;
+
 	//Database cx;
 	int index;
 	Key tagName;
@@ -418,7 +444,7 @@ struct RestoreRequest {
 	std::vector<int> restoreRequests;
 	//Key restoreTag;
 
-	ReplyPromise< struct RestoreReply > reply;
+	ReplyPromise< struct RestoreCommonReply > reply;
 
 	RestoreRequest() : testData(0) {}
 	explicit RestoreRequest(int testData) : testData(testData) {}
@@ -445,19 +471,6 @@ struct RestoreRequest {
 			   << " verbose:" << std::to_string(verbose) << " range:" << range.toString() << " addPrefix:" << addPrefix.contents().toString()
 			   << " removePrefix:" << removePrefix.contents().toString() << " lockDB:" << std::to_string(lockDB) << " randomUid:" << randomUid.toString();
 		return ss.str();
-	}
-};
-
-
-struct RestoreReply {
-	int replyData;
-
-	RestoreReply() : replyData(0) {}
-	explicit RestoreReply(int replyData) : replyData(replyData) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, replyData);
 	}
 };
 

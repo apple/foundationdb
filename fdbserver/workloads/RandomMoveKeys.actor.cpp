@@ -82,8 +82,8 @@ struct MoveKeysWorkload : TestWorkload {
 	}
 
 	KeyRange getRandomKeys() const {
-		double len = g_random->random01() * this->maxKeyspace;
-		double pos = g_random->random01() * (1.0 - len);
+		double len = deterministicRandom()->random01() * this->maxKeyspace;
+		double pos = deterministicRandom()->random01() * (1.0 - len);
 		return KeyRangeRef( doubleToTestKey( pos ), doubleToTestKey( pos+len ) );
 	}
 
@@ -93,7 +93,7 @@ struct MoveKeysWorkload : TestWorkload {
 			throw operation_failed();
 		}
 
-		g_random->randomShuffle( storageServers );
+		deterministicRandom()->randomShuffle( storageServers );
 
 		std::set<StorageServerInterface> t;
 		std::set<Optional<Standalone<StringRef>>> machines;

@@ -77,13 +77,22 @@ function(assert_no_version_h target)
 
   message(STATUS "Check versions.h on ${target}")
   set(target_name "${target}_versions_h_check")
-  add_custom_target("${target_name}"
-    COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+
+  if (DEFINED ENV{VERBOSE})
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
                                -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-    COMMAND echo
-    "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-                               -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-    COMMENT "Check old build system wasn't used in source dir")
+      COMMAND echo
+      "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+                                 -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+      COMMENT "Check old build system wasn't used in source dir")
+  else()
+    add_custom_target("${target_name}"
+      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+      COMMENT "Check old build system wasn't used in source dir")
+  endif()
+
   add_dependencies(${target} ${target_name})
 endfunction()
 
@@ -140,7 +149,7 @@ function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY
     DYNAMIC_LIBRARY)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_WITHOUT_WAIT_WARNING ADDL_SRCS)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(NOT AFT_NAME)
     message(FATAL_ERROR "add_flow_target requires option NAME")
@@ -149,7 +158,7 @@ function(add_flow_target)
     message(FATAL_ERROR "No sources provided")
   endif()
   if(OPEN_FOR_IDE)
-    set(sources ${AFT_SRCS} ${AFT_DISABLE_ACTOR_WRITHOUT_WAIT_WARNING})
+    set(sources ${AFT_SRCS} ${AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING} ${AFT_ADDL_SRCS})
     add_library(${AFT_NAME} OBJECT ${sources})
   else()
     foreach(src IN LISTS AFT_SRCS AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
@@ -171,12 +180,12 @@ function(add_flow_target)
       list(APPEND generated_files ${CMAKE_CURRENT_BINARY_DIR}/${generated})
       if(WIN32)
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags}
+          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
           DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
           COMMENT "Compile actor: ${src}")
       else()
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
-          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} ${actor_compiler_flags} > /dev/null
+          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
           DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
           COMMENT "Compile actor: ${src}")
       endif()
@@ -187,20 +196,20 @@ function(add_flow_target)
     if(AFT_EXECUTABLE)
       set(strip_target ON)
       set(target_type exec)
-      add_executable(${AFT_NAME} ${sources})
+      add_executable(${AFT_NAME} ${sources} ${AFT_ADDL_SRCS})
     endif()
     if(AFT_STATIC_LIBRARY)
       if(target_type)
         message(FATAL_ERROR "add_flow_target can only be of one type")
       endif()
-      add_library(${AFT_NAME} STATIC ${sources})
+      add_library(${AFT_NAME} STATIC ${sources} ${AFT_ADDL_SRCS})
     endif()
     if(AFT_DYNAMIC_LIBRARY)
       if(target_type)
         message(FATAL_ERROR "add_flow_target can only be of one type")
       endif()
       set(strip_target ON)
-      add_library(${AFT_NAME} DYNAMIC ${sources})
+      add_library(${AFT_NAME} DYNAMIC ${sources} ${AFT_ADDL_SRCS})
     endif()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})

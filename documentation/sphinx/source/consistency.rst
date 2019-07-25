@@ -27,4 +27,4 @@ Consistency model
 
 Consistency models serve to define the guarantees the database provides about when concurrent writes become visible to readers. Consistency models fall along a spectrum, depending on the strength of the guarantees. In general, stronger consistency models make reasoning about the database easier and speed development. For example, *causal* consistency guarantees that readers see all previously committed writes. *Eventual* consistency guarantees only that readers see writes after "sufficient time". Eventual consistency is the model used in many of the first-generation NoSQL systems.
 
-FoundationDB provides the strongest possible consistency model, `sequential consistency <http://en.wikipedia.org/wiki/Sequential_consistency>`_ (closely related to `serializability <http://en.wikipedia.org/wiki/Serializability>`_ from the database literature), providing the greatest possible ease of development.
+FoundationDB provides strict serializability, the strongest possible consistency model, to provide the greatest possible ease of development.

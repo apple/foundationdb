@@ -40,6 +40,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 
+#include <cinttypes>
 #include <type_traits>
 #include <signal.h>
 
@@ -58,31 +59,44 @@ extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION, OPT_TRACE_FORMAT };
+enum {
+	OPT_CONNFILE,
+	OPT_DATABASE,
+	OPT_HELP,
+	OPT_TRACE,
+	OPT_TRACE_DIR,
+	OPT_TIMEOUT,
+	OPT_EXEC,
+	OPT_NO_STATUS,
+	OPT_STATUS_FROM_JSON,
+	OPT_VERSION,
+	OPT_TRACE_FORMAT,
+	OPT_USE_OBJECT_SERIALIZER
+};
 
-CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
-	{ OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
-	{ OPT_DATABASE, "-d", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
-	{ OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
-	{ OPT_EXEC, "--exec", SO_REQ_SEP },
-	{ OPT_NO_STATUS, "--no-status", SO_NONE },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
+	                                  { OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
+	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
+	                                  { OPT_TRACE, "--log", SO_NONE },
+	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
+	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
+	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_HELP, "-?", SO_NONE },
+	                                  { OPT_HELP, "-h", SO_NONE },
+	                                  { OPT_HELP, "--help", SO_NONE },
+	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
+	                                  { OPT_VERSION, "--version", SO_NONE },
+	                                  { OPT_VERSION, "-v", SO_NONE },
+	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	                                  { OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	                                  { OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
+	                                  TLS_OPTION_FLAGS
 #endif
 
-	SO_END_OF_OPTIONS
-};
+	                                      SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
@@ -167,7 +181,7 @@ public:
 private:
 	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
 	void setTransactionOption(Reference<ReadYourWritesTransaction> tr, FDBTransactionOptions::Option option, bool enabled, Optional<StringRef> arg, bool intrans) {
-		if(enabled && arg.present() != FDBTransactionOptions::optionInfo[option].hasParameter)	{
+		if(enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter)	{
 			printf("ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
 			throw invalid_option_value();
 		}
@@ -223,7 +237,7 @@ private:
 
 		//Returns true if the specified option is documented
 		bool isDocumented(typename T::Option option) {
-			FDBOptionInfo info = T::optionInfo[option];
+			FDBOptionInfo info = T::optionInfo.getMustExist(option);
 
 			std::string deprecatedStr = "Deprecated";
 			return !info.comment.empty() && info.comment.substr(0, deprecatedStr.size()) != deprecatedStr;
@@ -245,7 +259,7 @@ private:
 		void printHelpString() {
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
 				if(isDocumented(itr->second)) {
-					FDBOptionInfo info = T::optionInfo[itr->second];
+					FDBOptionInfo info = T::optionInfo.getMustExist(itr->second);
 					std::string helpStr = info.name + " - " + info.comment;
 					if(info.hasParameter)
 						helpStr += " " + info.parameterComment;
@@ -400,21 +414,25 @@ static void printProgramUsage(const char* name) {
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-		   "  --log-dir PATH Specifes the output directory for trace files. If\n"
-		   "                 unspecified, defaults to the current directory. Has\n"
-		   "                 no effect unless --log is specified.\n"
-		   "  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json\n"
-		   "                 are supported. Has no effect unless --log is specified.\n"
-		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
-		   "                 and then exits.\n"
-		   "  --no-status    Disables the initial status check done when starting\n"
-		   "                 the CLI.\n"
+	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --trace_format FORMAT\n"
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported. Has no effect unless --log is specified.\n"
+	       "  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n"
+	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
+	       "                 and then exits.\n"
+	       "  --no-status    Disables the initial status check done when starting\n"
+	       "                 the CLI.\n"
 #ifndef TLS_DISABLED
-		   TLS_HELP
+	       TLS_HELP
 #endif
-		   "  -v, --version  Print FoundationDB CLI version information and exit.\n"
-		   "  -h, --help     Display this help and exit.\n");
+	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
+	       "  -h, --help     Display this help and exit.\n");
 }
 
 
@@ -461,14 +479,20 @@ void initHelp() {
 		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
-	helpMap["exclude"] = CommandHelp(
-		"exclude <ADDRESS>*",
-		"exclude servers from the database",
-		"If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all database state has been safely moved away from the specified servers.");
+	helpMap["exclude"] =
+	    CommandHelp("exclude [no_wait] <ADDRESS>*", "exclude servers from the database",
+	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
+	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
+	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
+	                "command returns \nimmediately without checking if the exclusions have completed successfully.");
 	helpMap["include"] = CommandHelp(
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
+	helpMap["snapshot"] = CommandHelp(
+		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
+		"snapshot the database",
+		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",
@@ -532,6 +556,10 @@ void initHelp() {
 		"maintenance [on|off] [ZONEID] [SECONDS]",
 		"mark a zone for maintenance",
 		"Calling this command with `on' prevents data distribution from moving data away from the processes with the specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this command with `off' will disable maintenance.\n");
+	helpMap["consistencycheck"] = CommandHelp(
+		"consistencycheck [on|off]",
+		"enables or disables consistencycheck",
+		"Calling this command with `on' enables consistency check to run and `off' will disable the same. Calling this command with no arguments will display setting for consistency check.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -540,7 +568,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
 }
 
 void printHelpOverview() {
@@ -604,6 +632,9 @@ std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 }
 
 std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::string serverID) {
+	if(serverID == "")
+		return "unknown";
+		
 	for (auto proc : processesMap.obj()){
 		try {
 			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
@@ -1665,32 +1696,42 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
@@ -1779,32 +1820,42 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret=false;
+		ret=true;
+		break;
+	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
+		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DCID_MISSING:
+		printf("ERROR: `No storage servers in one of the specified regions\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
@@ -1939,13 +1990,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		printf("To find out whether it is safe to remove one or more of these\n"
 			   "servers from the cluster, type `exclude <addresses>'.\n"
 			   "To return one of these servers to the cluster, type `include <addresses>'.\n");
+
+		return false;
 	} else {
 		state std::vector<AddressExclusion> addresses;
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
+		state bool waitForAllExcluded = true;
 		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
 			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
+			} else if (*t == LiteralStringRef("no_wait")) {
+				waitForAllExcluded = false;
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
@@ -2047,13 +2103,16 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		wait( makeInterruptable(excludeServers(db,addresses)) );
 
-		printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
-		printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+		if (waitForAllExcluded) {
+			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
+			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+		}
 
 		if(warn.isValid())
 			warn.cancel();
-		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
+		state std::set<NetworkAddress> notExcludedServers =
+		    wait(makeInterruptable(checkForExcludingServers(db, addresses, waitForAllExcluded)));
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for(auto addr : workers)
@@ -2080,9 +2139,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 
 			printf("\n");
-		}
-		else
+		} else if (notExcludedServers.empty()) {
 			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
+		} else {
+			printf("\nWARNING: Exclusion in progress. It is not safe to remove the following machines\n"
+			       "or processes from the cluster:\n");
+			for (auto addr : notExcludedServers) {
+				if (addr.port == 0)
+					printf("  %s\n", addr.ip.toString().c_str());
+				else
+					printf("  %s\n", addr.toString().c_str());
+			}
+		}
 
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
@@ -2096,6 +2164,24 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		if (foundCoordinator)
 			printf("Type `help coordinators' for information on how to change the\n"
 				   "cluster's coordination servers before removing them.\n");
+
+		return false;
+	}
+}
+
+ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
+	try {
+		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, 2 /* version */)));
+		int version = 2;
+		if (version == 1) {
+			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
+		} else {
+			printf("Snapshots create succeeded with UID: %s\n", snapUID.toString().c_str());
+		}
+	} catch (Error& e) {
+		fprintf(stderr, "Snapshot create failed, %d (%s)."
+				" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+		return true;
 	}
 	return false;
 }
@@ -2302,6 +2388,7 @@ struct CLIOptions {
 	bool trace;
 	std::string traceDir;
 	std::string traceFormat;
+	bool useObjectSerializer = true;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2373,41 +2460,55 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-			case TLSOptions::OPT_TLS_PLUGIN:
-				args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_CERTIFICATES:
-				tlsCertPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_CA_FILE:
-				tlsCAPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_KEY:
-				tlsKeyPath = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_PASSWORD:
-				tlsPassword = args.OptionArg();
-				break;
-			case TLSOptions::OPT_TLS_VERIFY_PEERS:
-				tlsVerifyPeers = args.OptionArg();
-				break;
+		    case TLSOptions::OPT_TLS_PLUGIN:
+			    args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_CERTIFICATES:
+			    tlsCertPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_CA_FILE:
+			    tlsCAPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_KEY:
+			    tlsKeyPath = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_PASSWORD:
+			    tlsPassword = args.OptionArg();
+			    break;
+		    case TLSOptions::OPT_TLS_VERIFY_PEERS:
+			    tlsVerifyPeers = args.OptionArg();
+			    break;
 #endif
-			case OPT_HELP:
-				printProgramUsage(program_name.c_str());
-				return 0;
-			case OPT_STATUS_FROM_JSON:
-				return printStatusFromJSON(args.OptionArg());
-			case OPT_TRACE_FORMAT:
-				if (!validateTraceFormat(args.OptionArg())) {
-					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-				}
-				traceFormat = args.OptionArg();
-				break;
-			case OPT_VERSION:
-				printVersion();
-				return FDB_EXIT_SUCCESS;
-		}
-		return -1;
+		    case OPT_HELP:
+			    printProgramUsage(program_name.c_str());
+			    return 0;
+		    case OPT_STATUS_FROM_JSON:
+			    return printStatusFromJSON(args.OptionArg());
+		    case OPT_TRACE_FORMAT:
+			    if (!validateTraceFormat(args.OptionArg())) {
+				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+			    }
+			    traceFormat = args.OptionArg();
+			    break;
+		    case OPT_USE_OBJECT_SERIALIZER: {
+			    std::string s = args.OptionArg();
+			    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+			    if (s == "on" || s == "true" || s == "1") {
+				    useObjectSerializer = true;
+			    } else if (s == "off" || s == "false" || s == "0") {
+				    useObjectSerializer = false;
+			    } else {
+				    fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+				    printProgramUsage(program_name.c_str());
+				    flushAndExit(FDB_EXIT_ERROR);
+			    }
+			    break;
+		    }
+		    case OPT_VERSION:
+			    printVersion();
+			    return FDB_EXIT_SUCCESS;
+		    }
+		    return -1;
 	}
 };
 
@@ -2454,7 +2555,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		db = Database::createDatabase(ccf, -1);
+		db = Database::createDatabase(ccf, -1, false);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -2467,12 +2568,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
+			.setMaxEventLength(12000)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", opt.commandLine)
 			.trackLatest("ProgramStart");
 	}
@@ -2519,7 +2622,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
 
 		try {
-			state UID randomID = g_random->randomUniqueID();
+			state UID randomID = deterministicRandom()->randomUniqueID();
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;
@@ -2699,6 +2802,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "snapshot")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						bool err = wait(createSnapshot(db, tokens[1]));
+						if (err) is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "setclass")) {
 					if (tokens.size() != 3 && tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -2867,6 +2981,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else {
 							wait( makeInterruptable( setHealthyZone( db, tokens[2], seconds ) ) );
 						}
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "consistencycheck")) {
+					getTransaction(db, tr, options, intrans);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					if (tokens.size() == 1) {
+						state Future<Optional<Standalone<StringRef>>> ccSuspendSettingFuture = tr->get(fdbShouldConsistencyCheckBeSuspended);
+						wait( makeInterruptable( success(ccSuspendSettingFuture) ) );
+						bool ccSuspendSetting = ccSuspendSettingFuture.get().present() ? BinaryReader::fromStringRef<bool>(ccSuspendSettingFuture.get().get(), Unversioned()) : false;
+						printf("ConsistencyCheck is %s\n", ccSuspendSetting ? "off" : "on");
+					}
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
+						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(true, Unversioned()));
+						wait( commitTransaction(tr) );
+					}
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
+						tr->set(fdbShouldConsistencyCheckBeSuspended, BinaryWriter::toValue(false, Unversioned()));
+						wait( commitTransaction(tr) );
 					} else {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -3449,6 +3588,11 @@ int main(int argc, char **argv) {
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
+	// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as zero =
+	// false, non-zero = true.
+	setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
+	                 opt.useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
+	                                         : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
 
 	initHelp();
 

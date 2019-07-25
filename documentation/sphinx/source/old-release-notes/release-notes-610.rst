@@ -2,7 +2,37 @@
 Release Notes
 #############
 
-6.1.0
+6.1.11
+======
+
+Fixes
+-----
+
+* Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
+
+6.1.10
+======
+
+Performance
+-----------
+
+* Improved the recovery speed of storage servers with large amount of data. `(PR #1700) <https://github.com/apple/foundationdb/pull/1700>`_
+
+Fixes
+-----
+
+* The ``fdbrestore`` commands ``abort``, ``wait``, and ``status`` would use a default cluster file instead of the destination cluster file argument.  `(PR #1701) <https://github.com/apple/foundationdb/pull/1701>`_
+
+6.1.9
+=====
+
+Fixes
+-----
+
+* Sometimes a minority of coordinators would not converge to the leader. `(PR #1649) <https://github.com/apple/foundationdb/pull/1649>`_
+* HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. `(PR #1651) <https://github.com/apple/foundationdb/pull/1651>`_
+
+6.1.8
 =====
 
 Features
@@ -20,7 +50,7 @@ Features
 * Separated data distribution from the master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
 * Separated ratekeeper from the master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
 * Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
-* Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
+* Added support for IPv6. `(PR #1178) <https://github.com/apple/foundationdb/pull/1178>`_
 * FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
 * Added ``DISABLE_POSIX_KERNEL_AIO`` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) <https://github.com/apple/foundationdb/pull/1283>`_
 * Added support for configuring the cluster to use the primary and remote DC's as satellites. `(PR #1320) <https://github.com/apple/foundationdb/pull/1320>`_
@@ -40,12 +70,17 @@ Features
 * Added ``modify`` command to fdbbackup for modifying parameters of a running backup. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 * Added ``header`` parameter to blobstore backup URLs for setting custom HTTP headers. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 * Added the ``maintenance`` command to ``fdbcli``. This command will stop data distribution from moving data away from processes with a specified zoneID. `(PR #1397) <https://github.com/apple/foundationdb/pull/1397>`_
+* Added the ``three_data_hall_fallback`` configuration, which can be used to drop storage replicas in a dead data hall. [6.1.1] `(PR #1422) <https://github.com/apple/foundationdb/pull/1422>`_
 
 Performance
 -----------
 
 * Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
 * Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
+* Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] `(PR #1485) <https://github.com/apple/foundationdb/pull/1485>`_
+* SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] `(PR #1482) <https://github.com/apple/foundationdb/pull/1482>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* Avoid closing saturated network connections which have not received ping packets. [6.1.7] `(PR #1601) <https://github.com/apple/foundationdb/pull/1601>`_
 
 Fixes
 -----
@@ -66,6 +101,13 @@ Fixes
 * Java: Successful commits and range reads no longer create ``FDBException`` objects, which avoids wasting resources and reduces memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
 * Windows: Fixed a crash when deleting files. `(Issue #1380) <https://github.com/apple/foundationdb/issues/1380>`_ (by KrzysFR)
 * Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. `(PR #1394) <https://github.com/apple/foundationdb/pull/1394>`_
+* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+* Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] `(PR #1468) <https://github.com/apple/foundationdb/pull/1468>`_.
+* Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] `(PR #1486) <https://github.com/apple/foundationdb/pull/1486>`_ `(PR #1499) <https://github.com/apple/foundationdb/pull/1499>`_
+* The ``configure`` command in ``fdbcli`` returned successfully even when the configuration was not changed for some error types. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Safety protections in the ``configure`` command in ``fdbcli`` would trigger spuriously when changing between ``three_datacenter`` replication and a region configuration. [6.1.4] `(PR #1509) <https://github.com/apple/foundationdb/pull/1509>`_
+* Status could report an incorrect reason for ongoing data movement. [6.1.5] `(PR #1544) <https://github.com/apple/foundationdb/pull/1544>`_
+* Storage servers were considered failed as soon as they were rebooted, instead of waiting to see if they rejoin the cluster. [6.1.8] `(PR #1618) <https://github.com/apple/foundationdb/pull/1618>`_
 
 Status
 ------
@@ -105,6 +147,20 @@ Other Changes
 
 * Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
 * IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable. [6.1.1] `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
+
+Fixes only impacting 6.1.0+
+---------------------------
+
+* The ``consistencycheck`` fdbserver role would repeatedly exit. [6.1.1] `(PR #1437) <https://github.com/apple/foundationdb/pull/1437>`_
+* The ``consistencycheck`` fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] `(PR #1452) <https://github.com/apple/foundationdb/pull/1452>`_
+* The background actor which removes redundant teams could leave data unbalanced. [6.1.3] `(PR #1479) <https://github.com/apple/foundationdb/pull/1479>`_
+* The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] `(PR #1527) <https://github.com/apple/foundationdb/pull/1527>`_
+* Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] `(PR #1541) <https://github.com/apple/foundationdb/pull/1541>`_
+* TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] `(PR #1545) <https://github.com/apple/foundationdb/pull/1545>`_
+* Fix PR #1545 to work on Windows and Linux. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] `(PR #1556) <https://github.com/apple/foundationdb/pull/1556>`_
+* The TLog's disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] `(PR #1617) <https://github.com/apple/foundationdb/pull/1617>`_
 
 Earlier release notes
 ---------------------

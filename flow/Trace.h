@@ -42,6 +42,8 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
+extern int g_trace_depth;
+
 enum Severity {
 	SevSample=1,
 	SevDebug=5,
@@ -55,6 +57,7 @@ enum Severity {
 
 class TraceEventFields {
 public:
+	constexpr static FileIdentifier file_identifier = 11262274;
 	typedef std::pair<std::string, std::string> Field;
 	typedef std::vector<Field> FieldContainer;
 	typedef FieldContainer::const_iterator FieldIterator;
@@ -78,6 +81,11 @@ public:
 
 	std::string toString() const;
 	void validateFormat() const;
+	template<class Archiver>
+	void serialize(Archiver& ar) {
+		static_assert(is_fb_function<Archiver>, "Streaming serializer has to use load/save");
+		serializer(ar, fields);
+	}
 
 private:
 	FieldContainer fields;
@@ -202,6 +210,7 @@ FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(double, "%g");
+FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
 FORMAT_TRACEABLE(volatile unsigned long, "%lu");
 FORMAT_TRACEABLE(volatile long long, "%lld");
@@ -323,10 +332,11 @@ struct TraceableStringImpl : std::true_type {
 				result.push_back('\\');
 				result.push_back('\\');
 			} else {
+				const uint8_t byte = *iter;
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char(*iter / 16));
-				result.push_back(base16Char(*iter));
+				result.push_back(base16Char(byte / 16));
+				result.push_back(base16Char(byte));
 			}
 		}
 		return result;
@@ -436,6 +446,15 @@ public:
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
+	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
+	// disables truncation. This should be called before the field whose length you want to change, and it can be
+	// changed multiple times in a single event.
+	TraceEvent& setMaxFieldLength(int maxFieldLength);
+
+	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the default,
+	// a negative value disables length suppression. This should be called before adding details.
+	TraceEvent& setMaxEventLength(int maxEventLength);
+
 	//Cannot call other functions which could disable the trace event afterwords
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
 
@@ -457,6 +476,11 @@ private:
 	const char *type;
 	UID id;
 	Error err;
+
+	int maxFieldLength;
+	int maxEventLength;
+
+	void setSizeLimits();
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
@@ -528,6 +552,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+void flushTraceFileVoid();
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.
@@ -539,7 +564,7 @@ void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
-extern trace_clock_t g_trace_clock;
+extern thread_local trace_clock_t g_trace_clock;
 extern TraceBatch g_traceBatch;
 
 #endif

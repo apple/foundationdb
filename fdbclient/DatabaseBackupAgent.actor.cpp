@@ -584,7 +584,7 @@ namespace dbBackup {
 					loop{
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+							tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 
@@ -669,7 +669,6 @@ namespace dbBackup {
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 
-			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
@@ -736,7 +735,7 @@ namespace dbBackup {
 			Optional<Value> stopValue = wait(fStopValue);
 			state Version stopVersionData = stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
 
-			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
+			if(endVersion - beginVersion > deterministicRandom()->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
 				TraceEvent("DBA_CopyLogs").detail("BeginVersion", beginVersion).detail("ApplyVersion", applyVersion).detail("EndVersion", endVersion).detail("StopVersionData", stopVersionData).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 			}
 
@@ -940,7 +939,7 @@ namespace dbBackup {
 			tr->set(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin), BinaryWriter::toValue(beginVersion, Unversioned()));
 			Optional<Value> stopWhenDone = wait(fStopWhenDone);
 
-			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
+			if(endVersion - beginVersion > deterministicRandom()->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
 				TraceEvent("DBA_CopyDiffLogs").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 			}
 
@@ -1081,7 +1080,7 @@ namespace dbBackup {
 					loop{
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+							tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 
@@ -1166,7 +1165,6 @@ namespace dbBackup {
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 
-			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
@@ -1408,8 +1406,6 @@ namespace dbBackup {
 			state Optional<Value> stopWhenDone = wait(tr->get(conf.pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey)));
 			state Reference<TaskFuture> allPartsDone;
 
-			state UID logUid = BinaryReader::fromStringRef<UID>(task->params[DatabaseBackupAgent::keyConfigLogUid], Unversioned());
-
 			TraceEvent("DBA_Complete").detail("RestoreVersion", restoreVersion).detail("Differential", stopWhenDone.present()).detail("LogUID", task->params[BackupAgentBase::keyConfigLogUid]);
 
 			// Start the complete task, if differential is not enabled
@@ -1482,7 +1478,7 @@ namespace dbBackup {
 						if (existingDestUidValue.present()) {
 							destUidValue = existingDestUidValue.get();
 						} else {
-							destUidValue = BinaryWriter::toValue(g_random->randomUniqueID(), Unversioned());
+							destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 							srcTr->set(destUidLookupPath, destUidValue);
 						}
 					}
@@ -1834,7 +1830,7 @@ public:
 	}
 
 	ACTOR static Future<Void> submitBackup(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone, Key addPrefix, Key removePrefix, bool lockDB, bool databasesInSync) {
-		state UID logUid = g_random->randomUniqueID();
+		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 		state UID logUidCurrent = wait(backupAgent->getLogUid(tr, tagName));
 
@@ -1964,7 +1960,7 @@ public:
 			checkAtomicSwitchOverConfig(srcStatus, destStatus, tagName);
 		}
 		
-		state UID logUid = g_random->randomUniqueID();
+		state UID logUid = deterministicRandom()->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 		state UID logUidCurrent = wait(drAgent.getLogUid(backupAgent->taskBucket->src, tagName));
 

@@ -41,7 +41,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 {
 	state Version version = 0;
 	state Future<FailureMonitoringReply> request = Never();
-	state Future<Void> nextRequest = delay(0, TaskFailureMonitor);
+	state Future<Void> nextRequest = delay(0, TaskPriority::FailureMonitor);
 	state Future<Void> requestTimeout = Never();
 	state double before = now();
 	state double waitfor = 0;
@@ -61,7 +61,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 		loop {
 			choose {
 				when( FailureMonitoringReply reply = wait( request ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					request = Never();
 					requestTimeout = Never();
 					if (reply.allOthersFailed) {
@@ -122,10 +122,10 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					}
 					before = now();
 					waitfor = reply.clientRequestIntervalMS * .001;
-					nextRequest = delayJittered( waitfor, TaskFailureMonitor );
+					nextRequest = delayJittered( waitfor, TaskPriority::FailureMonitor );
 				}
 				when( wait( requestTimeout ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					requestTimeout = Never();
 					TraceEvent(SevWarn, "FailureMonitoringServerDown").detail("OldServerID",controller.id());
 					monitor->setStatus(controlAddr.address, FailureStatus(true));
@@ -136,14 +136,14 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					}
 				}
 				when( wait( nextRequest ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					nextRequest = Never();
 
 					double elapsed = now() - before;
 					double slowThreshold = .200 + waitfor + FLOW_KNOBS->MAX_BUGGIFIED_DELAY;
 					double warnAlwaysThreshold = CLIENT_KNOBS->FAILURE_MIN_DELAY/2;
 
-					if (elapsed > slowThreshold && g_random->random01() < elapsed / warnAlwaysThreshold) {
+					if (elapsed > slowThreshold && deterministicRandom()->random01() < elapsed / warnAlwaysThreshold) {
 						TraceEvent(elapsed > warnAlwaysThreshold ? SevWarnAlways : SevWarn, "FailureMonitorClientSlow").detail("Elapsed", elapsed).detail("Expected", waitfor);
 					}
 
@@ -152,9 +152,9 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					req.addresses = g_network->getLocalAddresses();
 					if (trackMyStatus)
 						req.senderStatus = FailureStatus(false);
-					request = controller.failureMonitoring.getReply( req, TaskFailureMonitor );
+					request = controller.failureMonitoring.getReply( req, TaskPriority::FailureMonitor );
 					if(!controller.failureMonitoring.getEndpoint().isLocal())
-						requestTimeout = delay( fmState->serverFailedTimeout, TaskFailureMonitor );
+						requestTimeout = delay( fmState->serverFailedTimeout, TaskPriority::FailureMonitor );
 				}
 			}
 		}
@@ -167,6 +167,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 }
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
+	TraceEvent("FailureMonitorStart").detail("IsClient", FlowTransport::transport().isClient());
+	if (FlowTransport::transport().isClient()) {
+		wait(Never());
+	}
+
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
 	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
 	auto localAddr = g_network->getLocalAddresses();

@@ -1,6 +1,7 @@
 .. -*- mode: rst; -*-
 
-.. |json-status-format| replace::
+.. code-block:: javascript
+
    "cluster":{
       "layers":{
          "_valid":true,
@@ -35,6 +36,7 @@
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -63,7 +65,8 @@
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "router"
                      ]
                   },
                   "data_version":12341234,
@@ -185,7 +188,8 @@
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+            "run_loop_busy":0.2 // fraction of time the run loop was busy
          }
       },
       "old_logs":[
@@ -227,7 +231,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -246,7 +251,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -262,7 +268,10 @@
       },
       "incompatible_connections":[
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,
@@ -290,6 +299,10 @@
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
          ]
+      },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
       },
       "messages":[
          {
@@ -320,7 +333,9 @@
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled"
                ]
             },
             "issues":[
@@ -401,6 +416,21 @@
          },
          "transactions":{
             "started":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0

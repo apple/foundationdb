@@ -31,7 +31,7 @@
  * Usage:
  * 
  * TEST_CASE("/product/module/testcase") {
- *   double random_test_parameter = g_random->random01();
+ *   double random_test_parameter = deterministicRandom()->random01();
  *   ASSERT( something );
  *   return Void();
  * }

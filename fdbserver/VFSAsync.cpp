@@ -78,7 +78,9 @@ struct VFSAsyncFile {
 
 	int debug_zcrefs, debug_zcreads, debug_reads;
 
-	VFSAsyncFile(std::string const& filename, int flags) : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0) {
+	int chunkSize;
+
+	VFSAsyncFile(std::string const& filename, int flags) : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0), chunkSize(0) {
 		filename_lockCount_openCount[filename].second++;
 	}
 	~VFSAsyncFile();
@@ -183,6 +185,12 @@ static int asyncWrite(sqlite3_file *pFile, const void *zBuf, int iAmt, sqlite_in
 
 static int asyncTruncate(sqlite3_file *pFile, sqlite_int64 size){
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+
+	// Adjust size to a multiple of chunkSize if set
+	if(p->chunkSize != 0) {
+		size = ((size + p->chunkSize - 1) / p->chunkSize) * p->chunkSize;
+	}
+
 	try {
 		waitFor( p->file->truncate( size ) );
 		return SQLITE_OK;
@@ -242,7 +250,18 @@ static int asyncCheckReservedLock(sqlite3_file *pFile, int *pResOut){
 ** No xFileControl() verbs are implemented by this VFS.
 */
 static int VFSAsyncFileControl(sqlite3_file *pFile, int op, void *pArg){
-	return SQLITE_NOTFOUND;
+	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+	switch(op) {
+		case SQLITE_FCNTL_CHUNK_SIZE:
+			p->chunkSize = *(int *)pArg;
+			return SQLITE_OK;
+
+		case SQLITE_FCNTL_SIZE_HINT:
+			return asyncTruncate(pFile, *(int64_t *)pArg);
+
+		default:
+			return SQLITE_NOTFOUND;
+	};
 }
 
 static int asyncSectorSize(sqlite3_file *pFile){ return 512; }  // SOMEDAY: Would 4K be better?
@@ -677,7 +696,7 @@ static void asyncDlClose(sqlite3_vfs *pVfs, void *pHandle){
 */
 static int asyncRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
   for(int i=0; i<nByte; i++)
-	  zByte[i] = g_random->randomInt(0,256);
+	  zByte[i] = deterministicRandom()->randomInt(0,256);
   return SQLITE_OK;
 }
 
@@ -694,7 +713,7 @@ static int asyncSleep(sqlite3_vfs *pVfs, int microseconds){
 			waitFor( delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY) );
 			return 0;
 		}
-		waitFor( g_network->delay( microseconds*1e-6, TaskDefaultDelay ) || simCancel );
+		waitFor( g_network->delay( microseconds*1e-6, TaskPriority::DefaultDelay ) || simCancel );
 		return microseconds;
 	} catch( Error &e ) {
 		TraceEvent(SevError, "AsyncSleepError").error(e,true);

@@ -21,21 +21,15 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 
 #include <foundationdb/fdb_c.h>
 
 #define JNI_NULL nullptr 
 
 #if defined(__GNUG__)
-#define thread_local __thread
-// TODO: figure out why the default definition suppresses visibility
 #undef JNIEXPORT
 #define JNIEXPORT __attribute__ ((visibility ("default")))
-#elif defined(_MSC_VER)
-#define thread_local __declspec(thread)
-#else
-#error Missing thread local storage
 #endif
 
 static JavaVM* g_jvm = nullptr; 
@@ -249,21 +243,21 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1releaseM
 	fdb_future_release_memory(var);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureVersion_FutureVersion_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get(JNIEnv *jenv, jobject, jlong future) {
+	if (!future) {
 		throwParamNotNull(jenv);
 		return 0;
 	}
 	FDBFuture *f = (FDBFuture *)future;
 
-	int64_t version = 0;
-	fdb_error_t err = fdb_future_get_version(f, &version);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
+	int64_t value = 0;
+	fdb_error_t err = fdb_future_get_int64(f, &value);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
 		return 0;
 	}
 
-	return (jlong)version;
+	return (jlong)value;
 }
 
 JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv *jenv, jobject, jlong future) {
@@ -809,6 +803,15 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 	return (jlong)version;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getApproximateSize(JNIEnv *jenv, jobject, jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBFuture* f = fdb_transaction_get_approximate_size((FDBTransaction*)tPtr);
+	return (jlong)f;
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getVersionstamp(JNIEnv *jenv, jobject, jlong tPtr) {

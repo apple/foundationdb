@@ -215,7 +215,7 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&, std::string phase, int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
-							int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0);
+							int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6);
 
 
 #include "flow/unactorcompiler.h"

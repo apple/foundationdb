@@ -19,6 +19,7 @@
  */
 
 #include <ctime>
+#include <cinttypes>
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -48,10 +49,10 @@ public:
 		sum += x;
 		sumSQ += x*x;
 		N++;
-		if (g_random->random01() < samplingRate){
+		if (deterministicRandom()->random01() < samplingRate){
 			samples.push_back(x);
 			if (samples.size() == minSamples * 2){
-				g_random->randomShuffle(samples);
+				deterministicRandom()->randomShuffle(samples);
 				samples.resize(minSamples);
 				samplingRate /= 2;
 			}
@@ -142,7 +143,7 @@ struct KVTest {
 		s->value.insert( lastSet, NoMetric() );
 	}
 
-	Key randomKey() { return makeKey( g_random->randomInt(0,nodeCount) ); }
+	Key randomKey() { return makeKey( deterministicRandom()->randomInt(0,nodeCount) ); }
 	Key makeKey(Version value) {
 		Key k;
 		((KeyRef&)k) = KeyRef( new (k.arena()) uint8_t[ keyBytes ], keyBytes );
@@ -276,7 +277,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		}
 		double elapsed = timer()-cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		printf("Counted: %lld in %0.1fs\n", count, elapsed);
+		printf("Counted: %" PRId64 " in %0.1fs\n", count, elapsed);
 	}
 
 	if (workload->doSetup) {
@@ -285,7 +286,6 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 
 		printf("Building %d nodes: ", workload->nodeCount);
 		state double setupBegin = timer();
-		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
 		for(i=0; i<workload->nodeCount; i++) {
 			test.store->set( KeyValueRef( test.makeKey( i ), wr.toValue() ) );
@@ -327,7 +327,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 			double end = now();
 			loop {
 				t += 1.0 / workload->operationsPerSecond;
-				double op = g_random->random01();
+				double op = deterministicRandom()->random01();
 				if (op < workload->commitFraction) {
 					// Commit
 					if (workload->commits.getValue() == commitsStarted) {
@@ -371,7 +371,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	//wait( delay(1) );
 	TraceEvent("GO");
 
-	UID id = g_random->randomUniqueID();
+	UID id = deterministicRandom()->randomUniqueID();
 	std::string fn = workload->filename.size() ? workload->filename : id.toString();
 	if (workload->storeType == "ssd")
 		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_BTREE_V2);

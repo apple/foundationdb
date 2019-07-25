@@ -25,7 +25,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 KeySelector randomizedSelector(const KeyRef &key, bool orEqual, int offset ) {
-	if( orEqual && g_random->random01() > 0.5 )
+	if( orEqual && deterministicRandom()->random01() > 0.5 )
 		return KeySelectorRef( keyAfter(key), false, offset );
 	return KeySelectorRef( key, orEqual, offset );
 }
@@ -101,9 +101,9 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		state bool restartProcess;
 
 		loop {
-			forward = g_random->randomInt(0,2) != 0;
+			forward = deterministicRandom()->randomInt(0,2) != 0;
 			direction = forward ? 1 : -1;
-			diff = g_random->randomInt(0, self->maxDiff);
+			diff = deterministicRandom()->randomInt(0, self->maxDiff);
 
 			//Setup start and end key
 			loop {
@@ -138,8 +138,8 @@ struct BackgroundSelectorWorkload : TestWorkload {
 			loop {
 				wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
 				tr.reset();
-				startDrift = direction * g_random->randomInt( self->minDrift, self->maxDrift );
-				endDrift   = direction * g_random->randomInt( self->minDrift, self->maxDrift );
+				startDrift = direction * deterministicRandom()->randomInt( self->minDrift, self->maxDrift );
+				endDrift   = direction * deterministicRandom()->randomInt( self->minDrift, self->maxDrift );
 
 				//max sure the end drift does not violate maxDiff
 				endDrift = std::max( endDrift, startDrift - self->maxDiff - diff );

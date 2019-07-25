@@ -137,7 +137,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterW
 // 4) After process all restore requests, finish restore by cleaning up the restore related system key
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
-	state UID randomUID = g_random->randomUniqueID();
+	state UID randomUID = deterministicRandom()->randomUniqueID();
 	TraceEvent("FastRestore").detail("RestoreMaster", "WaitOnRestoreRequests");
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
 
@@ -275,7 +275,7 @@ void dummySampleWorkload(Reference<RestoreMasterData> self) {
 	// We will use the splitter at [1, numAppliers - 1]. The first splitter is normalKeys.begin
 	int i;
 	for (i = 0; i < numAppliers - 1; i++) {
-		keyrangeSplitter.push_back(g_random->randomUniqueID());
+		keyrangeSplitter.push_back(deterministicRandom()->randomUniqueID());
 	}
 	std::sort( keyrangeSplitter.begin(), keyrangeSplitter.end() );
 	i = 0;

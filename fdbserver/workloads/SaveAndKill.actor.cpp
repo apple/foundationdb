@@ -34,12 +34,14 @@ struct SaveAndKillWorkload : TestWorkload {
 
 	std::string restartInfo;
 	double testDuration;
+	int isRestoring;
 
 	SaveAndKillWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
 	{
 		restartInfo = getOption( options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini") ).toString();
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		isRestoring = getOption( options, LiteralStringRef("isRestoring"),  0 );
 	}
 
 	virtual std::string description() { return "SaveAndKillWorkload"; }
@@ -53,12 +55,13 @@ struct SaveAndKillWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start( SaveAndKillWorkload* self) {
 		state int i;
-		wait(delay(g_random->random01()*self->testDuration));
+		wait(delay(deterministicRandom()->random01()*self->testDuration));
 
 		CSimpleIni ini;
 		ini.SetUnicode();
 		ini.LoadFile(self->restartInfo.c_str());
 
+		ini.SetValue("RESTORE", "isRestoring", format("%d", self->isRestoring).c_str());
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());

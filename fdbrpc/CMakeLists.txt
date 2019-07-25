@@ -57,6 +57,9 @@ add_library(thirdparty ${FDBRPC_THIRD_PARTY_SRCS})
 if(NOT WIN32)
   target_compile_options(thirdparty BEFORE PRIVATE -w) # disable warnings for third party
 endif()
+if(USE_VALGRIND)
+  target_link_libraries(thirdparty PUBLIC Valgrind)
+endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING
   ActorFuzz.actor.cpp

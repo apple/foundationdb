@@ -147,11 +147,11 @@ struct AtomicOpsWorkload : TestWorkload {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					int group = g_random->randomInt(0,100);
-					uint64_t intValue = g_random->randomInt( 0, 10000000 );
+					int group = deterministicRandom()->randomInt(0,100);
+					uint64_t intValue = deterministicRandom()->randomInt( 0, 10000000 );
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
-					tr.atomicOp(StringRef(format("ops%08x%08x",group,g_random->randomInt(0,self->nodeCount/100))), val, self->opType);
+					tr.atomicOp(StringRef(format("ops%08x%08x",group,deterministicRandom()->randomInt(0,self->nodeCount/100))), val, self->opType);
 					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
