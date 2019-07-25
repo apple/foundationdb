@@ -123,7 +123,9 @@ class Void {
 public:
 	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
-	void serialize(Ar&) {}
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
 };
 
 class Never {};
