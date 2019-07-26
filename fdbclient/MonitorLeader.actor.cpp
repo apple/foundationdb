@@ -646,7 +646,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 
 			if (leader.get().first.serializedInfo.size()) {
 				if (g_network->useObjectSerializer()) {
-					ObjectReader reader(leader.get().first.serializedInfo.begin());
+					ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
 					ClusterControllerClientInterface res;
 					reader.deserialize(res);
 					knownLeader->set(res);
