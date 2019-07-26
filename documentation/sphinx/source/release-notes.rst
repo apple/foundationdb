@@ -11,6 +11,8 @@ Features
 
 * CMake is now our official build system. The Makefile based build system is deprecated.
 
+* Added local ratekeeper, to throttle reads at a per-storage-process level. `(PR #1447) <https://github.com/apple/foundationdb/pull/1477>`_.
+
 Performance
 -----------
 
