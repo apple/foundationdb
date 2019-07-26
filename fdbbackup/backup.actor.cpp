@@ -3905,7 +3905,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 			bool locked = true;
 			struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(bc->getURL()), true, targetVersion, true, range, Key(), Key(), locked, deterministicRandom()->randomUniqueID());
 			tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
-			tr->set(restoreRequestTriggerKey, restoreRequestTriggerValue(1)); //backupRanges.size = 1 because we only support restoring 1 range in real mode
+			tr->set(restoreRequestTriggerKey, restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), 1)); //backupRanges.size = 1 because we only support restoring 1 range in real mode
 			wait(tr->commit()); // Trigger fast restore
 			break;
 		} catch(Error &e) {

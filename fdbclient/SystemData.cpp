@@ -647,15 +647,18 @@ RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value 
 
 // Encode and decode restore request value
 // restoreRequestTrigger key
-const Value restoreRequestTriggerValue (int const numRequests) {
+const Value restoreRequestTriggerValue (UID randomID, int const numRequests) {
 	BinaryWriter wr(IncludeVersion());
 	wr << numRequests;
+	wr << randomID;
 	return wr.toValue();
 }
 const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
 	int s;
+	UID randomID;
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
+	reader >> randomID;
 	return s;
 }
 

@@ -596,7 +596,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, deterministicRandom()->randomUniqueID());
 							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 						}
-						tr1.set(restoreRequestTriggerKey, restoreRequestTriggerValue(self->backupRanges.size()));
+						tr1.set(restoreRequestTriggerKey, restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), self->backupRanges.size()));
 						wait(tr1.commit()); // Trigger restore
 						break;
 					} catch( Error &e ) {

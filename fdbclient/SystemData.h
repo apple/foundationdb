@@ -290,7 +290,7 @@ extern const KeyRangeRef restoreRequestKeys;
 const Key restoreWorkerKeyFor( UID const& workerID );
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server );
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value );
-const Value restoreRequestTriggerValue (int const numRequests);
+const Value restoreRequestTriggerValue (UID randomUID, int const numRequests);
 const int decodeRestoreRequestTriggerValue( ValueRef const& value );
 const Value restoreRequestDoneVersionValue (Version readVersion);
 Version decodeRestoreRequestDoneVersionValue( ValueRef const& value );

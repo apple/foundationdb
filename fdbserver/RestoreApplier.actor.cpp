@@ -48,7 +48,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 		double elapsedTime = loopTopTime - lastLoopTopTime;
 		if( elapsedTime > 0.050 ) {
 			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", self->describeNode()).detail("Elapsed", elapsedTime);
+				TraceEvent(SevWarn, "SlowRestoreApplierLoopx100").detail("NodeDesc", self->describeNode()).detail("Elapsed", elapsedTime);
 		}
 		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";

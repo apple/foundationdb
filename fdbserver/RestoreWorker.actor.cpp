@@ -195,7 +195,7 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 	printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
 			workerInterf.id().toString().c_str());
 	wait( delay(10.0) );
-	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", workerInterf.id().toString().c_str());
+	printf("[INFO][Master] NodeID:%s starts collect restore worker interfaces\n", workerInterf.id().toString().c_str());
 
 	wait( collectRestoreWorkerInterface(self, cx, opConfig.num_loaders + opConfig.num_appliers) );
 
@@ -217,7 +217,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 		double elapsedTime = loopTopTime - lastLoopTopTime;
 		if( elapsedTime > 0.050 ) {
 			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100").detail("NodeDesc", self->describeNode()).detail("Elapsed", elapsedTime);
+				TraceEvent(SevWarn, "SlowRestoreWorkerLoopx100").detail("NodeDesc", self->describeNode()).detail("Elapsed", elapsedTime);
 		}
 		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
@@ -298,8 +298,10 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
 			if(leaderValue.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leaderValue.get(), IncludeVersion());
-				// Register my interface as an worker
-				tr.set(restoreWorkerKeyFor(myWorkerInterf.id()), restoreWorkerInterfaceValue(myWorkerInterf));
+				// Register my interface as an worker if I am not the leader
+				if (leaderInterf != myWorkerInterf) {
+					tr.set(restoreWorkerKeyFor(myWorkerInterf.id()), restoreWorkerInterfaceValue(myWorkerInterf));
+				}
 			} else {
 				// Workers compete to be the leader
 				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));

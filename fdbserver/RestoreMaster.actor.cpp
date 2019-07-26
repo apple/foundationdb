@@ -71,6 +71,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker, Reference<RestoreMasterData> masterData)  {
 	TraceEvent("FastRestore").detail("RecruitRestoreRoles", masterWorker->workerInterfaces.size())
 			.detail("NumLoaders", opConfig.num_loaders).detail("NumAppliers", opConfig.num_appliers);
+	ASSERT(masterData->loadersInterf.empty() && masterData->appliersInterf.empty());
 
 	ASSERT( masterData.isValid() );
 	ASSERT( opConfig.num_loaders > 0 && opConfig.num_appliers > 0 );
@@ -87,9 +88,11 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 		} else if ( nodeIndex >= opConfig.num_appliers && nodeIndex < opConfig.num_loaders + opConfig.num_appliers ) {
 			// [numApplier, numApplier + numLoader) are loaders
 			role = RestoreRole::Loader;
+		} else {
+			break;
 		}
 
-		TraceEvent("FastRestore").detail("Role", getRoleStr(role)).detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestore").detail("Role", getRoleStr(role)).detail("NodeIndex", nodeIndex).detail("WorkerNode", workerInterf.first);
 		requests[workerInterf.first] = RestoreRecruitRoleRequest(role, nodeIndex);
 		nodeIndex++;
 	}
