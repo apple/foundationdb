@@ -803,6 +803,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
+	connectionFile->set(connFile);
 	Future<Void> clientInfoMonitor = monitorProxies(connectionFile, clientInfo, networkOptions.supportedVersions, StringRef(networkOptions.traceLogGroup));
 
 	DatabaseContext *db;
