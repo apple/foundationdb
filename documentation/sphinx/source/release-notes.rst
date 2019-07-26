@@ -18,6 +18,7 @@ Performance
 
 * Use CRC32 checksum for SQLite pages. `(PR #1582) <https://github.com/apple/foundationdb/pull/1582>`_.
 * Added a 96-byte fast allocator, so storage queue nodes use less memory. `(PR #1336) <https://github.com/apple/foundationdb/pull/1336>`_.
+* Handle large packets better. `(PR #1684) <https://github.com/apple/foundationdb/pull/1684>`_.
 
 Fixes
 -----
@@ -39,6 +40,7 @@ Status
 Bindings
 --------
 
+* Add a transaction size limit for both database option and transaction option. `(PR #1725) <https://github.com/apple/foundationdb/pull/1725>`_.
 * Added a new API to get the approximated transaction size before commit, e.g., ``fdb_transaction_get_approximate_size`` in the C binding. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: ``fdb_future_get_version`` has been renamed to ``fdb_future_get_int64``. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: Applications linking to libfdb_c can now use ``pkg-config foundationdb-client`` or ``find_package(FoundationDB-Client ...)`` (for cmake) to get the proper flags for compiling and linking. `(PR #1636) <https://github.com/apple/foundationdb/pull/1636>`_.
