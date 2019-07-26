@@ -4,7 +4,7 @@ set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
-set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
+set(USE_LD "DEFAULT" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, LLD, or BFD")
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
@@ -89,15 +89,32 @@ else()
     set(GCC YES)
   endif()
 
+  # Use the linker environmental variable, if specified and valid
+  if ((USE_LD STREQUAL "DEFAULT") AND (NOT "$ENV{USE_LD}" STREQUAL ""))
+    string(TOUPPER "$ENV{USE_LD}" USE_LDENV)
+    if (("${USE_LDENV}" STREQUAL "LD") OR ("${USE_LDENV}" STREQUAL "GOLD") OR ("${USE_LDENV}" STREQUAL "LLD") OR ("${USE_LDENV}" STREQUAL "BFD"))
+      set(USE_LD "${USE_LDENV}")
+    endif()
+  endif()
+
   # check linker flags.
-  if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")))
-    message (FATAL_ERROR "USE_LD must be set to LD, GOLD, or LLD!")
+  if (USE_LD STREQUAL "DEFAULT")
+    set(USE_LD "LD")
+	else()
+    if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
+      message (FATAL_ERROR "USE_LD must be set to LD, GOLD, or LLD!")
+    endif()
   endif()
 
   # if USE_LD=LD, then we don't do anything, defaulting to whatever system
   # linker is available (e.g. binutils doesn't normally exist on macOS, so this
   # implies the default xcode linker, and other distros may choose others by
   # default).
+
+  if(USE_LD STREQUAL "BFD")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=bfd -Wl,--disable-new-dtags")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=bfd -Wl,--disable-new-dtags")
+  endif()
 
   if(USE_LD STREQUAL "GOLD")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
