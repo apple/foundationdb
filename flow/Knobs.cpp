@@ -74,7 +74,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
 	//AsyncFileCached
-	init( PAGE_CACHE_4K,                                2000LL<<20 );
+	init( PAGE_CACHE_4K,                                   2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
 	init( SIM_PAGE_CACHE_4K,                                   1e8 );
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
@@ -137,6 +137,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
+	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -147,6 +149,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 1 );
+	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
 	init( LOAD_BALANCE_BACKOFF_RATE,                           2.0 );

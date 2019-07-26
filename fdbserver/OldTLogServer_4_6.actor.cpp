@@ -48,7 +48,7 @@ namespace oldTLog_4_6 {
 	typedef int16_t OldTag;
 
 	OldTag convertTag( Tag tag ) {
-		if(tag == invalidTag) return invalidTagOld;
+		if(tag == invalidTag || tag.locality == tagLocalityTxs) return invalidTagOld;
 		if(tag == txsTag) return txsTagOld;
 		ASSERT(tag.id >= 0);
 		return tag.id;
@@ -1240,8 +1240,8 @@ namespace oldTLog_4_6 {
 
 		// FIXME: metadata in queue?
 
-		wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-		wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fRecoverCounts) ) );
+		wait( waitForAll( std::vector{fFormat} ) );
+		wait( waitForAll( std::vector{fVers, fRecoverCounts} ) );
 
 		if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 			TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", fFormat.get().get()).detail("Expected", persistFormat.value.toString());

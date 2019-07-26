@@ -86,6 +86,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, IPv6);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
@@ -95,7 +96,7 @@ public: // introduced features
 //
 //                                                         xyzdev
 //                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B061070001LL);
+constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B062000001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");

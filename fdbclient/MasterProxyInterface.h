@@ -49,9 +49,8 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
-	RequestStream<struct ExecRequest> execReq;
-
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream< struct ProxySnapRequest > proxySnapReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -63,7 +62,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, execReq);
+				   txnState, getHealthMetrics, proxySnapReq);
 	}
 
 	void initEndpoints() {
@@ -165,6 +164,8 @@ struct GetReadVersionReply : public ProxyForwardReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+
+	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -332,20 +333,21 @@ struct GetHealthMetricsRequest
 	}
 };
 
-struct ExecRequest
+struct ProxySnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22403900;
+	constexpr static FileIdentifier file_identifier = 22204900;
 	Arena arena;
-	StringRef execPayload;
+	StringRef snapPayload;
+	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
-	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
-	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
+	explicit ProxySnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ProxySnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, execPayload, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
 	}
 };
 

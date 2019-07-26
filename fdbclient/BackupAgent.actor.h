@@ -843,4 +843,6 @@ public:
 		return updateErrorInfo(cx, e, details);
 	}
 };
+
+#include "flow/unactorcompiler.h"
 #endif

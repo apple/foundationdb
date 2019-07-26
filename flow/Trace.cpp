@@ -113,7 +113,7 @@ struct SuppressionMap {
 };
 
 TraceBatch g_traceBatch;
-trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
+thread_local trace_clock_t g_trace_clock = TRACE_CLOCK_REALTIME;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -122,7 +122,6 @@ static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottle
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 static const char *TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
 static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
-static int TRACE_EVENT_MAX_SIZE = 4000;
 
 struct TraceLog {
 	Reference<ITraceLogFormatter> formatter;
@@ -656,18 +655,26 @@ void removeTraceRole(std::string role) {
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {
 	g_trace_depth++;
+	setMaxFieldLength(0);
+	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
 	: id(id), type(type), severity(severity), initialized(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 	g_trace_depth++;
+	setMaxFieldLength(0);
+	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent( TraceInterval& interval, UID id )
-	: id(id), type(interval.type)
-	, severity(interval.severity)
-	, initialized(false)
-	, enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
+	: id(id), type(interval.type),
+	  severity(interval.severity),
+	  initialized(false),
+	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
+
 	g_trace_depth++;
+	setMaxFieldLength(0);
+	setMaxEventLength(0);
+
 	init(interval);
 }
 TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
@@ -675,7 +682,11 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
 	  severity(severity),
 	  initialized(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
+
 	g_trace_depth++;
+	setMaxFieldLength(0);
+	setMaxEventLength(0);
+
 	init(interval);
 }
 
@@ -778,8 +789,8 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField) {
 	init();
 	if (enabled) {
-		if( value.size() > 495 ) {
-			value = value.substr(0, 495) + "...";
+		if( maxFieldLength >= 0 && value.size() > maxFieldLength ) {
+			value = value.substr(0, maxFieldLength) + "...";
 		}
 
 		if(writeEventMetricField) {
@@ -788,8 +799,8 @@ TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool
 
 		fields.addField(std::move(key), std::move(value));
 
-		if(fields.sizeBytes() > TRACE_EVENT_MAX_SIZE) {
-			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));
+		if(maxEventLength >= 0 && fields.sizeBytes() > maxEventLength) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow").setMaxEventLength(1000).detail("TraceFirstBytes", fields.toString().substr(300));
 			enabled = false;
 		}
 	}
@@ -884,6 +895,28 @@ TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCou
 	return *this;
 }
 
+TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
+	if(maxFieldLength == 0) {
+		this->maxFieldLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_FIELD_LENGTH : 495;
+	} 
+	else {
+		this->maxFieldLength = maxFieldLength;
+	}
+
+	return *this;
+}
+
+TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
+	if(maxEventLength == 0) {
+		this->maxEventLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_EVENT_LENGTH : 4000;
+	} 
+	else {
+		this->maxEventLength = maxEventLength;
+	}
+
+	return *this;
+}
+
 TraceEvent& TraceEvent::GetLastError() {
 #ifdef _WIN32
 	return detailf("WinErrorCode", "%x", ::GetLastError());
@@ -946,6 +979,7 @@ thread_local bool TraceEvent::networkThread = false;
 void TraceEvent::setNetworkThread() {
 	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
 	networkThread = true;
+	g_trace_clock = TRACE_CLOCK_NOW;
 }
 
 bool TraceEvent::isNetworkThread() {

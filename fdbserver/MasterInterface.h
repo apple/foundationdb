@@ -51,6 +51,7 @@ struct MasterInterface {
 
 	void initEndpoints() {
 		getCommitVersion.getEndpoint( TaskPriority::ProxyGetConsistentReadVersion );
+		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
 	}
 };
 

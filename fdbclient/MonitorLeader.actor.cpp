@@ -246,10 +246,10 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 			}
 			in.serializedInfo = rndString;
 		}
-		ObjectWriter writer;
+		ObjectWriter writer(IncludeVersion());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, IncludeVersion());
 		reader.deserialize(out);
 		ASSERT(in.forward == out.forward);
 		ASSERT(in.changeID == out.changeID);
@@ -268,10 +268,10 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objIn(leaderInfo);
 	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objOut;
 	Standalone<StringRef> copy;
-	ObjectWriter writer;
+	ObjectWriter writer(IncludeVersion());
 	writer.serialize(objIn);
 	copy = writer.toStringRef();
-	ArenaObjectReader reader(copy.arena(), copy);
+	ArenaObjectReader reader(copy.arena(), copy, IncludeVersion());
 	reader.deserialize(objOut);
 
 	ASSERT(!objOut.isError());
@@ -725,10 +725,17 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorProxies( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup ) {
-	state MonitorLeaderInfo info(connFile);
+ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup ) {
+	state MonitorLeaderInfo info(connFile->get());
 	loop {
-		MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile, clientInfo, info, supportedVersions, traceLogGroup ) );
-		info = _info;
+		choose {
+			when(MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile->get(), clientInfo, info, supportedVersions, traceLogGroup ) )) {
+				info = _info;
+			}
+			when(wait(connFile->onChange())) {
+				info.hasConnected = false;
+				info.intermediateConnFile = connFile->get();
+			}
+		}
 	}
 }

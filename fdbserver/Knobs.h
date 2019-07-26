@@ -142,8 +142,13 @@ public:
 	double DEBOUNCE_RECRUITING_DELAY;
 
 	// TeamRemover to remove redundant teams
-	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
+	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
+	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
+
+	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
+	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
@@ -325,6 +330,9 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// disk snapshot
+	double SNAP_CREATE_MAX_TIMEOUT;
+
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_FREE_SPACE;
@@ -334,6 +342,17 @@ public:
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
 	int MAX_MACHINES_FALLING_BEHIND;
 
+	int MAX_TPS_HISTORY_SAMPLES;
+	int NEEDED_TPS_HISTORY_SAMPLES;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS_BATCH;
+	int64_t DURABILITY_LAG_UNLIMITED_THRESHOLD;
+	double INITIAL_DURABILITY_LAG_MULTIPLIER;
+	double DURABILITY_LAG_REDUCTION_RATE;
+	double DURABILITY_LAG_INCREASE_RATE;
+	
+	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
+	
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -349,6 +368,7 @@ public:
 	int BUGGIFY_LIMIT_BYTES;
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
+	int FETCH_KEYS_LOWER_PRIORITY;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;

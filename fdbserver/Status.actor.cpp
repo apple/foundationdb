@@ -451,6 +451,7 @@ struct RolesInfo {
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
+			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
@@ -1113,6 +1114,37 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 	return statusObj;
 }
 
+ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool isAvailable) {
+	if(isAvailable) {
+		try {
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					Optional<Value> ccSuspendVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
+					bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
+					if(ccSuspend) {
+						messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
+					}
+					break;
+				} catch(Error &e) {
+					if(e.code() == error_code_timed_out) {
+						messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout", 
+							format("Timed out trying to fetch `%s` from the database.", printable(fdbShouldConsistencyCheckBeSuspended).c_str()).c_str()));
+						break;
+					}
+					wait(tr.onError(e));
+				}
+			}
+		} catch(Error &e) {
+			incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
+		}
+	}
+	return Void();
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -1284,10 +1316,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
-			
-			if(movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+
+			if (movingHighestPriority < PRIORITY_TEAM_UNHEALTHY) {
 				highestPriority = movingHighestPriority;
-			} else if(partitionsInFlight > 0) {
+			} else if (partitionsInFlight > 0) {
 				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
 			}
 
@@ -1328,32 +1360,26 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
-			}
-			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
-				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "optimizing_team_collections";
-				stateSectionObj["description"] = "Optimizing team collections";
-			}
-			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
+			} else if (highestPriority >= PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_repartitioning";
 				stateSectionObj["description"] = "Repartitioning.";
-			}
-			else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+			} else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "optimizing_team_collections";
+				stateSectionObj["description"] = "Optimizing team collections";
+			} else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
-			}
-			else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
- 				stateSectionObj["healthy"] = true;
+			} else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
+				stateSectionObj["healthy"] = true;
  				stateSectionObj["name"] = "healthy";
- 			}
-			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
+			} else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
 				stateSectionObj["description"] = "Rebalancing";
-			}
-			else if (highestPriority >= 0) {
+			} else if (highestPriority >= 0) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy";
 			}
@@ -2150,6 +2176,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!latencyProbeResults.empty()) {
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
+
+			wait(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons, isAvailable));
 
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
