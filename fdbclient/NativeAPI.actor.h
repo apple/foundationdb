@@ -129,15 +129,15 @@ public:
 	~Cluster();
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> getClusterInterface();
-	Reference<ClusterConnectionFile> getConnectionFile() { return connectionFile; }
+	Reference<AsyncVar<Reference<ClusterConnectionFile>>> getConnectionFile() { return connectionFile; }
 
 	Future<Void> onConnected();
 
-private: 
+private:
 	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
-	Reference<ClusterConnectionFile> connectionFile;
+	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 
 	Future<Void> failMon;
 	Future<Void> connected;

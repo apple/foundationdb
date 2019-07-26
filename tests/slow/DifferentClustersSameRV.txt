@@ -1,0 +1,8 @@
+testTitle=DifferentClustersSameRV
+   testName=DifferentClustersSameRV
+   testDuration=150
+   switchAfter=50
+   keyToRead=someKey
+   keyToWatch=anotherKey
+   extraDB=2
+   clearAfterTest=false

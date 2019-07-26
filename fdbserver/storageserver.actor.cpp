@@ -1846,6 +1846,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	if( *isTooOld )
 		throw transaction_too_old();
 
+	ASSERT(!cx->switchable);
 	tr.setVersion( version );
 	tr.info.taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;

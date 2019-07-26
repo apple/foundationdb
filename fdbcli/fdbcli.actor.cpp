@@ -2577,7 +2577,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
-			wait( makeInterruptable( checkStatus( Void(), ccf )) );
+			wait(makeInterruptable(checkStatus(Void(), db->getConnectionFile())));
 		}
 		else {
 			printf("\n");
@@ -2614,7 +2614,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				linenoise.historyAdd(line);
 		}
 
-		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
+		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db->getConnectionFile());
 
 		try {
 			state UID randomID = deterministicRandom()->randomUniqueID();
@@ -2742,7 +2742,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 
-					StatusObject s = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
+					StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db->getConnectionFile())));
 
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);
@@ -2751,7 +2751,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool err = wait( configure( db, tokens, ccf, &linenoise, warn ) );
+					bool err = wait(configure(db, tokens, db->getConnectionFile(), &linenoise, warn));
 					if (err) is_error = true;
 					continue;
 				}
@@ -2768,7 +2768,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
+					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
 						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
@@ -2781,7 +2781,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "exclude")) {
-					bool err = wait( exclude(db, tokens, ccf, warn ) );
+					bool err = wait(exclude(db, tokens, db->getConnectionFile(), warn));
 					if (err) is_error = true;
 					continue;
 				}
@@ -2955,7 +2955,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					wait( makeInterruptable( forceRecovery( ccf, tokens[1] ) ) );
+					wait(makeInterruptable(forceRecovery(db->getConnectionFile(), tokens[1])));
 					continue;
 				}
 
