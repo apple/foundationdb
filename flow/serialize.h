@@ -392,7 +392,7 @@ public:
 			((uint8_t*)p)[1] = (uint8_t)1;
 		}
 	}
-	
+
 	void serializeAsTuple( uint64_t t ) {
 		if(t == 0) {
 			void* p = writeBytes(1);
@@ -538,7 +538,7 @@ public:
 	void serializeBytes(void* data, int bytes) {
 		memcpy(data, readBytes(bytes), bytes);
 	}
-	
+
 	const uint8_t* arenaRead( int bytes ) {
 		return (const uint8_t*)readBytes(bytes);
 	}
@@ -598,7 +598,7 @@ public:
 	void serializeBytes(void* data, int bytes) {
 		memcpy(data, readBytes(bytes), bytes);
 	}
-	
+
 	template <class T>
 	void serializeBinaryItem( T& t ) {
 		t = *(T*)readBytes(sizeof(T));
@@ -774,13 +774,26 @@ struct ISerializeSource {
 	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
 
+template<class Ar, class T>
+struct SerializedMsg {
+	static void serialize(Ar& w, T const& value);
+};
+
+template<class T>
+struct ObjectSerializedMsg {
+	static void serialize(PacketWriter& w, T const& value);
+	static void serialize(ObjectWriter& w, T const& value);
+	static void deserialize(ArenaObjectReader& reader, T& value);
+	static void deserialize(ArenaReader& reader, T& value);
+};
+
 template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
+
 	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
 		if (useObjectSerializer) {
-			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
-			writer.serialize(get()); // Writes directly into buffer supplied by |w|
+			ObjectSerializedMsg<V>::serialize(w, get());
 		} else {
 			static_cast<T const*>(this)->serialize(w);
 		}
@@ -795,10 +808,10 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
 	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		w.serialize(value);
+		ObjectSerializedMsg<T>::serialize(w, value);
 	}
 	template <class Ar> void serialize(Ar& ar) const {
-		ar << value;
+		SerializedMsg<Ar, T>::serialize(ar, value);
 	}
 	virtual T const& get() const { return value; }
 };
@@ -809,7 +822,10 @@ struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
 	bool b;
 	T const& value;
 	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
-	template <class Ar> void serialize(Ar& ar) const { ar << b << value; }
+	template <class Ar> void serialize(Ar& ar) const {
+		SerializedMsg<Ar, bool>::serialize(ar, b);
+		SerializedMsg<Ar, T>::serialize(ar, value);
+	}
 	virtual void serializeObjectWriter(ObjectWriter& w) const {
 		ASSERT(false);
 	}
