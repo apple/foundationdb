@@ -82,8 +82,13 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
+	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+};
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -129,6 +134,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
 	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
 	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
 	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
@@ -619,6 +625,10 @@ static void printUsage( const char *name, bool devhelp ) {
 			   "                 Maximum amount of memory used for storage. The default\n"
 			   "                 value is 1GiB. When specified without a unit, MB is\n"
 			   "                 assumed.\n");
+		printf("  --cache_memory SIZE\n"
+		       "                 The amount of memory to use for caching disk pages.\n"
+		       "                 The default value is 2GiB. When specified without a unit,\n"
+		       "                 MiB is assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -1265,6 +1275,16 @@ int main(int argc, char* argv[]) {
 						flushAndExit(FDB_EXIT_ERROR);
 					}
 					storageMemLimit = ti.get();
+					break;
+				case OPT_CACHEMEMLIMIT:
+					ti = parse_with_suffix(args.OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
+					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
 					break;
 				case OPT_BUGGIFY:
 					if( !strcmp( args.OptionArg(), "on" ) )
