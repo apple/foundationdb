@@ -4111,7 +4111,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 				TraceEvent("SnapDDCreateTimedOut")
 					.detail("SnapPayload", snapReq.snapPayload)
 					.detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.sendError(operation_failed());
+				snapReq.reply.sendError(timed_out());
 			}
 		}
 	} catch (Error& e) {
