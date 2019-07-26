@@ -1090,7 +1090,11 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 				tag.id = tag.id % logData->logRouterTags;
 			}
 			if(tag.locality == tagLocalityTxs) {
-				tag.id = tag.id % logData->txsTags;
+				if (logData->txsTags > 0) {
+					tag.id = tag.id % logData->txsTags;
+				} else {
+					tag = txsTag;
+				}
 			}
 			Reference<LogData::TagData> tagData = logData->getTagData(tag);
 			if(!tagData) {

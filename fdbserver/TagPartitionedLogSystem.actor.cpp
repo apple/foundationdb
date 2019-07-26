@@ -752,10 +752,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		TraceEvent("TLogPeekTxs", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
 
 		int maxTxsTags = txsTags;
-		bool needsOldTxs = txsTags==0;
+		bool needsOldTxs = tLogs[0]->tLogVersion < TLogVersion::V4;
 		for(auto& it : oldLogData) {
 			maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
-			needsOldTxs = needsOldTxs || it.txsTags==0;
+			needsOldTxs = needsOldTxs || it.tLogs[0]->tLogVersion < TLogVersion::V4;
 		}
 		
 
@@ -1002,7 +1002,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual void popTxs( Version upTo, int8_t popLocality ) {
-		if(txsTags == 0) {
+		if( getTLogVersion() < TLogVersion::V4 ) {
 			pop(upTo, txsTag, 0, popLocality);
 		} else {
 			for(int i = 0; i < txsTags; i++) {
@@ -1221,19 +1221,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual bool hasRemoteLogs() {
+	virtual bool hasRemoteLogs() const {
 		return logRouterTags > 0 || pseudoLocalities.size() > 0;
 	}
 
-	virtual Tag getRandomRouterTag() {
+	virtual Tag getRandomRouterTag() const {
 		return Tag(tagLocalityLogRouter, deterministicRandom()->randomInt(0, logRouterTags));
 	}
 
-	virtual Tag getRandomTxsTag() {
-		if(txsTags==0) {
-			return txsTag;
-		}
+	virtual Tag getRandomTxsTag() const {
 		return Tag(tagLocalityTxs, deterministicRandom()->randomInt(0, txsTags));
+	}
+
+	virtual TLogVersion getTLogVersion() const {
+		return tLogs[0]->tLogVersion;
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
@@ -1841,6 +1842,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state vector<Future<TLogInterface>> remoteTLogInitializationReplies;
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
 
+		bool nonShardedTxs = self->getTLogVersion() < TLogVersion::V4;
 		if(oldLogSystem->logRouterTags == 0) {
 			std::vector<int> locations;
 			for( Tag tag : localTags ) {
@@ -1852,20 +1854,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			if(oldLogSystem->tLogs.size()) {
 				int maxTxsTags = oldLogSystem->txsTags;
-				bool needsOldTxs = oldLogSystem->txsTags==0;
+				bool needsOldTxs = oldLogSystem->tLogs[0]->tLogVersion < TLogVersion::V4;
 				for(auto& it : oldLogSystem->oldLogData) {
 					maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
-					needsOldTxs = needsOldTxs || it.txsTags==0;
+					needsOldTxs = needsOldTxs || it.tLogs[0]->tLogVersion < TLogVersion::V4;
 				}
 				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
-					Tag pushTag = (i==-1 || self->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%self->txsTags);
+					Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%self->txsTags);
 					locations.clear();
-					logSet->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
+					logSet->getPushLocations( {pushTag}, locations, 0 );
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
-				if(self->txsTags == 0) {
+				if(nonShardedTxs) {
 					localTags.push_back(txsTag);
 				} else {
 					for(int i = 0; i < self->txsTags; i++) {
@@ -1929,7 +1931,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->recoveredAt = oldLogSystem->recoverAt;
 		logSystem->repopulateRegionAntiQuorum = configuration.repopulateRegionAntiQuorum;
 		logSystem->recruitmentID = deterministicRandom()->randomUniqueID();
-		logSystem->txsTags = recr.tLogs.size();
+		logSystem->txsTags = configuration.tLogVersion >= TLogVersion::V4 ? recr.tLogs.size() : 0;
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
 		if(configuration.usableRegions > 1) {
@@ -1949,10 +1951,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state RegionInfo region = configuration.getRegion(recr.dcId);
 
 		state int maxTxsTags = oldLogSystem->txsTags;
-		state bool needsOldTxs = oldLogSystem->txsTags==0;
+		state bool needsOldTxs = oldLogSystem->tLogs.size() && oldLogSystem->getTLogVersion() < TLogVersion::V4;
 		for(auto& it : oldLogSystem->oldLogData) {
 			maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
-			needsOldTxs = needsOldTxs || it.txsTags==0;
+			needsOldTxs = needsOldTxs || it.tLogs[0]->tLogVersion < TLogVersion::V4;
 		}
 
 		if(region.satelliteTLogReplicationFactor > 0) {
@@ -2060,16 +2062,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			Tag tag = Tag(tagLocalityLogRouter, i);
 			reqs[ logSystem->tLogs[0]->bestLocationFor( tag ) ].recoverTags.push_back( tag );
 		}
+		bool nonShardedTxs = logSystem->getTLogVersion() < TLogVersion::V4;
 		if(oldLogSystem->tLogs.size()) {
 			for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 				Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
-				Tag pushTag = (i==-1 || logSystem->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
+				Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 				locations.clear();
 				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
 				for(int loc : locations)
 					reqs[ loc ].recoverTags.push_back( tag );
 			}
-			if(logSystem->txsTags == 0) {
+			if(nonShardedTxs) {
 				localTags.push_back(txsTag);
 			} else {
 				for(int i = 0; i < logSystem->txsTags; i++) {
@@ -2125,13 +2128,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(oldLogSystem->tLogs.size()) {
 				for(int i = needsOldTxs?-1:0; i < maxTxsTags; i++) {
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
-					Tag pushTag = (i==-1 || logSystem->txsTags==0) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
+					Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 					locations.clear();
 					logSystem->tLogs[1]->getPushLocations( {pushTag}, locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}
-				if(logSystem->txsTags == 0) {
+				if(nonShardedTxs) {
 					satelliteTags.push_back(txsTag);
 				} else {
 					for(int i = 0; i < logSystem->txsTags; i++) {
