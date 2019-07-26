@@ -1483,21 +1483,13 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 }
 
 ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
-	state int retryCount = 0;
-
-	loop {
-		state UID snapUID = deterministicRandom()->randomUniqueID();
-		try {
-			wait(snapCreate(cx, snapCmd, snapUID));
-			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-			return snapUID;
-		} catch (Error& e) {
-			++retryCount;
-			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
-			if (retryCount > 3) {
-				throw;
-			}
-		}
+	state UID snapUID = deterministicRandom()->randomUniqueID();
+	try {
+		wait(snapCreate(cx, snapCmd, snapUID));
+		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
+		return snapUID;
+	} catch (Error& e) {
+		throw;
 	}
 }
 
