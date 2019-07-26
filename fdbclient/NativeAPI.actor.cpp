@@ -754,7 +754,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = monitorProxies(connFile, clientInfo);
+	Future<Void> clientInfoMonitor = monitorProxies(connFile, clientInfo, networkOptions.supportedVersions, StringRef(networkOptions.traceLogGroup));
 
 	DatabaseContext *db;
 	if(preallocatedDb) {

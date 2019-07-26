@@ -216,7 +216,7 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	
-	db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup.toString(), req.supportedVersions, req.issues);
+	db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 
 	while (db->clientInfo->get().id == req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
 		choose {
@@ -257,7 +257,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
 			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.serializedInfo, &clientData);
+				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData);
 			}
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}

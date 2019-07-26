@@ -146,21 +146,20 @@ struct GetLeaderRequest {
 
 struct OpenDatabaseCoordRequest {
 	constexpr static FileIdentifier file_identifier = 214728;
-	// Sent by the native API to the cluster controller to open a database and track client
+	// Sent by the native API to the coordinator to open a database and track client
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
-	Arena arena;
-	StringRef traceLogGroup;
-	VectorRef<StringRef> issues;
-	VectorRef<ClientVersionRef> supportedVersions;
+	Key traceLogGroup;
+	Standalone<VectorRef<StringRef>> issues;
+	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
 	Key key;
-	Key serializedInfo;
+	vector<NetworkAddress> coordinators;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, key, serializedInfo, reply, arena);
+		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, key, coordinators, reply);
 	}
 };
 

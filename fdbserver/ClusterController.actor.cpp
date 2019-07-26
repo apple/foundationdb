@@ -101,6 +101,7 @@ public:
 		Database db;
 		int unfinishedRecoveries;
 		int logGenerations;
+		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
@@ -1290,24 +1291,20 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID k
 	return Void();
 }
 
-ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, UID knownClientInfoID,
-                                       Standalone<VectorRef<StringRef>> issues,
-                                       Standalone<VectorRef<ClientVersionRef>> supportedVersions,
-                                       Standalone<StringRef> traceLogGroup,
-                                       ReplyPromise<ClientDBInfo> reply) {
-	if(db->clientInfo->get().id != knownClientInfoID) {
-		reply.send( db->clientInfo->get() );
-		return Void();
+ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
+	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
+	if(db->clientStatus.size() > 10000) {
+		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
 	}
-
-	while (db->clientInfo->get().id == knownClientInfoID) {
+	
+	while (db->clientInfo->get().id == req.knownClientInfoID) {
 		choose {
 			when (wait( db->clientInfo->onChange() )) {}
-			when (wait( delayJittered( 300 ) )) { break; }  // The client might be long gone!
+			when (wait( delayJittered( SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) )) { break; }  // The client might be long gone!
 		}
 	}
 
-	reply.send( db->clientInfo->get() );
+	req.reply.send( db->clientInfo->get() );
 	return Void();
 }
 
@@ -2041,7 +2038,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, &self->db.clientStatus, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -2607,7 +2604,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send(clusterOpenDatabase(&self.db, req.knownClientInfoID, req.issues, req.supportedVersions, req.traceLogGroup, req.reply));
+			self.addActor.send(clusterOpenDatabase(&self.db, req));
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );

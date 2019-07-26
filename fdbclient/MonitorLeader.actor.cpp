@@ -526,9 +526,60 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	}
 }
 
+struct ClientStatusStats {
+	int count;
+	std::vector<std::pair<NetworkAddress,Key>> examples;
+
+	ClientStatusStats() : count(0) {
+		examples.reserve(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT);
+	}
+};
+
 OpenDatabaseRequest ClientData::getRequest() {
 	OpenDatabaseRequest req;
-	req.knownClientInfoID = clientInfo->get().id;
+
+	std::map<StringRef, ClientStatusStats> issueMap;
+	std::map<ClientVersionRef, ClientStatusStats> versionMap;
+	std::map<StringRef, ClientStatusStats> maxProtocolMap;
+
+	for(auto& ci : clientStatusInfoMap) {
+		for(auto& it : ci.second.issues) {
+			auto& entry = issueMap[it];
+			entry.count++;
+			if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+			}
+		}
+		StringRef maxProtocol;
+		for(auto& it : ci.second.versions) {
+			maxProtocol = std::max(maxProtocol, it.protocolVersion);
+			auto& entry = versionMap[it];
+			entry.count++;
+			if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+			}
+		}
+		auto& maxEntry = maxProtocolMap[maxProtocol];
+		maxEntry.count++;
+		if(maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+			maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+		}
+	}
+
+	req.issues.reserve(issueMap.size());
+	for(auto& it : issueMap) {
+		req.issues.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
+	}
+	req.supportedVersions.reserve(versionMap.size());
+	for(auto& it : versionMap) {
+		req.supportedVersions.push_back(ItemWithExamples<Standalone<ClientVersionRef>>(it.first, it.second.count, it.second.examples));
+	}
+	req.maxProtocolSupported.reserve(maxProtocolMap.size());
+	for(auto& it : maxProtocolMap) {
+		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
+	}
+	req.clientCount = clientStatusInfoMap.size();
+
 	return req;
 }
 
@@ -537,9 +588,18 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		wait( knownLeader->onChange() );
 	}
 	
+	state double lastRequestTime = now();
+	state OpenDatabaseRequest req = clientData->getRequest();
+	
 	loop {
+		if(now() - lastRequestTime > CLIENT_KNOBS->MAX_CLIENT_STATUS_AGE) {
+			req = clientData->getRequest();
+		} else {
+			resetReply(req);
+		}
+		req.knownClientInfoID = clientData->clientInfo->get().id;
 		choose {
-			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( clientData->getRequest() ) ) ) ) {
+			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
 				clientData->clientInfo->set(ni);
 			}
@@ -548,15 +608,14 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 	}
 }
 
-ACTOR Future<Void> monitorLeaderForProxies( Value serializedInfo, ClientData* clientData ) {
+ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData ) {
 	state vector< ClientLeaderRegInterface > clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state ClusterConnectionString cs(serializedInfo.toString());
 
-	for(auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
+	for(auto s = coordinators.begin(); s != coordinators.end(); ++s) {
 		clientLeaderServers.push_back( ClientLeaderRegInterface( *s ) );
 	}
 
@@ -565,21 +624,21 @@ ACTOR Future<Void> monitorLeaderForProxies( Value serializedInfo, ClientData* cl
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
 	for(int i=0; i<clientLeaderServers.size(); i++) {
-		actors.push_back( monitorNominee( cs.clusterKey(), clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
+		actors.push_back( monitorNominee( clusterKey, clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
 	}
 	actors.push_back( getClientInfoFromLeader( knownLeader, clientData ) );
 	allActors = waitForAll(actors);
 
 	loop {
 		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderForProxiesChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1)).detail("Key", cs.clusterKey().printable());
+		TraceEvent("MonitorLeaderForProxiesChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1)).detail("Key", clusterKey.printable());
 		if (leader.present()) {
 			if( leader.get().first.forward ) {
 				ClientDBInfo outInfo;
 				outInfo.id = deterministicRandom()->randomUniqueID();
 				outInfo.forward = leader.get().first.serializedInfo;
 				clientData->clientInfo->set(outInfo);
-				TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", serializedInfo.toString());
+				TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString());
 				return Void();
 			}
 
@@ -600,18 +659,40 @@ ACTOR Future<Void> monitorLeaderForProxies( Value serializedInfo, ClientData* cl
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info ) {
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
 	state int successIdx = 0;
+	state Optional<double> incorrectTime;
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer( addrs[idx] );
 		state OpenDatabaseCoordRequest req;
 		req.key = cs.clusterKey();
-		req.serializedInfo = info.intermediateConnFile->getConnectionString().toString();
+		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
+		req.supportedVersions = supportedVersions;
+		req.traceLogGroup = traceLogGroup;
+
+		ClusterConnectionString fileConnectionString;
+		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
+			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			std::string connectionString = connFile->getConnectionString().toString();
+			if(!incorrectTime.present()) {
+				incorrectTime = now();
+			}
+			if(connFile->canGetFilename()) {
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+					.detail("Filename", connFile->getFilename())
+					.detail("ConnectionStringFromFile", fileConnectionString.toString())
+					.detail("CurrentConnectionString", connectionString);
+			}
+		}
+		else {
+			incorrectTime = Optional<double>();
+		}
 
 		state ErrorOr<ClientDBInfo> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
 		if (rep.present()) {
@@ -642,10 +723,10 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorProxies( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo ) {
+ACTOR Future<Void> monitorProxies( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile, clientInfo, info ) );
+		MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile, clientInfo, info, supportedVersions, traceLogGroup ) );
 		info = _info;
 	}
 }

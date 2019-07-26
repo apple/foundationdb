@@ -43,6 +43,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_MAX_GENERATIONS,                  10 );
 
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
+	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
+	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 

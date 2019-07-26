@@ -32,12 +32,12 @@
 class ClientCoordinators;
 
 struct ClientStatusInfo {
-	std::string traceLogGroup;
+	Key traceLogGroup;
 	Standalone<VectorRef<ClientVersionRef>> versions;
 	Standalone<VectorRef<StringRef>> issues;
 
 	ClientStatusInfo() {}
-	ClientStatusInfo(std::string const& traceLogGroup, Standalone<VectorRef<ClientVersionRef>> versions, Standalone<VectorRef<StringRef>> issues) : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
+	ClientStatusInfo(Key const& traceLogGroup, Standalone<VectorRef<ClientVersionRef>> versions, Standalone<VectorRef<StringRef>> issues) : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
 };
 
 struct ClientData {
@@ -45,7 +45,7 @@ struct ClientData {
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 
 	OpenDatabaseRequest getRequest();
-	
+
 	ClientData() : clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ) {}
 };
 
@@ -55,9 +55,9 @@ Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Re
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 
-Future<Void> monitorLeaderForProxies( Value const& serializedInfo, ClientData* const& clientData );
+Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> const& coordinators, ClientData* const& clientData );
 
-Future<Void> monitorProxies( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo );
+Future<Void> monitorProxies( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Standalone<VectorRef<ClientVersionRef>> const& supportedVersions, Key const& traceLogGroup );
 
 #pragma region Implementation
 
