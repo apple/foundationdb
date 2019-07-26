@@ -221,7 +221,7 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	while (db->clientInfo->get().id == req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
 		choose {
 			when (wait( db->clientInfo->onChange() )) {}
-			when (wait( delayJittered( 300 ) )) { break; }  // The client might be long gone!
+			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }  // The client might be long gone!
 		}
 	}
 
@@ -257,7 +257,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
 			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData);
+				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData);
 			}
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}
@@ -472,13 +472,14 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
-			Optional<LeaderInfo> forward = regs.getForward(req.key);
+			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if( forward.present() ) {
 				ClientDBInfo info;
+				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
 				req.reply.send( info );
 			} else {
-				regs.getInterface(req.key, id).openDatabase.send( req );
+				regs.getInterface(req.clusterKey, id).openDatabase.send( req );
 			}
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {

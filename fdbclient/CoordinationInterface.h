@@ -153,13 +153,13 @@ struct OpenDatabaseCoordRequest {
 	Standalone<VectorRef<StringRef>> issues;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
-	Key key;
+	Key clusterKey;
 	vector<NetworkAddress> coordinators;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, key, coordinators, reply);
+		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, clusterKey, coordinators, reply);
 	}
 };
 

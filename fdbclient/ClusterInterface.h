@@ -145,7 +145,7 @@ struct ItemWithExamples {
 	int count;
 	std::vector<std::pair<NetworkAddress,Key>> examples;
 
-	ItemWithExamples() : count(0) {}
+	ItemWithExamples() : item{}, count(0) {}
 	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress,Key>> const& examples) : item(item), count(count), examples(examples) {}
 
 	template <class Ar>

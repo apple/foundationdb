@@ -932,9 +932,9 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 				cli["log_group"] = client.second.toString();
 				clients.push_back(cli);
 			}
-			maxSupportedProtocol.erase(cv.first.protocolVersion);
 			ver["max_protocol_count"] = iter->second.count;
 			ver["max_protocol_clients"] = maxClients;
+			maxSupportedProtocol.erase(cv.first.protocolVersion);
 		}
 
 		ver["connected_clients"] = clients;
@@ -1883,6 +1883,7 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 			}
 		}
 
+		//FIXME: add the log_group in addition to the network address
 		for (auto i : deduplicatedIssues) {
 			JsonBuilderObject message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonBuilderArray addresses;

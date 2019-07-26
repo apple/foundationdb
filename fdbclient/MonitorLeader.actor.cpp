@@ -385,7 +385,7 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskPriority::CoordinationReply ) );
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Key", key.printable());
+		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("ClusterKey", key.printable());
 
 		if (li != *info) {
 			*info = li;
@@ -542,6 +542,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 	std::map<ClientVersionRef, ClientStatusStats> versionMap;
 	std::map<StringRef, ClientStatusStats> maxProtocolMap;
 
+	//SOMEDAY: add a yield in this loop
 	for(auto& ci : clientStatusInfoMap) {
 		for(auto& it : ci.second.issues) {
 			auto& entry = issueMap[it];
@@ -593,6 +594,7 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 	
 	loop {
 		if(now() - lastRequestTime > CLIENT_KNOBS->MAX_CLIENT_STATUS_AGE) {
+			lastRequestTime = now();
 			req = clientData->getRequest();
 		} else {
 			resetReply(req);
@@ -669,7 +671,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer( addrs[idx] );
 		state OpenDatabaseCoordRequest req;
-		req.key = cs.clusterKey();
+		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions;
