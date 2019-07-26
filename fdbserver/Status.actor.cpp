@@ -1254,10 +1254,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
-			
-			if(movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+
+			if (movingHighestPriority < PRIORITY_TEAM_UNHEALTHY) {
 				highestPriority = movingHighestPriority;
-			} else if(partitionsInFlight > 0) {
+			} else if (partitionsInFlight > 0) {
 				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
 			}
 
@@ -1298,32 +1298,26 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
-			}
-			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
-				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "optimizing_team_collections";
-				stateSectionObj["description"] = "Optimizing team collections";
-			}
-			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
+			} else if (highestPriority >= PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_repartitioning";
 				stateSectionObj["description"] = "Repartitioning.";
-			}
-			else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+			} else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "optimizing_team_collections";
+				stateSectionObj["description"] = "Optimizing team collections";
+			} else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
-			}
-			else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
- 				stateSectionObj["healthy"] = true;
+			} else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
+				stateSectionObj["healthy"] = true;
  				stateSectionObj["name"] = "healthy";
- 			}
-			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
+			} else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
 				stateSectionObj["description"] = "Rebalancing";
-			}
-			else if (highestPriority >= 0) {
+			} else if (highestPriority >= 0) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy";
 			}
