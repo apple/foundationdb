@@ -2619,6 +2619,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
 	self.addActor.send( timeKeeper(&self) );
 	self.addActor.send( monitorProcessClasses(&self) );
+	self.addActor.send( monitorServerInfoConfig(&self.db) );
 	self.addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	self.addActor.send( updatedChangingDatacenters(&self) );
 	self.addActor.send( updatedChangedDatacenters(&self) );
