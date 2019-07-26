@@ -44,8 +44,7 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear",
-	                                "Exec" };
+	                                "CompareAndClear"};
 
 struct MutationRef;
 std::string getHexString(StringRef input);
@@ -74,9 +73,6 @@ struct MutationRef {
 		MinV2,
 		AndV2,
 		CompareAndClear,
-		// ExecOp is always set with FIRST_IN_BATCH option to quickly identify
-		// the op in a transaction batch while parsing it in TLog
-		Exec,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.

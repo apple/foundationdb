@@ -1723,7 +1723,6 @@ int main(int argc, char* argv[]) {
 				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
-				int backupVersion = 1;
 				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
 				if (isRestoringStr) {
 					isRestoring = atoi(isRestoringStr);
@@ -1731,142 +1730,77 @@ int main(int argc, char* argv[]) {
 					if (isRestoring && backupFailedStr) {
 						backupFailed = atoi(backupFailedStr);
 					}
-					const char* backupVersionStr = ini.GetValue("RESTORE", "BackupVersion", NULL);
-					if (isRestoring && backupVersionStr) {
-						backupVersion = atoi(backupVersionStr);
-					}
 				}
 				if (isRestoring && !backupFailed) {
-					if (backupVersion == 1) {
-						std::vector<std::string> returnList;
-						std::string ext = "";
-						returnList = platform::listDirectories(absDataFolder);
-						std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
+					std::vector<std::string> returnList;
+					std::string ext = "";
+					returnList = platform::listDirectories(absDataFolder);
+					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
-						TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
-						TraceEvent("RestoreSnapUID").detail("UID", snapStr);
+					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
+					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
-						// delete all files (except fdb.cluster) in non-snap directories
-						for (int i = 0; i < returnList.size(); i++) {
-							if (returnList[i] == "." || returnList[i] == "..") {
-								continue;
-							}
-							if (returnList[i].find(snapStr) != std::string::npos) {
-								continue;
-							}
+					// delete all files (except fdb.cluster) in non-snap directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						if (dirEntry.find(snapStr) != std::string::npos) {
+							continue;
+						}
 
-							std::string childf = absDataFolder + "/" + returnList[i];
-							std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-							for (int j = 0; j < returnFiles.size(); j++) {
-								if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
-									TraceEvent("DeletingNonSnapfiles")
-										.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
-									deleteFile(childf + "/" + returnFiles[j]);
-								}
+						std::string childf = absDataFolder + "/" + dirEntry;
+						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+						for (const auto & fileEntry : returnFiles) {
+							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
+								TraceEvent("DeletingNonSnapfiles")
+									.detail("FileBeingDeleted", childf + "/" + fileEntry);
+								deleteFile(childf + "/" + fileEntry);
 							}
 						}
-						// move the contents from snap folder to the original folder,
-						// delete snap folders
-						for (int i = 0; i < returnList.size(); i++) {
-							if (returnList[i] == "." || returnList[i] == "..") {
-								continue;
-							}
-							std::string dirSrc = absDataFolder + "/" + returnList[i];
-							// delete snap directories which are not part of restoreSnapUID
-							if (returnList[i].find(snapStr) == std::string::npos) {
-								if (returnList[i].find("snap") != std::string::npos) {
-									platform::eraseDirectoryRecursive(dirSrc);
-								}
-								continue;
-							}
-							// remove empty/partial snap directories
-							std::vector<std::string> childrenList = platform::listFiles(dirSrc);
-							if (childrenList.size() == 0) {
-								TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
+					}
+					// cleanup unwanted and partial directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						// delete snap directories which are not part of restoreSnapUID
+						if (dirEntry.find(snapStr) == std::string::npos) {
+							if (dirEntry.find("snap") != std::string::npos) {
 								platform::eraseDirectoryRecursive(dirSrc);
-								continue;
 							}
-							std::string origDir = returnList[i].substr(0, 32);
-							std::string dirToRemove = absDataFolder + "/" + origDir;
-							TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
-							platform::eraseDirectoryRecursive(dirToRemove);
-							renameFile(dirSrc, dirToRemove);
-							TraceEvent("RenamingSnapToOriginalDirectory")
-								.detail("Oldname", dirSrc)
-								.detail("Newname", dirToRemove);
+							continue;
 						}
-					} else if (backupVersion == 2) {
-						std::vector<std::string> returnList;
-						std::string ext = "";
-						returnList = platform::listDirectories(absDataFolder);
-						std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
-
-						TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
-						TraceEvent("RestoreSnapUID").detail("UID", snapStr);
-
-						// delete all files (except fdb.cluster) in non-snap directories
-						for (const auto & dirEntry : returnList) {
-							if (dirEntry == "." || dirEntry == "..") {
-								continue;
-							}
-							if (dirEntry.find(snapStr) != std::string::npos) {
-								continue;
-							}
-
-							std::string childf = absDataFolder + "/" + dirEntry;
-							std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-							for (const auto & fileEntry : returnFiles) {
-								if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
-									TraceEvent("DeletingNonSnapfiles")
-										.detail("FileBeingDeleted", childf + "/" + fileEntry);
-									deleteFile(childf + "/" + fileEntry);
-								}
-							}
+						// remove empty/partial snap directories
+						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
+						if (childrenList.size() == 0) {
+							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
+							platform::eraseDirectoryRecursive(dirSrc);
+							continue;
 						}
-						// cleanup unwanted and partial directories
-						for (const auto & dirEntry : returnList) {
-							if (dirEntry == "." || dirEntry == "..") {
-								continue;
-							}
-							std::string dirSrc = absDataFolder + "/" + dirEntry;
-							// delete snap directories which are not part of restoreSnapUID
-							if (dirEntry.find(snapStr) == std::string::npos) {
-								if (dirEntry.find("snap") != std::string::npos) {
-									platform::eraseDirectoryRecursive(dirSrc);
-								}
-								continue;
-							}
-							// remove empty/partial snap directories
-							std::vector<std::string> childrenList = platform::listFiles(dirSrc);
-							if (childrenList.size() == 0) {
-								TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
-								platform::eraseDirectoryRecursive(dirSrc);
-								continue;
-							}
+					}
+					// move snapshotted files to appropriate locations
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
 						}
-						// move snapshotted files to appropriate locations
-						for (const auto & dirEntry : returnList) {
-							if (dirEntry == "." || dirEntry == "..") {
-								continue;
-							}
-							std::string dirSrc = absDataFolder + "/" + dirEntry;
-							std::string origDir = dirEntry.substr(0, 32);
-							std::string dirToMove = absDataFolder + "/" + origDir;
-							if ((dirEntry.find("snap") != std::string::npos) &&
-								(dirEntry.find("tlog") != std::string::npos)) {
-								// restore tlog files
-								restoreRoleFilesHelper(dirSrc, dirToMove, "log");
-							} else if ((dirEntry.find("snap") != std::string::npos) &&
-									   (dirEntry.find("storage") != std::string::npos)) {
-								// restore storage files
-								restoreRoleFilesHelper(dirSrc, dirToMove, "storage");
-							} else if ((dirEntry.find("snap") != std::string::npos) &&
-									   (dirEntry.find("coord") != std::string::npos)) {
-								// restore coordinator files
-								restoreRoleFilesHelper(dirSrc, dirToMove, "coordination");
-							}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						std::string origDir = dirEntry.substr(0, 32);
+						std::string dirToMove = absDataFolder + "/" + origDir;
+						if ((dirEntry.find("snap") != std::string::npos) &&
+							(dirEntry.find("tlog") != std::string::npos)) {
+							// restore tlog files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "log");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("storage") != std::string::npos)) {
+							// restore storage files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "storage");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("coord") != std::string::npos)) {
+							// restore coordinator files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "coordination");
 						}
-
 					}
 				}
 			}
