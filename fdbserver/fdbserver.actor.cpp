@@ -968,7 +968,7 @@ int main(int argc, char* argv[]) {
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 		uint64_t rsssize = -1;
-		bool useObjectSerializer = true;
+		bool useObjectSerializer = false;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);

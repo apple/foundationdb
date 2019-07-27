@@ -804,6 +804,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		db.Options().SetTransactionMaxRetryDelay(100)
 		db.Options().SetTransactionRetryLimit(10)
 		db.Options().SetTransactionRetryLimit(-1)
+		db.Options().SetTransactionCausalReadRisky()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")

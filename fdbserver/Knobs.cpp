@@ -292,6 +292,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
 	init( PROXY_FORWARD_DELAY,                                  10.0 );
 	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
+	init( MIN_CONFIRM_INTERVAL,                                 0.05 );
+
+	bool shortRecoveryDuration = randomize && BUGGIFY;
+	init( ENFORCED_MIN_RECOVERY_DURATION,                       0.085 ); if( shortRecoveryDuration ) ENFORCED_MIN_RECOVERY_DURATION = 0.01;
+	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)

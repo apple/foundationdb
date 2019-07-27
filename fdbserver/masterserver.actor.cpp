@@ -1123,7 +1123,7 @@ ACTOR Future<Void> rejoinRequestHandler( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems ) {
+ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems, Future<Void> minRecoveryDuration ) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	loop {
@@ -1136,6 +1136,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		state bool allLogs = newState.tLogs.size() == self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
 		wait( self->cstate.write(newState, finalUpdate) );
+		wait( minRecoveryDuration );
 		self->logSystem->coreStateWritten(newState);
 		if(self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
@@ -1247,10 +1248,16 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	state vector<StorageServerInterface> seedServers;
 	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
+	state Future<Void> minRecoveryDuration;
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
-		if(oldLogSystem) logChanges = triggerUpdates(self, oldLogSystem);
+		if(oldLogSystem) {
+			logChanges = triggerUpdates(self, oldLogSystem);
+			if(!minRecoveryDuration.isValid()) {
+				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
+			}
+		}
 
 		state Future<Void> reg = oldLogSystem ? updateRegistration(self, oldLogSystem) : Never();
 		self->registrationTrigger.trigger();
@@ -1379,7 +1386,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between our
 	//     first commit and the next new TLogs
 
-	self->addActor.send( trackTlogRecovery(self, oldLogSystems) );
+	self->addActor.send( trackTlogRecovery(self, oldLogSystems, minRecoveryDuration) );
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);

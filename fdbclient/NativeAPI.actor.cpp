@@ -667,7 +667,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 	if (defaultFor >= 0) {
 		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
 		       FDBTransactionOptions::optionInfo.end());
-		transactionDefaults.addOption((FDBTransactionOptions::Option)option, value.castTo<Standalone<StringRef>>());
+		transactionDefaults.addOption((FDBTransactionOptions::Option)defaultFor, value.castTo<Standalone<StringRef>>());
 	}
 	else {
 		switch(option) {
