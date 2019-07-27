@@ -30,6 +30,7 @@
     <ActorCompiler Include="sim2.actor.cpp" />
     <ClCompile Include="Net2FileSystem.cpp" />
     <ClCompile Include="QueueModel.cpp" />
+    <ClCompile Include="SerializeImpl.cpp" />
     <ClCompile Include="Replication.cpp" />
     <ClCompile Include="ReplicationUtils.cpp" />
     <ClCompile Include="ReplicationTypes.cpp" />

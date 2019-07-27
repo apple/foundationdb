@@ -123,6 +123,7 @@
     <ActorCompiler Include="NativeAPI.actor.cpp" />
     <ActorCompiler Include="ReadYourWrites.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
+    <ClCompile Include="SerializeImpl.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
