@@ -52,7 +52,6 @@ public:
 	}
 
 	// For internal (fdbserver) use only
-	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
 	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
@@ -60,7 +59,7 @@ public:
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
+	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
 	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -109,13 +108,14 @@ public:
 	bool switchable = false;
 
 //private: 
-	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
 		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );
 
 	explicit DatabaseContext( const Error &err );
 
 	// Key DB-specific information
+	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
@@ -190,8 +190,7 @@ public:
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;
-
-	Reference<Cluster> cluster;
+	Future<Void> connected;
 
 	int apiVersion;
 

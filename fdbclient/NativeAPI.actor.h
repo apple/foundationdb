@@ -118,31 +118,6 @@ void runNetwork();
 // Throws network_not_setup if g_network has not been initalized
 void stopNetwork();
 
-/*
- * Starts and holds the monitorLeader and failureMonitorClient actors
- */
-class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
-public:
-	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
-
-	~Cluster();
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> getClusterInterface();
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> getConnectionFile() { return connectionFile; }
-
-	Future<Void> onConnected();
-
-private:
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-
-	Future<Void> failMon;
-	Future<Void> connected;
-};
-
 struct StorageMetrics;
 
 struct TransactionOptions {

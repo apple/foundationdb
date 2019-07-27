@@ -82,6 +82,7 @@ struct ClientDBInfo {
 	vector< MasterProxyInterface > proxies;
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
+	Optional<Value> forward;
 	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
@@ -92,7 +93,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit);
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
 	}
 };
 

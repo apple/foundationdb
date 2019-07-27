@@ -35,6 +35,28 @@
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues,
+               Optional<UID>& issueID) {
+	if (issues.size()) {
+		auto& e = issueMap[addr];
+		e.first = issues;
+		e.second = deterministicRandom()->randomUniqueID();
+		issueID = e.second;
+	} else {
+		issueMap.erase(addr);
+		issueID = Optional<UID>();
+	}
+}
+
+void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID) {
+	if (!issueID.present()) {
+		return;
+	}
+	if (issueMap.count(addr) && issueMap[addr].second == issueID.get()) {
+		issueMap.erase( addr );
+	}
+}
+
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
@@ -845,35 +867,75 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
-									std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap) {
+struct ClientStats {
+	int count;
+	std::set<std::pair<NetworkAddress, Key>> examples;
+
+	ClientStats() : count(0) {}
+};
+
+static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
 
-	clientStatus["count"] = (int64_t)clientVersionMap.size();
+	int64_t clientCount = 0;
+	std::map<Key, ClientStats> issues;
+	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
+	std::map<Key, ClientStats> maxSupportedProtocol;
 
-	std::map<ClientVersionRef, std::set<NetworkAddress>> clientVersions;
-	for(auto client : clientVersionMap) {
-		for(auto ver : client.second) {
-			clientVersions[ver].insert(client.first);
+	
+	for(auto iter = clientStatusMap->begin(); iter != clientStatusMap->end(); ++iter) {
+		if( now() - iter->second.first < 2*SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) {
+			clientCount += iter->second.second.clientCount;
+			for(auto& it : iter->second.second.issues) {
+				auto& issue = issues[it.item];
+				issue.count += it.count;
+				issue.examples.insert(it.examples.begin(), it.examples.end());
+			}
+			for(auto& it : iter->second.second.supportedVersions) {
+				auto& version = supportedVersions[it.item];
+				version.count += it.count;
+				version.examples.insert(it.examples.begin(), it.examples.end());
+			}
+			for(auto& it : iter->second.second.maxProtocolSupported) {
+				auto& protocolVersion = maxSupportedProtocol[it.item];
+				protocolVersion.count += it.count;
+				protocolVersion.examples.insert(it.examples.begin(), it.examples.end());
+			}
+		} else {
+			iter = clientStatusMap->erase(iter);
 		}
 	}
 
+	clientStatus["count"] = clientCount;
+
 	JsonBuilderArray versionsArray = JsonBuilderArray();
-	for(auto cv : clientVersions) {
+	for(auto& cv : supportedVersions) {
 		JsonBuilderObject ver;
-		ver["count"] = (int64_t)cv.second.size();
+		ver["count"] = (int64_t)cv.second.count;
 		ver["client_version"] = cv.first.clientVersion.toString();
 		ver["protocol_version"] = cv.first.protocolVersion.toString();
 		ver["source_version"] = cv.first.sourceVersion.toString();
 
 		JsonBuilderArray clients = JsonBuilderArray();
-		for(auto client : cv.second) {
+		for(auto& client : cv.second.examples) {
 			JsonBuilderObject cli;
-			cli["address"] = client.toString();
-			ASSERT(clientStatusInfoMap.find(client) != clientStatusInfoMap.end());
-			cli["log_group"] = clientStatusInfoMap[client].traceLogGroup;
-			cli["connected_coordinators"]  = (int) clientStatusInfoMap[client].connectedCoordinatorsNum;
+			cli["address"] = client.first.toString();
+			cli["log_group"] = client.second.toString();
 			clients.push_back(cli);
+		}
+
+		auto iter = maxSupportedProtocol.find(cv.first.protocolVersion);
+		if(iter != maxSupportedProtocol.end()) {
+			JsonBuilderArray maxClients = JsonBuilderArray();
+			for(auto& client : iter->second.examples) {
+				JsonBuilderObject cli;
+				cli["address"] = client.first.toString();
+				cli["log_group"] = client.second.toString();
+				clients.push_back(cli);
+			}
+			ver["max_protocol_count"] = iter->second.count;
+			ver["max_protocol_clients"] = maxClients;
+			maxSupportedProtocol.erase(cv.first.protocolVersion);
 		}
 
 		ver["connected_clients"] = clients;
@@ -1827,27 +1889,35 @@ static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsM
 	return issuesMap;
 }
 
-static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issues) {
+static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap ) {
 	JsonBuilderArray issuesList;
 
 	try {
-		ProcessIssuesMap issues = _issues;
-		std::map<std::string, std::vector<std::string>> deduplicatedIssues;
+		std::map<std::string, std::pair<int, std::vector<std::string>>> deduplicatedIssues;
 
-		for (auto processIssues : issues) {
-			for (auto issue : processIssues.second.first) {
-				deduplicatedIssues[issue.toString()].push_back(
-				    formatIpPort(processIssues.first.ip, processIssues.first.port));
+		for( auto iter = clientStatusMap->begin(); iter != clientStatusMap->end(); ++iter) {
+			if( now() - iter->second.first < 2*SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) {
+				for (auto& issue : iter->second.second.issues) {
+					auto& t = deduplicatedIssues[issue.item.toString()];
+					t.first += issue.count;
+					for(auto& example : issue.examples) {
+						t.second.push_back(formatIpPort(example.first.ip, example.first.port));
+					}
+				}
+			} else {
+				iter = clientStatusMap->erase(iter);
 			}
 		}
 
+		//FIXME: add the log_group in addition to the network address
 		for (auto i : deduplicatedIssues) {
 			JsonBuilderObject message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonBuilderArray addresses;
-			for(auto addr : i.second) {
+			for(auto addr : i.second.second) {
 				addresses.push_back(addr);
 			}
 
+			message["count"] = i.second.first;
 			message["addresses"] = addresses;
 			issuesList.push_back(message);
 		}
@@ -1965,9 +2035,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		Database cx,
 		vector<WorkerDetails> workers,
 		ProcessIssuesMap workerIssues,
-		ProcessIssuesMap clientIssues,
-		ClientVersionMap clientVersionMap,
-		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap,
+		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
@@ -2219,7 +2287,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), 
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap, clientStatusInfoMap);
+		statusObj["clients"] = clientStatusFetcher(clientStatus);
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
@@ -2244,7 +2312,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["recovery_state"] = recoveryStateStatus;
 
 		// cluster messages subsection;
-		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientIssues);
+		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
 		if (clientIssuesArr.size() > 0) {
 			JsonBuilderObject clientIssueMessage = JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
