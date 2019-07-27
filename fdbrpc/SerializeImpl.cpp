@@ -1,5 +1,5 @@
 /*
- * serialize.h
+ * IRandom.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,19 @@
  * limitations under the License.
  */
 
-#include "flow/serialize.h"
+#include "flow/SerializeImpl.h"
+#include "fdbrpc/fdbrpc.h"
 
-namespace {
-struct PacketWriterAllocator {
-	PacketWriter& w;
+MAKE_SERIALIZABLE(ReplyPromise<Void>);
+MAKE_SERIALIZABLE(ReplyPromise<double>);
+MAKE_SERIALIZABLE(ReplyPromise<bool>);
+MAKE_SERIALIZABLE(ReplyPromise<int8_t>);
+MAKE_SERIALIZABLE(ReplyPromise<uint8_t>);
+MAKE_SERIALIZABLE(ReplyPromise<int16_t>);
+MAKE_SERIALIZABLE(ReplyPromise<uint16_t>);
+MAKE_SERIALIZABLE(ReplyPromise<int32_t>);
+MAKE_SERIALIZABLE(ReplyPromise<uint32_t>);
+MAKE_SERIALIZABLE(ReplyPromise<int64_t>);
+MAKE_SERIALIZABLE(ReplyPromise<uint64_t>);
 
-	uint8_t* operator()(size_t size) { return w.writeBytes(size); }
-};
-} // namespace
-
-template<class T>
-void ObjectSerializedMsg::serialize(PacketWriter& w, T const& value) {
-	ObjectWriter writer(PacketWriterAllocator{ w }, AssumeVersion(w.protocolVersion()));
-	writer.serialize(value); // Writes directly into buffer supplied by |w|
-}
+MAKE_SERIALIZABLE(Endpoint);

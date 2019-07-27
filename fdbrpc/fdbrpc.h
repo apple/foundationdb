@@ -88,17 +88,17 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
 		this->addPromiseRef();
 		bool ok;
-		ObjectSerializedMsg<bool>::deserialize(reader, ok);
+		SerializedMsg<ArenaReader, bool>::deserialize(reader, ok);
 		//reader >> ok;
 		if (ok) {
 			T message;
-			ObjectSerializedMsg<T>::deserialize(reader, message);
+			SerializedMsg<ArenaReader, T>::deserialize(reader, message);
 			//reader >> message;
 			SAV<T>::sendAndDelPromiseRef(message);
 		}
 		else {
 			Error error;
-			ObjectSerializedMsg<Error>::deserialize(reader, error);
+			SerializedMsg<ArenaReader, Error>::deserialize(reader, error);
 			//reader >> error;
 			SAV<T>::sendErrorAndDelPromiseRef(error);
 		}
@@ -246,7 +246,7 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	virtual void receive(ArenaReader& reader) {
 		this->addPromiseRef();
 		T message;
-		ObjectSerializedMsg<T>::deserialize(reader, message);
+		SerializedMsg<ArenaReader, T>::deserialize(reader, message);
 		this->send(std::move(message));
 		this->delPromiseRef();
 	}

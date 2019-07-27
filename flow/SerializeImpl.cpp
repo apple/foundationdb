@@ -1,5 +1,5 @@
 /*
- * serialize.h
+ * flow.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,18 @@
  * limitations under the License.
  */
 
-#include "flow/MakeSerializedSourceImpl.h"
+#include "flow/flow.h"
+#include "flow/SerializeImpl.h"
 
-template class ObjectSerializedMsg<int>;
+MAKE_SERIALIZABLE(Void);
+MAKE_SERIALIZABLE(Error);
+MAKE_SERIALIZABLE(double);
+MAKE_SERIALIZABLE(bool);
+MAKE_SERIALIZABLE(int8_t);
+MAKE_SERIALIZABLE(uint8_t);
+MAKE_SERIALIZABLE(int16_t);
+MAKE_SERIALIZABLE(uint16_t);
+MAKE_SERIALIZABLE(int32_t);
+MAKE_SERIALIZABLE(uint32_t);
+MAKE_SERIALIZABLE(int64_t);
+MAKE_SERIALIZABLE(uint64_t);

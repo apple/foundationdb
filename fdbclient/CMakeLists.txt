@@ -53,6 +53,7 @@ set(FDBCLIENT_SRCS
   RYWIterator.h
   Schemas.cpp
   Schemas.h
+  SerializeImpl.cpp
   SnapshotCache.h
   Status.h
   StatusClient.actor.cpp

@@ -24,6 +24,7 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  SerializeImpl.cpp
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h

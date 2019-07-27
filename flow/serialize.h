@@ -751,7 +751,6 @@ struct PacketWriter {
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
 
-private:
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
@@ -762,9 +761,7 @@ private:
 		return result;
 	}
 
-	template <class, class>
-	friend class MakeSerializeSource;
-
+private:
 	void init( PacketBuffer* buf, ReliablePacket* reliable );
 };
 
@@ -777,6 +774,7 @@ struct ISerializeSource {
 template<class Ar, class T>
 struct SerializedMsg {
 	static void serialize(Ar& w, T const& value);
+	static void deserialize(Ar& w, T value);
 };
 
 template<class T>
@@ -784,7 +782,6 @@ struct ObjectSerializedMsg {
 	static void serialize(PacketWriter& w, T const& value);
 	static void serialize(ObjectWriter& w, T const& value);
 	static void deserialize(ArenaObjectReader& reader, T& value);
-	static void deserialize(ArenaReader& reader, T& value);
 };
 
 template <class T, class V>
