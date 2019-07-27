@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 
@@ -112,6 +112,7 @@ namespace FDB {
 
 		virtual Future<Void> commit() = 0;
 		virtual Version getCommittedVersion() = 0;
+		virtual Future<int64_t> getApproximateSize() = 0;
 		virtual Future<FDBStandalone<StringRef>> getVersionstamp() = 0;
 	};
 

@@ -123,7 +123,9 @@ class Void {
 public:
 	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
-	void serialize(Ar&) {}
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
 };
 
 class Never {};
@@ -207,11 +209,13 @@ template <class T>
 struct union_like_traits<ErrorOr<T>> : std::true_type {
 	using Member = ErrorOr<T>;
 	using alternatives = pack<Error, T>;
-	static uint8_t index(const Member& variant) { return variant.present() ? 1 : 0; }
-	static bool empty(const Member& variant) { return false; }
+	template <class Context>
+	static uint8_t index(const Member& variant, Context&) { return variant.present() ? 1 : 0; }
+	template <class Context>
+	static bool empty(const Member& variant, Context&) { return false; }
 
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member& m) {
+	template <int i, class Context>
+	static const index_t<i, alternatives>& get(const Member& m, Context&) {
 		if constexpr (i == 0) {
 			return m.getError();
 		} else {
@@ -220,8 +224,8 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 		}
 	}
 
-	template <int i, class Alternative>
-	static const void assign(Member& m, const Alternative& a) {
+	template <int i, class Alternative, class Context>
+	static const void assign(Member& m, const Alternative& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {

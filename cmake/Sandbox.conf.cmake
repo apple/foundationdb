@@ -30,6 +30,7 @@ logdir = ${CMAKE_BINARY_DIR}/sandbox/logs
 # class =
 # memory = 8GiB
 # storage_memory = 1GiB
+# cache_memory = 2GiB
 # metrics_cluster =
 # metrics_prefix =
 

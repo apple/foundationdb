@@ -295,6 +295,65 @@ construct that is analogous to sending someone a self-addressed envelope. You se
 promise to a someone else, who then unpacks it and send the answer back to you, because
 you are holding the corresponding future.
 
+### Flatbuffers/ObjectSerializer
+
+1. Motivation and Goals
+1. Correspondence to flatbuffers IDL
+    - Tables
+    ```
+    // Flow type
+    struct A {
+        constexpr static FileIdentifier file_identifier = 12345;
+        int a;
+        template <class Ar>
+        void serialize(Ar& ar) {
+            serializer(ar, a);
+        }
+    }
+
+    // IDL equivalent
+    table A {
+        a:int;
+    }
+    ```
+    - Unions
+    ```
+    // Flow type
+    using T = std::variant<A, B, C>;
+
+    // IDL equivalent
+    union T { A, B, C}
+    ```
+    - Strings (there's a string type in the idl that guarantees null termination, but flow does not, so it's comparable to a vector of bytes)
+    ```
+    // Flow type
+    StringRef, std::string
+
+    // IDL equivalent
+    [ubyte]
+    ```
+    - Vectors
+    ```
+    // Flow type
+    VectorRef<T>, std::vector<T>
+
+    // IDL equivalent
+    [T]
+    ```
+
+TODO finish documenting/implementing the following.
+1. Vtables collected from default-constructed instances
+1. Requirements (serialize must be cheap for a default-constructed instance, must have a serialize method or implement a trait.)
+1. Traits/Concepts: vector_like, union_like, dynamic_size, scalar
+1. isDeserializing idiom
+1. Gotchas (serialize gets called more than once on save path, maybe more)
+1. File identifiers
+1. Schema evolution
+1. Testing plan: have buggify sometimes default initialize fields that are introduced without changing the protocol version.
+1. (Future work) Allow ObjectSerializer to take the usual version specifications, `IncludeVersion`, `AssumeVersion`, or `Unversioned`.
+1. (Future work) Smaller messages for deprecated fields
+1. (Future work) `Deprecated<...>` template that knows whether or not the field was present? Automatically buggifies the field being absent?
+
 ### ACTOR return values
 
 An actor can have only one returned Future, so there is a case that one actor wants to perform

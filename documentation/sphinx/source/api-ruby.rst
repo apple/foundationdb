@@ -26,6 +26,7 @@
 .. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
+.. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
 .. |future-type-string| replace:: a :class:`Future`
 .. |read-your-writes-disable-option| replace:: :meth:`Transaction.options.set_read_your_writes_disable`
 .. |retry-limit-transaction-option| replace:: :meth:`Transaction.options.set_retry_limit`
@@ -35,6 +36,7 @@
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
+.. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :class:`DirectorySubspace`
@@ -91,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 610
+    FDB.api_version 620
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -385,6 +387,10 @@ Database options
 .. method:: Database.options.set_transaction_causal_read_risky() -> nil
 
     |option-db-causal-read-risky-blurb|
+
+.. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
+
+    |option-db-tr-transaction-logging-max-field-length-blurb|
 
 .. method:: Database.options.set_snapshot_ryw_enable() -> nil
 
@@ -802,6 +808,10 @@ Transaction options
     |option-set-timeout-blurb2|
 
     |option-set-timeout-blurb3|
+
+.. method:: Transaction.options.set_transaction_logging_max_field_length(size_limit) -> nil
+
+    |option-set-transaction-logging-max-field-length-blurb|
 
 .. _transact:
 

@@ -90,17 +90,6 @@ T sorted(T range) {
 }
 
 template <class T>
-inline std::vector<T>& operator , (std::vector<T>& v, T a) {
-	v.push_back(a);
-	return v;
-}
-
-template <class T>
-inline std::vector<T>& operator , (std::vector<T> && v, T a) {
-	return (const_cast<std::vector<T>&>(v), a);
-}
-
-template <class T>
 ErrorOr<T> errorOr( T t ) {
 	return ErrorOr<T>(t);
 }
@@ -208,6 +197,7 @@ Future<T> timeoutError( Future<T> what, double time, TaskPriority taskID = TaskP
 		when( wait( end ) ) { throw timed_out(); }
 	}
 }
+
 
 ACTOR template <class T>
 Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
@@ -740,7 +730,7 @@ ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Stand
 	loop {
 		if (input->get().size()) {
 			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin());
+				ObjectReader reader(input->get().begin(), IncludeVersion());
 				T res;
 				reader.deserialize(res);
 				output->set(res);

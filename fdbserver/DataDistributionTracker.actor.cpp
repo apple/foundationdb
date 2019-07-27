@@ -26,6 +26,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus {
 	BandwidthStatusLow,
 	BandwidthStatusNormal,
@@ -427,7 +428,7 @@ Future<Void> shardMerger(
 		if( endingStats.bytes >= shardBounds.min.bytes ||
 				getBandwidthStatus( endingStats ) != BandwidthStatusLow ||
 				shardsMerged >= SERVER_KNOBS->DD_MERGE_LIMIT ) {
-			// The merged range is larger than the min bounds se we cannot continue merging in this direction.
+			// The merged range is larger than the min bounds so we cannot continue merging in this direction.
 			//  This means that:
 			//  1. If we were going forwards (the starting direction), we roll back the last speculative merge.
 			//      In this direction we do not want to go above this boundary since we will merge at least one in
@@ -752,6 +753,7 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	check();
 }
 
+// Move keys to destinationTeams by updating shard_teams
 void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team> destinationTeams ) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 		.detail("KeyBegin", keys.begin)

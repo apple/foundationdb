@@ -477,6 +477,8 @@ public:
 	virtual Reference<StringToIntMap> const&	getGroupKeyMap() const
 	{	return _localitygroup->getGroupKeyMap(); }
 
+	Reference<StringToIntMap> _keymap;
+
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()
 	{	return _localitygroup->getGroupValueMap(); }
@@ -491,7 +493,7 @@ protected:
 
 	std::vector<AttribKey>								_keyIndexArray;
 	std::vector<LocalityCacheRecord>			_cacheArray;
-	Reference<StringToIntMap>							_keymap;
+
 	LocalitySet*													_localitygroup;
 	long long unsigned int								_cachehits;
 	long long unsigned int								_cachemisses;

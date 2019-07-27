@@ -55,54 +55,54 @@ public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
 	~ThreadSafeTransaction();
 
-	void cancel();
-	void setVersion( Version v );
-	ThreadFuture<Version> getReadVersion();
+	void cancel() override;
+	void setVersion( Version v ) override;
+	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture< Optional<Value> > get( const KeyRef& key, bool snapshot = false );
-	ThreadFuture< Key > getKey( const KeySelectorRef& key, bool snapshot = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot = false, bool reverse = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, int limit, bool snapshot = false, bool reverse = false ) {
+	ThreadFuture< Optional<Value> > get( const KeyRef& key, bool snapshot = false ) override;
+	ThreadFuture< Key > getKey( const KeySelectorRef& key, bool snapshot = false ) override;
+	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot = false, bool reverse = false ) override;
+	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) override;
+	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, int limit, bool snapshot = false, bool reverse = false ) override {
 		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse );
 	}
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) {
+	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) override {
 		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse );
 	}
+	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
+	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 
-	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key);
-
-	void addReadConflictRange( const KeyRangeRef& keys );
+	void addReadConflictRange( const KeyRangeRef& keys ) override;
 	void makeSelfConflicting();
 
-	void atomicOp( const KeyRef& key, const ValueRef& value, uint32_t operationType );
-	void set( const KeyRef& key, const ValueRef& value );
-	void clear( const KeyRef& begin, const KeyRef& end);
-	void clear( const KeyRangeRef& range );
-	void clear( const KeyRef& key );
+	void atomicOp( const KeyRef& key, const ValueRef& value, uint32_t operationType ) override;
+	void set( const KeyRef& key, const ValueRef& value ) override;
+	void clear( const KeyRef& begin, const KeyRef& end) override;
+	void clear( const KeyRangeRef& range ) override;
+	void clear( const KeyRef& key ) override;
 
-	ThreadFuture< Void > watch( const KeyRef& key );
+	ThreadFuture< Void > watch( const KeyRef& key ) override;
 
-	void addWriteConflictRange( const KeyRangeRef& keys );
+	void addWriteConflictRange( const KeyRangeRef& keys ) override;
 
-	ThreadFuture<Void> commit();
-	Version getCommittedVersion();
-	ThreadFuture<Standalone<StringRef>> getVersionstamp();
+	ThreadFuture<Void> commit() override;
+	Version getCommittedVersion() override;
+	ThreadFuture<int64_t> getApproximateSize() override;
 
-	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() ) override;
 
 	ThreadFuture<Void> checkDeferredError();
-	ThreadFuture<Void> onError( Error const& e );
+	ThreadFuture<Void> onError( Error const& e ) override;
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(NULL) {}
 	void operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
 	ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
 
-	void reset();
+	void reset() override;
 
-	void addref() { ThreadSafeReferenceCounted<ThreadSafeTransaction>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
 private:
 	ReadYourWritesTransaction *tr;

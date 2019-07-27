@@ -216,6 +216,9 @@ extern const KeyRangeRef fdbClientInfoPrefixRange;
 extern const KeyRef fdbClientInfoTxnSampleRate;
 extern const KeyRef fdbClientInfoTxnSizeLimit;
 
+// Consistency Check settings
+extern const KeyRef fdbShouldConsistencyCheckBeSuspended;
+
 // Request latency measurement key
 extern const KeyRef latencyBandConfigKey;
 

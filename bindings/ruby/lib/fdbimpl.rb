@@ -85,7 +85,7 @@ module FDB
       attach_function :fdb_future_set_callback, [ :pointer, :fdb_future_callback, :pointer ], :fdb_error
 
       attach_function :fdb_future_get_error, [ :pointer ], :fdb_error
-      attach_function :fdb_future_get_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_int64, [ :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
@@ -114,6 +114,7 @@ module FDB
       attach_function :fdb_transaction_watch, [ :pointer, :pointer, :int ], :pointer
       attach_function :fdb_transaction_commit, [ :pointer ], :pointer
       attach_function :fdb_transaction_get_committed_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_transaction_get_approximate_size, [ :pointer ], :pointer
       attach_function :fdb_transaction_get_versionstamp, [ :pointer ], :pointer
       attach_function :fdb_transaction_on_error, [ :pointer, :fdb_error ], :pointer
       attach_function :fdb_transaction_reset, [ :pointer ], :void
@@ -443,11 +444,11 @@ module FDB
     end
   end
 
-  class Version < LazyFuture
+  class Int64Future < LazyFuture
     def getter
-      version = FFI::MemoryPointer.new :int64
-      FDBC.check_error FDBC.fdb_future_get_version(@fpointer, version)
-      @value = version.read_long_long
+      val = FFI::MemoryPointer.new :int64
+      FDBC.check_error FDBC.fdb_future_get_int64(@fpointer, val)
+      @value = val.read_long_long
     end
     private :getter
   end
@@ -687,7 +688,7 @@ module FDB
     end
 
     def get_read_version
-      Version.new(FDBC.fdb_transaction_get_read_version @tpointer)
+      Int64Future.new(FDBC.fdb_transaction_get_read_version @tpointer)
     end
 
     def get(key)
@@ -902,6 +903,10 @@ module FDB
       version = FFI::MemoryPointer.new :int64
       FDBC.check_error FDBC.fdb_transaction_get_committed_version(@tpointer, version)
       version.read_long_long
+    end
+
+    def get_approximate_size
+      Int64Future.new(FDBC.fdb_transaction_get_approximate_size @tpointer)
     end
 
     def get_versionstamp

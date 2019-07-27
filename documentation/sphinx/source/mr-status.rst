@@ -128,4 +128,5 @@ min_free_space                      Running out of space (approaching 100MB limi
 min_free_space_ratio                Running out of space (approaching 5% limit).
 log_server_min_free_space           Log server running out of space (approaching 100MB limit).
 log_server_min_free_space_ratio     Log server running out of space (approaching 5% limit).
+storage_server_durability_lag       Storage server durable version falling behind.
 =================================== ====================================================

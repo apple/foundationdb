@@ -1024,6 +1024,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::NoBackupAgents;
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::NoBackupAgents;
+	state bool enableDD = false;
 	if (tests.empty()) useDB = true;
 	for( auto iter = tests.begin(); iter != tests.end(); ++iter ) {
 		if( iter->useDB ) useDB = true;
@@ -1036,6 +1037,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		if (iter->simDrAgents != ISimulator::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
 		}
+		enableDD = enableDD || getOption(iter->options[0], LiteralStringRef("enableDD"), false);
 	}
 
 	if (g_network->isSimulated()) {
@@ -1048,7 +1050,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		cx = DatabaseContext::create(ci, Reference<ClusterConnectionFile>(), locality);
+		cx = openDBOnServer(dbInfo);
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
@@ -1058,6 +1060,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
+			if (g_network->isSimulated() && enableDD) {
+				wait(success(setDDMode(cx, 1)));
+			}
 		}
 		catch(Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");

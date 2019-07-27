@@ -1403,11 +1403,12 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 					rd >> oldMode;
 				}
 			}
-			if (!mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			}
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 
 			tr.set( dataDistributionModeKey, wr.toValue() );
 
@@ -1420,13 +1421,16 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+                                                                bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return Void();
+	if (!excl.size()) return inProgressExclusion;
 
 	loop {
 		state Transaction tr(cx);
+
 		try {
 			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
@@ -1439,11 +1443,12 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
 			state bool ok = true;
+			inProgressExclusion.clear();
 			for(auto& s : serverList) {
 				auto addr = decodeServerListValue( s.value ).address();
 				if ( addressExcluded(exclusions, addr) ) {
 					ok = false;
-					break;
+					inProgressExclusion.insert(addr);
 				}
 			}
 
@@ -1454,47 +1459,46 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 				for( auto const& log : logs.first ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 				for( auto const& log : logs.second ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 			}
 
-			if (ok) return Void();
+			if (ok) return inProgressExclusion;
+			if (!waitForAllExcluded) break;
 
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			wait( tr.onError(e) );
 		}
 	}
+
+	return inProgressExclusion;
 }
 
-ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
 	state int retryCount = 0;
 
 	loop {
 		state UID snapUID = deterministicRandom()->randomUniqueID();
 		try {
 			wait(snapCreate(cx, snapCmd, snapUID));
-			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
 			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-			break;
+			return snapUID;
 		} catch (Error& e) {
 			++retryCount;
 			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
 			if (retryCount > 3) {
-				fprintf(stderr, "Snapshot create failed, %d (%s)."
-						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
 				throw;
 			}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {

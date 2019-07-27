@@ -655,6 +655,36 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 	}
 }
 
+ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFolder) {
+	state ExecCmdValueString snapArg(snapReq.snapPayload);
+	try {
+		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
+		int err = wait(execHelper(&snapArg, snapFolder.toString(), role.toString()));
+		std::string uidStr = snapReq.snapUID.toString();
+		TraceEvent("ExecTraceWorker")
+			.detail("Uid", uidStr)
+			.detail("Status", err)
+			.detail("Role", snapReq.role)
+			.detail("Value", snapFolder)
+			.detail("ExecPayload", snapReq.snapPayload);
+		if (err != 0) {
+			throw operation_failed();
+		}
+		if (snapReq.role.toString() == "storage") {
+			printStorageVersionInfo();
+		}
+		snapReq.reply.send(Void());
+	} catch (Error& e) {
+		TraceEvent("ExecHelperError").error(e, true /*includeCancelled*/);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
@@ -1198,24 +1228,12 @@ ACTOR Future<Void> workerServer(
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
 			}
-			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
-				state ExecCmdValueString execArg(req.execPayload);
-				try {
-					int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
-					StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-					auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
-					auto te = TraceEvent("ExecTraceCoordinators");
-					te.detail("Uid", uidStr.toString());
-					te.detail("Status", err);
-					te.detail("Role", "coordinator");
-					te.detail("Value", coordFolder);
-					te.detail("ExecPayload", execArg.getCmdValueString().toString());
-					te.trackLatest(tokenStr.c_str());
-					req.reply.send(Void());
-				} catch (Error& e) {
-					TraceEvent("ExecHelperError").error(e);
-					req.reply.sendError(broken_promise());
+			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
+				Standalone<StringRef> snapFolder = StringRef(folder);
+				if (snapReq.role.toString() == "coord") {
+					snapFolder = coordFolder;
 				}
+				errorForwarders.add(workerSnapCreate(snapReq, snapFolder));
 			}
 			when( wait( errorForwarders.getResult() ) ) {}
 			when( wait( handleErrors ) ) {}
