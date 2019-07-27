@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/SerializeImpl.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/PerfMetric.h"
+#include "flow/SerializeImpl.h"
 
 MAKE_SERIALIZABLE(ReplyPromise<Void>);
 MAKE_SERIALIZABLE(ReplyPromise<double>);
@@ -34,3 +35,5 @@ MAKE_SERIALIZABLE(ReplyPromise<int64_t>);
 MAKE_SERIALIZABLE(ReplyPromise<uint64_t>);
 
 MAKE_SERIALIZABLE(Endpoint);
+
+template struct SerializedMsg<ArenaReader, ReplyPromise<std::vector<PerfMetric>>>;

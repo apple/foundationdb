@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/SerializeImpl.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SidebandMessage {
@@ -36,6 +37,8 @@ struct SidebandMessage {
 		serializer(ar, key, commitVersion);
 	}
 };
+
+template struct SerializedMsg<ArenaReader, SidebandMessage>;
 
 struct SidebandInterface {
 	constexpr static FileIdentifier file_identifier = 15950544;

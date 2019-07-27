@@ -65,6 +65,7 @@ set(FDBSERVER_SRCS
   RestoreInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
+  SerializeImpl.cpp
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
