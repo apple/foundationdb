@@ -755,7 +755,10 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 }
 
 Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
-	return connectionFile->get();
+	if(connectionFile) {
+		return connectionFile->get();
+	}
+	return Reference<ClusterConnectionFile>();
 }
 
 Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFile> standby) {
