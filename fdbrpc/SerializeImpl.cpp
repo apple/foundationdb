@@ -37,3 +37,4 @@ MAKE_SERIALIZABLE(ReplyPromise<uint64_t>);
 MAKE_SERIALIZABLE(Endpoint);
 
 template struct SerializedMsg<ArenaReader, ReplyPromise<std::vector<PerfMetric>>>;
+template struct ObjectSerializedMsg<ErrorOr<EnsureTable<std::pair<long, long>>>>;
