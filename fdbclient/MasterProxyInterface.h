@@ -97,17 +97,7 @@ struct ClientDBInfo {
 	}
 };
 
-struct ProxyForwardReply {
-	Optional<ClientDBInfo> newClientInfo;
-	ProxyForwardReply() {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, newClientInfo);
-	}
-};
-
-struct CommitID : public ProxyForwardReply {
+struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
@@ -115,7 +105,7 @@ struct CommitID : public ProxyForwardReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(ProxyForwardReply*)this, version, txnBatchId, metadataVersion);
+		serializer(ar, version, txnBatchId, metadataVersion);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
@@ -159,7 +149,7 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 	return total;
 }
 
-struct GetReadVersionReply : public ProxyForwardReply {
+struct GetReadVersionReply {
 	constexpr static FileIdentifier file_identifier = 15709388;
 	Version version;
 	bool locked;
@@ -169,7 +159,7 @@ struct GetReadVersionReply : public ProxyForwardReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(ProxyForwardReply*)this, version, locked, metadataVersion);
+		serializer(ar, version, locked, metadataVersion);
 	}
 };
 
@@ -203,14 +193,14 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-struct GetKeyServerLocationsReply : public ProxyForwardReply {
+struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
 	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(ProxyForwardReply*)this, results, arena);
+		serializer(ar, results, arena);
 	}
 };
 

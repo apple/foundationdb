@@ -290,8 +290,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PROXY_SPIN_DELAY,                                     0.01 );
 	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
-	init( PROXY_FORWARD_DELAY,                                  10.0 );
-	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
 	init( MIN_CONFIRM_INTERVAL,                                 0.05 );
 
 	bool shortRecoveryDuration = randomize && BUGGIFY;
