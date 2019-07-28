@@ -27,17 +27,14 @@
 MAKE_SERIALIZABLE(ClientWorkerInterface);
 MAKE_SERIALIZABLE(RebootRequest);
 MAKE_SERIALIZABLE(ProfilerRequest);
-
 MAKE_SERIALIZABLE(ClusterInterface);
 MAKE_SERIALIZABLE(OpenDatabaseRequest);
 MAKE_SERIALIZABLE(FailureMonitoringRequest);
 MAKE_SERIALIZABLE(StatusRequest);
 MAKE_SERIALIZABLE(GetClientWorkersRequest);
 MAKE_SERIALIZABLE(ForceRecoveryRequest);
-
 MAKE_SERIALIZABLE(GetLeaderRequest);
 MAKE_SERIALIZABLE(LeaderInfo);
-
 MAKE_SERIALIZABLE(MasterProxyInterface);
 MAKE_SERIALIZABLE(CommitTransactionRequest);
 MAKE_SERIALIZABLE(GetReadVersionRequest);
@@ -49,7 +46,6 @@ MAKE_SERIALIZABLE(GetHealthMetricsRequest);
 MAKE_SERIALIZABLE(ExecRequest);
 MAKE_SERIALIZABLE(ProxySnapRequest);
 MAKE_SERIALIZABLE(CommitID);
-
 MAKE_SERIALIZABLE(StorageServerInterface);
 MAKE_SERIALIZABLE(GetValueRequest);
 MAKE_SERIALIZABLE(GetKeyRequest);
@@ -66,7 +62,6 @@ MAKE_SERIALIZABLE(GetKeyReply);
 MAKE_SERIALIZABLE(SplitMetricsReply);
 MAKE_SERIALIZABLE(GetPhysicalMetricsReply);
 MAKE_SERIALIZABLE(StorageQueuingMetricsReply);
-
 MAKE_SERIALIZABLE(KeyValueStoreType);
 
 template struct ObjectSerializedMsg<ErrorOr<EnsureTable<ClientDBInfo>>>;
@@ -77,7 +72,7 @@ template struct ObjectSerializedMsg<ErrorOr<EnsureTable<GetReadVersionReply>>>;
 template struct ObjectSerializedMsg<ErrorOr<EnsureTable<Optional<LeaderInfo>>>>;
 template struct ObjectSerializedMsg<ErrorOr<EnsureTable<StatusReply>>>;
 template struct ObjectSerializedMsg<ErrorOr<EnsureTable<StorageMetrics>>>;
-template struct ObjectSerializedMsg<ErrorOr<EnsureTable<std::pair<long long, long long>>>>;
+template struct ObjectSerializedMsg<ErrorOr<EnsureTable<std::pair<int64_t, int64_t>>>>;
 template struct ObjectSerializedMsg<ErrorOr<EnsureTable<std::vector<ClientWorkerInterface>>>>;
 template struct ObjectSerializedMsg<ReplyPromise<KeyValueStoreType>>;
 template struct SerializedMsg<ArenaReader, ClientDBInfo>;
@@ -89,7 +84,7 @@ template struct SerializedMsg<ArenaReader, Optional<LeaderInfo>>;
 template struct SerializedMsg<ArenaReader, ReplyPromise<KeyValueStoreType>>;
 template struct SerializedMsg<ArenaReader, StatusReply>;
 template struct SerializedMsg<ArenaReader, StorageMetrics>;
-template struct SerializedMsg<ArenaReader, std::pair<long, long>>;
-template struct SerializedMsg<ArenaReader, std::vector<ClientWorkerInterface, std::allocator<ClientWorkerInterface>>>;
+template struct SerializedMsg<ArenaReader, std::pair<int64_t, int64_t>>;
+template struct SerializedMsg<ArenaReader, std::vector<ClientWorkerInterface>>;
 template struct SerializedMsg<BinaryWriter, ErrorOr<EnsureTable<Void>>>;
 template struct SerializedMsg<PacketWriter, ErrorOr<EnsureTable<Void>>>;

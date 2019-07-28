@@ -36,7 +36,6 @@
     <ClCompile Include="IndexedSet.cpp" />
     <ClCompile Include="Knobs.cpp" />
     <ClCompile Include="Net2Packet.cpp" />
-    <ClCompile Include="SerializeImpl.cpp" />
     <ActorCompiler Include="Stats.actor.cpp" />
     <ClCompile Include="SystemMonitor.cpp" />
     <ClCompile Include="TDMetric.cpp" />

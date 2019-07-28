@@ -233,3 +233,34 @@ function(add_flow_target)
   endif()
   target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()
+
+function(generate_serialization_code)
+  set(oneValueArgs TARGET NUM_FILES)
+  cmake_parse_arguments(GEN "" "${oneValueArgs}" "" "${ARGN}")
+  if (NOT GEN_TARGET)
+    message(FATAL_ERROR "target not set")
+  endif()
+  if (GEN_NUM_FILES)
+    set(NUM_FILES ${GEN_NUM_FILES})
+  else()
+      set(NUM_FILES 8)
+  endif()
+  math(EXPR last_num "${NUM_FILES} - 1")
+  foreach(NUM RANGE ${last_num})
+    list(APPEND OUTFILES "${CMAKE_CURRENT_BINARY_DIR}/SerializeImpl${NUM}.cpp")
+  endforeach()
+  add_custom_command(
+    OUTPUT ${OUTFILES}
+    COMMAND ${Python_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/cmake/generate_templates.py
+            -t ${GEN_TARGET}
+            -o ${CMAKE_CURRENT_BINARY_DIR}/SerializeImpl
+            ${CMAKE_SOURCE_DIR}/cmake/templates.json
+    MAIN_DEPENDENCY ${CMAKE_SOURCE_DIR}/cmake/templates.json
+    COMMENT "Generating serializer instantiations"
+    )
+  set(target_name "${GEN_TARGET}_serialize")
+  add_custom_target(${target_name} DEPENDS ${OUTFILES})
+  target_sources(${GEN_TARGET} PRIVATE ${OUTFILES})
+  add_dependencies(${GEN_TARGET} ${target_name})
+endfunction()

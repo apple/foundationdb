@@ -65,7 +65,6 @@ set(FDBSERVER_SRCS
   RestoreInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
-  SerializeImpl.cpp
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
@@ -200,6 +199,7 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
+generate_serialization_code(TARGET fdbserver)
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c

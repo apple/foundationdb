@@ -20,6 +20,15 @@
 
 #include "flow/serialize.h"
 
+/**
+ * This file provides the implementation for the serialization code (or rather
+ * for the template instantiation). DO NOT include this file anywhere. This file is
+ * included into generated files.
+ *
+ * If you get linker errors due to new types that don't get generated, add those types
+ * into the proper section in cmake/templates.json
+ */
+
 namespace {
 struct PacketWriterAllocator {
 	PacketWriter& w;
@@ -61,10 +70,3 @@ template <class T>
 void ObjectSerializedMsg<T>::deserialize(ArenaObjectReader& reader, T& value) {
 	reader.deserialize(value);
 }
-
-#define MAKE_SERIALIZABLE(o)                                                                                           \
-	template struct SerializedMsg<PacketWriter, o>;                                                                    \
-	template struct SerializedMsg<BinaryWriter, o>;                                                                    \
-	template struct SerializedMsg<ArenaReader, o>;                                                                     \
-	template struct ObjectSerializedMsg<o>;                                                                            \
-	template struct ObjectSerializedMsg<ErrorOr<EnsureTable<o>>>
