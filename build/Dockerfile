@@ -34,7 +34,10 @@ RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.1
 		rm -rf cmake.tar.gz cmake-3.13.4-Linux-x86_64 cmake-sha.txt
 
 # install LibreSSL
-RUN curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz > /tmp/libressl.tar.gz &&\
+RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip > ninja.zip &&\
+    unzip ninja.zip && cd ninja-1.9.0 && scl enable devtoolset-8 -- ./configure.py --bootstrap && cp ninja /usr/bin &&\
+    cd .. && rm -rf ninja-1.9.0 ninja.zip &&\
+    curl -L https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz > /tmp/libressl.tar.gz &&\
     cd /tmp && echo "b8cb31e59f1294557bfc80f2a662969bc064e83006ceef0574e2553a1c254fd5  libressl.tar.gz" > libressl-sha.txt &&\
     sha256sum -c libressl-sha.txt && tar xf libressl.tar.gz &&\
     cd libressl-2.8.2 && cd /tmp/libressl-2.8.2 && scl enable devtoolset-8 -- ./configure --prefix=/usr/local/stow/libressl CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
