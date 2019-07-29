@@ -181,8 +181,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 	self->initBackupContainer(request.url);
 
 	wait( _collectBackupFiles(self->bc, &files, cx, request) ); // Get all backup files' description and save them to files
-	self->constructFilesWithVersionRange(files, allFiles); // Assign modified files to allFiles
-	self->buildVersionBatches(allFiles, self->versionBatches);  // Divide files into version batches
+	self->buildVersionBatches(files, self->versionBatches);  // Divide files into version batches
 
 	state std::map<Version, VersionBatch>::iterator versionBatch;
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {

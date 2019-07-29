@@ -131,33 +131,6 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 		}
 	}
 
-	// Parse file's name to get beginVersion and endVersion of the file; and assign files to allFiles
-	void constructFilesWithVersionRange(std::vector<RestoreFileFR> &files, std::vector<RestoreFileFR>& allFiles) {
-		printf("[INFO] constructFilesWithVersionRange for num_files:%ld\n", files.size());
-		allFiles.clear();
-		for (int i = 0; i <  files.size(); i++) {
-			Version beginVersion = 0;
-			Version endVersion = 0;
-			if ( files[i].isRange) {
-				// No need to parse range filename to get endVersion
-				beginVersion =  files[i].version;
-				endVersion = beginVersion;
-			} else { // Log file
-				//Refer to pathToLogFile() in BackupContainer.actor.cpp
-				long blockSize, len;
-				int pos =  files[i].fileName.find_last_of("/");
-				std::string fileName =  files[i].fileName.substr(pos);
-				//printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
-				sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%lu%ln", &beginVersion, &endVersion, &blockSize, &len);
-				//printf("\t[File:%d] Log filename:%s produces beginVersion:%ld endVersion:%ld\n",i, fileName.c_str(), beginVersion, endVersion);
-			}
-			files[i].beginVersion = beginVersion;
-			files[i].endVersion = endVersion;
-			ASSERT(beginVersion <= endVersion);
-			allFiles.push_back( files[i]);
-		}
-	}
-
 	void logApplierKeyRange() {
 		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", range2Applier.size());
 		for (auto &applier : range2Applier) {
