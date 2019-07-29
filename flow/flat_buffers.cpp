@@ -1,5 +1,5 @@
 /*
- * serialize.h
+ * flat_buffers.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -452,7 +452,7 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
 		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
-		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
+		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, outVec, vecArena);
 	}
 	ASSERT(src.size() == outVec.size());
 	for (int i = 0; i < src.size(); ++i) {
