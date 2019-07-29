@@ -59,6 +59,7 @@ Other Changes
 * Added new network option for client buggify which will randomly throw expected exceptions in the client. Intended for client testing `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
 * Added ``--cache_memory`` parameter for ``fdbserver`` processes to control the amount of memory dedicated to caching pages read from disk. `(PR #1889) <https://github.com/apple/foundationdb/pull/1889>`_.
 * Ratekeeper will aggresively throttle when unable to fetch storage server list for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
+* ``fdbserver`` now accepts a comma separated list of public and listen addresses. `(PR #1721) <https://github.com/apple/foundationdb/pull/1721>`_.
 
 Earlier release notes
 ---------------------
