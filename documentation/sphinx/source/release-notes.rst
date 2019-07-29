@@ -13,6 +13,8 @@ Features
 
 * Added local ratekeeper, to throttle reads at a per-storage-process level. `(PR #1447) <https://github.com/apple/foundationdb/pull/1477>`_.
 
+* FDB backups based on disk snapshots, provides an ability to take cluster level backup based on disk level snapshots of storage, tlogs and coordinators. `(PR #1733) <https://github.com/apple/foundationdb/pull/1733>`_.
+
 Performance
 -----------
 
