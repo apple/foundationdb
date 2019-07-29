@@ -104,6 +104,9 @@ CFLAGS += -g
 
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
 
+# Shards of explicit template instantiation files
+NUM_SERIALIZER_FILES ?= 8
+
 # Define the TLS compilation and link variables
 ifdef TLS_DISABLED
 CFLAGS += -DTLS_DISABLED
