@@ -1,21 +1,35 @@
 #!/bin/bash
 
 set -e
+OPTIONS=''
+
+# Add linker, if specified and valid
+# The linker to use for building:
+# can be LD (system default, default choice), GOLD, LLD, or BFD
+if [ "${PLATFORM}" == "linux" ] && [ -n "${USE_LD}" ]; then
+	if [ "${USE_LD}" == "BFD" ]; then
+		OPTIONS+='-fuse-ld=bfd -Wl,--disable-new-dtags'
+	elif [ "${USE_LD}" == "GOLD" ]; then
+		OPTIONS+='-fuse-ld=gold -Wl,--disable-new-dtags'
+	elif [ "${USE_LD}" == "LLD" ]; then
+		OPTIONS+='-fuse-ld=lld -Wl,--disable-new-dtags'
+	elif [ "${USE_LD}" != "DEFAULT" ] && [ "${USE_LD}" != "LD" ]; then
+		echo 'USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!'
+		exit 1
+	fi
+fi
 
 case $1 in
     Application | DynamicLibrary)
 	echo "Linking        $3"
 
 	if [ "$1" = "DynamicLibrary" ]; then
-	    OPTIONS="-shared"
-	    if [ "$PLATFORM" = "linux" ]; then
-		OPTIONS="$OPTIONS -Wl,-z,noexecstack -Wl,-soname,$( basename $3 )"
-	    fi
-	    if [ "$PLATFORM" = "osx" ]; then
-		OPTIONS="$OPTIONS -Wl,-dylib_install_name -Wl,$( basename $3 )"
-	    fi
-	else
-	    OPTIONS=
+		OPTIONS+=" -shared"
+		if [ "$PLATFORM" = "linux" ]; then
+			OPTIONS+=" -Wl,-z,noexecstack -Wl,-soname,$( basename $3 )"
+		elif [ "$PLATFORM" = "osx" ]; then
+			OPTIONS+=" -Wl,-dylib_install_name -Wl,$( basename $3 )"
+		fi
 	fi
 
 	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL \$$2_LDFLAGS -o $3" )
@@ -33,7 +47,8 @@ case $1 in
 		fi
 		;;
 	    *)
-		$CC $OPTIONS
+	  echo "Linker: $CC -v $OPTIONS"
+		$CC -v $OPTIONS
 		;;
 	esac
 
