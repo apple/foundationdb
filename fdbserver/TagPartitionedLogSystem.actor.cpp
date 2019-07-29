@@ -1547,6 +1547,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			if(maxRecoveryIndex > 0) {
 				logServers = oldLogData[maxRecoveryIndex-1].tLogs;
+				prevState.txsTags = oldLogData[maxRecoveryIndex-1].txsTags;
 				lockResults[0] = allLockResults[maxRecoveryIndex];
 				lockResults[0].isCurrent = true;
 
