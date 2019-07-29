@@ -4163,12 +4163,14 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 			snapReq.reply.sendError(e);
 		} else {
 			// enable DD should always succeed
-			ASSERT(setDDEnabled(true, snapReq.snapUID));
+			bool success = setDDEnabled(true, snapReq.snapUID);
+			ASSERT(success);
 			throw e;
 		}
 	}
 	// enable DD should always succeed
-	ASSERT(setDDEnabled(true, snapReq.snapUID));
+	bool success = setDDEnabled(true, snapReq.snapUID);
+	ASSERT(success);
 	return Void();
 }
 
