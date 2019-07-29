@@ -140,6 +140,7 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 	var ret []KeyValue
 
 	ri := rr.Iterator()
+	defer ri.Close()
 
 	if rr.options.Limit != 0 {
 		ri.options.Mode = StreamingModeExact

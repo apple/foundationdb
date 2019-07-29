@@ -285,8 +285,6 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 }
 
 func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 
 	var kvs *C.FDBKeyValue
