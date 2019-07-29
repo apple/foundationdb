@@ -1489,6 +1489,7 @@ ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
 		return snapUID;
 	} catch (Error& e) {
+		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
 		throw;
 	}
 }
