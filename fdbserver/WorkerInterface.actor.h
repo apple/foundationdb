@@ -151,7 +151,8 @@ struct InitializeLogRouterRequest {
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
-	LogEpoch epoch;
+	LogEpoch recruitedEpoch;
+	LogEpoch backupEpoch;
 	Tag routerTag;
 	Version startVersion;
 	Optional<Version> endVersion;
@@ -162,7 +163,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, epoch, routerTag, startVersion, endVersion, reply);
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, startVersion, endVersion, reply);
 	}
 };
 

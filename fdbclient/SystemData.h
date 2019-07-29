@@ -174,13 +174,13 @@ const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
 
-//    "\xff/backupProgress/[[workerID]]" := "[[RecoveryCount, Version]]"
+//    "\xff/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
 extern const KeyRangeRef backupProgressKeys;
 extern const KeyRef backupProgressPrefix;
 const Key backupProgressKeyFor(UID workerID);
-const Value backupProgressValue(LogEpoch epoch, Version version);
+const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
-void decodeBackupProgressValue(const ValueRef& value, LogEpoch& epoch, Version& version);
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;

@@ -1332,7 +1332,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	std::map<LogEpoch, Version> getEpochEndVersions() const override {
 		std::map<LogEpoch, Version> epochEndVersion;
-		for (const auto old : oldLogData) {
+		for (const auto& old : oldLogData) {
 			epochEndVersion[old.epoch] = old.epochEnd;
 		}
 		return epochEndVersion;

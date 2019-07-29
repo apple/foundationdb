@@ -32,8 +32,9 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const Version startVersion;
-	Version endVersion;  // mutable in a new epoch, i.e., end version for this epoch is known.
-	const LogEpoch epoch;
+	const Version endVersion;
+	const LogEpoch recruitedEpoch;
+	const LogEpoch backupEpoch;
 	Version minKnownCommittedVersion;
 	Version poppedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
@@ -49,8 +50,8 @@ struct BackupData {
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), startVersion(req.startVersion),
 	    endVersion(req.endVersion.present() ? req.endVersion.get() : std::numeric_limits<Version>::max()),
-	    epoch(req.epoch), minKnownCommittedVersion(invalidVersion), poppedVersion(invalidVersion),
-	    version(req.startVersion - 1), cc("BackupWorker", id.toString()) {
+	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
+	    poppedVersion(invalidVersion), version(req.startVersion - 1), cc("BackupWorker", id.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "PoppedVersion", [this]() { return this->poppedVersion; });
@@ -69,7 +70,8 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(self->epoch, backupVersion));
+			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag);
+			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(status));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -107,6 +109,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 		if (self->poppedVersion >= self->endVersion) {
 			self->backupDone.trigger();
+			return Void();
 		}
 	}
 }
@@ -154,11 +157,10 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount,
                                 BackupData* self) {
-	state UID lastMasterID(0,0);
 	loop {
 		bool isDisplaced =
-		    (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED);
-		// (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		    (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
+		    (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED);
 		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasBackupWorker(self->myId);
 		if (isDisplaced) {
 			TraceEvent("BackupWorkerDisplaced", self->myId)
@@ -167,16 +169,6 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch r
 			    .detail("DBRecoveryCount", db->get().recoveryCount)
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
-		}
-		if (db->get().master.id() != lastMasterID) {
-			lastMasterID = db->get().master.id();
-			const Version endVersion = db->get().logSystemConfig.getEpochEndVersion(recoveryCount);
-			if (endVersion != invalidVersion) {
-				TraceEvent("BackupWorkerSet", self->myId)
-					.detail("Before", self->endVersion)
-					.detail("Now", endVersion - 1);
-				self->endVersion = endVersion - 1;
-			}
 		}
 		wait(db->onChange());
 	}
@@ -188,11 +180,13 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
+	state Future<Void> onDone = self.backupDone.onTrigger();
 
 	TraceEvent("BackupWorkerStart", interf.id())
 	    .detail("Tag", req.routerTag.toString())
 	    .detail("StartVersion", req.startVersion)
-	    .detail("LogEpoch", req.epoch);
+	    .detail("LogEpoch", req.recruitedEpoch)
+	    .detail("BackupEpoch", req.backupEpoch);
 	try {
 		addActor.send(pullAsyncData(&self));
 		addActor.send(uploadData(&self));
@@ -208,13 +202,13 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				TraceEvent("BackupWorkerHalted", interf.id()).detail("ReqID", req.requesterID);
 				break;
 			}
-			when(wait(checkRemoved(db, req.epoch, &self))) {
-				TraceEvent("BackupWorkerRemoved", interf.id());
-				break;
-			}
-			when(wait(self.backupDone.onTrigger())) {
+			when(wait(checkRemoved(db, req.recruitedEpoch, &self))) {}
+			when(wait(onDone)) {
+				// TODO: when backup is done, we don't exit because master would think
+				// this worker failed and start recovery. Should fix the protocol between
+				// this worker and master so that done/exit here doesn't trigger recovery.
 				TraceEvent("BackupWorkerDone", interf.id());
-				break;
+				onDone = Never();
 			}
 			when(wait(error)) {}
 		}

@@ -1233,25 +1233,39 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR Future<std::vector<std::tuple<UID, LogEpoch, Version>>> getBackupProgress(Reference<MasterData> self) {
+void addBackupStatus(std::map<LogEpoch, std::map<Tag, Version>>& progress, const WorkerBackupStatus& status) {
+	auto& it = progress[status.epoch];
+	auto lb = it.lower_bound(status.tag);
+	if (lb != it.end() && status.tag == lb->first) {
+		if (lb->second < status.version) {
+			lb->second = status.version;
+		}
+	} else {
+		it.insert(lb, { status.tag, status.version });
+	}
+}
+
+ACTOR Future<std::map<LogEpoch, std::map<Tag, Version>>> getBackupProgress(Reference<MasterData> self) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Transaction tr(cx);
 
 	loop {
 		try {
-			state std::vector<std::tuple<UID, LogEpoch, Version>> progress;
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
+			state std::map<LogEpoch, std::map<Tag, Version>> progress;
 			for (auto& it : results) {
-				UID workerID = decodeBackupProgressKey(it.key);
-				LogEpoch recoveryCount;
-				Version v;
-				decodeBackupProgressValue(it.value, recoveryCount, v);
-				progress.emplace_back(workerID, recoveryCount, v);
-				TraceEvent("GotBackupProgress", self->dbgid).detail("W", workerID).detail("Epoch", recoveryCount).detail("Version", v);
+				const UID workerID = decodeBackupProgressKey(it.key);
+				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
+				addBackupStatus(progress, status);
+				TraceEvent("GotBackupProgress", self->dbgid)
+				    .detail("W", workerID)
+				    .detail("Epoch", status.epoch)
+				    .detail("Version", status.version)
+				    .detail("Tag", status.tag.toString());
 			}
 			wait(tr.commit());
 			return progress;
@@ -1261,20 +1275,58 @@ ACTOR Future<std::vector<std::tuple<UID, LogEpoch, Version>>> getBackupProgress(
 	}
 }
 
+// for each old epoch:
+//    if savedVersion < epochEnd - 1 = knownCommittedVersion
+//        recover/backup [savedVersion + 1, epochEnd - 1]
+//
+// Returns a map of pair<Epoch, EpochEndVersion> : map<tag, savedVersion>, so that
+// the backup range should be [savedVersion + 1, EpochEndVersion).
+std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup(
+    const UID dbgid, const std::map<LogEpoch, std::map<Tag, Version>>& progress,
+    const std::map<LogEpoch, Version>& epochEndVersions) {
+	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit;
+	for (const auto& it : progress) {
+		const LogEpoch epoch = it.first;
+		auto versionIt = epochEndVersions.find(epoch);
+		if (versionIt != epochEndVersions.end()) {
+			const Version endVersion = versionIt->second;
+			std::map<Tag, Version> tagVersions;
+			for (const auto& tv : it.second) {
+				if (tv.second < endVersion - 1) {
+					tagVersions.insert({ tv.first, tv.second });
+					TraceEvent("BW", dbgid)
+					    .detail("OldEpoch", epoch)
+					    .detail("Tag", tv.first.toString())
+					    .detail("Version", tv.second)
+					    .detail("EpochEndVersion", endVersion);
+				}
+			}
+			if (!tagVersions.empty()) {
+				toRecruit[{ epoch, endVersion }] = tagVersions;
+			}
+		} else {
+			TraceEvent("BW", dbgid).detail("SkipEpoch", epoch);
+		}
+	}
+	return toRecruit;
+}
+
 ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	if (self->backupWorkers.size() == 0) return Void();
 
-	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	state Future<std::vector<std::tuple<UID, LogEpoch, Version>>> backupProgress = getBackupProgress(self);
-	state std::map<LogEpoch, Version> epochEndVersion = self->logSystem->getEpochEndVersions();
+	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
+	state Future<std::map<LogEpoch, std::map<Tag, Version>>> backupProgress = getBackupProgress(self);
+	state std::map<LogEpoch, Version> epochEndVersions = self->logSystem->getEpochEndVersions();
 
-	std::vector<Future<BackupInterface>> initializationReplies;
+	state std::vector<Future<BackupInterface>> initializationReplies;
 	const int logRouterTags = self->logSystem->getLogRouterTags();
 	const Version startVersion = self->logSystem->getStartVersion();
-	for (int i = 0; i < logRouterTags; i++) {
+	state int i = 0;
+	for (; i < logRouterTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 		InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
-		req.epoch = epoch;
+		req.recruitedEpoch = epoch;
+		req.backupEpoch = epoch;
 		req.routerTag = Tag(tagLocalityLogRouter, i);
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
@@ -1287,38 +1339,40 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		                    master_recovery_failed()));
 	}
 
+	std::map<LogEpoch, std::map<Tag, Version>> progress = wait(backupProgress);
+	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit =
+	    getUnfinishedBackup(self->dbgid, progress, epochEndVersions);
+	for (const auto& epochData : toRecruit) {
+		const LogEpoch backupEpoch = epochData.first.first;
+		const Version epochEndVersion = epochData.first.second;
+		for (const auto& tagVersion : epochData.second) {
+			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
+			i++;
+			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
+			req.recruitedEpoch = epoch;
+			req.backupEpoch = backupEpoch;
+			req.routerTag = tagVersion.first;
+			req.startVersion = tagVersion.second + 1; // savedVersion + 1
+			req.endVersion = epochEndVersion - 1;
+			TraceEvent("BackupRecruitment", self->dbgid)
+			    .detail("WorkerID", worker.id())
+			    .detail("Epoch", epoch)
+			    .detail("BackupEpoch", backupEpoch)
+			    .detail("StartVersion", req.startVersion);
+			initializationReplies.push_back(transformErrors(
+			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
+			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			    master_recovery_failed()));
+		}
+	}
+
 	std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
-	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
+	state std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	for (const auto& interf : newRecruits) {
 		backupWorkers.emplace_back(
 		    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
 	}
 	self->logSystem->setBackupWorkers(backupWorkers);
-
-	// get a map of UID -> recoveryCount, savedVersion
-	// for each old epoch:
-	//    if savedVersion >= epochEnd - 1 = knownCommittedVersion
-	//        skip or remove this entry
-	//    else
-	//        recover/backup [savedVersion + 1, epochEnd - 1]
-	//        use the old recoveryCount and tag. Make sure old worker stopped.
-
-	state std::vector<std::tuple<UID, LogEpoch, Version>> progress = wait(backupProgress);
-	for (const auto& t : progress) {
-		const UID uid = std::get<0>(t);
-		const LogEpoch epoch = std::get<1>(t);
-		const Version version = std::get<2>(t);
-		auto it = epochEndVersion.find(epoch);
-		if (it != epochEndVersion.end()) {
-			TraceEvent("BW", self->dbgid)
-			    .detail("UID", uid)
-			    .detail("Epoch", epoch)
-			    .detail("Version", version)
-			    .detail("BackedupVersion", it->second);
-		} else {
-			TraceEvent("BW", self->dbgid).detail("UID", uid).detail("Epoch", epoch).detail("Version", version);
-		}
-	}
 	TraceEvent("BackupRecruitmentDone", self->dbgid);
 	return Void();
 }

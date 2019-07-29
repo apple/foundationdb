@@ -971,4 +971,18 @@ struct HealthMetrics {
 	}
 };
 
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag);
+	}
+};
+
 #endif

@@ -502,9 +502,9 @@ const Key backupProgressKeyFor(UID workerID) {
 	return wr.toValue();
 }
 
-const Value backupProgressValue(LogEpoch epoch, Version version) {
+const Value backupProgressValue(const WorkerBackupStatus& status) {
 	BinaryWriter wr(IncludeVersion());
-	wr << epoch << version;
+	wr << status;
 	return wr.toValue();
 }
 
@@ -515,9 +515,11 @@ UID decodeBackupProgressKey(const KeyRef& key) {
 	return serverID;
 }
 
-void decodeBackupProgressValue(const ValueRef& value, LogEpoch& epoch, Version& version) {
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
 	BinaryReader reader(value, IncludeVersion());
-	reader >> epoch >> version;
+	reader >> status;
+	return status;
 }
 
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");

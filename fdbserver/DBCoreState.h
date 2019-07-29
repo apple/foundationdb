@@ -172,7 +172,7 @@ struct DBCoreState {
 				serializer(ar, txsTags);
 			}
 			if (ar.protocolVersion().hasBackupWorker()) {
-				serializer(ar, epoch);  // TODO: serialize epoch in higher version?
+				serializer(ar, epoch);
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

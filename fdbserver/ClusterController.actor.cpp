@@ -2174,15 +2174,15 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
 			self->clusterControllerDcId != w.locality.dcId()) {
-				TraceEvent("CCHaltRegisteringRatekeeper", self->id)
-					.detail("RKID", req.ratekeeperInterf.get().id())
-					.detail("DcID", printable(self->clusterControllerDcId))
-					.detail("ReqDcID", printable(w.locality.dcId()))
-					.detail("RecruitingRKID",
-							self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
+			TraceEvent("CCHaltRegisteringRatekeeper", self->id)
+			    .detail("RKID", req.ratekeeperInterf.get().id())
+			    .detail("DcID", printable(self->clusterControllerDcId))
+			    .detail("ReqDcID", printable(w.locality.dcId()))
+			    .detail("RecruitingRKID",
+			            self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(
 			    req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
-		} else if(!self->recruitingRatekeeperID.present()) {
+		} else if (!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;
 			TraceEvent("CCRegisterRatekeeper", self->id).detail("RKID", rki.id());
