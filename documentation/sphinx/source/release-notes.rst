@@ -58,6 +58,7 @@ Other Changes
 * Added experimental framework to run C and Java clients in simulator `(PR #1678) <https://github.com/apple/foundationdb/pull/1678>`_.
 * Added new network option for client buggify which will randomly throw expected exceptions in the client. Intended for client testing `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
 * Added ``--cache_memory`` parameter for ``fdbserver`` processes to control the amount of memory dedicated to caching pages read from disk. `(PR #1889) <https://github.com/apple/foundationdb/pull/1889>`_.
+* Ratekeeper will aggresively throttle when unable to fetch storage server list for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
 
 Earlier release notes
 ---------------------
