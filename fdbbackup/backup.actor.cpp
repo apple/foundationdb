@@ -3386,24 +3386,32 @@ int main(int argc, char* argv[]) {
 
 			break;
 		case EXE_RESTORE:
-			// Must explicitly call trace file options handling because initCluster() is not being used
-			initTraceFile();
+			if(dryRun) {
+				if(restoreType != RESTORE_START) {
+					fprintf(stderr, "Restore dry run only works for 'start' command\n");
+					return FDB_EXIT_ERROR;
+				}
 
-			if(restoreClusterFileDest.empty()) {
-				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-				return FDB_EXIT_ERROR;
+				// Must explicitly call trace file options handling if not calling Database::createDatabase()
+				initTraceFile();
 			}
+			else {
+				if(restoreClusterFileDest.empty()) {
+					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+					return FDB_EXIT_ERROR;
+				}
 
-			if(!fileExists(restoreClusterFileDest)) {
-				fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-				return FDB_EXIT_ERROR;
-			}
+				if(!fileExists(restoreClusterFileDest)) {
+					fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+					return FDB_EXIT_ERROR;
+				}
 
-			try {
-				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-			} catch(Error &e) {
-				fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
-				return FDB_EXIT_ERROR;
+				try {
+					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+				} catch(Error &e) {
+					fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+					return FDB_EXIT_ERROR;
+				}
 			}
 
 			switch(restoreType) {
