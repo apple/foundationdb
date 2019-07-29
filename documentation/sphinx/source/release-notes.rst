@@ -46,6 +46,8 @@ Bindings
 * C: Applications linking to libfdb_c can now use ``pkg-config foundationdb-client`` or ``find_package(FoundationDB-Client ...)`` (for cmake) to get the proper flags for compiling and linking. `(PR #1636) <https://github.com/apple/foundationdb/pull/1636>`_.
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Fix issue with finalizers running too early that could lead to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
+* Go: Added a `Close` function to `RangeIterator` which **must** be called to free resources returned from `Transaction.GetRange`. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
+* Go: Finalizers are no longer used to clean up native resources. `Future` results are now copied from the native heap to the Go heap, and native resources are freed immediately. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
 * Added transaction option to control the field length of keys and values in debug transaction logging in order to avoid truncation. `(PR #1844) <https://github.com/apple/foundationdb/pull/1844>`_.
 
 Other Changes
