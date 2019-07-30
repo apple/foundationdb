@@ -65,6 +65,8 @@ Other Changes
 * Added ``--cache_memory`` parameter for ``fdbserver`` processes to control the amount of memory dedicated to caching pages read from disk. `(PR #1889) <https://github.com/apple/foundationdb/pull/1889>`_.
 * Added ``MakoWorkload``, used as a benchmark to do performance testing of FDB. `(PR #1586) <https://github.com/apple/foundationdb/pull/1586>`_.
 * Added two knobs ``LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED`` and ``LOAD_BALANCE_DC_ID_LOCALITY_ENABLED`` allowing locality-based decision-making to be toggled on/off during load balancing. `(PR #1820) <https://github.com/apple/foundationdb/pull/1820>`_.
+* Ratekeeper will aggressively throttle when unable to fetch the list of storage servers for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
+* ``fdbserver`` now accepts a comma separated list of public and listen addresses. `(PR #1721) <https://github.com/apple/foundationdb/pull/1721>`_.
 
 Earlier release notes
 ---------------------
