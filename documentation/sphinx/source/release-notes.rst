@@ -20,9 +20,9 @@ Performance
 * Use CRC32 checksum for SQLite pages. `(PR #1582) <https://github.com/apple/foundationdb/pull/1582>`_.
 * Added a 96-byte fast allocator, so storage queue nodes use less memory. `(PR #1336) <https://github.com/apple/foundationdb/pull/1336>`_.
 * Handle large packets better. `(PR #1684) <https://github.com/apple/foundationdb/pull/1684>`_.
-* A new Transaction Log spilling implementation is now the default.  Write bandwidth and latency will no longer degrade during storage server or remote region failures.  `(PR #1731) <https://github.com/apple/foundationdb/pull/1731>`_.
-* Log routers will prefer to peek from satellites at ``log_version >= 4``.  `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
-* Spilled data can be consumed from transaction logs more faster and with less overhead `(PR #1584) <https://github.com/apple/foundationdb/pull/1584>`_.
+* A new Transaction Log spilling implementation is now the default.  Write bandwidth and latency will no longer degrade during storage server or remote region failures. `(PR #1731) <https://github.com/apple/foundationdb/pull/1731>`_.
+* Log routers will prefer to peek from satellites at ``log_version >= 4``. `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
+* Spilled data can be consumed from transaction logs more quickly and with less overhead `(PR #1584) <https://github.com/apple/foundationdb/pull/1584>`_.
 * Improved the speed of recoveries on large clusters. `(PR #1729) <https://github.com/apple/foundationdb/pull/1729>`_.
 
 Fixes
