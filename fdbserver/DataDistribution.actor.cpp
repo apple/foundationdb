@@ -3071,6 +3071,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
+	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 	loop {
 		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
 		if(inHealthyZone) {
@@ -3103,7 +3104,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		choose {
 			when ( wait(healthChanged) ) {
 				status->isFailed = !status->isFailed;
-				if(!status->isFailed && (server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
+				if(!status->isFailed && (server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 				}
 				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
@@ -3140,6 +3141,7 @@ ACTOR Future<Void> storageServerTracker(
 
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
 	state bool hasWrongStoreTypeOrDC = false;
+	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 
 	try {
 		loop {
@@ -3225,7 +3227,7 @@ ACTOR Future<Void> storageServerTracker(
 				self->restartRecruiting.trigger();
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
-			    ( server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
+			    ( server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
 				self->doBuildTeams = true;
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
