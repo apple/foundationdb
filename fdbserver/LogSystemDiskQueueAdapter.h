@@ -109,6 +109,7 @@ private:
 	Version poppedUpTo;
 	std::deque< Promise<CommitMessage> > commitMessages;
 	Version nextCommit;
+	bool hasDiscardedData;
 
 	friend class LogSystemDiskQueueAdapterImpl;
 };
