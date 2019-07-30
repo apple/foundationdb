@@ -1038,6 +1038,9 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	if(self->canDiscardPopped && self->poppedVersion > self->version().version) {
 		TraceEvent(SevWarn, "DiscardingPoppedData").detail("Version", self->version().version).detail("Popped", self->poppedVersion);
 		self->messageVersion = std::max(self->messageVersion, LogMessageVersion(self->poppedVersion));
+		for(auto& cursor : self->cursors) {
+			cursor->advanceTo(self->messageVersion);
+		}
 		self->messageIndex = self->messages.size();
 		if (self->messages.size() > 0 && self->messages[self->messages.size()-1].version < self->messageVersion) {
  			self->hasNextMessage = false;
@@ -1057,9 +1060,14 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 }
 
 Future<Void> ILogSystem::BufferedCursor::getMore(TaskPriority taskID) {
-	if( hasMessage() )
+	if( hasMessage() ) {
 		return Void();
-	return bufferedGetMore(this, taskID);
+	}
+
+	if( !more.isValid() || more.isReady() ) {
+		more = bufferedGetMore(this, taskID);
+	}
+	return more;
 }
 
 Future<Void> ILogSystem::BufferedCursor::onFailed() {

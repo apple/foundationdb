@@ -581,6 +581,7 @@ struct ILogSystem {
 		Version poppedVersion;
 		Version initialPoppedVersion;
 		bool canDiscardPopped;
+		Future<Void> more;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
