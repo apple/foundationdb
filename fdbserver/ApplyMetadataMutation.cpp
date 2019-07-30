@@ -273,7 +273,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			}
 			if (configKeys.intersects(range)) {
 				if(!initialCommit) txnStateStore->clear(range & configKeys);
-				if(!excludedServersKeys.contains(range)) {
+				if(!excludedServersKeys.contains(range) && !failedServersKeys.contains(range)) {
 					TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString());
 					if(confChange) *confChange = true;
 				}

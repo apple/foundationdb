@@ -479,13 +479,19 @@ Optional<ValueRef> DatabaseConfiguration::get( KeyRef key ) const {
 
 bool DatabaseConfiguration::isExcludedServer( NetworkAddress a ) const {
 	return get( encodeExcludedServersKey( AddressExclusion(a.ip, a.port) ) ).present() ||
-		get( encodeExcludedServersKey( AddressExclusion(a.ip) ) ).present();
+		get( encodeExcludedServersKey( AddressExclusion(a.ip) ) ).present() ||
+		get( encodeFailedServersKey( AddressExclusion(a.ip, a.port) ) ).present() ||
+		get( encodeFailedServersKey( AddressExclusion(a.ip) ) ).present();
 }
 std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
 	std::set<AddressExclusion> addrs;
 	for( auto i = lower_bound(rawConfiguration, excludedServersKeys.begin); i != rawConfiguration.end() && i->key < excludedServersKeys.end; ++i ) {
 		AddressExclusion a = decodeExcludedServersKey( i->key );
+		if (a.isValid()) addrs.insert(a);
+	}
+	for( auto i = lower_bound(rawConfiguration, failedServersKeys.begin); i != rawConfiguration.end() && i->key < failedServersKeys.end; ++i ) {
+		AddressExclusion a = decodeFailedServersKey( i->key );
 		if (a.isValid()) addrs.insert(a);
 	}
 	return addrs;

@@ -2934,25 +2934,34 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 	loop {
 		// Fetch the list of excluded servers
 		state Transaction tr(self->cx);
-		state Optional<Value> lastChangeID;
 		loop {
 			try {
-				state Future<Standalone<RangeResultRef>> fresults = tr.getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY );
-				state Future<Optional<Value>> fchid = tr.get( excludedServersVersionKey );
-				wait( success(fresults) && success(fchid) );
+				state Future<Standalone<RangeResultRef>> fresultsExclude = tr.getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY );
+				state Future<Standalone<RangeResultRef>> fresultsFailed = tr.getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY );
+				wait( success(fresultsExclude) && success(fresultsFailed) );
 
-				Standalone<RangeResultRef> results = fresults.get();
-				lastChangeID = fchid.get();
-				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
+				Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
+				ASSERT( !excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY );
+
+				Standalone<RangeResultRef> failedResults = fresultsFailed.get();
+				ASSERT( !failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY );
 
 				std::set<AddressExclusion> excluded;
-				for(auto r = results.begin(); r != results.end(); ++r) {
+				for(auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
 					AddressExclusion addr = decodeExcludedServersKey(r->key);
 					if (addr.isValid())
 						excluded.insert( addr );
 				}
+				for(auto r = failedResults.begin(); r != failedResults.end(); ++r) {
+					AddressExclusion addr = decodeFailedServersKey(r->key);
+					if (addr.isValid())
+						excluded.insert( addr );
+				}
 
-				TraceEvent("DDExcludedServersChanged", self->distributorId).detail("Rows", results.size()).detail("Exclusions", excluded.size());
+				TraceEvent("DDExcludedServersChanged", self->distributorId)
+					.detail("RowsExcluded", excludedResults.size())
+					.detail("RowsExcludedPermanently", failedResults.size())
+					.detail("TotalExclusions", excluded.size());
 
 				// Reset and reassign self->excludedServers based on excluded, but we only
 				// want to trigger entries that are different
@@ -2968,20 +2977,9 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 				wait( tr.onError(e) );
 			}
 		}
-
-		// Wait for a change in the list of excluded servers
-		loop {
-			try {
-				Optional<Value> nchid = wait( tr.get( excludedServersVersionKey ) );
-				if (nchid != lastChangeID)
-					break;
-
-				wait( delay( SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistribution ) );  // FIXME: make this tr.watch( excludedServersVersionKey ) instead
-				tr = Transaction(self->cx);
-			} catch (Error& e) {
-				wait( tr.onError(e) );
-			}
-		}
+		state Future<Void> excludedWatch = tr.watch(Reference<Watch>(new Watch(excludedServersVersionKey)));
+		state Future<Void> failedWatch = tr.watch(Reference<Watch>(new Watch(failedServersVersionKey)));
+		wait(excludedWatch || failedWatch);
 	}
 }
 

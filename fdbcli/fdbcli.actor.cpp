@@ -2023,11 +2023,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
 		state bool waitForAllExcluded = true;
+		state bool permanentlyFailed = false;
 		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
 			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
 			} else if (*t == LiteralStringRef("no_wait")) {
 				waitForAllExcluded = false;
+			} else if (*t == LiteralStringRef("permanent")) {
+				permanentlyFailed = true;
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
@@ -2127,7 +2130,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 		}
 
-		wait( makeInterruptable(excludeServers(db,addresses)) );
+		wait( makeInterruptable(excludeServers(db,addresses,permanentlyFailed)) );
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");

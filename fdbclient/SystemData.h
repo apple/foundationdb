@@ -133,6 +133,12 @@ extern const KeyRef excludedServersVersionKey;  // The value of this key shall b
 const AddressExclusion decodeExcludedServersKey( KeyRef const& key ); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey( AddressExclusion const& );
 
+extern const KeyRef failedServersPrefix;
+extern const KeyRangeRef failedServersKeys;
+extern const KeyRef failedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the failed servers list
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
+std::string encodeFailedServersKey( AddressExclusion const& );
+
 //    "\xff/workers/[[processID]]" := ""
 //    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
 //    and are currently (recently) available

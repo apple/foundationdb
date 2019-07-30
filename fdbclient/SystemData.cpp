@@ -380,6 +380,23 @@ std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef failedServersKeys( LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0") );
+const KeyRef failedServersPrefix = failedServersKeys.begin;
+const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ) {
+	ASSERT( key.startsWith( failedServersPrefix ) );
+	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
+	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all ports)
+	// Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+
+	return AddressExclusion::parse(key.removePrefix( failedServersPrefix ));
+}
+std::string encodeFailedServersKey( AddressExclusion const& addr ) {
+	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
+	return failedServersPrefix.toString() + addr.toString();
+}
+
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
