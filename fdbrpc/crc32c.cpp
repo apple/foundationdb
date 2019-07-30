@@ -171,7 +171,9 @@ static inline uint32_t shift_crc(uint32_t shift_table[][256], uint32_t crc)
 }
 
 /* Compute CRC-32C using the Intel hardware instruction. */
+#ifndef _WIN32
 __attribute__((target("sse4.2")))
+#endif
 static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
 {
     const uint8_t * next = buf;
