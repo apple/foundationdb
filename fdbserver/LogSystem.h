@@ -521,9 +521,8 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		Version poppedVersion;
-		bool needsPopped;
 
-		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds, bool needsPopped = true );
+		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -560,6 +559,7 @@ struct ILogSystem {
 			LogMessageVersion version;
 
 			BufferedMessage() {}
+			explicit BufferedMessage( Version version ) : version(version) {}
 			BufferedMessage( Arena arena, StringRef message, const std::vector<Tag>& tags, const LogMessageVersion& version ) : arena(arena), message(message), tags(tags), version(version) {}
 
 			bool operator < (BufferedMessage const& r) const {
@@ -578,13 +578,17 @@ struct ILogSystem {
 		Version end;
 		bool hasNextMessage;
 		bool withTags;
+		Version poppedVersion;
+		Version initialPoppedVersion;
+		bool canDiscardPopped;
+		Future<Void> more;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
 		std::vector<Tag> tags;
 		void combineMessages();
 
-		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags = false );
+		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -655,7 +659,7 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
-	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd ) = 0;
+	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped ) = 0;
 		// Same contract as peek(), but only for peeking the txsLocality. It allows specifying a preferred peek locality.
 
 	virtual Version getKnownCommittedVersion() = 0;
@@ -781,7 +785,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
+	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -795,8 +799,9 @@ struct LogPushData : NonCopyable {
 			next_message_tags.clear();
 		}
 		uint32_t subseq = this->subsequence++;
+		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size()) << subseq << uint16_t(prev_tags.size());
+			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
 				messagesWriter[loc] << tag;
 			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
