@@ -61,6 +61,8 @@ public:
 					}
 				}
 				if(self->cursor->popped() != 0) {
+					TEST(true); //disk adapter reset
+					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
 					self->recoveryQueue.clear();
 					self->recoveryQueueDataSize = 0;
 					self->recoveryLoc = self->cursor->popped();
