@@ -577,15 +577,17 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-	       "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-	       "                 to a random value shared by all fdbserver processes on this\n"
-	       "                 machine.\n");
+	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
+	       "                 Defaults to a random value shared by all fdbserver processes\n"
+	       "                 on this machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
-	       "                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
+	       "                 LOCALITYVALUE is not.\n");
 	printf("  -m SIZE, --memory SIZE\n"
 	       "                 Memory limit. The default value is 8GiB. When specified\n"
 	       "                 without a unit, MiB is assumed.\n");
@@ -1675,7 +1677,7 @@ int main(int argc, char* argv[]) {
 			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyMachineId))
-			localities.set(LocalityData::keyMachineId, machineId);
+			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
 			localities.set(LocalityData::keyDcId, dcId);
