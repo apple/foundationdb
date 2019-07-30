@@ -658,7 +658,7 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
-	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd ) = 0;
+	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped ) = 0;
 		// Same contract as peek(), but only for peeking the txsLocality. It allows specifying a preferred peek locality.
 
 	virtual Version getKnownCommittedVersion() = 0;

@@ -42,19 +42,19 @@ public:
 							break;
 						}
 						when( wait( self->localityChanged ) ) {
-							self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+							self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 							self->localityChanged = self->peekLocality->onChange();
 						}
 						when( wait( delay(self->peekTypeSwitches==0 ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME)) ) {
 							self->peekTypeSwitches++;
 							if(self->peekTypeSwitches%3==1) {
-								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = Never();
 							} else if(self->peekTypeSwitches%3==2) {
-								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = self->peekLocality->onChange();
 							} else {
-								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = self->peekLocality->onChange();
 							}
 						}
@@ -70,14 +70,15 @@ public:
 					self->recoveryQueueDataSize = 0;
 					self->recoveryLoc = self->cursor->popped();
 					self->recoveryQueueLoc = self->recoveryLoc;
+					self->totalRecoveredBytes = 0;
 					if(self->peekTypeSwitches%3==1) {
-						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion );
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion, true );
 						self->localityChanged = Never();
 					} else if(self->peekTypeSwitches%3==2) {
-						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, true );
 						self->localityChanged = self->peekLocality->onChange();
 					} else {
-						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, true );
 						self->localityChanged = self->peekLocality->onChange();
 					}
 					self->hasDiscardedData = true;
@@ -96,6 +97,7 @@ public:
 			
 			self->recoveryQueue.push_back( Standalone<StringRef>(self->cursor->getMessage(), self->cursor->arena()) );
 			self->recoveryQueueDataSize += self->recoveryQueue.back().size();
+			self->totalRecoveredBytes += self->recoveryQueue.back().size();
 			self->cursor->nextMessage();
 			if(!self->cursor->hasMessage()) self->recoveryLoc = self->cursor->version().version;
 
