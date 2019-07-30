@@ -1159,6 +1159,9 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 Version poppedVersion( Reference<LogData> self, Tag tag) {
 	auto tagData = self->getTagData(tag);
 	if (!tagData) {
+		if (tag == txsTag || tag.locality == tagLocalityTxs) {
+ 			return 0;
+ 		}
 		return self->recoveredAt;
 	}
 	return tagData->popped;
@@ -1586,6 +1589,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 }
 
 ACTOR Future<Void> watchDegraded(TLogData* self) {
+	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		return Void();
+	}
+	
 	//This delay is divided into multiple delays to avoid marking the tlog as degraded because of a single SlowTask
 	state int loopCount = 0;
 	while(loopCount < SERVER_KNOBS->TLOG_DEGRADED_DELAY_COUNT) {

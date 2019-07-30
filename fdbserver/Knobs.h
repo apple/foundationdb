@@ -102,6 +102,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
 
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;

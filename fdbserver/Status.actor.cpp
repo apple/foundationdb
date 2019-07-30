@@ -1463,43 +1463,43 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
-static int getExtraTLogEligibleMachines(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
-	std::set<StringRef> allMachines;
-	std::map<Key,std::set<StringRef>> dcId_machine;
+static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
+	std::set<StringRef> allZones;
+	std::map<Key,std::set<StringRef>> dcId_zone;
 	for(auto const& worker : workers) {
 		if(worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
 			&& !configuration.isExcludedServer(worker.interf.address()))
 		{
-			allMachines.insert(worker.interf.locality.zoneId().get());
+			allZones.insert(worker.interf.locality.zoneId().get());
 			if(worker.interf.locality.dcId().present()) {
-				dcId_machine[worker.interf.locality.dcId().get()].insert(worker.interf.locality.zoneId().get());
+				dcId_zone[worker.interf.locality.dcId().get()].insert(worker.interf.locality.zoneId().get());
 			}
 		}
 	}
 
 	if(configuration.regions.size() == 0) {
-		return allMachines.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
+		return allZones.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	}
-	int extraTlogEligibleMachines = configuration.usableRegions == 1 ? 0 : std::numeric_limits<int>::max();
+	int extraTlogEligibleZones = configuration.usableRegions == 1 ? 0 : std::numeric_limits<int>::max();
 	for(auto& region : configuration.regions) {
-		int eligible = dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
+		int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
 		//FIXME: does not take into account fallback satellite policies
 		if(region.satelliteTLogReplicationFactor > 0) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {
-				totalSatelliteEligible += dcId_machine[sat.dcId].size();
+				totalSatelliteEligible += dcId_zone[sat.dcId].size();
 			}
 			eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
 		}
 		if( configuration.usableRegions == 1 ) {
 			if( region.priority >= 0 ) {
-				extraTlogEligibleMachines = std::max( extraTlogEligibleMachines, eligible );
+				extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
 			}
 		} else {
-			extraTlogEligibleMachines = std::min( extraTlogEligibleMachines, eligible );
+			extraTlogEligibleZones = std::min( extraTlogEligibleZones, eligible );
 		}
 	}
-	return extraTlogEligibleMachines;
+	return extraTlogEligibleZones;
 }
 
 JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transPerSec, double tpsLimit) {
@@ -1812,13 +1812,13 @@ static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Asyn
 	return oldTlogsArray;
 }
 
-static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleMachines, int minReplicasRemaining, bool underMaintenance) {
+static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleZones, int minReplicasRemaining, bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
-	int32_t maxMachineFailures = configuration.maxMachineFailuresTolerated();
+	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated();
 	if(underMaintenance) {
-		maxMachineFailures--;
+		maxZoneFailures--;
 	}
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
@@ -1845,16 +1845,16 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		maxCoordinatorZoneFailures += 1;
 	}
 
-	int machineFailuresWithoutLosingData = std::min(maxMachineFailures, maxCoordinatorZoneFailures);
+	int zoneFailuresWithoutLosingData = std::min(maxZoneFailures, maxCoordinatorZoneFailures);
 
 	if (minReplicasRemaining >= 0){
-		machineFailuresWithoutLosingData = std::min(machineFailuresWithoutLosingData, minReplicasRemaining - 1);
+		zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, minReplicasRemaining - 1);
 	}
 
-	statusObj["max_machine_failures_without_losing_data"] = std::max(machineFailuresWithoutLosingData, 0);
+	statusObj["max_zone_failures_without_losing_data"] = std::max(zoneFailuresWithoutLosingData, 0);
 
 	// without losing availablity
-	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(extraTlogEligibleMachines, machineFailuresWithoutLosingData), 0);
+	statusObj["max_zone_failures_without_losing_availability"] = std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), 0);
 	return statusObj;
 }
 
@@ -2206,8 +2206,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			if(configuration.present()) {
-				int extraTlogEligibleMachines = getExtraTLogEligibleMachines(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleMachines, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
+				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
+				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);

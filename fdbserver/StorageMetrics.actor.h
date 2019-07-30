@@ -342,18 +342,19 @@ struct StorageServerMetrics {
 		}
 	}
 
-	void getPhysicalMetrics( GetPhysicalMetricsRequest req, StorageBytes sb ){
-		GetPhysicalMetricsReply rep;
+	void getStorageMetrics( GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate ){
+		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
 		rep.load = getMetrics(allKeys);
 
-		if (sb.free < 1e9 && deterministicRandom()->random01() < 0.1)
+		if (sb.free < 1e9 && deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
 				.detail("Free", sb.free)
 				.detail("Total", sb.total)
 				.detail("Available", sb.available)
 				.detail("Load", rep.load.bytes);
+		}
 
 		rep.free.bytes = sb.free;
 		rep.free.iosPerKSecond = 10e6;
@@ -362,6 +363,8 @@ struct StorageServerMetrics {
 		rep.capacity.bytes = sb.total;
 		rep.capacity.iosPerKSecond = 10e6;
 		rep.capacity.bytesPerKSecond = 100e9;
+
+		rep.bytesInputRate = bytesInputRate;
 
 		req.reply.send(rep);
 	}

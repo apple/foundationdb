@@ -52,7 +52,14 @@ struct RelocateData {
 			rs.priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 			rs.priority == PRIORITY_SPLIT_SHARD ||
-			rs.priority == PRIORITY_TEAM_REDUNDANT ), interval("QueuedRelocation") {}
+			rs.priority == PRIORITY_TEAM_REDUNDANT ||
+			mergeWantsNewServers(rs.keys, rs.priority)), interval("QueuedRelocation") {}
+
+	static bool mergeWantsNewServers(KeyRangeRef keys, int priority) {
+		return priority == PRIORITY_MERGE_SHARD && 
+			(SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 2 || 
+				(SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 1 && keys.begin.startsWith(LiteralStringRef("\xff"))));
+	}
 
 	bool operator> (const RelocateData& rhs) const {
 		return priority != rhs.priority ? priority > rhs.priority : ( startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId );
@@ -181,11 +188,11 @@ public:
 		});
 	}
 
-	virtual Future<Void> updatePhysicalMetrics() {
+	virtual Future<Void> updateStorageMetrics() {
 		vector<Future<Void>> futures;
 
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			futures.push_back((*it)->updatePhysicalMetrics());
+			futures.push_back((*it)->updateStorageMetrics());
 		}
 		return waitForAll(futures);
 	}
@@ -1049,7 +1056,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
 					try {
-						wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
+						wait( healthyDestinations.updateStorageMetrics() ); //prevent a gap between the polling for an increase in storage metrics and decrementing data in flight
 					} catch( Error& e ) {
 						error = e;
 					}
