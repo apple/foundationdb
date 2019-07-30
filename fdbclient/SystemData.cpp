@@ -119,6 +119,7 @@ const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+// Q: What is serverTagHistoryKeys used for?
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );

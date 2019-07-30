@@ -67,6 +67,7 @@ struct TLogQueueEntryRef {
 	}
 };
 
+// Q: This struct is no longer found in code base. Should we remove it?
 struct AlternativeTLogQueueEntryRef {
 	UID id;
 	Version version;
@@ -282,6 +283,9 @@ struct SpilledData {
 
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
+	// Q: What is the number in TLog 1 mean?
+	// Q: What is an old TLog and a new TLog?
+	// Q: The figure below is great, but it is still unclear what does the ^popOrder, ^spillOrder mean.
 	//  We always pop the disk queue from the oldest TLog, spill from the oldest TLog that still has
 	//  data in memory, and commits to the disk queue come from the most recent TLog.
 	//
@@ -296,9 +300,9 @@ struct TLogData : NonCopyable {
 
 	UID dbgid;
 
-	IKeyValueStore* persistentData;
-	IDiskQueue* rawPersistentQueue;
-	TLogQueue *persistentQueue;
+	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
+	IDiskQueue* rawPersistentQueue; // Q: The persistentQueue (below) made durable on disk
+	TLogQueue *persistentQueue;	// Q: The queue data is pushed or poped on the tLog?
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
@@ -2296,6 +2300,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 	return Void();
 }
 
+// Recovery persistent state of tLog from disk
 ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;

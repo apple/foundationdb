@@ -630,6 +630,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						storageServerInterfaces.push_back( si );
 					}
 
+					// Wait for new destination servers to fetch the keys
 					for(int s=0; s<storageServerInterfaces.size(); s++)
 						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
 					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskPriority::MoveKeys ) );

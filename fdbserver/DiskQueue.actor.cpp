@@ -125,7 +125,7 @@ private:
 	}
 };
 
-// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait().
+// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait() on pending file operations (e.g., read).
 template <typename T>
 class Tracked {
 protected:
@@ -154,6 +154,7 @@ private:
 	AsyncVar<bool> actorCountIsZero = true;
 };
 
+// Q: What is this class for? Why it needs twoFiles?
 class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
@@ -258,7 +259,7 @@ public:
 	bool isFirstCommit;
 
 	StringBuffer readingBuffer; // Pages that have been read and not yet returned
-	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
+	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete //Q: Is i supposed to be 1?
 	int64_t readingPage;  // Page within readingFile that is the next page after readingBuffer
 
 	int64_t writingPos;  // Position within files[1] that will be next written
@@ -306,7 +307,7 @@ public:
 	}
 
 	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
-		// Write the given data to the queue files, swapping or extending them if necessary.
+		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT( self->readingFile == 2 );
 		ASSERT( pageData.size() % _PAGE_SIZE == 0 );
@@ -384,6 +385,7 @@ public:
 		return waitForAll(waitfor);
 	}
 
+	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem) that hold the pageData
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
@@ -455,7 +457,7 @@ public:
 		files[1].popped += popped - pop0;
 	}
 
-
+	// Q: What does this function do?
 	ACTOR static Future<Void> setPoppedPage( RawDiskQueue_TwoFiles *self, int file, int64_t page, int64_t debugSeq ) {
 		self->files[file].popped = page*sizeof(Page);
 		if (file) self->files[0].popped = self->files[0].size;
@@ -526,6 +528,8 @@ public:
 		state Error error = success();
 		try {
 			wait(success(errorOr(self->lastCommit)));
+			// Wait for the pending operations (e.g., read) to finish before we destroy the DiskQueue, because
+			// tLog, instead of DiskQueue, hold the future of the pending operations.
 			wait( self->onSafeToDestruct() );
 
 			for(int i=0; i<2; i++)
@@ -555,6 +559,7 @@ public:
 		}
 	}
 
+	// Q: From where this function is called, its return seems to be lastPageData, instead of both first and last page data?
 	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readFirstAndLastPages(RawDiskQueue_TwoFiles* self, compare_pages compare) {
 		state TrackMe trackMe(self);
 
@@ -654,6 +659,7 @@ public:
 		}
 	}
 
+	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
 	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
@@ -719,6 +725,7 @@ public:
 		}
 	}
 
+	// Set zero and free the memory from pos to the end of file self->files[file].
 	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
 		state TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
@@ -800,6 +807,7 @@ public:
 		ASSERT( !upTo.hi );
 		ASSERT( !recovered || upTo.lo <= endLocation() );
 
+		// Q: Why would the caller pop into an uncommitted page?
 		// The following ASSERT is NOT part of the intended contract of IDiskQueue, but alerts the user to a known bug where popping
 		//  into uncommitted pages can cause a durability failure.
 		// FIXME: Remove this ASSERT when popping into uncommitted pages is fixed
@@ -821,11 +829,13 @@ public:
 		return Page::maxPayload;
 	}
 
+	// Always commit an entire page. Commit overhead is the unused space in a to-be-committed page
 	virtual int getCommitOverhead() {
 		if(!pushedPageCount()) {
 			if(!anyPopped)
 				return 0;
 
+			// Q: Is this an overestimation of the overhead?
 			return Page::maxPayload;
 		}
 		else
@@ -836,14 +846,14 @@ public:
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
-			addEmptyPage();
+			addEmptyPage(); //Q: Why do we need to add an empty page if there is nothing that has been pushed?
 		}
 		anyPopped = false;
 		backPage().popped = poppedSeq;
 		backPage().zeroPad();
 		backPage().updateHash();
 
-		if( pushedPageCount() >= 8000 ) {
+		if( pushedPageCount() >= 8000 ) { // Q: Does 8000  means to be 4KB * 8000 = 32MB memory limit?
 			TraceEvent( warnAlwaysForMemory ? SevWarnAlways : SevWarn, "DiskQueueMemoryWarning", dbgid)
 				.suppressFor(1.0)
 				.detail("PushedPages", pushedPageCount())
@@ -924,7 +934,7 @@ private:
 				uint16_t implementationVersion;
 			};
 		};
-		uint64_t seq;
+		uint64_t seq; // Q: Definition?
 		uint64_t popped;
 		int payloadSize;
 	};
@@ -1035,6 +1045,7 @@ private:
 		delete buffer;
 	}
 
+	// TODO: what does start and end mean
 	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue *self, location start, location end) {
 		state TrackMe trackme(self);
 		state int fromFile;
@@ -1232,6 +1243,8 @@ private:
 		return result.str;
 	}
 
+	// Q: do we assume the tLog process's file still exists? 
+	// Q: Is it correct to say: We want to restore the DiskQueue's state (e.g., nextReadLocation) to recoverAt?
 	ACTOR static Future<bool> initializeRecovery( DiskQueue* self, location recoverAt ) {
 		if (self->initialized) {
 			return self->recovered;
@@ -1250,6 +1263,7 @@ private:
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
 		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
+			// Q: Why is this?
 			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 		} else {
 			self->nextReadLocation = lastPage->popped;
@@ -1342,7 +1356,7 @@ private:
 	bool warnAlwaysForMemory;
 	loc_t nextPageSeq, poppedSeq;
 	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called
-	loc_t lastCommittedSeq;
+	loc_t lastCommittedSeq; // Q: What is the definition of lastCommittedSeq?
 
 	// Buffer of pushed pages that haven't been committed.  The last one (backPage()) is still mutable.
 	StringBuffer* pushed_page_buffer;
@@ -1362,7 +1376,7 @@ private:
 	int readBufPos;
 };
 
-//A class wrapping DiskQueue which durably allows uncommitted data to be popped
+//A class wrapping DiskQueue which durably allows uncommitted data to be popped //Q: why do we need to pop uncommitted data?
 //This works by performing two commits when uncommitted data is popped:
 //	Commit 1 - pop only previously committed data and push new data
 //  Commit 2 - finish pop into uncommitted data

@@ -44,7 +44,7 @@ ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Ve
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
-	int32_t txsTags;
+	int32_t txsTags; //Q: Definition?
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
@@ -64,6 +64,7 @@ struct OldLogData {
 	}
 };
 
+// Q: To confirm: Info. of tLog's lock
 struct LogLockInfo {
 	Version epochEnd;
 	bool isCurrent;
@@ -73,6 +74,7 @@ struct LogLockInfo {
 	LogLockInfo() : epochEnd(std::numeric_limits<Version>::max()), isCurrent(false) {}
 };
 
+// Q: What is the difference between tLog and log?
 LogSet::LogSet(const TLogSet& tLogSet) :
 	tLogWriteAntiQuorum(tLogSet.tLogWriteAntiQuorum),
 	tLogReplicationFactor(tLogSet.tLogReplicationFactor),
@@ -167,7 +169,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
-	std::set<int8_t> pseudoLocalities;
+	std::set<int8_t> pseudoLocalities; // Q: What is pseudo-locaility?
 	std::map<int8_t, Version> pseudoLocalityPopVersion;
 
 	// new members

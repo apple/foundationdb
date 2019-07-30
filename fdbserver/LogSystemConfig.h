@@ -190,8 +190,8 @@ struct OldTLogConf {
 };
 
 enum class LogSystemType {
-	empty = 0,
-	tagPartitioned = 2,
+	empty = 0, // Q: when is this type?
+	tagPartitioned = 2, // Q: Why make it 2 instead of 1
 };
 BINARY_SERIALIZABLE(LogSystemType);
 

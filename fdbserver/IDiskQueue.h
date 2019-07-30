@@ -33,6 +33,7 @@ enum class CheckHashes {
 class IDiskQueue : public IClosable {
 public:
 	struct location {
+		// Q: Definition of hi and lo?
 		int64_t hi, lo;
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
@@ -105,6 +106,7 @@ struct numeric_limits<IDiskQueue::location> {
 };
 }
 
+// Q: What are the difference between V0 and V1? when is V1 introduced?
 enum class DiskQueueVersion : uint16_t {
 	V0 = 0,
 	V1 = 1,
