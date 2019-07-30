@@ -898,7 +898,7 @@ Version ILogSystem::MultiCursor::popped() {
 	return std::max(poppedVersion, cursors.back()->popped());
 }
 
-ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags ) : cursors(cursors), messageVersion(begin), end(end), withTags(withTags), collectTags(collectTags), hasNextMessage(false), messageIndex(0), poppedVersion(0), initialPoppedVersion(0), hasReturnedData(false) {
+ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped ) : cursors(cursors), messageVersion(begin), end(end), withTags(withTags), collectTags(collectTags), hasNextMessage(false), messageIndex(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped) {
 	messages.reserve(10000);
 }
 
@@ -994,7 +994,7 @@ ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Refe
 		}
 		wait(cursor->getMore(taskID));
 		self->poppedVersion = std::max(self->poppedVersion, cursor->popped());
-		if(!self->hasReturnedData) {
+		if(self->canDiscardPopped) {
 			self->initialPoppedVersion = std::max(self->initialPoppedVersion, cursor->popped());
 		}
 	}
@@ -1035,12 +1035,12 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	}
 
 	wait(yield());
-	if(!self->hasReturnedData) {
+	if(self->canDiscardPopped) {
 		while(self->hasNextMessage && self->version().version < self->poppedVersion) {
 			self->nextMessage();
 		}
 		if(self->hasNextMessage) {
-			self->hasReturnedData = true;
+			self->canDiscardPopped = false;
 		}
 	}
 	return Void();

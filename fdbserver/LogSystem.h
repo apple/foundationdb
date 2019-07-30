@@ -579,14 +579,14 @@ struct ILogSystem {
 		bool withTags;
 		Version poppedVersion;
 		Version initialPoppedVersion;
-		bool hasReturnedData;
+		bool canDiscardPopped;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
 		std::vector<Tag> tags;
 		void combineMessages();
 
-		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags = false );
+		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
