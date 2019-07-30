@@ -181,11 +181,11 @@ public:
 		});
 	}
 
-	virtual Future<Void> updatePhysicalMetrics() {
+	virtual Future<Void> updateStorageMetrics() {
 		vector<Future<Void>> futures;
 
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			futures.push_back((*it)->updatePhysicalMetrics());
+			futures.push_back((*it)->updateStorageMetrics());
 		}
 		return waitForAll(futures);
 	}
@@ -1049,7 +1049,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
 					try {
-						wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
+						wait( healthyDestinations.updateStorageMetrics() ); //prevent a gap between the polling for an increase in storage metrics and decrementing data in flight
 					} catch( Error& e ) {
 						error = e;
 					}
