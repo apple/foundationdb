@@ -769,8 +769,10 @@ ACTOR Future<Void> workerServer(
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
+	// TODO: Define structs instead of using tuples.
 	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
-	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	               std::tuple<Future<Void>, UID, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	state Reference<AsyncVar<UID>> activeSharedTLog = Reference<AsyncVar<UID>>(new AsyncVar<UID>());
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
@@ -887,13 +889,14 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !std::get<0>(logData).isValid() || std::get<0>(logData).isReady() ? std::get<2>(logData) : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded, activeSharedTLog );
 				recoveries.push_back(recovery.getFuture());
+				activeSharedTLog->set(s.storeID);
 
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
-				if(!logData.first.isValid() || logData.first.isReady()) {
-					logData.first = oldLog.getFuture() || tl;
+				if(!std::get<0>(logData).isValid() || std::get<0>(logData).isReady()) {
+					std::get<0>(logData) = oldLog.getFuture() || tl;
 				}
 				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
@@ -1033,8 +1036,8 @@ ACTOR Future<Void> workerServer(
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
-				logData.second.send(req);
-				if(!logData.first.isValid() || logData.first.isReady()) {
+				std::get<2>(logData).send(req);
+				if(!std::get<0>(logData).isValid() || std::get<0>(logData).isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -1051,11 +1054,14 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded );
-					logData.first = handleIOErrors( logData.first, data, logId );
-					logData.first = handleIOErrors( logData.first, queue, logId );
-					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
+					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, std::get<2>(logData), logId, false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
+					tLogCore = handleIOErrors( tLogCore, data, logId );
+					tLogCore = handleIOErrors( tLogCore, queue, logId );
+					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore ) );
+					std::get<0>(logData) = tLogCore;
+					std::get<1>(logData) = logId;
 				}
+				activeSharedTLog->set(std::get<1>(logData));
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
 				if( !storageCache.exists( req.reqId ) ) {
