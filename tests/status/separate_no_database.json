@@ -37,8 +37,8 @@
             ]
         },
         "fault_tolerance" : {
-            "max_machine_failures_without_losing_availability" : 0,
-            "max_machine_failures_without_losing_data" : 0
+            "max_zone_failures_without_losing_availability" : 0,
+            "max_zone_failures_without_losing_data" : 0
         },
         "machines" : {
             "6344abf1813eb05b" : {
