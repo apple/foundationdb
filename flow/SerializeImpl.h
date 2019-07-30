@@ -19,6 +19,7 @@
  */
 
 #include "flow/serialize.h"
+#include "flow/ObjectSerializer.h"
 
 /**
  * This file provides the implementation for the serialization code (or rather
@@ -69,4 +70,25 @@ void ObjectSerializedMsg<T>::serialize(ObjectWriter& w, T const& value) {
 template <class T>
 void ObjectSerializedMsg<T>::deserialize(ArenaObjectReader& reader, T& value) {
 	reader.deserialize(value);
+}
+
+template <class T, class VersionOptions>
+T StringSerializer<T, VersionOptions>::deserialize(StringRef data, VersionOptions vo, bool useFlatBuffers) {
+	T res;
+	if (useFlatBuffers) {
+		ObjectReader reader(data.begin(), vo);
+		reader.deserialize(res);
+		return res;
+	} else {
+		return BinaryReader::fromStringRef<T>(data, vo);
+	}
+}
+
+template <class T, class VersionOptions>
+Standalone<StringRef> StringSerializer<T, VersionOptions>::serialize(const T &value, VersionOptions vo, bool useFlatBuffers) {
+	if (useFlatBuffers) {
+		return ObjectWriter::toValue(value, vo);
+	} else {
+		return BinaryWriter::toValue(value, vo);
+	}
 }

@@ -19,6 +19,7 @@
  */
 
 #include "flow/flow.h"
+#include "flow/ObjectSerializer.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {

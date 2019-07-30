@@ -21,6 +21,7 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/SerializeImpl.h"
 #include <stdarg.h>
 #include <cinttypes>
 

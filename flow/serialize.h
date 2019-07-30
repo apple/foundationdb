@@ -29,7 +29,6 @@
 #include "flow/Error.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
-#include "flow/ObjectSerializer.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -765,6 +764,9 @@ private:
 	void init( PacketBuffer* buf, ReliablePacket* reliable );
 };
 
+class ObjectWriter;
+class ArenaObjectReader;
+
 struct ISerializeSource {
 	virtual void serializePacketWriter(PacketWriter&, bool useObjectSerializer) const = 0;
 	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
@@ -782,6 +784,12 @@ struct ObjectSerializedMsg {
 	static void serialize(PacketWriter& w, T const& value);
 	static void serialize(ObjectWriter& w, T const& value);
 	static void deserialize(ArenaObjectReader& reader, T& value);
+};
+
+template<class T, class VersionOptions>
+struct StringSerializer {
+	T deserialize(StringRef, VersionOptions vo, bool useFlatBuffers);
+	Standalone<StringRef> serialize(T const& value, VersionOptions vo, bool useFlatBuffers);
 };
 
 template <class T, class V>

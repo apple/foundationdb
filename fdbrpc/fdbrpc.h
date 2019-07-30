@@ -103,18 +103,19 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 			SAV<T>::sendErrorAndDelPromiseRef(error);
 		}
 	}
-	virtual void receive(ArenaObjectReader& reader) {
-		if (!SAV<T>::canBeSet()) return;
-		this->addPromiseRef();
-		ErrorOr<EnsureTable<T>> message;
-		ObjectSerializedMsg<ErrorOr<EnsureTable<T>>>::deserialize(reader, message);
-		//reader.deserialize(message);
-		if (message.isError()) {
-			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
-		} else {
-			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
-		}
-	}
+	virtual void receive(ArenaObjectReader& reader);
+	//virtual void receive(ArenaObjectReader& reader) {
+	//	if (!SAV<T>::canBeSet()) return;
+	//	this->addPromiseRef();
+	//	ErrorOr<EnsureTable<T>> message;
+	//	ObjectSerializedMsg<ErrorOr<EnsureTable<T>>>::deserialize(reader, message);
+	//	//reader.deserialize(message);
+	//	if (message.isError()) {
+	//		SAV<T>::sendErrorAndDelPromiseRef(message.getError());
+	//	} else {
+	//		SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
+	//	}
+	//}
 };
 
 

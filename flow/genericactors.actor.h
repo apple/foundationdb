@@ -726,20 +726,16 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
+ACTOR template <class T>
+Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output,
+                              bool useObjSerializer) {
+	state StringSerializer<T, _IncludeVersion> deserializer;
 	loop {
 		if (input->get().size()) {
-			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin(), IncludeVersion());
-				T res;
-				reader.deserialize(res);
-				output->set(res);
-			} else {
-				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-			}
+			output->set(deserializer.deserialize(input->get(), IncludeVersion(), useObjSerializer));
 		} else
-			output->set( Optional<T>() );
-		wait( input->onChange() );
+			output->set(Optional<T>());
+		wait(input->onChange());
 	}
 }
 
@@ -751,7 +747,7 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
+ACTOR template <class T>
 Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
 	try {
 		loop {
@@ -765,7 +761,7 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
+ACTOR template <class T>
 Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 	wait( delay( time ) );
 	var->set( val );

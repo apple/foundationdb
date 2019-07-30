@@ -30,25 +30,28 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR template <class T>
-void networkSender(Future<T> input, Endpoint endpoint) {
-	try {
-		T value = wait(input);
-		if (g_network->useObjectSerializer()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint);
-		} else {
-			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
-		}
-	} catch (Error& err) {
-		// if (err.code() == error_code_broken_promise) return;
-		ASSERT(err.code() != error_code_actor_cancelled);
-		if (g_network->useObjectSerializer()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint);
-		} else {
-			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);
-		}
-	}
-}
+template <class T>
+void networkSender(Future<T> const& input, Endpoint const& endpoint);
+
+//ACTOR template <class T>
+//void networkSender(Future<T> input, Endpoint endpoint) {
+//	try {
+//		T value = wait(input);
+//		if (g_network->useObjectSerializer()) {
+//			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint);
+//		} else {
+//			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
+//		}
+//	} catch (Error& err) {
+//		// if (err.code() == error_code_broken_promise) return;
+//		ASSERT(err.code() != error_code_actor_cancelled);
+//		if (g_network->useObjectSerializer()) {
+//			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint);
+//		} else {
+//			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);
+//		}
+//	}
+//}
 #include "flow/unactorcompiler.h"
 
 #endif
