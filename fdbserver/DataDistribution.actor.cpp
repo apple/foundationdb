@@ -50,7 +50,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Reference<TCMachineInfo> machine;
 	Future<Void> tracker;
 	int64_t dataInFlightToServer;
-	ErrorOr<GetPhysicalMetricsReply> serverMetrics;
+	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	Promise<Void> removed;
@@ -91,14 +91,14 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 
 ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 	state StorageServerInterface ssi = server->lastKnownInterface;
-	state Future<ErrorOr<GetPhysicalMetricsReply>> metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
+	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
 	state Future<Void> serverRemoved( server->onRemoved );
 
 	loop {
 		choose {
-			when( ErrorOr<GetPhysicalMetricsReply> rep = wait( metricsRequest ) ) {
+			when( ErrorOr<GetStorageMetricsReply> rep = wait( metricsRequest ) ) {
 				if( rep.present() ) {
 					server->serverMetrics = rep;
 					if(server->updated.canBeSet()) {
@@ -118,12 +118,12 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 				return Void();
 			}
 			when( wait( resetRequest ) ) { //To prevent a tight spin loop
-				if(IFailureMonitor::failureMonitor().getState(ssi.getPhysicalMetrics.getEndpoint()).isFailed()) {
-					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getPhysicalMetrics.getEndpoint(), FailureStatus(false));
+				if(IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
+					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(), FailureStatus(false));
 				}
 				else {
 					resetRequest = Never();
-					metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
+					metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 				}
 			}
 		}
@@ -292,8 +292,8 @@ public:
 		return getMinFreeSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinFreeSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
 	}
 
-	virtual Future<Void> updatePhysicalMetrics() {
-		return doUpdatePhysicalMetrics( this );
+	virtual Future<Void> updateStorageMetrics() {
+		return doUpdateStorageMetrics( this );
 	}
 
 	virtual bool isOptimal() {
@@ -341,7 +341,7 @@ private:
 	// Calculate the max of the metrics replies that we received.
 
 
-	ACTOR Future<Void> doUpdatePhysicalMetrics( TCTeamInfo* self ) {
+	ACTOR Future<Void> doUpdateStorageMetrics( TCTeamInfo* self ) {
 		std::vector<Future<Void>> updates;
 		for( int i = 0; i< self->servers.size(); i++ )
 			updates.push_back( updateServerMetrics( self->servers[i] ) );
@@ -540,6 +540,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
+	bool lastBuildTeamsFailed;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 
@@ -626,7 +627,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
 	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
@@ -1449,6 +1450,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
+				lastBuildTeamsFailed = true;
 				break;
 			}
 		}
@@ -1874,6 +1876,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			if (bestServerTeam.size() != configuration.storageTeamSize) {
 				// Not find any team and will unlikely find a team
+				lastBuildTeamsFailed = true;
 				break;
 			}
 
@@ -2018,7 +2021,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineTeamCount", self->machineTeams.size())
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-
+					
+			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
 				state vector<std::vector<UID>> builtTeams;
 
@@ -3099,7 +3103,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		choose {
 			when ( wait(healthChanged) ) {
 				status->isFailed = !status->isFailed;
-				if(!status->isFailed && !server->teams.size()) {
+				if(!status->isFailed && (server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 				}
 				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
@@ -3221,7 +3225,7 @@ ACTOR Future<Void> storageServerTracker(
 				self->restartRecruiting.trigger();
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
-			    server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER) {
+			    ( server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 				self->doBuildTeams = true;
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
@@ -4111,7 +4115,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 				TraceEvent("SnapDDCreateTimedOut")
 					.detail("SnapPayload", snapReq.snapPayload)
 					.detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.sendError(operation_failed());
+				snapReq.reply.sendError(timed_out());
 			}
 		}
 	} catch (Error& e) {

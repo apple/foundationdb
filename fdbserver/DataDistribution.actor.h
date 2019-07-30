@@ -80,7 +80,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) = 0;
 	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) = 0;
 	virtual bool hasHealthyFreeSpace() = 0;
-	virtual Future<Void> updatePhysicalMetrics() = 0;
+	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 	virtual bool isHealthy() = 0;

@@ -101,6 +101,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
+	init( MERGE_ONTO_NEW_TEAM,                                     1 ); if( randomize && BUGGIFY ) MERGE_ONTO_NEW_TEAM = deterministicRandom()->coinflip() ? 0 : 2;
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
@@ -246,7 +247,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPRING_CLEANING_MAX_VACUUM_PAGES,                      1e9 ); if( randomize && BUGGIFY ) SPRING_CLEANING_MAX_VACUUM_PAGES = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt(1, 1e4);
 
 	// KeyValueStoreMemory
-	init( REPLACE_CONTENTS_BYTES,                                1e5 ); if( randomize && BUGGIFY ) REPLACE_CONTENTS_BYTES = 1e3;
+	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
