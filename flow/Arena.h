@@ -1143,7 +1143,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		string_serialized_traits<V> traits;
 		auto* p = out;
 		uint32_t length = t.size();
-		memcpy(out, &length, sizeof(length));
+		*reinterpret_cast<decltype(length)*>(out) = length;
 		out += sizeof(length);
 		for (const auto& item : t) {
 			out += traits.save(out, item);
