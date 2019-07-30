@@ -784,7 +784,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations, Version commitVersion ) {
+	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -805,7 +805,6 @@ struct LogPushData : NonCopyable {
 				messagesWriter[loc] << tag;
 			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
 		}
-		TraceEvent("AddMessage").detail("Tags", describe(prev_tags)).detail("Version", commitVersion).detail("Subseq", subseq).detail("MsgSize", msgsize);
 	}
 
 	template <class T>
