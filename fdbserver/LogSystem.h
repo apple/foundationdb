@@ -521,9 +521,8 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		Version poppedVersion;
-		bool needsPopped;
 
-		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds, bool needsPopped = true );
+		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -578,6 +577,9 @@ struct ILogSystem {
 		Version end;
 		bool hasNextMessage;
 		bool withTags;
+		Version poppedVersion;
+		Version initialPoppedVersion;
+		bool hasReturnedData;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
@@ -781,7 +783,7 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
+	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations, Version commitVersion ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -795,12 +797,14 @@ struct LogPushData : NonCopyable {
 			next_message_tags.clear();
 		}
 		uint32_t subseq = this->subsequence++;
+		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size()) << subseq << uint16_t(prev_tags.size());
+			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
 				messagesWriter[loc] << tag;
 			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
 		}
+		TraceEvent("AddMessage").detail("Tags", describe(prev_tags)).detail("Version", commitVersion).detail("Subseq", subseq).detail("MsgSize", msgsize);
 	}
 
 	template <class T>
