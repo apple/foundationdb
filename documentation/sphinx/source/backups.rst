@@ -407,7 +407,7 @@ The following options apply to all commands:
   Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
 ``--dest_cluster_file <CONNFILE>``
-  Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.
+  Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.
 
 .. _restore-start:
 
