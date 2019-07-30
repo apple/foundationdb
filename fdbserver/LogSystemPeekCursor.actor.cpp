@@ -1041,6 +1041,8 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 		}
 		if(self->hasNextMessage) {
 			self->canDiscardPopped = false;
+		} else {
+			self->messageVersion = LogMessageVersion(self->poppedVersion);
 		}
 	}
 	return Void();

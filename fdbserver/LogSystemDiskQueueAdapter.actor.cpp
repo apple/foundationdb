@@ -60,6 +60,14 @@ public:
 						}
 					}
 				}
+				if(self->cursor->popped() != 0) {
+					self->recoveryQueue.clear();
+					self->recoveryQueueDataSize = 0;
+					self->recoveryLoc = self->cursor->popped();
+					self->recoveryQueueLoc = self->recoveryLoc;
+					throw disk_adapter_reset();
+				}
+
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc)
 					.detail("End", self->logSystem->getEnd()).detail("HasMessage", self->cursor->hasMessage()).detail("Version", self->cursor->version().version); 
 				if(self->recoveryQueueDataSize == 0) {
