@@ -490,7 +490,11 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
-		ASSERT(!primaryDead || !remoteDead);
+		//FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the datacenterDead function
+		if(primaryDead && remoteDead) {
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			return Void();
+		}
 		if(primaryDead || remoteDead) {
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate").detail("RemoteDead", remoteDead).detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
