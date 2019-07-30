@@ -540,6 +540,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
+	bool lastBuildTeamsFailed;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 
@@ -626,7 +627,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
 	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
@@ -1449,6 +1450,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
+				lastBuildTeamsFailed = true;
 				break;
 			}
 		}
@@ -1874,6 +1876,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			if (bestServerTeam.size() != configuration.storageTeamSize) {
 				// Not find any team and will unlikely find a team
+				lastBuildTeamsFailed = true;
 				break;
 			}
 
@@ -2018,7 +2021,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineTeamCount", self->machineTeams.size())
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-
+					
+			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
 				state vector<std::vector<UID>> builtTeams;
 
@@ -3099,7 +3103,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		choose {
 			when ( wait(healthChanged) ) {
 				status->isFailed = !status->isFailed;
-				if(!status->isFailed && !server->teams.size()) {
+				if(!status->isFailed && (server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 				}
 				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
@@ -3221,7 +3225,7 @@ ACTOR Future<Void> storageServerTracker(
 				self->restartRecruiting.trigger();
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
-			    server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER) {
+			    ( server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 				self->doBuildTeams = true;
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
