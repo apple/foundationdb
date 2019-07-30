@@ -65,13 +65,23 @@ public:
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;
 				}
+
 				if(!self->cursor->hasMessage()) {
 					self->recoveryLoc = self->cursor->version().version;
 					wait(yield());
 					continue;
 				}
 			}
-			
+
+			if (self->cursor->popped() != 0) {
+				if (self->startingPoppedVersion == invalidVersion) {
+					self->startingPoppedVersion = self->cursor->popped();
+				}
+				if (self->cursor->popped() != self->startingPoppedVersion && self->cursor->popped() > self->recoveryLoc) {
+					ASSERT(false);
+				}
+			}
+
 			self->recoveryQueue.push_back( Standalone<StringRef>(self->cursor->getMessage(), self->cursor->arena()) );
 			self->recoveryQueueDataSize += self->recoveryQueue.back().size();
 			self->cursor->nextMessage();

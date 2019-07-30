@@ -52,7 +52,7 @@ public:
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality, bool recover=true ) : logSystem(logSystem), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0) {
+	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality, bool recover=true ) : logSystem(logSystem), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), startingPoppedVersion(invalidVersion), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
 			cursor = logSystem->peekTxs( UID(), 1, peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid, peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion );
@@ -100,7 +100,7 @@ private:
 	// Recovery state (used while readNext() is being called repeatedly)
 	bool enableRecovery;
 	Reference<ILogSystem> logSystem;
-	Version recoveryLoc, recoveryQueueLoc;
+	Version recoveryLoc, recoveryQueueLoc, startingPoppedVersion;
 	std::vector<Standalone<StringRef>> recoveryQueue;
 	int recoveryQueueDataSize;
 

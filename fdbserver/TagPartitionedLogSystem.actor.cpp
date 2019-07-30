@@ -807,7 +807,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			cursors[0] = Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(allCursors, localEnd, end, false) );
 			epochEnds.emplace_back(localEnd);
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds, false) );
+			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
 		} catch( Error& e ) {
 			if(e.code() == error_code_worker_removed) {
 				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;

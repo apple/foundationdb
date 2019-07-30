@@ -521,9 +521,8 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		Version poppedVersion;
-		bool needsPopped;
 
-		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds, bool needsPopped = true );
+		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -575,6 +574,7 @@ struct ILogSystem {
 		std::vector<BufferedMessage> messages;
 		int messageIndex;
 		LogMessageVersion messageVersion;
+		Version poppedVersion = 0;
 		Version end;
 		bool hasNextMessage;
 		bool withTags;
