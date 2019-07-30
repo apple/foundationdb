@@ -43,7 +43,7 @@
 #undef min
 #endif
 
-int g_trace_depth = 0;
+thread_local int g_trace_depth = 0;
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
