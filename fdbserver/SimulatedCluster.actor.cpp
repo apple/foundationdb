@@ -1057,7 +1057,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		machine_count = 9;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
-		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minMachinesRequiredPerDatacenter()));
+		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minZonesRequiredPerDatacenter()));
 		machine_count = deterministicRandom()->randomInt( machine_count, std::max(machine_count+1, extraDB ? 6 : 10) );
 		if (generateMachineTeamTestConfig) {
 			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5

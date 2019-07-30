@@ -325,12 +325,17 @@ func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
+func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
+	return o.setOpt(504, nil)
+}
+
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
 func (o TransactionOptions) SetCausalWriteRisky() error {
 	return o.setOpt(10, nil)
 }
 
-// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a fault or partition
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
 func (o TransactionOptions) SetCausalReadRisky() error {
 	return o.setOpt(20, nil)
 }

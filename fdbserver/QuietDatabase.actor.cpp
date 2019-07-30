@@ -245,8 +245,10 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
 						  }));
-	ASSERT(regionsValue.present());
-	int usableRegions = atoi(regionsValue.get().toString().c_str());
+	int usableRegions = 1;
+	if (regionsValue.present()) {
+		usableRegions = atoi(regionsValue.get().toString().c_str());
+	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 
 	vector<WorkerInterface> result;
