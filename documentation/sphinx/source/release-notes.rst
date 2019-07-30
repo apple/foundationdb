@@ -8,6 +8,7 @@ Release Notes
 Features
 --------
 * Improved team collection for data distribution that builds a balanced number of teams per server and gurantees that each server has at least one team. `(PR #1785) <https://github.com/apple/foundationdb/pull/1785>`_.
+* Added the option to have data distribution FetchKeys to run at a lower priority by setting the knob ``FETCH_KEYS_LOWER_PRIORITY`` `(PR #1791) <https://github.com/apple/foundationdb/pull/1791>`_.
 
 * CMake is now our official build system. The Makefile based build system is deprecated.
 
@@ -61,6 +62,7 @@ Other Changes
 * Added new network option for client buggify which will randomly throw expected exceptions in the client. Intended for client testing `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
 * Added ``--cache_memory`` parameter for ``fdbserver`` processes to control the amount of memory dedicated to caching pages read from disk. `(PR #1889) <https://github.com/apple/foundationdb/pull/1889>`_.
 * Added ``MakoWorkload``, used as a benchmark to do performance testing of FDB. `(PR #1586) <https://github.com/apple/foundationdb/pull/1586>`_.
+* Added two knobs ``LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED`` and ``LOAD_BALANCE_DC_ID_LOCALITY_ENABLED`` allowing locality-based decision-making to be toggled on/off during load balancing. `(PR #1820) <https://github.com/apple/foundationdb/pull/1820>`_.
 
 Earlier release notes
 ---------------------
