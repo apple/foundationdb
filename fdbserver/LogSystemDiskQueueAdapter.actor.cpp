@@ -63,13 +63,24 @@ public:
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc)
 					.detail("End", self->logSystem->getEnd()).detail("HasMessage", self->cursor->hasMessage()).detail("Version", self->cursor->version().version); 
 				
-				if(self->cursor->popped() != 0) {
+				if(self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
 					TEST(true); //disk adapter reset
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
 					self->recoveryQueue.clear();
 					self->recoveryQueueDataSize = 0;
 					self->recoveryLoc = self->cursor->popped();
 					self->recoveryQueueLoc = self->recoveryLoc;
+					if(self->peekTypeSwitches%3==1) {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion );
+						self->localityChanged = Never();
+					} else if(self->peekTypeSwitches%3==2) {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+						self->localityChanged = self->peekLocality->onChange();
+					} else {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+						self->localityChanged = self->peekLocality->onChange();
+					}
+					self->hasDiscardedData = true;
 					throw disk_adapter_reset();
 				}
 
