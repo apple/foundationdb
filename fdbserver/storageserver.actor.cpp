@@ -27,30 +27,30 @@
 #include "flow/SystemMonitor.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/SystemData.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/DatabaseContext.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbserver/StorageMetrics.h"
-#include "fdbrpc/sim_validation.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/Stats.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/LatencyBandConfig.h"
-#include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/TDMetric.actor.h"
 #include <type_traits>
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -324,7 +324,7 @@ public:
 			TraceEvent(SevDebug, "LocalRatekeeperChange", thisServerID)
 				.detail("Old", old_rate)
 				.detail("New", res)
-				.detail("NDV", versionLag);
+				.detail("NonDurableVersions", versionLag);
 			old_rate = res;
 		}
 		return res;
@@ -1615,6 +1615,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 
 	Future<Void> checkFatalError = data->otherError.getFuture();
 	data->durableVersion.set( nextDurableVersion );
+	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady()) checkFatalError.get();
 
 	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
@@ -1845,6 +1846,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	if( *isTooOld )
 		throw transaction_too_old();
 
+	ASSERT(!cx->switchable);
 	tr.setVersion( version );
 	tr.info.taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
@@ -1906,12 +1908,9 @@ void addMutation( Reference<T>& target, Version version, MutationRef const& muta
 }
 
 template <class T>
-void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update, vector<int>& execIndex) {
+void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update) {
 	for(int i = 0; i < update.mutations.size(); i++) {
 		splitMutation(data, map, update.mutations[i], update.version);
-		if (update.mutations[i].type == MutationRef::Exec) {
-			execIndex.push_back(i);
-		}
 	}
 }
 
@@ -1930,51 +1929,8 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 				addMutation( i->value(), ver, MutationRef((MutationRef::Type)m.type, k.begin, k.end) );
 			}
 		}
-	} else if (m.type == MutationRef::Exec) {
 	} else
 		ASSERT(false);  // Unknown mutation type in splitMutations
-}
-
-ACTOR Future<Void>
-snapHelper(StorageServer* data, MutationRef m, Version ver)
-{
-	state std::string cmd = m.param1.toString();
-	if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
-		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
-		return Void();
-	}
-
-	state ExecCmdValueString execArg(m.param2);
-	state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-	state int err = 0;
-	state Future<int> cmdErr;
-	state UID execUID = UID::fromString(uidStr.toString());
-	state bool skip = false;
-	if (cmd == execSnap && isTLogInSameNode()) {
-		skip = true;
-	}
-	// other storage has initiated the exec, so we can skip
-	if (!skip && isExecOpInProgress(execUID)) {
-		skip = true;
-	}
-
-	if (!skip) {
-		setExecOpInProgress(execUID);
-		int err = wait(execHelper(&execArg, data->folder, "role=storage"));
-		clearExecOpInProgress(execUID);
-	}
-	TraceEvent te = TraceEvent("ExecTraceStorage");
-	te.detail("Uid", uidStr.toString());
-	te.detail("Status", err);
-	te.detail("Role", "storage");
-	te.detail("Version", ver);
-	te.detail("Mutation", m.toString());
-	te.detail("Mid", data->thisServerID.toString());
-	te.detail("DurableVersion", data->durableVersion.get());
-	te.detail("DataVersion", data->version.get());
-	te.detail("Tag", data->tag.toString());
-	te.detail("SnapCreateSkipped", skip);
-	return Void();
 }
 
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
@@ -2084,28 +2040,22 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				if (this_block.more) {
 					Key nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
 					if (nfk != keys.end) {
-						state std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
+						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
 
 						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
 						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
-						state AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
 						// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
 						// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
-						state vector<int> execIdxVec;
-						state std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
+						std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
 						for(; u != updatesToSplit.end(); ++u) {
-							ASSERT(execIdxVec.size() == 0);
-							splitMutations(data, data->shards, *u, execIdxVec);
-							for (auto execIdx : execIdxVec) {
-								wait(snapHelper(data, u->mutations[execIdx], u->version));
-							}
-							execIdxVec.clear();
+							splitMutations(data, data->shards, *u);
 						}
 
 						TEST( true );
@@ -2298,8 +2248,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 		adding->addMutation(version, mutation);
 	else if (readWrite)
 		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
-	else if ((mutation.type != MutationRef::ClearRange)
-	         && (mutation.type != MutationRef::Exec)) {
+	else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation.toString());
 		ASSERT(false);  // Mutation delivered to notAssigned shard!
 	}
@@ -2714,9 +2663,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
-				if (pUpdate->mutations[mutationNum].type == MutationRef::Exec) {
-					wait(snapHelper(data, pUpdate->mutations[mutationNum], pUpdate->version));
-				}
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
 				if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
@@ -2789,9 +2735,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 							++data->counters.atomicMutations;
 							break;
 					}
-					if (msg.type == MutationRef::Exec) {
-						wait(snapHelper(data, msg, ver));
-					}
 				}
 				else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
@@ -2821,6 +2764,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->noRecentUpdates.set(false);
 			data->lastUpdate = now();
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
+			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
 			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
@@ -3455,9 +3399,9 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 					self->metrics.splitMetrics( req );
 				}
 			}
-			when (GetPhysicalMetricsRequest req = waitNext(ssi.getPhysicalMetrics.getFuture())) {
+			when (GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getPhysicalMetrics( req, sb );
+				self->metrics.getStorageMetrics( req, sb, self->counters.bytesInput.getRate() );
 			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();

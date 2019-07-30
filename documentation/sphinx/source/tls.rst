@@ -34,6 +34,8 @@ This will configure the new cluster to communicate with TLS.
 Converting an existing cluster to use TLS (since v6.1)
 ======================================================
 
+.. warning:: Release 6.2 removed the "connected_coordinators" field from status.
+
 Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:
 
 1) Restart each FoundationDB server individually, but with an additional listen address for TLS traffic::

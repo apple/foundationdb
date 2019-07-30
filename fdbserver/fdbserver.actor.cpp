@@ -82,8 +82,13 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
+	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+};
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -129,6 +134,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
 	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
 	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
 	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
@@ -619,6 +625,10 @@ static void printUsage( const char *name, bool devhelp ) {
 			   "                 Maximum amount of memory used for storage. The default\n"
 			   "                 value is 1GiB. When specified without a unit, MB is\n"
 			   "                 assumed.\n");
+		printf("  --cache_memory SIZE\n"
+		       "                 The amount of memory to use for caching disk pages.\n"
+		       "                 The default value is 2GiB. When specified without a unit,\n"
+		       "                 MiB is assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -865,6 +875,20 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	}
 
 	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
+}
+
+// moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
+void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
+	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
+	for (const auto & fileEntry: returnFiles) {
+		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
+			//rename files
+			TraceEvent("RenamingSnapFile")
+				.detail("Oldname", dirSrc + "/" + fileEntry)
+				.detail("Newname", dirToMove + "/" + fileEntry);
+			renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
+		}
+	}
 }
 
 int main(int argc, char* argv[]) {
@@ -1251,6 +1275,16 @@ int main(int argc, char* argv[]) {
 						flushAndExit(FDB_EXIT_ERROR);
 					}
 					storageMemLimit = ti.get();
+					break;
+				case OPT_CACHEMEMLIMIT:
+					ti = parse_with_suffix(args.OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
+					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
 					break;
 				case OPT_BUGGIFY:
 					if( !strcmp( args.OptionArg(), "on" ) )
@@ -1704,34 +1738,33 @@ int main(int argc, char* argv[]) {
 					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
 					// delete all files (except fdb.cluster) in non-snap directories
-					for (int i = 0; i < returnList.size(); i++) {
-						if (returnList[i] == "." || returnList[i] == "..") {
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
-						if (returnList[i].find(snapStr) != std::string::npos) {
+						if (dirEntry.find(snapStr) != std::string::npos) {
 							continue;
 						}
 
-						std::string childf = absDataFolder + "/" + returnList[i];
+						std::string childf = absDataFolder + "/" + dirEntry;
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-						for (int j = 0; j < returnFiles.size(); j++) {
-							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
+						for (const auto & fileEntry : returnFiles) {
+							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
 								TraceEvent("DeletingNonSnapfiles")
-									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
-								deleteFile(childf + "/" + returnFiles[j]);
+									.detail("FileBeingDeleted", childf + "/" + fileEntry);
+								deleteFile(childf + "/" + fileEntry);
 							}
 						}
 					}
-					// move the contents from snap folder to the original folder,
-					// delete snap folders
-					for (int i = 0; i < returnList.size(); i++) {
-						if (returnList[i] == "." || returnList[i] == "..") {
+					// cleanup unwanted and partial directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
-						std::string dirSrc = absDataFolder + "/" + returnList[i];
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
 						// delete snap directories which are not part of restoreSnapUID
-						if (returnList[i].find(snapStr) == std::string::npos) {
-							if (returnList[i].find("snap") != std::string::npos) {
+						if (dirEntry.find(snapStr) == std::string::npos) {
+							if (dirEntry.find("snap") != std::string::npos) {
 								platform::eraseDirectoryRecursive(dirSrc);
 							}
 							continue;
@@ -1743,14 +1776,28 @@ int main(int argc, char* argv[]) {
 							platform::eraseDirectoryRecursive(dirSrc);
 							continue;
 						}
-						std::string origDir = returnList[i].substr(0, 32);
-						std::string dirToRemove = absDataFolder + "/" + origDir;
-						TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
-						platform::eraseDirectoryRecursive(dirToRemove);
-						renameFile(dirSrc, dirToRemove);
-						TraceEvent("RenamingSnapToOriginalDirectory")
-							.detail("Oldname", dirSrc)
-							.detail("Newname", dirToRemove);
+					}
+					// move snapshotted files to appropriate locations
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						std::string origDir = dirEntry.substr(0, 32);
+						std::string dirToMove = absDataFolder + "/" + origDir;
+						if ((dirEntry.find("snap") != std::string::npos) &&
+							(dirEntry.find("tlog") != std::string::npos)) {
+							// restore tlog files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "log");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("storage") != std::string::npos)) {
+							// restore storage files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "storage");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("coord") != std::string::npos)) {
+							// restore coordinator files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "coordination");
+						}
 					}
 				}
 			}

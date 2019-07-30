@@ -45,6 +45,10 @@ struct TLogInterface {
 	RequestStream< struct TLogConfirmRunningRequest > confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
+	RequestStream< struct TLogDisablePopRequest> disablePopRequest;
+	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
+	RequestStream< struct TLogSnapRequest> snapRequest;
+
 	
 	TLogInterface() {}
 	explicit TLogInterface(LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
@@ -69,7 +73,8 @@ struct TLogInterface {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
 		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
+		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
+		  , disablePopRequest, enablePopRequest, snapRequest);
 	}
 };
 
@@ -220,16 +225,16 @@ struct TLogCommitRequest {
 
 	ReplyPromise<Version> reply;
 	Optional<UID> debugID;
-    bool hasExecOp;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, bool hasExecOp, Optional<UID> debugID )
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID), hasExecOp(hasExecOp){}
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID, hasExecOp);
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
 	}
 };
+
 
 struct TLogQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 12206626;
@@ -252,6 +257,55 @@ struct TLogQueuingMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+struct TLogDisablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022806;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogDisablePopRequest() = default;
+	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogEnablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022809;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogEnablePopRequest() = default;
+	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	TLogSnapRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
 	}
 };
 

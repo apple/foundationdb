@@ -81,6 +81,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 
+	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
+	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
+
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
@@ -98,6 +101,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
+	init( MERGE_ONTO_NEW_TEAM,                                     1 ); if( randomize && BUGGIFY ) MERGE_ONTO_NEW_TEAM = deterministicRandom()->coinflip() ? 0 : 2;
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
@@ -243,7 +247,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPRING_CLEANING_MAX_VACUUM_PAGES,                      1e9 ); if( randomize && BUGGIFY ) SPRING_CLEANING_MAX_VACUUM_PAGES = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt(1, 1e4);
 
 	// KeyValueStoreMemory
-	init( REPLACE_CONTENTS_BYTES,                                1e5 ); if( randomize && BUGGIFY ) REPLACE_CONTENTS_BYTES = 1e3;
+	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -287,8 +291,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PROXY_SPIN_DELAY,                                     0.01 );
 	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
 	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
-	init( PROXY_FORWARD_DELAY,                                  10.0 );
-	init( MAX_FORWARD_MESSAGES,                                  1e6 ); if( randomize && BUGGIFY ) MAX_FORWARD_MESSAGES = 10;
+	init( MIN_CONFIRM_INTERVAL,                                 0.05 );
+
+	bool shortRecoveryDuration = randomize && BUGGIFY;
+	init( ENFORCED_MIN_RECOVERY_DURATION,                       0.085 ); if( shortRecoveryDuration ) ENFORCED_MIN_RECOVERY_DURATION = 0.01;
+	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -336,6 +343,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
+	init( COORDINATOR_REGISTER_INTERVAL,                        30.0 );
+	init( CLIENT_REGISTER_INTERVAL,                            300.0 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,             ProcessClass::UnsetFit );
@@ -462,7 +471,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );
-	BUGGIFY_ALL_COORDINATION =                                   false;   if( randomize && BUGGIFY ) { BUGGIFY_ALL_COORDINATION = true; TraceEvent("BuggifyAllCoordination"); }
+	BUGGIFY_ALL_COORDINATION =                                   false; if( randomize && BUGGIFY ) BUGGIFY_ALL_COORDINATION = true;
 
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );

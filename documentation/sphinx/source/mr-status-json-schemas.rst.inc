@@ -294,7 +294,14 @@
                          "log_group":"default"
                      }
                  ],
+                 "max_protocol_clients":[
+                     {
+                         "address":"127.0.0.1:9898",
+                         "log_group":"default"
+                     }
+                 ],
                  "count" : 1,
+                 "max_protocol_count" : 1,
                  "protocol_version" : "fdb00a400050001",
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }

@@ -18,21 +18,24 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/DatabaseContext.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
 #include <set>
 #include <sstream>
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/Replication.h"
-#include "flow/UnitTest.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 class TCTeamInfo;
@@ -47,7 +50,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Reference<TCMachineInfo> machine;
 	Future<Void> tracker;
 	int64_t dataInFlightToServer;
-	ErrorOr<GetPhysicalMetricsReply> serverMetrics;
+	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	Promise<Void> removed;
@@ -88,14 +91,14 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 
 ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 	state StorageServerInterface ssi = server->lastKnownInterface;
-	state Future<ErrorOr<GetPhysicalMetricsReply>> metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
+	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
 	state Future<Void> serverRemoved( server->onRemoved );
 
 	loop {
 		choose {
-			when( ErrorOr<GetPhysicalMetricsReply> rep = wait( metricsRequest ) ) {
+			when( ErrorOr<GetStorageMetricsReply> rep = wait( metricsRequest ) ) {
 				if( rep.present() ) {
 					server->serverMetrics = rep;
 					if(server->updated.canBeSet()) {
@@ -115,12 +118,12 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 				return Void();
 			}
 			when( wait( resetRequest ) ) { //To prevent a tight spin loop
-				if(IFailureMonitor::failureMonitor().getState(ssi.getPhysicalMetrics.getEndpoint()).isFailed()) {
-					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getPhysicalMetrics.getEndpoint(), FailureStatus(false));
+				if(IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
+					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(), FailureStatus(false));
 				}
 				else {
 					resetRequest = Never();
-					metricsRequest = ssi.getPhysicalMetrics.tryGetReply( GetPhysicalMetricsRequest(), TaskPriority::DataDistributionLaunch );
+					metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 				}
 			}
 		}
@@ -132,7 +135,7 @@ ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server ) {
 	return Void();
 }
 
-// Machine team information
+// TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
 public:
 	vector<Reference<TCMachineInfo>> machines;
@@ -167,6 +170,7 @@ public:
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
 };
 
+// TeamCollection's server team info.
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
 private:
 	vector< Reference<TCServerInfo> > servers;
@@ -288,8 +292,8 @@ public:
 		return getMinFreeSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinFreeSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
 	}
 
-	virtual Future<Void> updatePhysicalMetrics() {
-		return doUpdatePhysicalMetrics( this );
+	virtual Future<Void> updateStorageMetrics() {
+		return doUpdateStorageMetrics( this );
 	}
 
 	virtual bool isOptimal() {
@@ -337,7 +341,7 @@ private:
 	// Calculate the max of the metrics replies that we received.
 
 
-	ACTOR Future<Void> doUpdatePhysicalMetrics( TCTeamInfo* self ) {
+	ACTOR Future<Void> doUpdateStorageMetrics( TCTeamInfo* self ) {
 		std::vector<Future<Void>> updates;
 		for( int i = 0; i< self->servers.size(); i++ )
 			updates.push_back( updateServerMetrics( self->servers[i] ) );
@@ -536,6 +540,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
+	bool lastBuildTeamsFailed;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 
@@ -622,7 +627,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
 	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
@@ -1445,6 +1450,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
+				lastBuildTeamsFailed = true;
 				break;
 			}
 		}
@@ -1870,6 +1876,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			if (bestServerTeam.size() != configuration.storageTeamSize) {
 				// Not find any team and will unlikely find a team
+				lastBuildTeamsFailed = true;
 				break;
 			}
 
@@ -2014,7 +2021,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineTeamCount", self->machineTeams.size())
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-
+					
+			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
 				state vector<std::vector<UID>> builtTeams;
 
@@ -3095,7 +3103,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 		choose {
 			when ( wait(healthChanged) ) {
 				status->isFailed = !status->isFailed;
-				if(!status->isFailed && !server->teams.size()) {
+				if(!status->isFailed && (server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 				}
 				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
@@ -3217,7 +3225,7 @@ ACTOR Future<Void> storageServerTracker(
 				self->restartRecruiting.trigger();
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
-			    server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER) {
+			    ( server->teams.size() < SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER || self->lastBuildTeamsFailed)) {
 				self->doBuildTeams = true;
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
@@ -3456,6 +3464,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 	return Void();
 }
 
+// Recruit a worker as a storage server
 ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Future<RecruitStorageReply> fCandidateWorker;
 	state RecruitStorageRequest lastRequest;
@@ -3598,6 +3607,8 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		wait( self->readyToStart || error );
 		TraceEvent("DDTeamCollectionReadyToStart", self->distributorId).detail("Primary", self->primary);
 
+		// removeBadTeams() does not always run. We may need to restart the actor when needed.
+		// So we need the badTeamRemover variable to check if the actor is ready.
 		if(self->badTeamRemover.isReady()) {
 			self->badTeamRemover = removeBadTeams(self);
 			self->addActor.send(self->badTeamRemover);
@@ -3618,6 +3629,8 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 			self->addActor.send(updateReplicasKey(self, self->includedDCs[0]));
 		}
 
+		// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
+		// they are always running.
 		self->addActor.send(storageRecruiter( self, db ));
 		self->addActor.send(monitorStorageServerRecruitment( self ));
 		self->addActor.send(waitServerListChange( self, serverRemoved.getFuture() ));
@@ -3997,9 +4010,134 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	TraceEvent("SnapDataDistributor.SnapReqEnter")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	try {
+		// disable tlog pop on local tlog nodes
+		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
+		std::vector<Future<Void>> disablePops;
+		for (const auto & tlog : tlogs) {
+			disablePops.push_back(
+				transformErrors(throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))), operation_failed())
+				);
+		}
+		wait(waitForAll(disablePops));
+
+		TraceEvent("SnapDataDistributor.AfterDisableTLogPop")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap local storage nodes
+		std::vector<WorkerInterface> storageWorkers = wait(getStorageWorkers(cx, db, true /* localOnly */));
+		TraceEvent("SnapDataDistributor.GotStorageWorkers")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		std::vector<Future<Void>> storageSnapReqs;
+		for (const auto & worker : storageWorkers) {
+			storageSnapReqs.push_back(
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))), operation_failed())
+				);
+		}
+		wait(waitForAll(storageSnapReqs));
+
+		TraceEvent("SnapDataDistributor.AfterSnapStorage")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap local tlog nodes
+		std::vector<Future<Void>> tLogSnapReqs;
+		for (const auto & tlog : tlogs) {
+			tLogSnapReqs.push_back(
+				transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))), operation_failed())
+				);
+		}
+		wait(waitForAll(tLogSnapReqs));
+
+		TraceEvent("SnapDataDistributor.AfterTLogStorage")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// enable tlog pop on local tlog nodes
+		std::vector<Future<Void>> enablePops;
+		for (const auto & tlog : tlogs) {
+			enablePops.push_back(
+				transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), operation_failed())
+				);
+		}
+		wait(waitForAll(enablePops));
+
+		TraceEvent("SnapDataDistributor.AfterEnableTLogPops")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		// snap the coordinators
+		std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, db));
+		TraceEvent("SnapDataDistributor.GotCoordWorkers")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+		std::vector<Future<Void>> coordSnapReqs;
+		for (const auto & worker : coordWorkers) {
+			coordSnapReqs.push_back(
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))), operation_failed())
+				);
+		}
+		wait(waitForAll(coordSnapReqs));
+		TraceEvent("SnapDataDistributor.AfterSnapCoords")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID);
+	} catch (Error& e) {
+		TraceEvent("SnapDataDistributor.SnapReqExit")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled */);
+		throw e;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	state Future<Void> dbInfoChange = db->onChange();
+	double delayTime = g_network->isSimulated() ? 70.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
+	try {
+		choose {
+			when (wait(dbInfoChange)) {
+				TraceEvent("SnapDDCreateDBInfoChanged")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.sendError(operation_failed());
+			}
+			when (wait(ddSnapCreateCore(snapReq, db))) {
+				TraceEvent("SnapDDCreateSuccess")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.send(Void());
+			}
+			when (wait(delay(delayTime))) {
+				TraceEvent("SnapDDCreateTimedOut")
+					.detail("SnapPayload", snapReq.snapPayload)
+					.detail("SnapUID", snapReq.snapUID);
+				snapReq.reply.sendError(timed_out());
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent("SnapDDCreateError")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled */);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state ActorCollection actors(false);
+	self->addActor.send(actors.getResult());
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
@@ -4015,6 +4153,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(Void());
 				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
 				break;
+			}
+			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
+				actors.add(ddSnapCreate(snapReq, db));
 			}
 		}
 	}
@@ -4202,7 +4343,9 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state int teamSize = 3;
+	//state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
+	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
@@ -4214,7 +4357,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	for(auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
 		auto teamCount = process->second->teams.size();
 		ASSERT(teamCount >= 1);
-		// ASSERT(teamCount <= 5);
+		//ASSERT(teamCount <= targetTeamsPerServer);
 	}
 
 	delete(collection);
@@ -4232,7 +4375,9 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	state int processSize = 5;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state int teamSize = 3;
+	state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
+	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);

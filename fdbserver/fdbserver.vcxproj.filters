@@ -256,6 +256,9 @@
     <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\DifferentClustersSameRV.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>

@@ -390,7 +390,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
 						//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
-						if (self->performQuiescentChecks && (!shards.present() || shards.get().newClientInfo.present()))
+						if (self->performQuiescentChecks && !shards.present())
 						{
 							TraceEvent("ConsistencyCheck_MasterProxyUnavailable").detail("MasterProxyID", proxyInfo->getId(i));
 							self->testFailure("Master proxy unavailable");
@@ -399,7 +399,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 						//Get the list of shards if one was returned.  If not doing a quiescent check, we can break if it is.
 						//If we are doing a quiescent check, then we only need to do this for the first shard.
-						if (shards.present() && !shards.get().newClientInfo.present() && !keyServersInsertedForThisIteration)
+						if (shards.present() && !keyServersInsertedForThisIteration)
 						{
 							keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
 							keyServersInsertedForThisIteration = true;

@@ -102,6 +102,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
 
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
@@ -233,8 +234,9 @@ public:
 	double PROXY_SPIN_DELAY;
 	double UPDATE_REMOTE_LOG_VERSION_INTERVAL;
 	int MAX_TXS_POP_VERSION_HISTORY;
-	double PROXY_FORWARD_DELAY;
-	int MAX_FORWARD_MESSAGES;
+	double MIN_CONFIRM_INTERVAL;
+	double ENFORCED_MIN_RECOVERY_DURATION;
+	double REQUIRED_MIN_RECOVERY_DURATION;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -279,6 +281,8 @@ public:
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
+	double COORDINATOR_REGISTER_INTERVAL;
+	double CLIENT_REGISTER_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -327,6 +331,9 @@ public:
 	int64_t TLOG_HARD_LIMIT_BYTES;
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
+
+	// disk snapshot
+	double SNAP_CREATE_MAX_TIMEOUT;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

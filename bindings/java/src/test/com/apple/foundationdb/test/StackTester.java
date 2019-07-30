@@ -446,6 +446,7 @@ public class StackTester {
 						db.options().setTransactionMaxRetryDelay(100);
 						db.options().setTransactionRetryLimit(10);
 						db.options().setTransactionRetryLimit(-1);
+						db.options().setTransactionCausalReadRisky();
 
 						tr.options().setPrioritySystemImmediate();
 						tr.options().setPriorityBatch();
