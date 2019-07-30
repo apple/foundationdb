@@ -47,8 +47,7 @@ case $1 in
 		fi
 		;;
 	    *)
-	  echo "Linker: $CC -v $OPTIONS"
-		$CC -v $OPTIONS
+		$CC $OPTIONS
 		;;
 	esac
 
