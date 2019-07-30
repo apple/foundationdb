@@ -579,7 +579,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-	       "                 Zone identifier key (up to 16 hex characters). Defaults\n"
+	       "                 Machine identifier key (up to 16 hex characters). Defaults\n"
 	       "                 to a random value shared by all fdbserver processes on this\n"
 	       "                 machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
