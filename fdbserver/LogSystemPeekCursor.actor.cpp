@@ -1035,15 +1035,15 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	}
 
 	wait(yield());
-	if(self->canDiscardPopped && self->poppedVersion > self->messageVersion.version) {
-		TraceEvent(SevWarn, "DiscardingPoppedData").detail("Version", self->messageVersion.version).detail("Popped", self->poppedVersion);
-		self->messageVersion = LogMessageVersion(self->poppedVersion);
+	if(self->canDiscardPopped && self->poppedVersion > self->version().version) {
+		TraceEvent(SevWarn, "DiscardingPoppedData").detail("Version", self->version().version).detail("Popped", self->poppedVersion);
+		self->messageVersion = std::max(self->messageVersion, LogMessageVersion(self->poppedVersion));
 		self->messageIndex = self->messages.size();
 		if (self->messages.size() > 0 && self->messages[self->messages.size()-1].version < self->messageVersion) {
  			self->hasNextMessage = false;
  		} else {
  			auto iter = std::lower_bound(self->messages.begin(), self->messages.end(),
- 					ILogSystem::BufferedCursor::BufferedMessage(self->arena(), LiteralStringRef(""), {}, self->messageVersion));
+ 					ILogSystem::BufferedCursor::BufferedMessage(self->poppedVersion));
  			self->hasNextMessage = iter != self->messages.end();
 			if(self->hasNextMessage) {
 				self->messageIndex = iter - self->messages.begin();

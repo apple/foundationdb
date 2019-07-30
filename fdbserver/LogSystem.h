@@ -559,6 +559,7 @@ struct ILogSystem {
 			LogMessageVersion version;
 
 			BufferedMessage() {}
+			explicit BufferedMessage( Version version ) : version(version) {}
 			BufferedMessage( Arena arena, StringRef message, const std::vector<Tag>& tags, const LogMessageVersion& version ) : arena(arena), message(message), tags(tags), version(version) {}
 
 			bool operator < (BufferedMessage const& r) const {
