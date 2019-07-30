@@ -1047,9 +1047,11 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
  			self->hasNextMessage = iter != self->messages.end();
 			if(self->hasNextMessage) {
 				self->messageIndex = iter - self->messages.begin();
-				self->canDiscardPopped = false;
 			}
 		}
+	}
+	if(self->hasNextMessage) {
+		self->canDiscardPopped = false;
 	}
 	return Void();
 }
