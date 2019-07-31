@@ -259,7 +259,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 					hugeArenaSample(reqSize);
 				}
-				g_hugeArenaMemory += reqSize;
+				g_hugeArenaMemory.fetch_add(reqSize);
 
 				// If the new block has less free space than the old block, make the old block depend on it
 				if (next && !next->isTiny() && next->unused() >= reqSize-dataSize) {
@@ -296,7 +296,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				#ifdef ALLOC_INSTRUMENTATION
 					allocInstr[ "ArenaHugeKB" ].dealloc( (bigSize+1023)>>10 );
 				#endif
-				g_hugeArenaMemory -= bigSize;
+				g_hugeArenaMemory.fetch_sub(bigSize);
 				delete[] (uint8_t*)this;
 			}
 		}

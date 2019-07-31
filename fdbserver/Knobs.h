@@ -141,6 +141,8 @@ public:
 	int64_t DD_LOCATION_CACHE_SIZE;
 	double MOVEKEYS_LOCK_POLLING_DELAY;
 	double DEBOUNCE_RECRUITING_DELAY;
+	int REBALANCE_MAX_RETRIES;
+	int DD_OVERLAP_PENALTY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
