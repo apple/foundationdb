@@ -119,7 +119,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, value);
+		serializer(ar, penalty, error, value);
 	}
 };
 
@@ -167,7 +167,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
+		serializer(ar, penalty, error, data, version, more, arena);
 	}
 };
 
@@ -198,7 +198,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, sel);
+		serializer(ar, penalty, error, sel);
 	}
 };
 
