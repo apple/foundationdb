@@ -1472,7 +1472,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					maxAttempts += 1;
 					continue;
 				}
-				score += 10000*overlap;
+				score += SERVER_KNOBS->DD_OVERLAP_PENALTY*overlap;
 
 				// SOMEDAY: randomly pick one from teams with the lowest score
 				if (score < bestScore) {
@@ -1910,7 +1910,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Pick the server team with smallest score in all attempts
 				// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
-				int score = 10000*overlap;
+				int score = SERVER_KNOBS->DD_OVERLAP_PENALTY*overlap;
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}

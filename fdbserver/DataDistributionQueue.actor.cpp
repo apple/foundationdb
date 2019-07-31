@@ -1120,20 +1120,17 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	state KeyRange moveShard;
 	state StorageMetrics metrics;
 	state int retries = 0;
-	while(retries < 100) {
+	while(retries < SERVER_KNOBS->REBALANCE_MAX_RETRIES) {
 		state KeyRange testShard = deterministicRandom()->randomChoice( shards );
 		StorageMetrics testMetrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(testShard)) ) );
-		if(metrics.bytes >= averageShardBytes) {
+		if(testMetrics.bytes > metrics.bytes) {
 			moveShard = testShard;
 			metrics = testMetrics;
-			break;
+			if(metrics.bytes > averageShardBytes) {
+				break;
+			}
 		}
 		retries++;
-	}
-
-	if(retries == 100) {
-		TraceEvent(SevWarn, "CannotFindSmallShard", self->distributorId).detail("Src", sourceTeam->getDesc()).detail("AverageShardBytes", averageShardBytes).detail("Shards", shards.size());
-		return false;
 	}
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);
