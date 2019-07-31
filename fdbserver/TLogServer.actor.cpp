@@ -1589,6 +1589,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 }
 
 ACTOR Future<Void> watchDegraded(TLogData* self) {
+	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		return Void();
+	}
+	
 	//This delay is divided into multiple delays to avoid marking the tlog as degraded because of a single SlowTask
 	state int loopCount = 0;
 	while(loopCount < SERVER_KNOBS->TLOG_DEGRADED_DELAY_COUNT) {

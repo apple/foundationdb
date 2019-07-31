@@ -729,11 +729,15 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
-	self->masterProxiesChangeTrigger.trigger();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
+	auto clearedClientInfo = self->clientInfo->get();
+	clearedClientInfo.proxies.clear();
+	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
+	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
+	
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
