@@ -30,8 +30,8 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR template <class Node>
-Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
+ACTOR template <class Node, class Allocator>
+Future<Void> ISFreeNodes(std::vector<Node*> toFree, Allocator* alloc, bool synchronous) {
 	// Frees the forest of nodes in the 'toFree' vector. 
 	// If 'synchronous' is true, then there can be no waits.
 
@@ -57,7 +57,7 @@ Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
 		if (n->child[0]) toFree.push_back(n->child[0]);
 		if (n->child[1]) toFree.push_back(n->child[1]);
 		n->child[0] = n->child[1] = 0;
-		delete n;
+		n->destroy(*alloc);
 		++eraseCount;
 
 		if(!synchronous && eraseCount % 1000 == 0)
