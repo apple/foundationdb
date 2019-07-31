@@ -940,6 +940,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							for(auto& it : self->resultEntries) {
 								serverIds.push_back(*tempMap->getObject(it));
 							}
+							std::sort(serverIds.begin(), serverIds.end());
 							self->addTeam(serverIds.begin(), serverIds.end(), true);
 						}
 					} else {
