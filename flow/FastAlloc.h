@@ -40,6 +40,7 @@
 #include "flow/Hash3.h"
 
 #include <assert.h>
+#include <atomic>
 #include <vector>
 #include <cstdlib>
 #include <cstdio>
@@ -152,7 +153,7 @@ private:
 	static void releaseMagazine(void*);
 };
 
-extern int64_t g_hugeArenaMemory;
+extern std::atomic<int64_t> g_hugeArenaMemory;
 void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();

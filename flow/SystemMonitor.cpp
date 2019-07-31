@@ -115,7 +115,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(2048)
 				.DETAILALLOCATORMEMUSAGE(4096)
 				.DETAILALLOCATORMEMUSAGE(8192)
-				.detail("HugeArenaMemory", g_hugeArenaMemory);
+				.detail("HugeArenaMemory", g_hugeArenaMemory.load());
 
 			TraceEvent n("NetworkMetrics");
 			n
