@@ -3754,7 +3754,7 @@ ACTOR Future<Void> waitForDataDistributionEnabled( Database cx ) {
 				rd >> m;
 				TraceEvent(SevDebug, "WaitForDDEnabled")
 					.detail("Mode", m)
-					.detail("IsDDEnabled()", isDDEnabled());
+					.detail("IsDDEnabled", isDDEnabled());
 				if (m && isDDEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded");
 					return Void();
