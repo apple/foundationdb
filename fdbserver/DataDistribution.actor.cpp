@@ -3781,7 +3781,7 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 				if (m && isDDEnabled()) {
 					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						.detail("Mode", m)
-						.detail("IsDDEnabled()", isDDEnabled());
+						.detail("IsDDEnabled", isDDEnabled());
 					return true;
 				}
 			}
