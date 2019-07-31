@@ -66,15 +66,11 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 };
 
 // Subclasses must initialize all members in their default constructors
+// Subclasses must serialize all members
 struct LoadBalancedReply {
 	double penalty;
 	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, penalty, error);
-	}
 };
 
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
