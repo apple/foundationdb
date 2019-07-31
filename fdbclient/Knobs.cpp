@@ -45,7 +45,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
-	init( MAX_CLIENT_PROXY_CONNECTIONS,              3 ); if( randomize && BUGGIFY ) MAX_CLIENT_PROXY_CONNECTIONS = 1;
+	init( MAX_CLIENT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_CLIENT_PROXY_CONNECTIONS = 1;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 

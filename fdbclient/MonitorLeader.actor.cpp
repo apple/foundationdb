@@ -603,13 +603,6 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		choose {
 			when( state ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
-				if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
-					deterministicRandom()->randomShuffle(ni.proxies);
-					ni.proxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
-					for(int i = 0; i < ni.proxies.size(); i++) {
-						TraceEvent("ClientConnectedProxy", knownLeader->get().get().clientInterface.id()).detail("Proxy", ni.proxies[i].id());
-					}
-				}
 				clientData->clientInfo->set(ni);
 			}
 			when( wait( knownLeader->onChange() ) ) {}
@@ -674,6 +667,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	state int idx = 0;
 	state int successIdx = 0;
 	state Optional<double> incorrectTime;
+	state std::vector<UID> lastProxyUIDs;
+
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer( addrs[idx] );
@@ -722,6 +717,22 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 
 			info.hasConnected = true;
 			connFile->notifyConnected();
+
+			auto& ni = rep.get();
+			if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
+				std::vector<UID> proxyUIDs;
+				for(auto& proxy : ni.proxies) {
+					proxyUIDs.push_back(proxy.id());
+				}
+				if(proxyUIDs != lastProxyUIDs) {
+					lastProxyUIDs = proxyUIDs;
+					deterministicRandom()->randomShuffle(ni.proxies);
+					ni.proxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
+					for(int i = 0; i < ni.proxies.size(); i++) {
+						TraceEvent("ClientConnectedProxy", knownLeader->get().get().clientInterface.id()).detail("Proxy", ni.proxies[i].id());
+					}
+				}
+			}
 
 			clientInfo->set( rep.get() );
 			successIdx = idx;
