@@ -3161,8 +3161,6 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 			} else if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 				// Ignore all SS failures
 				status->isFailed = false;
-				// status->isUndesired = false;
-				// status->isWrongConfiguration = false;
 				inHealthyZone = true;
 				TraceEvent("SSFailureTracker", self->distributorId)
 				    .suppressFor(1.0)
@@ -3209,8 +3207,6 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 						    .detail("ServerID", interf.id())
 						    .detail("Status", status->toString());
 						status->isFailed = false;
-						// status->isUndesired = false;
-						// status->isWrongConfiguration = false;
 					} else if (self->clearHealthyZoneFuture.isReady()) {
 						self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
 						TraceEvent("MaintenanceZoneCleared", self->distributorId);

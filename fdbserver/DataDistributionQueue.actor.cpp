@@ -56,9 +56,9 @@ struct RelocateData {
 			mergeWantsNewServers(rs.keys, rs.priority)), interval("QueuedRelocation") {}
 
 	static bool mergeWantsNewServers(KeyRangeRef keys, int priority) {
-		return priority == PRIORITY_MERGE_SHARD && 
-			(SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 2 || 
-				(SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 1 && keys.begin.startsWith(LiteralStringRef("\xff"))));
+		return priority == PRIORITY_MERGE_SHARD &&
+		       (SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 2 ||
+		        (SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 1 && keys.begin.startsWith(LiteralStringRef("\xff"))));
 	}
 
 	bool operator> (const RelocateData& rhs) const {
@@ -561,7 +561,7 @@ struct DDQueueData {
 				}
 
 				// If the size of keyServerEntries is large, then just assume we are using all storage servers
-				// Why the size can be large? 
+				// Why the size can be large?
 				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
 				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
@@ -1176,6 +1176,10 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
+				if (skipCurrentLoop && !val.present()) {
+					// reset loop interval
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+				}
 				skipCurrentLoop = val.present();
 			}
 			wait(delayF);
@@ -1184,8 +1188,6 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
 				continue;
-			} else {
-				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 			}
 			if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
@@ -1243,6 +1245,10 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
+				if (skipCurrentLoop && !val.present()) {
+					// reset loop interval
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+				}
 				skipCurrentLoop = val.present();
 			}
 			wait(delayF);
@@ -1251,8 +1257,6 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
 				continue;
-			} else {
-				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 			}
 			if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {

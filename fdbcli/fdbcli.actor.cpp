@@ -2609,7 +2609,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
-			Future<Void> checkStatusF = checkStatus(Void(), ccf);
+			Future<Void> checkStatusF = checkStatus(Void(), db->getConnectionFile());
 			Future<Void> checkDDStatusF = checkDataDistributionStatus(db, true);
 			wait(makeInterruptable(success(checkStatusF) && success(checkDDStatusF)));
 		}
