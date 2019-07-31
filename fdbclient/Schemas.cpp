@@ -232,8 +232,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -614,8 +614,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map":{

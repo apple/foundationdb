@@ -245,8 +245,10 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
 						  }));
-	ASSERT(regionsValue.present());
-	int usableRegions = atoi(regionsValue.get().toString().c_str());
+	int usableRegions = 1;
+	if (regionsValue.present()) {
+		usableRegions = atoi(regionsValue.get().toString().c_str());
+	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 
 	vector<WorkerInterface> result;
@@ -490,7 +492,11 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
-		ASSERT(!primaryDead || !remoteDead);
+		//FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the datacenterDead function
+		if(primaryDead && remoteDead) {
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			return Void();
+		}
 		if(primaryDead || remoteDead) {
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate").detail("RemoteDead", remoteDead).detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
