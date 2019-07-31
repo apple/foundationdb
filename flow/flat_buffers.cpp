@@ -180,8 +180,8 @@ TEST_CASE("flow/FlatBuffers/collectVTables") {
 	ASSERT(vtables == detail::get_vtableset(root, context));
 	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
 	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
-	int root_offset = vtables->offsets.at(&root_vtable);
-	int nested_offset = vtables->offsets.at(&nested_vtable);
+	int root_offset = vtables->getOffset(&root_vtable);
+	int nested_offset = vtables->getOffset(&nested_vtable);
 	ASSERT(!memcmp((uint8_t*)&root_vtable[0], &vtables->packed_tables[root_offset], root_vtable.size()));
 	ASSERT(!memcmp((uint8_t*)&nested_vtable[0], &vtables->packed_tables[nested_offset], nested_vtable.size()));
 	return Void();

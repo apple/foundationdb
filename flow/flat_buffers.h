@@ -512,7 +512,12 @@ void for_each(F&& f, Members&&... members) {
 }
 
 struct VTableSet {
-	std::map<const VTable*, int> offsets;
+	// Precondition: vtable is in offsets
+	int getOffset(const VTable* vtable) const {
+		return std::lower_bound(offsets.begin(), offsets.end(), std::make_pair(vtable, -1))->second;
+	}
+	// Sorted map
+	std::vector<std::pair<const VTable*, int>> offsets;
 	std::vector<uint8_t> packed_tables;
 };
 
@@ -601,11 +606,12 @@ VTableSet get_vtableset_impl(const Root& root, const Context& context) {
 	}
 	std::vector<uint8_t> packed_tables(size);
 	int i = 0;
-	std::map<const VTable*, int> offsets;
+	std::vector<std::pair<const VTable*, int>> offsets;
+	offsets.reserve(vtables.size());
 	for (const auto* vtable : vtables) {
 		memcpy(&packed_tables[i], reinterpret_cast<const uint8_t*>(&(*vtable)[0]),
 		       vec_bytes(vtable->begin(), vtable->end()));
-		offsets[vtable] = i;
+		offsets.push_back({ vtable, i });
 		i += vec_bytes(vtable->begin(), vtable->end());
 	}
 	return VTableSet{ offsets, packed_tables };
@@ -777,7 +783,7 @@ struct SaveVisitorLambda : Context {
 			    }
 		    },
 		    members...);
-		int vtable_offset = writer.vtable_start - vtableset->offsets.at(&vtable);
+		int vtable_offset = writer.vtable_start - vtableset->getOffset(&vtable);
 		int padding = 0;
 		int start =
 		    RightAlign(writer.current_buffer_size + vtable[1] - 4, std::max({ 4, fb_align<Members>... }), &padding) + 4;
