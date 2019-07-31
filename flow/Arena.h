@@ -110,6 +110,35 @@ public:
 	Reference<struct ArenaBlock> impl;
 };
 
+template<class T>
+struct ArenaAllocator {
+	Arena arena;
+	using value_type = T;
+	using size_type = std::size_t;
+	using difference_type = std::ptrdiff_t;
+	using propagate_on_container_move_assignment = std::true_type;
+	using is_always_equal = std::true_type;
+	template <class U>
+	struct rebind {
+		typedef ArenaAllocator<U> other;
+	};
+
+	ArenaAllocator(const Arena& arena) = default;
+	ArenaAllocator() = delete;
+	template<class U>
+	ArenaAllocator(ArenaAllocator<U>&& o) : arena(std::move(o.arena)) {}
+	template<class U>
+	ArenaAllocator(const ArenaAllocator<U>& o) : arena(o.arena) {}
+
+	[[nodiscard]]
+	T* allocate(std::size_t n) {
+		return reinterpret_cast<T*>(new (arena) uint8_t[n*sizeof(T)]);
+	}
+
+	void deallocate(T* p, std::size_t n) {
+	}
+};
+
 template<>
 struct scalar_traits<Arena> : std::true_type {
 	constexpr static size_t size = 0;

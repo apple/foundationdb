@@ -55,13 +55,13 @@ class Future;
 
 class Void;
 
-template <class T, class Metric>
+template <class T, class Metric, class Allocator = FastAllocAllocator<T>>
 struct IndexedSet{
 	typedef T value_type;
 	typedef T key_type;
 
 private: // Forward-declare IndexedSet::Node because Clang is much stricter about this ordering.
-	struct Node : FastAllocated<Node> {
+	struct Node {
 		// Here, and throughout all code that indirectly instantiates a Node, we rely on forwarding
 		// references so that we don't need to maintain the set of 2^arity lvalue and rvalue reference
 		// combinations, but still take advantage of move constructors when available (or required).
@@ -69,9 +69,15 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		Node(T_&& data, Metric_&& m, Node* parent=0) : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
 			child[0] = child[1] = NULL;
 		}
-		~Node(){
-			delete child[0];
-			delete child[1];
+		void destroy(Allocator& allocator) {
+			if (child[0]) {
+				child[0]->destroy(allocator);
+			}
+			if (child[1]) {
+				child[1]->destroy(allocator);
+			}
+			this->~Node();
+			allocator.deallocate(this, 1);
 		}
 
 		T data;
@@ -79,7 +85,12 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		Metric total;			// this + child[0] + child[1]
 		Node *child[2];			// left, right
 		Node *parent;
+	private:
+		~Node() = default;
+
 	};
+
+	typename Allocator::template rebind<Node>::other allocator;
 
 public:
 	struct iterator{
@@ -94,10 +105,16 @@ public:
 		bool operator != ( const iterator& r ) const { return i != r.i; }
 	};
 
-	IndexedSet() : root(NULL) {};
-	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = NULL; }
-	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
+	explicit IndexedSet(const Allocator& allocator = Allocator()) : root(nullptr), allocator(allocator) {};
+	~IndexedSet() { root->destroy(allocator); }
+	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root), allocator(std::move(r.allocator)) { r.root = nullptr; }
+	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT {
+		allocator = std::move(r.allocator);
+		root->destroy(allocator);
+		root = r.root;
+		r.root = nullptr;
+		return *this;
+	}
 
 	iterator begin() const;
 	iterator end() const { return iterator(); }
@@ -105,7 +122,7 @@ public:
 	iterator lastItem() const;
 
 	bool empty() const { return !root; }
-	void clear() { delete root; root = NULL; }
+	void clear() { root->destroy(allocator); root = nullptr; }
 	void swap( IndexedSet& r ) { std::swap( root, r.root ); }
 
 	// Place data in the set with the given metric.  If an item equal to data is already in the set and,
@@ -171,7 +188,7 @@ public:
 	iterator index( M const& metric ) const;
 
 	// Return the metric inserted with item x
-	Metric getMetric(iterator x) const; 
+	Metric getMetric(iterator x) const;
 
 	// Return the sum of getMetric(x) for begin()<=x<to
 	Metric sumTo(iterator to) const;
@@ -180,7 +197,7 @@ public:
 	Metric sumRange(iterator begin, iterator end) const { return sumTo(end) - sumTo(begin); }
 
 	// Return the sum of getMetric(x) for all x s.t. begin <= *x && *x < end
-	template <class Key> 
+	template <class Key>
 	Metric sumRange(const Key& begin, const Key& end) const { return sumRange(lower_bound(begin), lower_bound(end)); }
 
 	// Return the amount of memory used by an entry in the IndexedSet
@@ -188,7 +205,7 @@ public:
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
-	IndexedSet( const IndexedSet& );  
+	IndexedSet( const IndexedSet& );
 	IndexedSet& operator=( const IndexedSet& );
 
 	Node *root;
@@ -275,12 +292,12 @@ public:
 	iterator previous(iterator i) const { return set.previous(i); }
 	bool empty() const { return set.empty(); }
 
-	Value& operator[]( const Key& key ) { 
+	Value& operator[]( const Key& key ) {
 		iterator i = set.insert( Pair(key, Value()), Metric(1), false );
 		return i->value;
 	}
 
-	Value& get( const Key& key, Metric m = Metric(1) ) { 
+	Value& get( const Key& key, Metric m = Metric(1) ) {
 		iterator i = set.insert( Pair(key, Value()), m, false );
 		return i->value;
 	}
@@ -288,7 +305,7 @@ public:
 	iterator insert( const Pair& p, bool replaceExisting = true, Metric m = Metric(1) ) { return set.insert(p, m, replaceExisting); }
 	iterator insert( Pair && p, bool replaceExisting = true, Metric m = Metric(1) ) { return set.insert(std::move(p), m, replaceExisting); }
 	int insert( const std::vector<std::pair<MapPair<Key,Value>, Metric>>& pairs, bool replaceExisting = true) { return set.insert(pairs, replaceExisting); }
-	
+
 	template <class KeyCompatible>
 	void erase( KeyCompatible const& k ) { set.erase(k); }
 	void erase( iterator b, iterator e ) { set.erase(b,e); }
@@ -307,12 +324,12 @@ public:
 	iterator upper_bound( KeyCompatible const& k ) const { return set.upper_bound(k); }
 	template <class KeyCompatible>
 	iterator lastLessOrEqual( KeyCompatible const& k ) const { return set.lastLessOrEqual(k); }
-	template <class M> 
+	template <class M>
 	iterator index( M const& metric ) const { return set.index(metric); }
 	Metric getMetric(iterator x) const { return set.getMetric(x); }
 	Metric sumTo(iterator to) const { return set.sumTo(to); }
 	Metric sumRange(iterator begin, iterator end) const { return set.sumRange(begin,end); }
-	template <class KeyCompatible> 
+	template <class KeyCompatible>
 	Metric sumRange(const KeyCompatible& begin, const KeyCompatible& end) const { return set.sumRange(begin,end); }
 
 	static int getElementBytes() { return IndexedSet< Pair, Metric >::getElementBytes(); }
@@ -329,13 +346,13 @@ private:
 
 /////////////////////// implementation //////////////////////////
 
-template <class T, class Metric>
-void IndexedSet<T,Metric>::iterator::operator++(){
+template <class T, class Metric, class Allocator>
+void IndexedSet<T,Metric,Allocator>::iterator::operator++(){
 	moveIterator<1>(i);
 }
 
-template <class T, class Metric>
-void IndexedSet<T,Metric>::iterator::decrementNonEnd(){
+template <class T, class Metric, class Allocator>
+void IndexedSet<T,Metric,Allocator>::iterator::decrementNonEnd(){
 	moveIterator<0>(i);
 }
 
@@ -385,17 +402,17 @@ int ISRebalance( Node*& root ) {
 	// rebalance is O(1) if abs(root->balance)<=2, and probably O(log N) otherwise.  (The rare "still unbalanced" recursion is hard to analyze)
 	//
 	// The documentation of this function will be referencing the following tree (where
-	// nodes A, C, E, and G represent subtrees of unspecified height). Thus for each node X, 
+	// nodes A, C, E, and G represent subtrees of unspecified height). Thus for each node X,
 	// we know the value of balance(X), but not height(X).
 	//
 	// We will assume that balance(F) < 0 (so we will be rotating right).
 	// Trees that rotate to the left will perform analagous operations.
-	// 
+	//
 	//         F
 	//       /   \
 	//      B     G
 	//     / \
-	//    A   D 
+	//    A   D
 	//       / \
 	//      C   E
 
@@ -417,7 +434,7 @@ int ISRebalance( Node*& root ) {
 	//        /   \
 	//       D     G
 	//      / \
-	//     B   E 
+	//     B   E
 	//    / \
 	//   A   C
 	//
@@ -434,7 +451,7 @@ int ISRebalance( Node*& root ) {
 		// We know that height(A) == max(height(C), height(E)) because B had balance of +1
 		// If height(E) >= height(C), then height(E) == height(A) and balance(D') = -1
 		// Otherwise height(C) == height(E) + 1, and therefore balance(D') = -2
-		n->balance = ((x==-bal) ? -2 : -1)*bal; 
+		n->balance = ((x==-bal) ? -2 : -1)*bal;
 
 		// Compute the balance at the old root node B' of our rotation
 		// As stated above, height(A) == max(height(C), height(E))
@@ -469,7 +486,7 @@ int ISRebalance( Node*& root ) {
 	// height(G) - height(A) = height(G) - height(B) + 1 = balance(F) + 1
 	//
 	// Otherwise, height(A) = height(D) - balance(B) = height(B) - 1 - balance(B), so
-	// height(G) - height(A) = height(G) - height(B) + 1 + balance(B) = balance(F) + 1 + balance(B) 
+	// height(G) - height(A) = height(G) - height(B) + 1 + balance(B) = balance(F) + 1 + balance(B)
 	//
 	// balance(B') = 1 + max(balance(B), balance(F) + 1 + max(balance(B), 0))
 	//
@@ -482,8 +499,8 @@ int ISRebalance( Node*& root ) {
 	// If height(D) >= height(A) (i.e. balance(B) >= 0), then height(D) = height(B) - 1, so
 	// balance(F') = height(G) - height(B) + 1 = balance(F) + 1
 	//
-	// Otherwise, height(D) = height(A) + balance(B) = height(B) - 1 + balance(B), so 
-	// balance(F') = height(G) - height(B) + 1 - balance(B) = balance(F) + 1 - balance(B) 
+	// Otherwise, height(D) = height(A) + balance(B) = height(B) - 1 + balance(B), so
+	// balance(F') = height(G) - height(B) + 1 - balance(B) = balance(F) + 1 - balance(B)
 	//
 	// balance(F') = balance(F) + 1 - min(balance(B), 0)
 	//
@@ -504,8 +521,8 @@ int ISRebalance( Node*& root ) {
 	//
 	// If we did a single rotation, then height(A) >= height(D).
 	// As a result, height(A) >= height(G) + 1; otherwise the tree would be balanced and we wouldn't do any rotations.
-	// 
-	// Then the original height of the tree is height(A) + 2, 
+	//
+	// Then the original height of the tree is height(A) + 2,
 	// and the new height is max(height(D) + 2 + childHeightChange, height(A) + 1), so
 	//
 	// heightChange_single = max(height(D) + 2 + childHeightChange, height(A) + 1) - (height(A) + 2)
@@ -560,33 +577,33 @@ Node* ISCommonSubtreeRoot(Node* first, Node* last) {
 	return f;
 }
 
-template <class T, class Metric>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::begin() const {
+template <class T, class Metric, class Allocator>
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::begin() const {
 	Node *x = root;
 	while (x && x->child[0])
 		x = x->child[0];
 	return x;
 }
 
-template <class T, class Metric>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::previous(typename IndexedSet<T,Metric>::iterator i) const {
-	if (i==end())
-		return lastItem();
+template <class T, class Metric, class Allocator>
+typename IndexedSet<T, Metric, Allocator>::iterator IndexedSet<T, Metric, Allocator>::previous(
+    typename IndexedSet<T, Metric, Allocator>::iterator i) const {
+	if (i == end()) return lastItem();
 
 	moveIterator<0>(i.i);
 	return i;
 }
 
-template <class T, class Metric>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lastItem() const {
+template <class T, class Metric, class Allocator>
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::lastItem() const {
 	Node *x = root;
 	while (x && x->child[1])
 		x = x->child[1];
 	return x;
 }
 
-template <class T, class Metric> template<class T_, class Metric_>
-Metric IndexedSet<T,Metric>::addMetric(T_&& data, Metric_&& metric){
+template <class T, class Metric, class Allocator> template<class T_, class Metric_>
+Metric IndexedSet<T,Metric,Allocator>::addMetric(T_&& data, Metric_&& metric){
 	auto i = find( data );
 	if (i == end()) {
 		insert( std::forward<T_>(data), std::forward<Metric_>(metric) );
@@ -598,10 +615,10 @@ Metric IndexedSet<T,Metric>::addMetric(T_&& data, Metric_&& metric){
 	}
 }
 
-template <class T, class Metric> template<class T_, class Metric_>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, Metric_&& metric, bool replaceExisting){
+template <class T, class Metric, class Allocator> template<class T_, class Metric_>
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::insert(T_&& data, Metric_&& metric, bool replaceExisting){
 	if (root == NULL){
-		root = new Node(std::forward<T_>(data), std::forward<Metric_>(metric));
+		root = new (allocator.allocate(1)) Node(std::forward<T_>(data), std::forward<Metric_>(metric));
 		return root;
 	}
 	Node *t = root;
@@ -632,7 +649,7 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 		t = nextT;
 	}
 
-	Node *newNode = new Node(std::forward<T_>(data), std::forward<Metric_>(metric), t);
+	Node *newNode = new (allocator.allocate(1)) Node(std::forward<T_>(data), std::forward<Metric_>(metric), t);
 	t->child[d] = newNode;
 
 	while (true){
@@ -670,8 +687,8 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 	return newNode;
 }
 
-template <class T, class Metric>
-int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVector, bool replaceExisting) {
+template <class T, class Metric,class Allocator>
+int IndexedSet<T,Metric,Allocator>::insert(const std::vector<std::pair<T,Metric>>& dataVector, bool replaceExisting) {
 	int num_inserted = 0;
 	Node *blockStart = NULL;
 	Node *blockEnd = NULL;
@@ -684,7 +701,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 		if(blockStart == NULL || (blockEnd != NULL && data >= blockEnd->data)) {
 			blockEnd = NULL;
 			if (root == NULL){
-				root = new Node(std::move(data), metric);
+				root = new (allocator.allocate(1)) Node(std::move(data), metric);
 				num_inserted++;
 				blockStart = root;
 				continue;
@@ -719,7 +736,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 					break;
 				}
 				Node *nextT = t->child[d];
-				if (!nextT) { 
+				if (!nextT) {
 					blockStart = t;
 					break;
 				}
@@ -736,7 +753,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 			d = 0;
 		}
 
-		Node *newNode = new Node(std::move(data), metric, t);
+		Node *newNode = new (allocator.allocate(1)) Node(std::move(data), metric, t);
 		num_inserted++;
 
 		t->child[d] = newNode;
@@ -777,8 +794,8 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 	return num_inserted;
 }
 
-template <class T, class Metric>
-Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, int& heightDelta, std::vector<Node*>& toFree ) {
+template <class T, class Metric, class Allocator>
+Metric IndexedSet<T,Metric,Allocator>::eraseHalf( Node* start, Node* end, int eraseDir, int& heightDelta, std::vector<Node*>& toFree ) {
 	// Removes all nodes between start (inclusive) and end (exclusive) from the set, where start is equal to end or one of its descendants
 	// eraseDir 1 means erase the right half (nodes > at) of the left subtree of end.  eraseDir 0 means the left half of the right subtree
 	// toFree is extended with the roots of completely removed subtrees
@@ -799,10 +816,10 @@ Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, in
 	while(start != end) {
 		start->total = start->total - metricDelta;
 
-		IndexedSet<T,Metric>::Node *parent = start->parent;
+		IndexedSet<T,Metric,Allocator>::Node *parent = start->parent;
 
 		// Obtain the child pointer to start, which rebalance will update with the new root of the subtree currently rooted at start
-		IndexedSet<T,Metric>::Node *& node = parent->child[ parent->child[1] == start ];
+		IndexedSet<T,Metric,Allocator>::Node *& node = parent->child[ parent->child[1] == start ];
 		int nextDir = parent->child[1] == start;
 
 		if (fromDir==eraseDir) {
@@ -816,13 +833,13 @@ Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, in
 			metricDelta = metricDelta + start->total;
 
 			// If there is a surviving subtree of start, then connect it to start->parent
-			IndexedSet<T,Metric>::Node *n = node->child[fromDir];
+			IndexedSet<T,Metric,Allocator>::Node *n = node->child[fromDir];
 			node = n; // This updates the appropriate child pointer of start->parent
 			if (n) {
 				metricDelta = metricDelta - n->total;
 				n->parent = start->parent;
 			}
-			
+
 			start->child[fromDir] = NULL;
 			toFree.push_back( start );
 		}
@@ -835,7 +852,7 @@ Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, in
 		parent->balance += heightDelta * dir;
 
 		// Compute the change in height of start's parent based on its change in balance.
-		// Because we can only be (possibly) shrinking one subtree of parent: 
+		// Because we can only be (possibly) shrinking one subtree of parent:
 		//   If we were originally heavier on the shrunken size (oldBalance * dir > 0), then the change in height is at most abs(oldBalance) == oldBalance * dir.
 		//   If we were lighter on the shrunken side, then height cannot change.
 		int maxHeightChange = std::max(oldBalance * dir, 0);
@@ -849,8 +866,10 @@ Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, in
 	return metricDelta;
 }
 
-template <class T, class Metric>
-void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin, typename IndexedSet<T,Metric>::iterator end, std::vector<Node*>& toFree ) {
+template <class T, class Metric, class Allocator>
+void IndexedSet<T, Metric, Allocator>::erase(typename IndexedSet<T, Metric, Allocator>::iterator begin,
+                                             typename IndexedSet<T, Metric, Allocator>::iterator end,
+                                             std::vector<Node*>& toFree) {
 	// Removes all nodes in the set between first and last, inclusive.
 	// toFree is extended with the roots of completely removed subtrees.
 
@@ -858,23 +877,23 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 
 	if(begin == end)
 		return;
-	
-	IndexedSet<T,Metric>::Node* first = begin.i;
-	IndexedSet<T,Metric>::Node* last = previous(end).i; 
 
-	IndexedSet<T,Metric>::Node* subRoot = ISCommonSubtreeRoot(first, last);
+	IndexedSet<T,Metric,Allocator>::Node* first = begin.i;
+	IndexedSet<T,Metric,Allocator>::Node* last = previous(end).i;
+
+	IndexedSet<T,Metric,Allocator>::Node* subRoot = ISCommonSubtreeRoot(first, last);
 
 	Metric metricDelta = 0;
 	int leftHeightDelta = 0;
 	int rightHeightDelta = 0;
-	
+
 	// Erase all matching nodes that descend from subRoot, by first erasing descendants of subRoot->child[0] and then erasing the descendants of subRoot->child[1]
 	// subRoot is not removed from the tree at this time
 	metricDelta = metricDelta + eraseHalf( first, subRoot, 1, leftHeightDelta, toFree );
 	metricDelta = metricDelta + eraseHalf( last, subRoot, 0, rightHeightDelta, toFree );
 
 	// Change in the height of subRoot due to past activity, before subRoot is rebalanced. subRoot->balance already reflects changes in height to its children.
-	int heightDelta = leftHeightDelta + rightHeightDelta; 
+	int heightDelta = leftHeightDelta + rightHeightDelta;
 
 	// Rebalance and update metrics for all nodes from subRoot up to the root
 	for(auto p = subRoot; p != NULL; p = p->parent) {
@@ -898,8 +917,8 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	erase( IndexedSet<T,Metric>::iterator(subRoot) );
 }
 
-template <class T, class Metric>
-void IndexedSet<T,Metric>::erase(iterator toErase) {
+template <class T, class Metric, class Allocator>
+void IndexedSet<T,Metric,Allocator>::erase(iterator toErase) {
 	Node* rebalanceNode;
 	int rebalanceDir;
 
@@ -918,8 +937,8 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 			if (rebalanceNode) rebalanceDir = rebalanceNode->child[1] == t;
 			int d = !t->child[0];  // Only one child, on this side (or no children!)
 			replacePointer(t, t->child[d]);
-			t->child[d] = 0;
-			delete t;
+			t->child[d] = nullptr;
+			t->destroy(allocator);
 		} else {  // Remove node with two children
 			Node* predecessor = t->child[0];
 			while ( predecessor->child[1] )
@@ -947,7 +966,7 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 					t->child[i] = 0;
 				}
 			}
-			delete t;
+			t->destroy(allocator);
 		}
 	}
 
@@ -984,9 +1003,9 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 }
 
 // Returns x such that key==*x, or end()
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class Key>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::find(const Key &key) const {
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::find(const Key &key) const {
 	Node* t = root;
 	while (t){
 		int d = t->data < key;
@@ -998,9 +1017,10 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::find(const Key &ke
 }
 
 // Returns the smallest x such that *x>=key, or end()
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class Key>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lower_bound(const Key &key) const {
+typename IndexedSet<T, Metric, Allocator>::iterator IndexedSet<T, Metric, Allocator>::lower_bound(
+    const Key& key) const {
 	Node* t = root;
 	if (!t) return iterator();
 	while (true) {
@@ -1016,9 +1036,10 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lower_bound(const 
 }
 
 // Returns the smallest x such that *x>key, or end()
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class Key>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::upper_bound(const Key &key) const {
+typename IndexedSet<T, Metric, Allocator>::iterator IndexedSet<T, Metric, Allocator>::upper_bound(
+    const Key& key) const {
 	Node* t = root;
 	if (!t) return iterator();
 	while (true) {
@@ -1033,18 +1054,18 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::upper_bound(const 
 	return iterator(t);
 }
 
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class Key>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lastLessOrEqual(const Key &key) const {
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::lastLessOrEqual(const Key &key) const {
 	iterator i = upper_bound(key);
 	if (i == begin()) return end();
 	return previous(i);
 }
 
 // Returns first x such that metric < sum(begin(), x+1), or end()
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class M>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::index( M const& metric ) const
+typename IndexedSet<T,Metric,Allocator>::iterator IndexedSet<T,Metric,Allocator>::index( M const& metric ) const
 {
 	M m = metric;
 	Node* t = root;
@@ -1063,17 +1084,17 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::index( M const& me
 	return end();
 }
 
-template <class T, class Metric>
-Metric IndexedSet<T,Metric>::getMetric(typename IndexedSet<T,Metric>::iterator x) const {
+template <class T, class Metric, class Allocator>
+Metric IndexedSet<T,Metric,Allocator>::getMetric(typename IndexedSet<T,Metric,Allocator>::iterator x) const {
 	Metric m = x.i->total;
 	for(int i=0; i<2; i++)
-		if (x.i->child[i]) 
+		if (x.i->child[i])
 			m = m - x.i->child[i]->total;
 	return m;
 }
 
-template <class T, class Metric>
-Metric IndexedSet<T,Metric>::sumTo(typename IndexedSet<T,Metric>::iterator end) const {
+template <class T, class Metric, class Allocator>
+Metric IndexedSet<T,Metric,Allocator>::sumTo(typename IndexedSet<T,Metric,Allocator>::iterator end) const {
 	if (!end.i)
 		return root ? root->total : Metric();
 
@@ -1090,23 +1111,25 @@ Metric IndexedSet<T,Metric>::sumTo(typename IndexedSet<T,Metric>::iterator end) 
 #include "flow/flow.h"
 #include "flow/IndexedSet.actor.h"
 
-template <class T, class Metric>
-void IndexedSet<T,Metric>::erase(typename IndexedSet<T,Metric>::iterator begin, typename IndexedSet<T,Metric>::iterator end) {
-	std::vector<IndexedSet<T,Metric>::Node*> toFree;
+template <class T, class Metric, class Allocator>
+void IndexedSet<T, Metric, Allocator>::erase(typename IndexedSet<T, Metric, Allocator>::iterator begin,
+                                             typename IndexedSet<T, Metric, Allocator>::iterator end) {
+	std::vector<IndexedSet<T, Metric,Allocator>::Node*> toFree;
 	erase(begin, end, toFree);
 
 	ISFreeNodes(toFree, true);
 }
 
-template <class T, class Metric>
+template <class T, class Metric, class Allocator>
 template <class Key>
-Future<Void> IndexedSet<T, Metric>::eraseAsync(const Key &begin, const Key &end) {
-	return eraseAsync(lower_bound(begin), lower_bound(end) ); 
+Future<Void> IndexedSet<T, Metric, Allocator>::eraseAsync(const Key &begin, const Key &end) {
+	return eraseAsync(lower_bound(begin), lower_bound(end) );
 }
 
-template <class T, class Metric>
-Future<Void> IndexedSet<T, Metric>::eraseAsync(typename IndexedSet<T,Metric>::iterator begin, typename IndexedSet<T,Metric>::iterator end) {
-	std::vector<IndexedSet<T,Metric>::Node*> toFree;
+template <class T, class Metric, class Allocator>
+Future<Void> IndexedSet<T, Metric, Allocator>::eraseAsync(typename IndexedSet<T, Metric, Allocator>::iterator begin,
+                                                          typename IndexedSet<T, Metric, Allocator>::iterator end) {
+	std::vector<IndexedSet<T, Metric,Allocator>::Node*> toFree;
 	erase(begin, end, toFree);
 
 	return uncancellable(ISFreeNodes(toFree, false));

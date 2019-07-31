@@ -149,7 +149,7 @@ private:
 
 	FastAllocator();  // not implemented
 	static void initThread();
-	static void getMagazine();   
+	static void getMagazine();
 	static void releaseMagazine(void*);
 };
 
@@ -225,5 +225,33 @@ static void freeFast(int size, void* ptr) {
 	if (size <= 512) return FastAllocator<512>::release(ptr);
 	delete[](uint8_t*)ptr;
 }
+
+template<class T>
+struct FastAllocAllocator {
+	using value_type = T;
+	using size_type = std::size_t;
+	using difference_type = std::ptrdiff_t;
+	using propagate_on_container_move_assignment = std::true_type;
+	using is_always_equal = std::true_type;
+	template <class U>
+	struct rebind {
+		typedef FastAllocAllocator<U> other;
+	};
+
+	constexpr FastAllocAllocator() noexcept {}
+	template<class U>
+	FastAllocAllocator(const FastAllocAllocator<U>& o) {}
+	template<class U>
+	FastAllocAllocator(FastAllocAllocator<U>&& o) {}
+
+	[[nodiscard]]
+	T* allocate(std::size_t n) {
+		return reinterpret_cast<T*>(allocateFast(n*sizeof(T)));
+	}
+
+	void deallocate(T* p, std::size_t n) {
+		freeFast(n * sizeof(T), p);
+	}
+};
 
 #endif
