@@ -40,7 +40,7 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 
 struct TimedRequest {
 	void setRequestTime(double requestTime_) { this->requestTime_ = requestTime_; }
-	double requestTime() {
+	double requestTime() const {
 		ASSERT(requestTime_ > 0);
 		return requestTime_;
 	}
