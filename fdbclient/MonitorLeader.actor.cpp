@@ -729,7 +729,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 					deterministicRandom()->randomShuffle(ni.proxies);
 					ni.proxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
 					for(int i = 0; i < ni.proxies.size(); i++) {
-						TraceEvent("ClientConnectedProxy", knownLeader->get().get().clientInterface.id()).detail("Proxy", ni.proxies[i].id());
+						TraceEvent("ClientConnectedProxy").detail("Proxy", ni.proxies[i].id());
 					}
 				}
 			}
