@@ -1134,7 +1134,7 @@ Future<Void> IndexedSet<T, Metric, Allocator>::eraseAsync(typename IndexedSet<T,
 	std::vector<IndexedSet<T, Metric,Allocator>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	return uncancellable(ISFreeNodes(toFree, allocator, false));
+	return uncancellable(ISFreeNodes(toFree, &allocator, false));
 }
 
 #endif
