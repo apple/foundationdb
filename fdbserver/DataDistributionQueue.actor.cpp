@@ -1164,23 +1164,29 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 }
 
 ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionIndex ) {
-	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
-	state double sinceLastRead = 0;
+	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	loop {
 		try {
-			state Future<Void> deleyF = delay(checkDelay, TaskPriority::DataDistributionLaunch);
-			if (sinceLastRead > 1) {
+			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
+			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				sinceLastRead = 0;
+				lastRead = now();
 				skipCurrentLoop = val.present();
 			}
-			wait(deleyF);
-			sinceLastRead += checkDelay;
-			if (skipCurrentLoop) continue;
+			wait(delayF);
+			if (skipCurrentLoop) {
+				// set loop interval to avoid busy wait here.
+				rebalancePollingInterval =
+				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				continue;
+			} else {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+			}
 			if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
@@ -1205,14 +1211,16 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			}
 
 			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-				checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
+				rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
+				                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 			} else {
-				checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+				rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
+				                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
 			}
 
 			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-			    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
-				checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+			    rebalancePollingInterval < SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL) {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 			}
 			tr.reset();
@@ -1223,23 +1231,29 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 }
 
 ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex) {
-	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
-	state double sinceLastRead = 0;
+	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	loop {
 		try {
-			state Future<Void> deleyF = delay(checkDelay, TaskPriority::DataDistributionLaunch);
-			if (sinceLastRead > 1) {
+			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
+			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				sinceLastRead = 0;
+				lastRead = now();
 				skipCurrentLoop = val.present();
 			}
-			wait(deleyF);
-			sinceLastRead += checkDelay;
-			if (skipCurrentLoop) continue;
+			wait(delayF);
+			if (skipCurrentLoop) {
+				// set loop interval to avoid busy wait here.
+				rebalancePollingInterval =
+				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				continue;
+			} else {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+			}
 			if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
@@ -1263,14 +1277,16 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			}
 
 			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-				checkDelay = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT, checkDelay * SERVER_KNOBS->BG_DD_INCREASE_RATE);
+				rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
+				                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 			} else {
-				checkDelay = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT, checkDelay / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+				rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
+				                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
 			}
 
 			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-			    checkDelay < SERVER_KNOBS->BG_DD_POLLING_INTERVAL) {
-				checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
+			    rebalancePollingInterval < SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL) {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 			}
 			tr.reset();

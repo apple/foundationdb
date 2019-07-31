@@ -37,11 +37,11 @@ static std::set<int> const& normalAttritionErrors() {
 
 ACTOR Future<Void> resetHealthyZoneAfter(Database cx, double duration) {
 	state Transaction tr(cx);
-	state Future<Void> deleyF = delay(duration);
+	state Future<Void> delayF = delay(duration);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(deleyF);
+			wait(delayF);
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
 			return Void();
