@@ -309,9 +309,9 @@ Future<U> mapAsync(Future<T> what, F actorFunc)
 
 //maps a vector of futures with an asynchronous function
 template<class T, class F>
-std::vector<Future<decltype(actorFunc(T()).getValue())>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
+std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
 {
-	std::vector<typename std::invoke_result<F(T)>::type> ret;
+	std::vector<std::invoke_result_t<F, T>> ret;
 	for(auto f : what)
 		ret.push_back(mapAsync( f, actorFunc ));
 	return ret;
@@ -360,7 +360,7 @@ Future<Void> mapAsync( FutureStream<T> input, F actorFunc, PromiseStream<U> outp
 
 //Waits for a future to be ready, and then applies a function to it.
 ACTOR template<class T, class F>
-Future<typename std::invoke_result<F, T>> map(Future<T> what, F func)
+Future<std::invoke_result_t<F, T>> map(Future<T> what, F func)
 {
 	T val = wait(what);
 	return func(val);
@@ -368,9 +368,9 @@ Future<typename std::invoke_result<F, T>> map(Future<T> what, F func)
 
 //maps a vector of futures
 template<class T, class F>
-std::vector<Future<typename std::invoke_result<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
+std::vector<Future<std::invoke_result<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
 {
-	std::vector<Future<typename std::invoke_result<F, T>>> ret;
+	std::vector<Future<std::invoke_result<F, T>>> ret;
 	for(auto f : what)
 		ret.push_back(map( f, func ));
 	return ret;
@@ -378,7 +378,7 @@ std::vector<Future<typename std::invoke_result<F, T>>> map(std::vector<Future<T>
 
 //maps a stream
 ACTOR template<class T, class F>
-Future<Void> map( FutureStream<T> input, F func, PromiseStream<typename std::invoke_result<F, T>> output )
+Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_result<F, T>> output )
 {
 	loop {
 		try {
