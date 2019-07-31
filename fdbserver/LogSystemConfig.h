@@ -28,7 +28,7 @@
 
 template <class Interface>
 struct OptionalInterface {
-	friend class serializable_traits<OptionalInterface<Interface>>;
+	friend struct serializable_traits<OptionalInterface<Interface>>;
 	// Represents an interface with a known id() and possibly known actual endpoints.
 	// For example, an OptionalInterface<TLogInterface> represents a particular tlog by id, which you might or might not presently know how to communicate with
 
