@@ -1022,23 +1022,71 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			.detail("MachineMaxTeams", maxMachineTeams);
 	}
 
-	bool teamExists( vector<UID> &team ) {
+	int overlappingMembers( vector<UID> &team ) {
 		if (team.empty()) {
-			return false;
+			return 0;
 		}
 
+		int maxMatchingServers = 0;
 		UID& serverID = team[0];
 		for (auto& usedTeam : server_info[serverID]->teams) {
-			if (team == usedTeam->getServerIDs()) {
-				return true;
+			auto used = usedTeam->getServerIDs();
+			int teamIdx = 0;
+			int usedIdx = 0;
+			int matchingServers = 0;
+			while(teamIdx < team.size() && usedIdx < used.size()) {
+				if(team[teamIdx] == used[usedIdx]) {
+					matchingServers++;
+					teamIdx++;
+					usedIdx++;
+				} else if(team[teamIdx] < used[usedIdx]) {
+					teamIdx++;
+				} else {
+					usedIdx++;
+				}
+			}
+			ASSERT(matchingServers > 0);
+			maxMatchingServers = std::max(maxMatchingServers, matchingServers);
+			if(maxMatchingServers == team.size()) {
+				return maxMatchingServers;
 			}
 		}
 
-		return false;
+		return maxMatchingServers;
 	}
 
-	// SOMEDAY: when machineTeams is changed from vector to set, we may check the existance faster
-	bool machineTeamExists(vector<Standalone<StringRef>>& machineIDs) { return findMachineTeam(machineIDs).isValid(); }
+	int overlappingMachineMembers( vector<Standalone<StringRef>>& team ) {
+		if (team.empty()) {
+			return 0;
+		}
+
+		int maxMatchingServers = 0;
+		Standalone<StringRef>& serverID = team[0];
+		for (auto& usedTeam : machine_info[serverID]->machineTeams) {
+			auto used = usedTeam->machineIDs;
+			int teamIdx = 0;
+			int usedIdx = 0;
+			int matchingServers = 0;
+			while(teamIdx < team.size() && usedIdx < used.size()) {
+				if(team[teamIdx] == used[usedIdx]) {
+					matchingServers++;
+					teamIdx++;
+					usedIdx++;
+				} else if(team[teamIdx] < used[usedIdx]) {
+					teamIdx++;
+				} else {
+					usedIdx++;
+				}
+			}
+			ASSERT(matchingServers > 0);
+			maxMatchingServers = std::max(maxMatchingServers, matchingServers);
+			if(maxMatchingServers == team.size()) {
+				return maxMatchingServers;
+			}
+		}
+
+		return maxMatchingServers;
+	}
 
 	Reference<TCMachineTeamInfo> findMachineTeam(vector<Standalone<StringRef>>& machineIDs) {
 		if (machineIDs.empty()) {
@@ -1421,10 +1469,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT_WE_THINK(isMachineTeamHealthy(machineIDs));
 
 				std::sort(machineIDs.begin(), machineIDs.end());
-				if (machineTeamExists(machineIDs)) {
+				int overlap = overlappingMachineMembers(machineIDs);
+				if (overlap == machineIDs.size()) {
 					maxAttempts += 1;
 					continue;
 				}
+				score += SERVER_KNOBS->DD_OVERLAP_PENALTY*overlap;
 
 				// SOMEDAY: randomly pick one from teams with the lowest score
 				if (score < bestScore) {
@@ -1853,7 +1903,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT(serverTeam.size() == configuration.storageTeamSize);
 
 				std::sort(serverTeam.begin(), serverTeam.end());
-				if (teamExists(serverTeam)) {
+				int overlap = overlappingMembers(serverTeam);
+				if (overlap == serverTeam.size()) {
 					maxAttempts += 1;
 					continue;
 				}
@@ -1861,7 +1912,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Pick the server team with smallest score in all attempts
 				// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
-				int score = 0;
+				int score = SERVER_KNOBS->DD_OVERLAP_PENALTY*overlap;
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
@@ -2023,7 +2074,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineTeamCount", self->machineTeams.size())
 			    .detail("MachineCount", self->machine_info.size())
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-					
+
 			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
 				state vector<std::vector<UID>> builtTeams;

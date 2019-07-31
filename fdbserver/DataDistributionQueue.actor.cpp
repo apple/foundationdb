@@ -1111,13 +1111,30 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 		return false;
 	}
 
-	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
+	Promise<int64_t> req;
+	self->getAverageShardBytes.send( req );
+
+	state int64_t averageShardBytes = wait(req.getFuture());
+	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
 
 	if( !shards.size() )
 		return false;
 
-	state KeyRange moveShard = deterministicRandom()->randomChoice( shards );
-	StorageMetrics metrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(moveShard)) ) );
+	state KeyRange moveShard;
+	state StorageMetrics metrics;
+	state int retries = 0;
+	while(retries < SERVER_KNOBS->REBALANCE_MAX_RETRIES) {
+		state KeyRange testShard = deterministicRandom()->randomChoice( shards );
+		StorageMetrics testMetrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply(GetMetricsRequest(testShard)) ) );
+		if(testMetrics.bytes > metrics.bytes) {
+			moveShard = testShard;
+			metrics = testMetrics;
+			if(metrics.bytes > averageShardBytes) {
+				break;
+			}
+		}
+		retries++;
+	}
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);
 	int64_t destBytes = destTeam->getLoadBytes();
@@ -1133,6 +1150,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 					.detail("SourceBytes", sourceBytes)
 					.detail("DestBytes", destBytes)
 					.detail("ShardBytes", metrics.bytes)
+					.detail("AverageShardBytes", averageShardBytes)
 					.detail("SourceTeam", sourceTeam->getDesc())
 					.detail("DestTeam", destTeam->getDesc());
 
