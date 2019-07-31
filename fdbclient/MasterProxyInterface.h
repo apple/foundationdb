@@ -132,7 +132,7 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID);
+		serializer(ar, transaction, reply, arena, flags, debugID, static_cast<TimedRequest&>(*this));
 	}
 };
 
@@ -189,7 +189,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, debugID, reply);
+		serializer(ar, transactionCount, flags, debugID, reply, static_cast<TimedRequest&>(*this));
 	}
 };
 
