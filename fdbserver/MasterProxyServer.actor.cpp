@@ -1002,7 +1002,7 @@ ACTOR Future<Void> commitBatch(
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {
 			bool filter = maxTransactionBytes > self->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime, filter);
+			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime(), filter);
 		}
 	}
 
@@ -1124,7 +1124,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
-		stats->grvLatencyBands.addMeasurement(end - request.requestTime);
+		stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		request.reply.send(reply);
 	}
 

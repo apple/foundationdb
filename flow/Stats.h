@@ -39,7 +39,14 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include "flow/TDMetric.actor.h"
 
 struct TimedRequest {
-	double requestTime = 0.0;
+	void setRequestTime(double requestTime_) { this->requestTime_ = requestTime_; }
+	double requestTime() {
+		ASSERT(requestTime_ > 0);
+		return requestTime_;
+	}
+
+private:
+	double requestTime_ = 0.0;
 };
 
 template <>
@@ -53,13 +60,13 @@ struct scalar_traits<TimedRequest> : std::true_type {
 	// load call tree.
 	template <class Context>
 	static void load(const uint8_t*, TimedRequest& value, Context&) {
-		value.requestTime = timer();
+		value.setRequestTime(timer());
 	}
 };
 
 template <class Archive>
 inline void load(Archive& ar, TimedRequest& value) {
-	value.requestTime = timer();
+	value.setRequestTime(timer());
 }
 
 template <class Archive>

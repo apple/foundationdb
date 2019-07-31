@@ -898,7 +898,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	--data->readQueueSizeMetric;
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes);
+		data->counters.readLatencyBands.addMeasurement(timer() - req.requestTime(), resultSize > maxReadBytes);
 	}
 
 	return Void();
@@ -1452,7 +1452,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset || abs(req.end.offset) > maxSelectorOffset);
+		data->counters.readLatencyBands.addMeasurement(
+		    timer() - req.requestTime(), resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
+		                                     abs(req.end.offset) > maxSelectorOffset);
 	}
 
 	return Void();
@@ -1508,7 +1510,8 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+		data->counters.readLatencyBands.addMeasurement(
+		    timer() - req.requestTime(), resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
 	}
 
 	return Void();
