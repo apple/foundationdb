@@ -42,6 +42,10 @@ ifeq ($(PLATFORM),Linux)
   CC ?= gcc
   CXX ?= g++
 
+  ifneq '' '$(findstring clang++,$(CXX))'
+    CXXFLAGS += -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-unused-command-line-argument
+  endif
+
   CXXFLAGS += -std=c++17
 
   BOOST_BASEDIR ?= /opt
