@@ -729,11 +729,15 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
-	self->masterProxiesChangeTrigger.trigger();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
+	auto clearedClientInfo = self->clientInfo->get();
+	clearedClientInfo.proxies.clear();
+	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
+	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
+	
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
@@ -3355,11 +3359,14 @@ ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef sna
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.snapshotDatabase.Before");
 		}
 
-		ProxySnapRequest req(snapPayload, snapUID, debugID);
-		wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, req, cx->taskID, true /*atmostOnce*/ ));
-		if (debugID.present())
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-									"NativeAPI.SnapshotDatabase.After");
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) { throw operation_failed(); }
+			when(wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapPayload, snapUID, debugID), cx->taskID, true /*atmostOnce*/ ))) {
+				if (debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+											"NativeAPI.SnapshotDatabase.After");
+			}
+		}
 	} catch (Error& e) {
 		TraceEvent("NativeAPI.SnapshotDatabaseError")
 			.detail("SnapPayload", snapPayload)
@@ -3370,11 +3377,11 @@ ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef sna
 	return Void();
 }
 
-ACTOR Future<Void> snapCreateCore(Database cx, StringRef snapCmd, UID snapUID) {
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 	// remember the client ID before the snap operation
 	state UID preSnapClientUID = cx->clientInfo->get().id;
 
-	TraceEvent("SnapCreateCoreEnter")
+	TraceEvent("SnapCreateEnter")
 	    .detail("SnapCmd", snapCmd.toString())
 	    .detail("UID", snapUID)
 	    .detail("PreSnapClientUID", preSnapClientUID);
@@ -3392,7 +3399,7 @@ ACTOR Future<Void> snapCreateCore(Database cx, StringRef snapCmd, UID snapUID) {
 		Future<Void> exec = snapshotDatabase(Reference<DatabaseContext>::addRef(cx.getPtr()), snapPayloadRef, snapUID, snapUID);
 		wait(exec);
 	} catch (Error& e) {
-		TraceEvent("SnapCreateCoreError")
+		TraceEvent("SnapCreateError")
 			.detail("SnapCmd", snapCmd.toString())
 			.detail("UID", snapUID)
 			.error(e);
@@ -3402,28 +3409,15 @@ ACTOR Future<Void> snapCreateCore(Database cx, StringRef snapCmd, UID snapUID) {
 	UID postSnapClientUID = cx->clientInfo->get().id;
 	if (preSnapClientUID != postSnapClientUID) {
 		// if the client IDs changed then we fail the snapshot
-		TraceEvent("SnapCreateCoreUIDMismatch")
+		TraceEvent("SnapCreateUIDMismatch")
 		    .detail("SnapPreSnapClientUID", preSnapClientUID)
 		    .detail("SnapPostSnapClientUID", postSnapClientUID);
 		throw coordinators_changed();
 	}
 
-	TraceEvent("SnapCreateCoreExit")
+	TraceEvent("SnapCreateExit")
 	    .detail("SnapCmd", snapCmd.toString())
 	    .detail("UID", snapUID)
 	    .detail("PreSnapClientUID", preSnapClientUID);
-	return Void();
-}
-
-ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
-	state int oldMode = wait( setDDMode( cx, 0 ) );
-	try {
-		wait(snapCreateCore(cx, snapCmd, snapUID));
-	} catch (Error& e) {
-		state Error err = e;
-		wait(success( setDDMode( cx, oldMode ) ));
-		throw err;
-	}
-	wait(success( setDDMode( cx, oldMode ) ));
 	return Void();
 }

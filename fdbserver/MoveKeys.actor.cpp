@@ -28,7 +28,41 @@
 using std::min;
 using std::max;
 
-ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
+// in-memory flag to disable DD
+bool ddEnabled = true;
+UID ddEnabledStatusUID = UID();
+
+bool isDDEnabled() {
+	return ddEnabled;
+}
+
+bool setDDEnabled(bool status, UID snapUID) {
+	TraceEvent("SetDDEnabled")
+		.detail("Status", status)
+		.detail("SnapUID", snapUID);
+	ASSERT(snapUID != UID());
+	if (!status) {
+		// disabling DD
+		if (ddEnabledStatusUID != UID()) {
+			// disable DD when a disable is already in progress not allowed
+			return false;
+		}
+		ddEnabled = status;
+		ddEnabledStatusUID = snapUID;
+		return true;
+	}
+	// enabling DD
+	if (snapUID != ddEnabledStatusUID) {
+		// enabling DD not allowed if UID does not match with the disable request
+		return false;
+	}
+	// reset to default status
+	ddEnabled = status;
+	ddEnabledStatusUID = UID();
+	return true;
+}
+
+ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -60,6 +94,10 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 }
 
 ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool isWrite = true ) {
+	if (!isDDEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
+		throw movekeys_conflict();
+	}
 	Optional<Value> readVal = wait( tr->get( moveKeysLockOwnerKey ) );
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 

@@ -579,11 +579,24 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-		   "                 to a random value shared by all fdbserver processes on this\n"
-		   "                 machine.\n");
+	       "                 Machine identifier key (up to 16 hex characters). Defaults\n"
+	       "                 to a random value shared by all fdbserver processes on this\n"
+	       "                 machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
+	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
+	printf("  -M SIZE, --storage_memory SIZE\n"
+	       "                 Maximum amount of memory used for storage. The default\n"
+	       "                 value is 1GiB. When specified without a unit, MB is\n"
+	       "                 assumed.\n");
+	printf("  --cache_memory SIZE\n"
+	       "                 The amount of memory to use for caching disk pages.\n"
+	       "                 The default value is 2GiB. When specified without a unit,\n"
+	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
@@ -617,18 +630,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -s SEED, --seed SEED\n"
 			   "                 Random seed.\n");
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  -m SIZE, --memory SIZE\n"
-			   "                 Memory limit. The default value is 8GiB. When specified\n"
-			   "                 without a unit, MiB is assumed.\n");
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -M SIZE, --storage_memory SIZE\n"
-			   "                 Maximum amount of memory used for storage. The default\n"
-			   "                 value is 1GiB. When specified without a unit, MB is\n"
-			   "                 assumed.\n");
-		printf("  --cache_memory SIZE\n"
-		       "                 The amount of memory to use for caching disk pages.\n"
-		       "                 The default value is 2GiB. When specified without a unit,\n"
-		       "                 MiB is assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -665,8 +667,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("                 Must be specified if using a different database for metrics.\n");
 		printf("  --knob_KNOBNAME KNOBVALUE\n");
 		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --locality_LOCALITYKEY LOCALITYVALUE\n");
-		printf("                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
 		printf("  --io_trust_seconds SECONDS\n");
 		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
 		       "                 before timing out with an error. If an operation times out, all future\n"

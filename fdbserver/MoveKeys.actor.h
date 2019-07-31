@@ -46,6 +46,12 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock);
 
+bool isDDEnabled();
+// checks if the in-memory DDEnabled flag is set
+
+bool setDDEnabled(bool status, UID snapUID);
+// sets the in-memory DDEnabled flag
+
 void seedShardServers(
 	Arena& trArena,
 	CommitTransactionRef &tr,
