@@ -168,7 +168,7 @@ private:
 
 	friend class ReadYourWritesTransaction;
 	Arena* arena;
-	IndexedSet< Entry, NoMetric > entries;
+	IndexedSet< Entry, NoMetric, ArenaAllocator<Entry> > entries;
 
 public:
 	struct iterator {
@@ -281,11 +281,11 @@ public:
 	private:
 		friend class SnapshotCache;
 		SnapshotCache* parent;
-		IndexedSet<Entry,NoMetric>::iterator it;
+		IndexedSet<Entry,NoMetric,ArenaAllocator<Entry>>::iterator it;
 		int offset;   // 0 <= offset < it->segments()
 	};
 
-	explicit SnapshotCache(Arena* arena) : arena(arena) {
+	explicit SnapshotCache(Arena* arena) : arena(arena), entries(ArenaAllocator<Entry>(*arena)) {
 		// Degenerate entries at the beginning and end reduce edge cases
 		entries.insert( Entry( allKeys.begin, allKeys.begin, VectorRef<KeyValueRef>() ), NoMetric(), true );
 		entries.insert( Entry( allKeys.end, afterAllKeys, VectorRef<KeyValueRef>() ), NoMetric(), true );

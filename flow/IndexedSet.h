@@ -69,7 +69,8 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		Node(T_&& data, Metric_&& m, Node* parent=0) : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
 			child[0] = child[1] = NULL;
 		}
-		void destroy(Allocator& allocator) {
+		template<class Alloc>
+		void destroy(Alloc& allocator) {
 			if (child[0]) {
 				child[0]->destroy(allocator);
 			}
@@ -90,7 +91,8 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 
 	};
 
-	typename Allocator::template rebind<Node>::other allocator;
+	using NodeAllocator = typename Allocator::template rebind<Node>::other;
+	NodeAllocator allocator;
 
 public:
 	struct iterator{
@@ -914,7 +916,7 @@ void IndexedSet<T, Metric, Allocator>::erase(typename IndexedSet<T, Metric, Allo
 	}
 
 	// Erase the subRoot using the single node erase implementation
-	erase( IndexedSet<T,Metric>::iterator(subRoot) );
+	erase( IndexedSet<T,Metric,Allocator>::iterator(subRoot) );
 }
 
 template <class T, class Metric, class Allocator>
@@ -1117,7 +1119,7 @@ void IndexedSet<T, Metric, Allocator>::erase(typename IndexedSet<T, Metric, Allo
 	std::vector<IndexedSet<T, Metric,Allocator>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	ISFreeNodes(toFree, true);
+	ISFreeNodes(toFree, &allocator, true);
 }
 
 template <class T, class Metric, class Allocator>
@@ -1132,7 +1134,7 @@ Future<Void> IndexedSet<T, Metric, Allocator>::eraseAsync(typename IndexedSet<T,
 	std::vector<IndexedSet<T, Metric,Allocator>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	return uncancellable(ISFreeNodes(toFree, false));
+	return uncancellable(ISFreeNodes(toFree, allocator, false));
 }
 
 #endif

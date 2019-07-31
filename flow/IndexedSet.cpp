@@ -46,21 +46,24 @@ void indent(int depth) {
 		printf(" ");
 }
 
-template <class T, class Metric>
-std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename IndexedSet<T, Metric>::Node* n, int depth, bool checkAVL) {
+template <class T, class Metric, class Allocator>
+std::pair<int, int> IndexedSet<T, Metric, Allocator>::testonly_assertBalanced(
+    typename IndexedSet<T, Metric, Allocator>::Node* n, int depth, bool checkAVL) {
 	/* An IndexedSet (sub)tree n has the following invariants:
-		(1) BST invariant: Every descendant x of n->child[0] has x->data < n->data, and every descendant x of n->child[1] has x->data > n->data
-		(2) Balance invariant: n->balance is the difference between the height (greatest distance to a descendant) of n->child[1] and the height of n->child[0]
-		(3) AVL invariant: n->balance is -1, 0 or 1
-		(4) Metric invariant: n->total is the sum of the metric value with which n and each of its descendants was inserted 
-		(5) Parent invariant: Every child x of n has x->parent==n
+	    (1) BST invariant: Every descendant x of n->child[0] has x->data < n->data, and every descendant x of
+	n->child[1] has x->data > n->data (2) Balance invariant: n->balance is the difference between the height (greatest
+	distance to a descendant) of n->child[1] and the height of n->child[0] (3) AVL invariant: n->balance is -1, 0 or 1
+	    (4) Metric invariant: n->total is the sum of the metric value with which n and each of its descendants was
+	inserted (5) Parent invariant: Every child x of n has x->parent==n
 
-	This function checks all of these for all descendants of n.  It assumes that every node was inserted with a metric of 3 in order to check the metric invariant.
-	If checkAVL==false, it does not check the AVL invariant (since this is often temporarily broken and then restored during operations, this permits checking invariants e.g. before a rebalancing operation)
-		*/
+	This function checks all of these for all descendants of n.  It assumes that every node was inserted with a metric
+	of 3 in order to check the metric invariant. If checkAVL==false, it does not check the AVL invariant (since this is
+	often temporarily broken and then restored during operations, this permits checking invariants e.g. before a
+	rebalancing operation)
+	    */
 	if (!n && depth == 0) n = root;
 
-	if (!n) { 
+	if (!n) {
 		return std::make_pair(0, 0);
 	}
 	bool ok = true;
@@ -237,9 +240,9 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 		int count = 0, incount = 0;
 		for (auto i : is) {
 			++count;
-			if (i >= b && i < e) { 
-				//printf("Remaining item: %d (%d - %d)\n", i, b, e); 
-				incount++; 
+			if (i >= b && i < e) {
+				//printf("Remaining item: %d (%d - %d)\n", i, b, e);
+				incount++;
 			}
 		}
 

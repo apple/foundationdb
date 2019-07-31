@@ -123,7 +123,7 @@ struct ArenaAllocator {
 		typedef ArenaAllocator<U> other;
 	};
 
-	ArenaAllocator(const Arena& arena) = default;
+	explicit ArenaAllocator(const Arena& arena) : arena(arena) {}
 	ArenaAllocator() = delete;
 	template<class U>
 	ArenaAllocator(ArenaAllocator<U>&& o) : arena(std::move(o.arena)) {}
