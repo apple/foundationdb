@@ -34,7 +34,7 @@ public:
     }
 
 	TimedRequest() {
-        if (FlowTransport::isClient()) {
+        if (!FlowTransport::isClient()) {
             _requestTime = timer();
         } else {
             _requestTime = 0.0;
