@@ -4570,6 +4570,13 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
 
       pCur->info.nSize = 0;
       pCell = findCell(pPage, idx) + pPage->childPtrSize;
+
+#if defined(__GNUC__) && defined(__linux__)
+      /* prefetch the next possible cells */
+      __builtin_prefetch(findCell(pPage, (u16)(((idx+1)+upr)/2)) + pPage->childPtrSize); /* c < 0 */
+      __builtin_prefetch(findCell(pPage, (u16)((lwr+(idx-1))/2)) + pPage->childPtrSize); /* c > 0 */
+#endif
+
       if( pPage->intKey ){
         i64 nCellKey;
         if( pPage->hasData ){
