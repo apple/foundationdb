@@ -909,9 +909,6 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 Version poppedVersion( Reference<LogData> self, Tag tag) {
 	auto tagData = self->getTagData(tag);
 	if (!tagData) {
-		if (tag == txsTag || tag.locality == tagLocalityTxs) {
- 			return 0;
- 		}
 		return self->recoveredAt;
 	}
 	return tagData->popped;
