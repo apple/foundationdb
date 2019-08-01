@@ -3,19 +3,28 @@
 set -e
 OPTIONS=''
 
+# Get compiler version and major version
+COMPILER_VER=$("${CC}" -dumpversion)
+COMPILER_MAJVER="${COMPILER_VER%%\.*}"
+
 # Add linker, if specified and valid
 # The linker to use for building:
 # can be LD (system default, default choice), GOLD, LLD, or BFD
-if [ "${PLATFORM}" == "linux" ] && [ -n "${USE_LD}" ]; then
-	if [ "${USE_LD}" == "BFD" ]; then
-		OPTIONS+='-fuse-ld=bfd -Wl,--disable-new-dtags'
-	elif [ "${USE_LD}" == "GOLD" ]; then
-		OPTIONS+='-fuse-ld=gold -Wl,--disable-new-dtags'
-	elif [ "${USE_LD}" == "LLD" ]; then
-		OPTIONS+='-fuse-ld=lld -Wl,--disable-new-dtags'
-	elif [ "${USE_LD}" != "DEFAULT" ] && [ "${USE_LD}" != "LD" ]; then
-		echo 'USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!'
-		exit 1
+if [ -n "${USE_LD}" ] && \
+	 (([[ "${CC}" == *"gcc"* ]] && [ "${COMPILER_MAJVER}" -ge 9 ]) || \
+    ([[ "${CXX}" == *"clang++"* ]] && [ "${COMPILER_MAJVER}" -ge 4 ]) )
+then
+	if [ "${PLATFORM}" == "linux" ]; then
+		if [ "${USE_LD}" == "BFD" ]; then
+			OPTIONS+='-fuse-ld=bfd -Wl,--disable-new-dtags'
+		elif [ "${USE_LD}" == "GOLD" ]; then
+			OPTIONS+='-fuse-ld=gold -Wl,--disable-new-dtags'
+		elif [ "${USE_LD}" == "LLD" ]; then
+			OPTIONS+='-fuse-ld=lld -Wl,--disable-new-dtags'
+		elif [ "${USE_LD}" != "DEFAULT" ] && [ "${USE_LD}" != "LD" ]; then
+			echo 'USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!'
+			exit 1
+		fi
 	fi
 fi
 
