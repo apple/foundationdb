@@ -564,7 +564,7 @@ struct RolesInfo {
 
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Reference<AsyncVar<struct ServerDBInfo>> db, std::vector<WorkerDetails> workers, WorkerEvents pMetrics,
-    WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors, 
+    WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
 	WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
@@ -882,7 +882,7 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
 	std::map<Key, ClientStats> maxSupportedProtocol;
 
-	
+
 	for(auto iter = clientStatusMap->begin(); iter != clientStatusMap->end(); ++iter) {
 		if( now() - iter->second.first < 2*SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) {
 			clientCount += iter->second.second.clientCount;
@@ -1131,7 +1131,7 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilder
 					break;
 				} catch(Error &e) {
 					if(e.code() == error_code_timed_out) {
-						messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout", 
+						messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
 							format("Timed out trying to fetch `%s` from the database.", printable(fdbShouldConsistencyCheckBeSuspended).c_str()).c_str()));
 						break;
 					}
@@ -1149,8 +1149,9 @@ struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
+	bool rebalanceDDIgnored;
 
-	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0) {}
+	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false) {}
 };
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
@@ -1191,9 +1192,10 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
 			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
+			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
 
 			choose {
-				when( wait( waitForAll(replicasFutures) && success(healthyZoneValue) ) ) {
+				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
 						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
@@ -1209,6 +1211,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						}
 					}
+					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
 					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
@@ -1317,7 +1320,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
 
-			if (movingHighestPriority < PRIORITY_TEAM_UNHEALTHY) {
+			if (movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
 				highestPriority = movingHighestPriority;
 			} else if (partitionsInFlight > 0) {
 				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
@@ -1434,16 +1437,16 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 
 ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	vector<std::pair<StorageServerInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
-		std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics" }));
+	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
+	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics" }));
 
 	return results;
 }
 
 ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
-	vector<std::pair<TLogInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
-		std::vector<std::string>{ "TLogMetrics" }));
+	vector<std::pair<TLogInterface, EventMap>> results =
+	    wait(getServerMetrics(servers, address_workers, std::vector<std::string>{ "TLogMetrics" }));
 
 	return results;
 }
@@ -1457,8 +1460,8 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 		}
 	}
 
-	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
-		std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
+	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
+	    servers, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
 
 	return results;
 }
@@ -2160,8 +2163,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if(loadResult.present()) {
 			statusObj["full_replication"] = loadResult.get().fullReplication;
 			if(loadResult.get().healthyZone.present()) {
-				statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
-				statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
+				if (loadResult.get().healthyZone.get() != ignoreSSFailuresZoneString) {
+					statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
+					statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
+				} else {
+					statusObj["data_distribution_disabled_for_ss_failures"] = true;
+				}
+			}
+			if (loadResult.get().rebalanceDDIgnored) {
+				statusObj["data_distribution_disabled_for_rebalance"] = true;
 			}
 		}
 
@@ -2281,10 +2291,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics, 
-		                                                            latestError, traceFileOpenErrors, programStarts, 
-		                                                            processIssues, storageServers, tLogs, proxies, cx, 
-		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), 
+		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
+		                                                            latestError, traceFileOpenErrors, programStarts,
+		                                                            processIssues, storageServers, tLogs, proxies, cx,
+		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
@@ -2576,7 +2586,7 @@ TEST_CASE("/status/json/builderPerf") {
 		printf("JsonBuilder: %8lu bytes  %-7.5f gen   +  %-7.5f serialize =  %-7.5f\n", s.size(), generate, serialize, generate + serialize);
 		printf("json_spirit: %8lu bytes  %-7.5f parse +  %-7.5f serialize =  %-7.5f\n", jsStr.size(), jsParse, jsSerialize, jsParse + jsSerialize);
 		printf("\n");
-		
+
 		generated += generate;
 		serialized += serialize;
 		bytes += s.size();

@@ -35,6 +35,22 @@ static std::set<int> const& normalAttritionErrors() {
 	return s;
 }
 
+ACTOR Future<Void> resetHealthyZoneAfter(Database cx, double duration) {
+	state Transaction tr(cx);
+	state Future<Void> delayF = delay(duration);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(delayF);
+			tr.clear(healthyZoneKey);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
 	int machinesToKill, machinesToLeave;
@@ -169,10 +185,17 @@ struct MachineAttritionWorkload : TestWorkload {
 
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
-
+				state Future<Void> resetHealthyZone = Future<Void>(Void());
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
-					wait( setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01()*20 ) );
+					bool _ =
+					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
+					// }
+				} else if (BUGGIFY_WITH_PROB(0.005)) {
+					TEST(true); // Disable DD for all storage server failures
+					bool _ = wait(setHealthyZone(cx, ignoreSSFailuresZoneString,
+					                             0)); // duration doesn't matter since this won't timeout
+					resetHealthyZone = resetHealthyZoneAfter(cx, deterministicRandom()->random01() * 5);
 				}
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
@@ -203,7 +226,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				if(!self->replacement)
 					self->machines.pop_back();
 
-				wait( delay( meanDelay - delayBeforeKill ) );
+				wait(delay(meanDelay - delayBeforeKill) && resetHealthyZone);
+
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}
