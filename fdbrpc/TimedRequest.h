@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBRPC_STATS_H
-#define FDBRPC_STATS_H
+#ifndef FDBRPC_TIMED_REQUEST_H
+#define FDBRPC_TIMED_REQUEST_H
 #pragma once
 
 #include <fdbrpc/fdbrpc.h>
@@ -28,19 +28,18 @@ class TimedRequest {
 	double _requestTime;
 
 public:
-    double requestTime() const {
-        ASSERT(_requestTime > 0.0);
-        return _requestTime;
-    }
+	double requestTime() const {
+		ASSERT(_requestTime > 0.0);
+		return _requestTime;
+	}
 
 	TimedRequest() {
-        if (!FlowTransport::isClient()) {
-            _requestTime = timer();
-        } else {
-            _requestTime = 0.0;
-        }
+		if (!FlowTransport::isClient()) {
+			_requestTime = timer();
+		} else {
+			_requestTime = 0.0;
+		}
 	}
 };
-
 
 #endif

@@ -28,7 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
-#include "fdbrpc/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
