@@ -203,7 +203,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Standalone<StringRef> dbId;
 
 	MasterInterface myInterface;
-	ClusterControllerFullInterface clusterController;  // If the cluster controller changes, this master will die, so this is immutable.
+	const ClusterControllerFullInterface clusterController;  // If the cluster controller changes, this master will die, so this is immutable.
 
 	ReusableCoordinatedState cstate;
 	Promise<Void> cstateUpdated;
