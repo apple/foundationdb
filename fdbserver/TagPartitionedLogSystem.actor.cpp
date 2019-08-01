@@ -1003,15 +1003,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual void popTxs( Version upTo, int8_t popLocality ) {
 		if( getTLogVersion() < TLogVersion::V4 ) {
-			pop(upTo, txsTag, 0, popLocality, true);
+			pop(upTo, txsTag, 0, popLocality);
 		} else {
 			for(int i = 0; i < txsTags; i++) {
-				pop(upTo, Tag(tagLocalityTxs, i), 0, popLocality, true);
+				pop(upTo, Tag(tagLocalityTxs, i), 0, popLocality);
 			}
 		}
 	}
 
-	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality, bool popOldGenerations ) {
+	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) {
 		if (upTo <= 0) return;
 		if( tag.locality == tagLocalityRemoteLog) {
 			popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
@@ -1025,21 +1025,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, durableKnownCommittedVersion);
 					if (prev == 0)
 						popActors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
-				}
-			}
-		}
-		if(popOldGenerations) {
-			for(auto& old : oldLogData) {
-				for(auto& t : old.tLogs) {
-					if(t->locality == tagLocalitySpecial || t->locality == tag.locality || tag.locality == tagLocalityUpgraded || (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
-						for(auto& log : t->logServers) {
-							Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
-							if (prev < upTo)
-								outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, durableKnownCommittedVersion);
-							if (prev == 0)
-								popActors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
-						}
-					}
 				}
 			}
 		}
