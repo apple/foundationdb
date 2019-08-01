@@ -26,6 +26,9 @@ Performance
 * Log routers will prefer to peek from satellites at ``log_version >= 4``. `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
 * Spilled data can be consumed from transaction logs more quickly and with less overhead. `(PR #1584) <https://github.com/apple/foundationdb/pull/1584>`_.
 * Improved the speed of recoveries on large clusters. `(PR #1729) <https://github.com/apple/foundationdb/pull/1729>`_.
+* Monitor leader only when proxies are unknown or any dies. `(PR #1059) <https://github.com/apple/foundationdb/pull/1059>`_.
+* Clients no longer talk to cluster controller for failure monitoring.  `(PR #1640) <https://github.com/apple/foundationdb/pull/1640>`_.
+* Make clients cheaper by reducing the connection monitoring messages between clients and servers and ensuring that unused connections are destroyed. `(PR #1768) <https://github.com/apple/foundationdb/pull/1768>`_.
 
 Fixes
 -----
@@ -38,6 +41,7 @@ Fixes
 * Setting ``--machine_id`` (or ``-i``) for an ``fdbserver`` process now sets ``locality_machineid`` in addition to ``locality_zoneid``. `(PR #1928) <https://github.com/apple/foundationdb/pull/1928>`_.
 * File descriptors opened by clients and servers set close-on-exec, if available on the platform. `(PR #1581) <https://github.com/apple/foundationdb/pull/1581>`_.
 * ``fdbrestore`` commands other than ``start`` required a default cluster file to be found but did not actually use it. `(PR #1912) <https://github.com/apple/foundationdb/pull/1912>`_.
+* Fix reference counting used for managing peer connections.  `(PR #1768) <https://github.com/apple/foundationdb/pull/1768>`_.
 
 Status
 ------
@@ -76,6 +80,7 @@ Other Changes
 * Ratekeeper will aggressively throttle when unable to fetch the list of storage servers for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
 * ``fdbserver`` now accepts a comma separated list of public and listen addresses. `(PR #1721) <https://github.com/apple/foundationdb/pull/1721>`_.
 * ``CAUSAL_READ_RISKY`` has been enhanced to further reduce the chance of causally inconsistent reads. Existing users of ``CAUSAL_READ_RISKY`` may see increased GRV latency if proxies are distantly located from logs. `(PR #1841) <https://github.com/apple/foundationdb/pull/1841>`_.
+* Added ``no_wait`` option in ``fdbcli`` exclude command to avoid blocking. `(PR #1852) <https://github.com/apple/foundationdb/pull/1852>`_.
 
 Earlier release notes
 ---------------------
