@@ -1161,7 +1161,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		memcpy(&num_elements, data, sizeof(num_elements));
 		data += sizeof(num_elements);
 		t.resize(context.arena(), num_elements);
-		for (int i = 0; i < num_elements; ++i) {
+		for (unsigned i = 0; i < num_elements; ++i) {
 			data += traits.load(data, t[i], context);
 		}
 		ASSERT(data - p == size);

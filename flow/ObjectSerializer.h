@@ -89,7 +89,7 @@ public:
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	ObjectReader& operator>> (ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
@@ -115,7 +115,7 @@ private:
 };
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	ArenaObjectReader& operator>> (ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
@@ -142,7 +142,7 @@ private:
 };
 
 class ObjectWriter {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
 	ObjectWriter& operator<< (const ProtocolVersion& version) {
 		writeProtocolVersion = true;
