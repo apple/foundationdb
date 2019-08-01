@@ -119,7 +119,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
 	}
 };
 
@@ -135,7 +135,7 @@ struct GetValueRequest : TimedRequest {
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		serializer(ar, key, version, debugID, reply);
+		serializer(ar, key, version, debugID, reply, static_cast<TimedRequest&>(*this));
 	}
 };
 
@@ -167,7 +167,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
 	}
 };
 
@@ -185,7 +185,7 @@ struct GetKeyValuesRequest : TimedRequest {
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena, static_cast<TimedRequest&>(*this));
 	}
 };
 
@@ -198,7 +198,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
 	}
 };
 
@@ -214,7 +214,7 @@ struct GetKeyRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, sel, version, reply, arena);
+		serializer(ar, sel, version, reply, arena, static_cast<TimedRequest&>(*this));
 	}
 };
 

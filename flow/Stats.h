@@ -39,12 +39,39 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include "flow/TDMetric.actor.h"
 
 struct TimedRequest {
-	double requestTime;
+	void setRequestTime(double requestTime_) { this->requestTime_ = requestTime_; }
+	double requestTime() const {
+		ASSERT(requestTime_ > 0);
+		return requestTime_;
+	}
 
-	TimedRequest() {
-		requestTime = timer();
+private:
+	double requestTime_ = 0.0;
+};
+
+template <>
+struct scalar_traits<TimedRequest> : std::true_type {
+	constexpr static size_t size = 0;
+	template <class Context>
+	static void save(uint8_t*, const TimedRequest&, Context&) {
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t*, TimedRequest& value, Context&) {
+		value.setRequestTime(timer());
 	}
 };
+
+template <class Archive>
+inline void load(Archive& ar, TimedRequest& value) {
+	value.setRequestTime(timer());
+}
+
+template <class Archive>
+inline void save( Archive& ar, const TimedRequest& value ) {
+}
 
 struct ICounter {
 	// All counters have a name and value
