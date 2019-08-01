@@ -656,7 +656,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
+	    badTeamRemover(Void()), wrongStoreTypeRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
 	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(true),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
