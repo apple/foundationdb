@@ -15,12 +15,21 @@ fi
 
 # Step 1: glibc version
 
+FAILED=0
 for i in $(objdump -T "$1" | awk '{print $5}' | grep GLIBC | sed 's/ *$//g' | sed 's/GLIBC_//' | sort | uniq); do
 	if ! verlte "$i" "$2"; then 
-		echo "!!! WARNING: DEPENDENCY ON NEWER LIBC DETECTED !!!"
-		exit 1
+		if [[ $FAILED == 0 ]]; then
+			echo "!!! WARNING: DEPENDENCY ON NEWER LIBC DETECTED !!!"
+		fi
+
+		objdump -T "$1" | grep GLIBC_$i | awk '{print $5 " " $6}' | grep "^GLIBC" | sort | awk '$0="\t"$0'
+		FAILED=1
 	fi
 done
+
+if [[ $FAILED == 1 ]]; then
+	exit 1
+fi
 
 # Step 2: Other dynamic dependencies
 

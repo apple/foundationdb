@@ -334,7 +334,7 @@ namespace HTTP {
 			}
 
 			// Write headers to a packet buffer chain
-			PacketBuffer *pFirst = new PacketBuffer();
+			PacketBuffer* pFirst = PacketBuffer::create();
 			PacketBuffer *pLast = writeRequestHeader(verb, resource, headers, pFirst);
 			// Prepend headers to content packer buffer chain
 			pContent->prependWriteBuffer(pFirst, pLast);

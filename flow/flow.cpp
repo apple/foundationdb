@@ -253,10 +253,10 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 	{
 		ErrorOr<int> in(worker_removed());
 		ErrorOr<int> out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(out.isError());
 		ASSERT(out.getError().code() == in.getError().code());
@@ -264,10 +264,10 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 	{
 		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
 		ErrorOr<uint32_t> out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(!out.isError());
 		ASSERT(out.get() == in.get());
@@ -279,20 +279,20 @@ TEST_CASE("/flow/FlatBuffers/Optional") {
 	{
 		Optional<int> in;
 		Optional<int> out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(!out.present());
 	}
 	{
 		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
 		Optional<uint32_t> out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(out.present());
 		ASSERT(out.get() == in.get());
@@ -304,20 +304,20 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 	{
 		Standalone<StringRef> in(std::string("foobar"));
 		StringRef out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(in == out);
 	}
 	{
 		StringRef in = LiteralStringRef("foobar");
 		Standalone<StringRef> out;
-		ObjectWriter writer;
+		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
-		ArenaObjectReader reader(copy.arena(), copy);
+		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(in == out);
 	}

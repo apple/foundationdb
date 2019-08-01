@@ -42,7 +42,7 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
-extern int g_trace_depth;
+extern thread_local int g_trace_depth;
 
 enum Severity {
 	SevSample=1,
@@ -564,7 +564,7 @@ void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
-extern trace_clock_t g_trace_clock;
+extern thread_local trace_clock_t g_trace_clock;
 extern TraceBatch g_traceBatch;
 
 #endif

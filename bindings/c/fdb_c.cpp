@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 610
+#define FDB_API_VERSION 620
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -215,8 +215,13 @@ fdb_error_t fdb_future_get_error_v22( FDBFuture* f, const char** description ) {
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_future_get_version( FDBFuture* f, int64_t* out_version ) {
+fdb_error_t fdb_future_get_version_v619( FDBFuture* f, int64_t* out_version ) {
 	CATCH_AND_RETURN( *out_version = TSAV(Version, f)->get(); );
+}
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_int64( FDBFuture* f, int64_t* out_value ) {
+	CATCH_AND_RETURN( *out_value = TSAV(int64_t, f)->get(); );
 }
 
 extern "C" DLLEXPORT
@@ -585,6 +590,11 @@ fdb_error_t fdb_transaction_get_committed_version( FDBTransaction* tr,
 }
 
 extern "C" DLLEXPORT
+FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getApproximateSize().extractPtr();
+}
+
+extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr )
 {
 	return (FDBFuture*)(TXN(tr)->getVersionstamp().extractPtr());
@@ -670,6 +680,7 @@ fdb_error_t fdb_select_api_version_impl( int runtime_version, int header_version
 	// Versioned API changes -- descending order by version (new changes at top)
 	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1) is the old implementation
 	// FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and function_(ver-1) is the old implementation
+	FDB_API_REMOVED( fdb_future_get_version, 620 );
 	FDB_API_REMOVED( fdb_create_cluster, 610 );
 	FDB_API_REMOVED( fdb_cluster_create_database, 610 );
 	FDB_API_REMOVED( fdb_cluster_set_option, 610 );

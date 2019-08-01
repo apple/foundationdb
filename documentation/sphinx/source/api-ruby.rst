@@ -23,6 +23,7 @@
 .. |timeout-database-option| replace:: :meth:`Database.options.set_transaction_timeout`
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
+.. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
@@ -34,6 +35,7 @@
 .. |size-limit-transaction-option| replace:: :meth:`Transaction.options.set_size_limit`
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
+.. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
 .. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
@@ -91,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 610
+    FDB.api_version 620
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -381,6 +383,10 @@ Database options
 .. method:: Database.options.set_transaction_size_limit(size_limit) -> nil
 
     |option-db-tr-size-limit-blurb|
+
+.. method:: Database.options.set_transaction_causal_read_risky() -> nil
+
+    |option-db-causal-read-risky-blurb|
 
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
 

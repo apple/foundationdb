@@ -22,8 +22,10 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -133,6 +135,39 @@ int64_t getPoppedVersionLag( const TraceEventFields& md ) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	Optional<Value> coordinators = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(coordinatorsKey);
+						  }));
+	if (!coordinators.present()) {
+		throw operation_failed();
+	}
+	std::vector<NetworkAddress> coordinatorsAddr =
+		ClusterConnectionString(coordinators.get().toString()).coordinators();
+	std::set<NetworkAddress> coordinatorsAddrSet;
+	for (const auto & addr : coordinatorsAddr) {
+		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
+		coordinatorsAddrSet.insert(addr);
+	}
+
+	vector<WorkerInterface> result;
+	for(const auto & worker : workers) {
+		NetworkAddress primary = worker.interf.address();
+		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
+			|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+			result.push_back(worker.interf);
+		}
+	}
+	return result;
+}
+
 // This is not robust in the face of a TLog failure
 ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
@@ -193,6 +228,44 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			wait( tr.onError(e) );
 		}
 	}
+}
+
+ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool localOnly ) {
+	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
+	state std::map<NetworkAddress, WorkerInterface> workersMap;
+	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	for(const auto & worker : workers) {
+		workersMap[worker.interf.address()] = worker.interf;
+	}
+	Optional<Value> regionsValue = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+						  }));
+	int usableRegions = 1;
+	if (regionsValue.present()) {
+		usableRegions = atoi(regionsValue.get().toString().c_str());
+	}
+	auto masterDcId = dbInfo->get().master.locality.dcId();
+
+	vector<WorkerInterface> result;
+	for (const auto & server : servers) {
+		TraceEvent(SevDebug, "DcIdInfo")
+			.detail("ServerLocalityID", server.locality.dcId())
+			.detail("MasterDcID", masterDcId);
+		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
+			auto itr = workersMap.find(server.address());
+			if(itr == workersMap.end()) {
+				TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
+				throw operation_failed();
+			}
+			result.push_back(itr->second);
+		}
+	}
+	return result;
 }
 
 //Gets the maximum size of all the storage server queues
@@ -280,8 +353,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
-			if (g_simulator.storagePolicy.isValid() &&
-			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos) {
+			if (!g_network->isSimulated() || 
+				(g_simulator.storagePolicy.isValid() &&
+			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos)) {
 				// Do not test DD team number for data_hall modes
 				return true;
 			}
@@ -315,25 +389,23 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
 			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
 			// can host data on it.
+			//
+			// If the machineTeamRemover does not remove the machine team with the most machine teams,
+			// we may oscillate between building more server teams by teamBuilder() and removing those teams by
+			// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
+			// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
+			//
 			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0 team on a server
 			//(!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
 			//  healthyMachineTeams > desiredMachineTeams) ||
 			// (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
 			if ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
-			     SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3) {
+			     SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
 				ret = false;
 
 				if (attempts++ < 10) {
 					wait(delay(60));
 					continue; // We may not receive the most recent TeamCollectionInfo
-				}
-				// If the machineTeamRemover does not remove the machine team with the most machine teams,
-				// we may oscillate between building more server teams by teamBuilder() and removing those teams by
-				// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
-				// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
-				if (!SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
-					TraceEvent(SevWarnAlways, "GetTeamCollectionValid").detail("RemoveMTWithMostTeams", "False");
-					ret = true;
 				}
 
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
@@ -361,6 +433,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			}
 
 		} catch (Error& e) {
+			if(e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent("QuietDatabaseFailure", dataDistributorWorker.id())
 			    .detail("Reason", "Failed to extract GetTeamCollectionValid information");
 			attempts++;
@@ -420,7 +495,11 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
-		ASSERT(!primaryDead || !remoteDead);
+		//FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the datacenterDead function
+		if(primaryDead && remoteDead) {
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			return Void();
+		}
 		if(primaryDead || remoteDead) {
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate").detail("RemoteDead", remoteDead).detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;

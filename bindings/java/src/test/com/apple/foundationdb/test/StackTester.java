@@ -261,6 +261,10 @@ public class StackTester {
 				inst.context.lastVersion = inst.tr.getCommittedVersion();
 				inst.push("GOT_COMMITTED_VERSION".getBytes());
 			}
+			else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
+				Long size = inst.tr.getApproximateSize().join();
+				inst.push("GOT_APPROXIMATE_SIZE".getBytes());
+			}
 			else if(op == StackOperation.GET_VERSIONSTAMP) {
 				inst.push(inst.tr.getVersionstamp());
 			}
@@ -442,6 +446,7 @@ public class StackTester {
 						db.options().setTransactionMaxRetryDelay(100);
 						db.options().setTransactionRetryLimit(10);
 						db.options().setTransactionRetryLimit(-1);
+						db.options().setTransactionCausalReadRisky();
 
 						tr.options().setPrioritySystemImmediate();
 						tr.options().setPriorityBatch();

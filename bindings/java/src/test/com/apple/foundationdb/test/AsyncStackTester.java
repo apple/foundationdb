@@ -282,6 +282,11 @@ public class AsyncStackTester {
 
 			return AsyncUtil.DONE;
 		}
+		else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
+			return inst.tr.getApproximateSize().thenAcceptAsync(size -> {
+				inst.push("GOT_APPROXIMATE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_VERSIONSTAMP) {
 			try {
 				inst.push(inst.tr.getVersionstamp());
@@ -489,6 +494,7 @@ public class AsyncStackTester {
 				db.options().setTransactionMaxRetryDelay(100);
 				db.options().setTransactionRetryLimit(10);
 				db.options().setTransactionRetryLimit(-1);
+				db.options().setTransactionCausalReadRisky();
 
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();

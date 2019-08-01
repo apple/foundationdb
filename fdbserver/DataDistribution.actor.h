@@ -50,10 +50,13 @@ enum {
 	PRIORITY_TEAM_HEALTHY    = 140,
 	PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER = 150,
 
-	PRIORITY_MERGE_SHARD     = 240,
-	PRIORITY_SPLIT_SHARD     = 250,
+	// Set removing_redundant_team priority lower than merge/split_shard_priority,
+	// so that removing redundant teams does not block merge/split shards.
+	PRIORITY_TEAM_REDUNDANT  = 200,
 
-	PRIORITY_TEAM_REDUNDANT  = 700,
+	PRIORITY_MERGE_SHARD     = 340,
+	PRIORITY_SPLIT_SHARD     = 350,
+
 	PRIORITY_TEAM_UNHEALTHY  = 800,
 	PRIORITY_TEAM_2_LEFT     = 809,
 
@@ -77,7 +80,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) = 0;
 	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) = 0;
 	virtual bool hasHealthyFreeSpace() = 0;
-	virtual Future<Void> updatePhysicalMetrics() = 0;
+	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 	virtual bool isHealthy() = 0;
@@ -128,7 +131,7 @@ struct TeamCollectionInterface {
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
 public:
 	ShardsAffectedByTeamFailure() {}
-	
+
 	struct Team {
 		vector<UID> servers;  // sorted
 		bool primary;
@@ -138,7 +141,7 @@ public:
 
 		bool operator < ( const Team& r ) const {
 			if( servers == r.servers ) return primary < r.primary;
-			return servers < r.servers; 
+			return servers < r.servers;
 		}
 		bool operator == ( const Team& r ) const {
 			return servers == r.servers && primary == r.primary;
@@ -206,6 +209,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<vector<UID>> primaryTeams;
 	std::set<vector<UID>> remoteTeams;
 	vector<DDShardInfo> shards;
+	Optional<Key> initHealthyZoneValue;
 };
 
 Future<Void> dataDistributionTracker(

@@ -67,7 +67,7 @@ struct NetworkOptions {
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(false) {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(true) {}
 };
 
 class Database {
@@ -117,31 +117,6 @@ void runNetwork();
 //
 // Throws network_not_setup if g_network has not been initalized
 void stopNetwork();
-
-/*
- * Starts and holds the monitorLeader and failureMonitorClient actors
- */
-class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
-public:
-	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
-
-	~Cluster();
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> getClusterInterface();
-	Reference<ClusterConnectionFile> getConnectionFile() { return connectionFile; }
-
-	Future<Void> onConnected();
-
-private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
-	Reference<ClusterConnectionFile> connectionFile;
-
-	Future<Void> failMon;
-	Future<Void> connected;
-};
 
 struct StorageMetrics;
 
@@ -268,14 +243,6 @@ public:
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
-	// execute operation is similar to set, but the command will reach
-	// one of the proxies, all the TLogs and all the storage nodes.
-	// instead of setting a key and value on the DB, it executes the command
-	// that is passed in the value field.
-	// - cmdType can be used for logging purposes
-	// - cmdPayload contains the details of the command to be executed:
-	// format of the cmdPayload : <binary-path>:<arg1=val1>,<arg2=val2>...
-	void execute(const KeyRef& cmdType, const ValueRef& cmdPayload);
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
@@ -287,6 +254,7 @@ public:
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
+	uint32_t getSize();
 	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 

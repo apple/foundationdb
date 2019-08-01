@@ -61,6 +61,7 @@ struct WorkerInterface {
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
 	RequestStream<struct ExecuteRequest> execReq;
+	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 
 	TesterInterface testerInterface;
 
@@ -72,7 +73,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
 	}
 };
 
@@ -255,6 +256,23 @@ struct ExecuteRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply, execPayload, arena);
+	}
+};
+
+struct WorkerSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8194122;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	WorkerSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	WorkerSnapRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
 	}
 };
 

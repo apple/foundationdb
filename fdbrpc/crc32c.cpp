@@ -36,7 +36,6 @@
 #include <algorithm>
 #include "fdbrpc/Platform.h"
 #include "generated-constants.cpp"
-#pragma GCC target("sse4.2")
 
 static uint32_t append_trivial(uint32_t crc, const uint8_t * input, size_t length)
 {
@@ -172,6 +171,9 @@ static inline uint32_t shift_crc(uint32_t shift_table[][256], uint32_t crc)
 }
 
 /* Compute CRC-32C using the Intel hardware instruction. */
+#if defined(__clang__) || defined(__GNUG__)
+__attribute__((target("sse4.2")))
+#endif
 static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
 {
     const uint8_t * next = buf;

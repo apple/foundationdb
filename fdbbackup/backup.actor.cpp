@@ -117,37 +117,40 @@ enum {
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
 
-	OPT_TRACE_FORMAT
+	OPT_TRACE_FORMAT,
+	OPT_USE_OBJECT_SERIALIZER
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
-	SO_END_OF_OPTIONS
+	    SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
@@ -173,6 +176,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -240,6 +245,8 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -270,6 +277,8 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -301,6 +310,8 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -332,6 +343,8 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -359,6 +372,8 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -388,6 +403,8 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -425,6 +442,8 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -456,6 +475,8 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -520,6 +541,8 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -562,6 +585,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -599,6 +624,8 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
@@ -629,6 +656,8 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -662,6 +691,8 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -693,6 +724,8 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -726,6 +759,8 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -755,6 +790,8 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -829,6 +866,10 @@ static void printAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -903,7 +944,18 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
+	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -951,6 +1003,17 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --add_prefix PREFIX\n");
 	printf("                 Prefix to add to the restored keys\n");
 	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -992,6 +1055,10 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -1028,6 +1095,17 @@ static void printDBBackupUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
+	printf("  --log          Enables trace file logging for the CLI session.\n"
+		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+	       "                 Use object serializer for sending messages. The object serializer\n"
+	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
+	       "                 each other even if they don't have the same version\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
@@ -2662,6 +2740,7 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
+		bool useObjectSerializer = true;
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -2772,6 +2851,18 @@ int main(int argc, char* argv[]) {
 					}
 					traceFormat = args->OptionArg();
 					break;
+				case OPT_USE_OBJECT_SERIALIZER: {
+					std::string s = args->OptionArg();
+					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+					if (s == "on" || s == "true" || s == "1") {
+						useObjectSerializer = true;
+					} else if (s == "off" || s == "false" || s == "0") {
+						useObjectSerializer = false;
+					} else {
+						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+					}
+					break;
+				}
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;
@@ -3118,6 +3209,11 @@ int main(int argc, char* argv[]) {
 			setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 		}
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+		// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as
+		// zero = false, non-zero = true.
+		setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
+		                 useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
+		                                     : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
 
 		// deferred TLS options
 		if (tlsCertPath.size()) {
@@ -3389,27 +3485,31 @@ int main(int argc, char* argv[]) {
 			break;
 		case EXE_RESTORE:
 			if(dryRun) {
+				if(restoreType != RESTORE_START) {
+					fprintf(stderr, "Restore dry run only works for 'start' command\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				// Must explicitly call trace file options handling if not calling Database::createDatabase()
 				initTraceFile();
 			}
-			else if(restoreType != RESTORE_START && !initCluster()) {
-				return FDB_EXIT_ERROR;
-			}
+			else {
+				if(restoreClusterFileDest.empty()) {
+					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+					return FDB_EXIT_ERROR;
+				}
 
-			if(restoreClusterFileDest.empty()) {
-				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-				return FDB_EXIT_ERROR;
-			}
+				if(!fileExists(restoreClusterFileDest)) {
+					fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+					return FDB_EXIT_ERROR;
+				}
 
-			if(!fileExists(restoreClusterFileDest)) {
-				fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-				return FDB_EXIT_ERROR;
-			}
-
-			try {
-				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-			} catch(Error &e) {
-				fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
-				return FDB_EXIT_ERROR;
+				try {
+					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+				} catch(Error &e) {
+					fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+					return FDB_EXIT_ERROR;
+				}
 			}
 
 			switch(restoreType) {

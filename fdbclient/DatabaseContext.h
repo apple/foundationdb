@@ -52,12 +52,14 @@ public:
 	}
 
 	// For internal (fdbserver) use only
-	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
-	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID=TaskPriority::DefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
+	static Database create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+	                       LocalityData clientLocality, bool enableLocalityLoadBalance,
+	                       TaskPriority taskID = TaskPriority::DefaultEndpoint, bool lockAware = false,
+	                       int apiVersion = Database::API_VERSION_LATEST, bool switchable = false);
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion )); }
+	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
 	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -94,14 +96,26 @@ public:
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<ClusterConnectionFile> getConnectionFile();
 
+	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
+	//
+	// Meant to be used as part of a 'hot standby' solution to switch to the standby. A correct switch will involve
+	// advancing the version on the new cluster sufficiently far that any transaction begun with a read version from the
+	// old cluster will fail to commit. Assuming the above version-advancing is done properly, a call to
+	// switchConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
+	// new cluster.
+	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
+	Future<Void> connectionFileChanged();
+	bool switchable = false;
+
 //private: 
-	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 
-		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST );
+		bool enableLocalityLoadBalance, bool lockAware, bool internal = true, int apiVersion = Database::API_VERSION_LATEST, bool switchable = false );
 
 	explicit DatabaseContext( const Error &err );
 
 	// Key DB-specific information
+	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
@@ -117,6 +131,14 @@ public:
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
+
+	AsyncTrigger connectionFileChangedTrigger;
+
+	// Disallow any reads at a read version lower than minAcceptableReadVersion.  This way the client does not have to
+	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
+	// Updated everytime we get a GRV response
+	Version minAcceptableReadVersion = std::numeric_limits<Version>::max();
+	void validateVersion(Version);
 
 	// Client status updater
 	struct ClientStatusUpdater {
@@ -168,8 +190,7 @@ public:
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;
-
-	Reference<Cluster> cluster;
+	Future<Void> connected;
 
 	int apiVersion;
 

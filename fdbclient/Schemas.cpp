@@ -232,8 +232,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -252,7 +252,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
-                  "storage_server_durability_lag"
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -272,7 +273,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
-                  "storage_server_durability_lag"
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -312,11 +314,17 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default",
-                         "connected_coordinators":2
+                         "log_group":"default"
+                     }
+                 ],
+                 "max_protocol_clients":[
+                     {
+                         "address":"127.0.0.1:9898",
+                         "log_group":"default"
                      }
                  ],
                  "count" : 1,
+                 "max_protocol_count" : 1,
                  "protocol_version" : "fdb00a400050001",
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
@@ -355,7 +363,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled"
                ]
             },
             "issues":[
@@ -604,8 +614,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map":{

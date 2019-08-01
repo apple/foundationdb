@@ -43,7 +43,7 @@
 #undef min
 #endif
 
-int g_trace_depth = 0;
+thread_local int g_trace_depth = 0;
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -113,7 +113,7 @@ struct SuppressionMap {
 };
 
 TraceBatch g_traceBatch;
-trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
+thread_local trace_clock_t g_trace_clock = TRACE_CLOCK_REALTIME;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -979,6 +979,7 @@ thread_local bool TraceEvent::networkThread = false;
 void TraceEvent::setNetworkThread() {
 	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
 	networkThread = true;
+	g_trace_clock = TRACE_CLOCK_NOW;
 }
 
 bool TraceEvent::isNetworkThread() {

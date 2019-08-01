@@ -590,6 +590,9 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			panic(e)
 		}
 		sm.store(idx, []byte("GOT_COMMITTED_VERSION"))
+	case op == "GET_APPROXIMATE_SIZE":
+		_ = sm.currentTransaction().GetApproximateSize().MustGet()
+		sm.store(idx, []byte("GOT_APPROXIMATE_SIZE"))
 	case op == "GET_VERSIONSTAMP":
 		sm.store(idx, sm.currentTransaction().GetVersionstamp())
 	case op == "GET_KEY":
@@ -801,6 +804,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		db.Options().SetTransactionMaxRetryDelay(100)
 		db.Options().SetTransactionRetryLimit(10)
 		db.Options().SetTransactionRetryLimit(-1)
+		db.Options().SetTransactionCausalReadRisky()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")

@@ -28,7 +28,7 @@
 
 template <class Interface>
 struct OptionalInterface {
-	friend class serializable_traits<OptionalInterface<Interface>>;
+	friend struct serializable_traits<OptionalInterface<Interface>>;
 	// Represents an interface with a known id() and possibly known actual endpoints.
 	// For example, an OptionalInterface<TLogInterface> represents a particular tlog by id, which you might or might not presently know how to communicate with
 
@@ -214,9 +214,13 @@ struct LogSystemConfig {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
-	std::vector<TLogInterface> allLocalLogs() const {
+	std::vector<TLogInterface> allLocalLogs(bool includeSatellite = true) const {
 		std::vector<TLogInterface> results;
 		for( int i = 0; i < tLogs.size(); i++ ) {
+			// skip satellite TLogs, if it was not needed
+			if (!includeSatellite && tLogs[i].locality == tagLocalitySatellite) {
+				continue;
+			}
 			if(tLogs[i].isLocal) {
 				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
 					if( tLogs[i].tLogs[j].present() ) {

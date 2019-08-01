@@ -28,6 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
@@ -50,7 +51,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
-	RequestStream<struct GetPhysicalMetricsRequest> getPhysicalMetrics;
+	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
@@ -69,11 +70,11 @@ struct StorageServerInterface {
 
 		if constexpr (!is_fb_function<Ar>) {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
 			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -119,7 +120,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
 	}
 };
 
@@ -159,7 +160,7 @@ struct WatchValueRequest {
 struct GetKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
-	VectorRef<KeyValueRef> data;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
 
@@ -167,7 +168,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
 	}
 };
 
@@ -177,14 +178,15 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeySelectorRef begin, end;
 	Version version;		// or latestVersion
 	int limit, limitBytes;
+	bool isFetchKeys;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
 
-	GetKeyValuesRequest() {}
+	GetKeyValuesRequest() : isFetchKeys(false) {}
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena);
 	}
 };
 
@@ -197,7 +199,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
 	}
 };
 
@@ -339,21 +341,24 @@ struct SplitMetricsRequest {
 	}
 };
 
-struct GetPhysicalMetricsReply {
+struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
 	StorageMetrics free;
 	StorageMetrics capacity;
+	double bytesInputRate;
+
+	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity);
+		serializer(ar, load, free, capacity, bytesInputRate);
 	}
 };
 
-struct GetPhysicalMetricsRequest {
+struct GetStorageMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 13290999;
-	ReplyPromise<GetPhysicalMetricsReply> reply;
+	ReplyPromise<GetStorageMetricsReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

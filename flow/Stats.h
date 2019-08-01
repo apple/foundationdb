@@ -38,14 +38,6 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 
-struct TimedRequest {
-	double requestTime;
-
-	TimedRequest() {
-		requestTime = timer();
-	}
-};
-
 struct ICounter {
 	// All counters have a name and value
 	virtual std::string const& getName() const = 0;

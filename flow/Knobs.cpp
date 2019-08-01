@@ -74,7 +74,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
 	//AsyncFileCached
-	init( PAGE_CACHE_4K,                                2000LL<<20 );
+	init( PAGE_CACHE_4K,                                   2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
 	init( SIM_PAGE_CACHE_4K,                                   1e8 );
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
@@ -149,6 +149,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 1 );
+	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
 	init( LOAD_BALANCE_BACKOFF_RATE,                           2.0 );
@@ -168,6 +170,16 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 }
 
+static std::string toLower( std::string const& name ) {
+	std::string lower_name;
+	for(auto c = name.begin(); c != name.end(); ++c)
+		if (*c >= 'A' && *c <= 'Z')
+			lower_name += *c - 'A' + 'a';
+		else
+			lower_name += *c;
+	return lower_name;
+}
+
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	if (double_knobs.count(knob)) {
 		double v;
@@ -176,6 +188,24 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 			throw invalid_option_value();
 		*double_knobs[knob] = v;
 		return true;
+	}
+	if (bool_knobs.count(knob)) {
+		if(toLower(value) == "true") {
+			*bool_knobs[knob] = true;
+		} else if(toLower(value) == "false") {
+			*bool_knobs[knob] = false;
+		} else {
+			int64_t v;
+			int n=0;
+			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
+				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			} else {
+				if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			}
+			*bool_knobs[knob] = v;
+		}
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;
@@ -203,16 +233,6 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	return false;
 }
 
-static std::string toLower( std::string const& name ) {
-	std::string lower_name;
-	for(auto c = name.begin(); c != name.end(); ++c)
-		if (*c >= 'A' && *c <= 'Z')
-			lower_name += *c - 'A' + 'a';
-		else
-			lower_name += *c;
-	return lower_name;
-}
-
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
 	knob = value;
 	double_knobs[toLower(name)] = &knob;
@@ -233,6 +253,11 @@ void Knobs::initKnob( std::string& knob, const std::string& value, const std::st
 	string_knobs[toLower(name)] = &knob;
 }
 
+void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
+	knob = value;
+	bool_knobs[toLower(name)] = &knob;
+}
+
 void Knobs::trace() {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
@@ -241,5 +266,7 @@ void Knobs::trace() {
 	for(auto &k : int64_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : string_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for(auto &k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

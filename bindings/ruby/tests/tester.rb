@@ -381,6 +381,9 @@ class Tester
         when "GET_COMMITTED_VERSION"
           @last_version = inst.tr.get_committed_version
           inst.push("GOT_COMMITTED_VERSION")
+        when "GET_APPROXIMATE_SIZE"
+          size = inst.tr.get_approximate_size.to_i
+          inst.push("GOT_APPROXIMATE_SIZE")
         when "GET_VERSIONSTAMP"
           inst.push(inst.tr.get_versionstamp)
         when "TUPLE_PACK"
@@ -465,6 +468,7 @@ class Tester
             @db.options.set_transaction_size_limit(100000)
             @db.options.set_transaction_retry_limit(10)
             @db.options.set_transaction_retry_limit(-1)
+            @db.options.set_transaction_causal_read_risky()
 
             @db.transact do |tr|
               tr.options.set_priority_system_immediate

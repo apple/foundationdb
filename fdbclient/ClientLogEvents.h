@@ -35,6 +35,14 @@ namespace FdbClientLogEvents {
 			EVENTTYPEEND	// End of EventType
 	     };
 
+	typedef int TrasactionPriorityType;
+	enum {
+		PRIORITY_DEFAULT   = 0,
+		PRIORITY_BATCH     = 1,
+		PRIORITY_IMMEDIATE = 2,
+		PRIORITY_END
+	};
+
 	struct Event {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
 		Event() { }
@@ -64,6 +72,39 @@ namespace FdbClientLogEvents {
 			TraceEvent("TransactionTrace_GetVersion")
 			.detail("TransactionID", id)
 			.detail("Latency", latency);
+		}
+	};
+
+	// Version V2 of EventGetVersion starting at 6.2
+	struct EventGetVersion_V2 : public Event {
+		EventGetVersion_V2(double ts, double lat, uint32_t type) : Event(GET_VERSION_LATENCY, ts), latency(lat) {
+			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {
+				priorityType = PRIORITY_DEFAULT;
+			} else if (type == GetReadVersionRequest::PRIORITY_BATCH) {
+				priorityType = PRIORITY_BATCH;
+			} else if (type == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE){
+				priorityType = PRIORITY_IMMEDIATE;
+			} else {
+				ASSERT(0);
+			}
+		 }
+		EventGetVersion_V2() { }
+
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), latency, priorityType);
+			else
+				return serializer(ar, latency, priorityType);
+		}
+
+		double latency;
+		TrasactionPriorityType priorityType {PRIORITY_END};
+
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetVersion")
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("PriorityType", priorityType);
 		}
 	};
 

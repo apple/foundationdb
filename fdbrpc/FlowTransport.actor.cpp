@@ -342,7 +342,7 @@ struct Peer : NonCopyable {
 		}
 		pkt.connectionId = transport->transportId;
 
-		PacketBuffer* pb_first = new PacketBuffer;
+		PacketBuffer* pb_first = PacketBuffer::create();
 		PacketWriter wr( pb_first, nullptr, Unversioned() );
 		pkt.serialize(wr);
 		unsent.prependWriteBuffer(pb_first, wr.finish());
@@ -657,7 +657,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 			if (g_network->useObjectSerializer()) {
 				StringRef data = reader.arenaReadAll();
 				ASSERT(data.size() > 8);
-				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
+				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
 				receiver->receive(objReader);
 			} else {
 				receiver->receive(reader);
@@ -897,7 +897,7 @@ ACTOR static Future<Void> connectionReader(
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
 								.detail("ConnectionId", connectionId)
-								.detail("UseObjectSerializer", false);
+								.detail("UseObjectSerializer", g_network->useObjectSerializer());
 						}
 
 						if(connectionId > 1) {
@@ -1150,7 +1150,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		Standalone<StringRef> copy;
 		if (g_network->useObjectSerializer()) {
-			ObjectWriter wr;
+			ObjectWriter wr(AssumeVersion(currentProtocolVersion));
 			what.serializeObjectWriter(wr);
 			copy = wr.toStringRef();
 		} else {
@@ -1206,15 +1206,16 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			// Find the correct place to start calculating checksum
 			uint32_t checksumUnprocessedLength = len;
 			prevBytesWritten += packetInfoSize;
-			if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
-				prevBytesWritten -= PacketBuffer::DATA_SIZE;
+			if (prevBytesWritten >= checksumPb->bytes_written) {
+				prevBytesWritten -= checksumPb->bytes_written;
 				checksumPb = checksumPb->nextPacketBuffer();
 			}
 
 			// Checksum calculation
 			while (checksumUnprocessedLength > 0) {
-				uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
-				checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
+				uint32_t processLength =
+				    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
+				checksum = crc32c_append(checksum, checksumPb->data() + prevBytesWritten, processLength);
 				checksumUnprocessedLength -= processLength;
 				checksumPb = checksumPb->nextPacketBuffer();
 				prevBytesWritten = 0;

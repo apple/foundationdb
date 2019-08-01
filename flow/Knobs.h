@@ -38,11 +38,13 @@ protected:
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
 	void initKnob( std::string& knob, const std::string& value, const std::string& name );
+	void initKnob( bool& knob, bool value, std::string const& name );
 
 	std::map<std::string, double*> double_knobs;
 	std::map<std::string, int64_t*> int64_knobs;
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
+	std::map<std::string, bool*> bool_knobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -169,6 +171,8 @@ public:
 	int MAX_METRICS;
 
 	//Load Balancing
+	int LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED;
+	int LOAD_BALANCE_DC_ID_LOCALITY_ENABLED;
 	double LOAD_BALANCE_MAX_BACKOFF;
 	double LOAD_BALANCE_START_BACKOFF;
 	double LOAD_BALANCE_BACKOFF_RATE;
