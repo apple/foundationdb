@@ -78,4 +78,50 @@ private:
 	VersionMetricHandle val;
 };
 
+struct NotifiedDouble {
+	explicit NotifiedDouble( double val = 0 ) : val(val) {}
+
+	Future<Void> whenAtLeast( double limit ) {
+		if (val >= limit) 
+			return Void();
+		Promise<Void> p;
+		waiting.push( std::make_pair(limit,p) );
+		return p.getFuture();
+	}
+
+	double get() const { return val; }
+
+	void set( double v ) {
+		ASSERT( v >= val );
+		if (v != val) {
+			val = v;
+
+			std::vector<Promise<Void>> toSend;
+			while ( waiting.size() && v >= waiting.top().first ) {
+				Promise<Void> p = std::move(waiting.top().second);
+				waiting.pop();
+				toSend.push_back(p);
+			}
+			for(auto& p : toSend) {
+				p.send(Void());
+			}
+		}
+	}
+
+	void operator=( double v ) {
+		set( v );
+	}
+
+	NotifiedDouble(NotifiedDouble&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedDouble&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+
+private:
+	typedef std::pair<double,Promise<Void>> Item;
+	struct ItemCompare {
+		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
+	};
+	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
+	double val;
+};
+
 #endif

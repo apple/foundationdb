@@ -568,7 +568,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
 void printHelpOverview() {
@@ -634,7 +634,7 @@ std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::string serverID) {
 	if(serverID == "")
 		return "unknown";
-		
+
 	for (auto proc : processesMap.obj()){
 		try {
 			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
@@ -995,6 +995,9 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
+
+			bool machinesAreZones = true;
+			std::map<std::string, int> zones;
 			try {
 				outputString += "\n  FoundationDB processes - ";
 				if (statusObjCluster.get("processes", processesMap)) {
@@ -1005,10 +1008,24 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					int processExclusions = 0;
 					for (auto p : processesMap.obj()) {
 						StatusObjectReader process(p.second);
-						if (process.has("excluded") && process.last().get_bool())
+						bool excluded = process.has("excluded") && process.last().get_bool();
+						if (excluded) {
 							processExclusions++;
+						}
 						if (process.has("messages") && process.last().get_array().size()){
-							errors ++;
+							errors++;
+						}
+
+						std::string zoneId;
+						if (process.get("locality.zoneid", zoneId)) {
+							std::string machineId;
+							if (!process.get("locality.machineid", machineId) || machineId != zoneId) {
+								machinesAreZones = false;
+							}
+							int& nonExcluded = zones[zoneId];
+							if(!excluded) {
+								nonExcluded = 1;
+							}
 						}
 					}
 
@@ -1018,6 +1035,21 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				} else
 					outputString += "unknown";
+
+				if (zones.size() > 0) {
+					outputString += format("\n  Zones                  - %d", zones.size());
+					int zoneExclusions = 0;
+					for (auto itr : zones) {
+						if (itr.second == 0) {
+							++zoneExclusions;
+						}
+					}
+					if (zoneExclusions > 0) {
+						outputString += format(" (less %d excluded)", zoneExclusions);
+					}
+				} else {
+					outputString += "\n  Zones                  - unknown";
+				}
 
 				outputString += "\n  Machines               - ";
 				if (statusObjCluster.get("machines", machinesMap)) {
@@ -1068,20 +1100,20 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjCluster.get("fault_tolerance", faultTolerance)) {
 					int availLoss, dataLoss;
 
-					if (faultTolerance.get("max_machine_failures_without_losing_availability", availLoss) && faultTolerance.get("max_machine_failures_without_losing_data", dataLoss)) {
+					if (faultTolerance.get("max_zone_failures_without_losing_availability", availLoss) && faultTolerance.get("max_zone_failures_without_losing_data", dataLoss)) {
 
 						outputString += "\n  Fault Tolerance        - ";
 
 						int minLoss = std::min(availLoss, dataLoss);
+						const char *faultDomain = machinesAreZones ? "machine" : "zone";
 						if (minLoss == 1)
-							outputString += "1 machine";
+							outputString += format("1 %s", faultDomain);
 						else
-							outputString += format("%d machines", minLoss);
+							outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
 						}
-
 					}
 				}
 
@@ -2172,9 +2204,9 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
 	try {
 		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
-		printf("Snapshots create succeeded with UID: %s\n", snapUID.toString().c_str());
+		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
 	} catch (Error& e) {
-		fprintf(stderr, "Snapshot create failed, %d (%s)."
+		fprintf(stderr, "Snapshot create failed %d (%s)."
 				" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
 		return true;
 	}
@@ -2577,7 +2609,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
-			wait( makeInterruptable( checkStatus( Void(), ccf )) );
+			Future<Void> checkStatusF = checkStatus(Void(), db->getConnectionFile());
+			Future<Void> checkDDStatusF = checkDataDistributionStatus(db, true);
+			wait(makeInterruptable(success(checkStatusF) && success(checkDDStatusF)));
 		}
 		else {
 			printf("\n");
@@ -2614,7 +2648,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				linenoise.historyAdd(line);
 		}
 
-		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
+		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db->getConnectionFile());
 
 		try {
 			state UID randomID = deterministicRandom()->randomUniqueID();
@@ -2742,7 +2776,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 
-					StatusObject s = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
+					StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db->getConnectionFile())));
 
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);
@@ -2751,7 +2785,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool err = wait( configure( db, tokens, ccf, &linenoise, warn ) );
+					bool err = wait(configure(db, tokens, db->getConnectionFile(), &linenoise, warn));
 					if (err) is_error = true;
 					continue;
 				}
@@ -2768,7 +2802,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
+					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
 						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
@@ -2781,7 +2815,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "exclude")) {
-					bool err = wait( exclude(db, tokens, ccf, warn ) );
+					bool err = wait(exclude(db, tokens, db->getConnectionFile(), warn));
 					if (err) is_error = true;
 					continue;
 				}
@@ -2955,7 +2989,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					wait( makeInterruptable( forceRecovery( ccf, tokens[1] ) ) );
+					wait(makeInterruptable(forceRecovery(db->getConnectionFile(), tokens[1])));
 					continue;
 				}
 
@@ -2964,7 +2998,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						wait( makeInterruptable( printHealthyZone(db) ) );
 					}
 					else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
-						wait( makeInterruptable( clearHealthyZone(db) ) );
+						bool clearResult = wait(makeInterruptable(clearHealthyZone(db, true)));
+						is_error = !clearResult;
 					}
 					else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
 						double seconds;
@@ -2974,7 +3009,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							wait( makeInterruptable( setHealthyZone( db, tokens[2], seconds ) ) );
+							bool setResult = wait(makeInterruptable(setHealthyZone(db, tokens[2], seconds, true)));
+							is_error = !setResult;
 						}
 					} else {
 						printUsage(tokens[0]);
@@ -3410,18 +3446,46 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "datadistribution")) {
-					if (tokens.size() != 2) {
-						printf("Usage: datadistribution <on|off>\n");
+					if (tokens.size() != 2 && tokens.size() != 3) {
+						printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+						       "<ssfailure|rebalance>>\n");
 						is_error = true;
 					} else {
-						if(tokencmp(tokens[1], "on")) {
+						if (tokencmp(tokens[1], "status")) {
+							wait(makeInterruptable(checkDataDistributionStatus(db)));
+						} else if (tokencmp(tokens[1], "on")) {
 							wait(success(setDDMode(db, 1)));
-							printf("Data distribution is enabled\n");
-						} else if(tokencmp(tokens[1], "off")) {
+							printf("Data distribution is turned on.\n");
+						} else if (tokencmp(tokens[1], "off")) {
 							wait(success(setDDMode(db, 0)));
-							printf("Data distribution is disabled\n");
+							printf("Data distribution is turned off.\n");
+						} else if (tokencmp(tokens[1], "disable")) {
+							if (tokencmp(tokens[2], "ssfailure")) {
+								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
+								printf("Data distribution is disabled for storage server failures.\n");
+							} else if (tokencmp(tokens[2], "rebalance")) {
+								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
+								printf("Data distribution is disabled for rebalance.\n");
+							} else {
+								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								       "<ssfailure|rebalance>>\n");
+								is_error = true;
+							}
+						} else if (tokencmp(tokens[1], "enable")) {
+							if (tokencmp(tokens[2], "ssfailure")) {
+								bool _ = wait(makeInterruptable(clearHealthyZone(db, false, true)));
+								printf("Data distribution is enabled for storage server failures.\n");
+							} else if (tokencmp(tokens[2], "rebalance")) {
+								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
+								printf("Data distribution is enabled for rebalance.\n");
+							} else {
+								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								       "<ssfailure|rebalance>>\n");
+								is_error = true;
+							}
 						} else {
-							printf("Usage: datadistribution <on|off>\n");
+							printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+							       "<ssfailure|rebalance>>\n");
 							is_error = true;
 						}
 					}

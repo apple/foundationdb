@@ -1,5 +1,5 @@
 /*
- * serialize.h
+ * flat_buffers.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -180,8 +180,8 @@ TEST_CASE("flow/FlatBuffers/collectVTables") {
 	ASSERT(vtables == detail::get_vtableset(root, context));
 	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
 	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
-	int root_offset = vtables->offsets.at(&root_vtable);
-	int nested_offset = vtables->offsets.at(&nested_vtable);
+	int root_offset = vtables->getOffset(&root_vtable);
+	int nested_offset = vtables->getOffset(&nested_vtable);
 	ASSERT(!memcmp((uint8_t*)&root_vtable[0], &vtables->packed_tables[root_offset], root_vtable.size()));
 	ASSERT(!memcmp((uint8_t*)&nested_vtable[0], &vtables->packed_tables[nested_offset], nested_vtable.size()));
 	return Void();
@@ -452,7 +452,11 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
 		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
-		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
+		// The VectorRef and Arena arguments are intentionally in a different order from the serialize call above.
+		// Arenas need to get serialized after any Ref types whose memory they own. In order for schema evolution to be
+		// possible, it needs to be okay to reorder an Arena so that it appears after a newly added Ref type. For this
+		// reason, Arenas are ignored by the wire protocol entirely. We test that behavior here.
+		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, outVec, vecArena);
 	}
 	ASSERT(src.size() == outVec.size());
 	for (int i = 0; i < src.size(); ++i) {

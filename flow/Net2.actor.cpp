@@ -575,6 +575,7 @@ void Net2::run() {
 	double nnow = timer_monotonic();
 
 	while(!stopped) {
+		FDB_TRACE_PROBE(run_loop_begin);
 		++countRunLoop;
 
 		if (runFunc) {
@@ -613,11 +614,15 @@ void Net2::run() {
 		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
+		int numTimers = 0;
 		while (!timers.empty() && timers.top().at < now) {
+			++numTimers;
 			++countTimers;
 			ready.push( timers.top() );
 			timers.pop();
 		}
+		countTimers += numTimers;
+		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
 		processThreadReady();
 
@@ -626,7 +631,9 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
+		int queueSize = ready.size();
 
+		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
@@ -643,8 +650,14 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
 
-			if (check_yield(TaskPriority::Max, true)) { ++countYields; break; }
+			if (check_yield(TaskPriority::Max, true)) {
+				FDB_TRACE_PROBE(run_loop_yield);
+				++countYields;
+                break;
+			}
 		}
+		queueSize = ready.size();
+		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
 		trackMinPriority(minTaskID, now);
 
@@ -723,13 +736,16 @@ void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
 }
 
 void Net2::processThreadReady() {
+	int numReady = 0;
 	while (true) {
 		Optional<OrderedTask> t = threadReady.pop();
 		if (!t.present()) break;
 		t.get().priority -= ++tasksIssued;
 		ASSERT( t.get().task != 0 );
 		ready.push( t.get() );
+		++numReady;
 	}
+	FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
 }
 
 void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority) {

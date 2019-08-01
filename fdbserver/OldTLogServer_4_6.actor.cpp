@@ -953,6 +953,7 @@ namespace oldTLog_4_6 {
 		TLogPeekReply reply;
 		reply.maxKnownVersion = logData->version.get();
 		reply.minKnownCommittedVersion = 0;
+		reply.onlySpilled = false;
 		if(poppedVer > req.begin) {
 			reply.popped = poppedVer;
 			reply.end = poppedVer;

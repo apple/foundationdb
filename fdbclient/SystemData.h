@@ -301,6 +301,8 @@ const  Key restoreStatusKeyFor( StringRef statusType);
 const Value restoreStatusValue( double const& val );
 
 extern const KeyRef healthyZoneKey;
+extern const StringRef ignoreSSFailuresZoneString;
+extern const KeyRef rebalanceDDIgnoreKey;
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version );
 std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );

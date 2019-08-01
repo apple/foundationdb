@@ -87,7 +87,8 @@ public:
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
-	double BG_DD_POLLING_INTERVAL;
+	double BG_REBALANCE_POLLING_INTERVAL;
+	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
@@ -102,6 +103,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
 
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
@@ -140,6 +142,8 @@ public:
 	int64_t DD_LOCATION_CACHE_SIZE;
 	double MOVEKEYS_LOCK_POLLING_DELAY;
 	double DEBOUNCE_RECRUITING_DELAY;
+	int REBALANCE_MAX_RETRIES;
+	int DD_OVERLAP_PENALTY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -233,8 +237,10 @@ public:
 	double PROXY_SPIN_DELAY;
 	double UPDATE_REMOTE_LOG_VERSION_INTERVAL;
 	int MAX_TXS_POP_VERSION_HISTORY;
-	double PROXY_FORWARD_DELAY;
-	int MAX_FORWARD_MESSAGES;
+	double MIN_CONFIRM_INTERVAL;
+	double ENFORCED_MIN_RECOVERY_DURATION;
+	double REQUIRED_MIN_RECOVERY_DURATION;
+	bool ALWAYS_CAUSAL_READ_RISKY;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -279,6 +285,8 @@ public:
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
+	double COORDINATOR_REGISTER_INTERVAL;
+	double CLIENT_REGISTER_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)

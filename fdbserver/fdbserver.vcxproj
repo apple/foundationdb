@@ -142,6 +142,7 @@
     <ActorCompiler Include="workloads\RandomMoveKeys.actor.cpp" />
     <ActorCompiler Include="workloads\TargetedKill.actor.cpp" />
     <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\DifferentClustersSameRV.actor.cpp" />
     <ActorCompiler Include="workloads\WriteDuringRead.actor.cpp" />
     <ActorCompiler Include="workloads\Watches.actor.cpp" />
     <ActorCompiler Include="workloads\ThreadSafety.actor.cpp" />

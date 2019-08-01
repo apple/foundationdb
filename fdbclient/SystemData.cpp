@@ -150,7 +150,7 @@ const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
 	wr.serializeBytes( serverTagHistoryKeys.begin );
 	wr << serverID;
 	version = bigEndian64(version);
-	
+
 	Key versionStr = makeString( 8 );
 	uint8_t* data = mutateString( versionStr );
 	memcpy(data, &version, 8);
@@ -709,6 +709,8 @@ const Value restoreStatusValue( double const& val ) {
 	return wr.toValue();
 }
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
+const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
+const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
 	BinaryWriter wr(IncludeVersion());

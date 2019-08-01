@@ -151,7 +151,7 @@ else()
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-stdlib=libc++ -lc++abi -Wl,-build-id=sha1)
+        add_link_options(-lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
     add_compile_options(
@@ -183,6 +183,13 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+
+  # Check whether we can use dtrace probes
+  include(CheckSymbolExists)
+  check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
+  if(SUPPORT_DTRACE)
+    add_compile_definitions(DTRACE_PROBES)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

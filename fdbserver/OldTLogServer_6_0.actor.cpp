@@ -402,7 +402,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered) {
-		if(tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && allTags.size() && !allTags.count(tag) && popped <= recoveredAt) {
+		if(tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && tag != txsTag && allTags.size() && !allTags.count(tag) && popped <= recoveredAt) {
 			popped = recoveredAt + 1;
 		}
 		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, nothingPersistent, poppedRecently, unpoppedRecovered) );
@@ -840,7 +840,11 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 				tag.id = tag.id % logData->logRouterTags;
 			}
 			if(tag.locality == tagLocalityTxs) {
-				tag.id = tag.id % logData->txsTags;
+				if (logData->txsTags > 0) {
+					tag.id = tag.id % logData->txsTags;
+				} else {
+					tag = txsTag;
+				}
 			}
 			Reference<LogData::TagData> tagData = logData->getTagData(tag);
 			if(!tagData) {
@@ -905,6 +909,9 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 Version poppedVersion( Reference<LogData> self, Tag tag) {
 	auto tagData = self->getTagData(tag);
 	if (!tagData) {
+		if (tag == txsTag || tag.locality == tagLocalityTxs) {
+ 			return 0;
+ 		}
 		return self->recoveredAt;
 	}
 	return tagData->popped;
@@ -1207,6 +1214,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 }
 
 ACTOR Future<Void> watchDegraded(TLogData* self) {
+	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		return Void();
+	}
+
 	//This delay is divided into multiple delays to avoid marking the tlog as degraded because of a single SlowTask
 	state int loopCount = 0;
 	while(loopCount < SERVER_KNOBS->TLOG_DEGRADED_DELAY_COUNT) {

@@ -82,8 +82,13 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BLOB_CREDENTIAL_FILE, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
+	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+};
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -129,6 +134,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
 	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
 	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
 	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
@@ -522,7 +528,7 @@ void* parentWatcher(void *arg) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -571,13 +577,28 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-		   "                 to a random value shared by all fdbserver processes on this\n"
-		   "                 machine.\n");
+	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
+	       "                 Defaults to a random value shared by all fdbserver processes\n"
+	       "                 on this machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
+	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
+	       "                 LOCALITYVALUE is not.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
+	printf("  -M SIZE, --storage_memory SIZE\n"
+	       "                 Maximum amount of memory used for storage. The default\n"
+	       "                 value is 1GiB. When specified without a unit, MB is\n"
+	       "                 assumed.\n");
+	printf("  --cache_memory SIZE\n"
+	       "                 The amount of memory to use for caching disk pages.\n"
+	       "                 The default value is 2GiB. When specified without a unit,\n"
+	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
@@ -611,14 +632,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -s SEED, --seed SEED\n"
 			   "                 Random seed.\n");
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  -m SIZE, --memory SIZE\n"
-			   "                 Memory limit. The default value is 8GiB. When specified\n"
-			   "                 without a unit, MiB is assumed.\n");
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -M SIZE, --storage_memory SIZE\n"
-			   "                 Maximum amount of memory used for storage. The default\n"
-			   "                 value is 1GiB. When specified without a unit, MB is\n"
-			   "                 assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -655,8 +669,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("                 Must be specified if using a different database for metrics.\n");
 		printf("  --knob_KNOBNAME KNOBVALUE\n");
 		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --locality_LOCALITYKEY LOCALITYVALUE\n");
-		printf("                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
 		printf("  --io_trust_seconds SECONDS\n");
 		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
 		       "                 before timing out with an error. If an operation times out, all future\n"
@@ -1289,6 +1301,16 @@ int main(int argc, char* argv[]) {
 					}
 					storageMemLimit = ti.get();
 					break;
+				case OPT_CACHEMEMLIMIT:
+					ti = parse_with_suffix(args.OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
+					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
+					break;
 				case OPT_BUGGIFY:
 					if( !strcmp( args.OptionArg(), "on" ) )
 						buggifyEnabled = true;
@@ -1678,7 +1700,7 @@ int main(int argc, char* argv[]) {
 			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyMachineId))
-			localities.set(LocalityData::keyMachineId, machineId);
+			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
 			localities.set(LocalityData::keyDcId, dcId);

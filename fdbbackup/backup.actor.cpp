@@ -947,7 +947,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
+	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
@@ -3641,27 +3641,31 @@ int main(int argc, char* argv[]) {
 			break;
 		case EXE_RESTORE:
 			if(dryRun) {
+				if(restoreType != RESTORE_START) {
+					fprintf(stderr, "Restore dry run only works for 'start' command\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				// Must explicitly call trace file options handling if not calling Database::createDatabase()
 				initTraceFile();
 			}
-			else if(restoreType != RESTORE_START && !initCluster()) {
-				return FDB_EXIT_ERROR;
-			}
+			else {
+				if(restoreClusterFileDest.empty()) {
+					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+					return FDB_EXIT_ERROR;
+				}
 
-			if(restoreClusterFileDest.empty()) {
-				fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-				return FDB_EXIT_ERROR;
-			}
+				if(!fileExists(restoreClusterFileDest)) {
+					fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
+					return FDB_EXIT_ERROR;
+				}
 
-			if(!fileExists(restoreClusterFileDest)) {
-				fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", restoreClusterFileDest.c_str());
-				return FDB_EXIT_ERROR;
-			}
-
-			try {
-				db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
-			} catch(Error &e) {
-				fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
-				return FDB_EXIT_ERROR;
+				try {
+					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+				} catch(Error &e) {
+					fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n", restoreClusterFileDest.c_str(), e.what());
+					return FDB_EXIT_ERROR;
+				}
 			}
 
 			switch(restoreType) {

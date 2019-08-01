@@ -259,7 +259,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 					hugeArenaSample(reqSize);
 				}
-				g_hugeArenaMemory += reqSize;
+				g_hugeArenaMemory.fetch_add(reqSize);
 
 				// If the new block has less free space than the old block, make the old block depend on it
 				if (next && !next->isTiny() && next->unused() >= reqSize-dataSize) {
@@ -296,7 +296,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				#ifdef ALLOC_INSTRUMENTATION
 					allocInstr[ "ArenaHugeKB" ].dealloc( (bigSize+1023)>>10 );
 				#endif
-				g_hugeArenaMemory -= bigSize;
+				g_hugeArenaMemory.fetch_sub(bigSize);
 				delete[] (uint8_t*)this;
 			}
 		}
@@ -1143,7 +1143,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		string_serialized_traits<V> traits;
 		auto* p = out;
 		uint32_t length = t.size();
-		memcpy(out, &length, sizeof(length));
+		*reinterpret_cast<decltype(length)*>(out) = length;
 		out += sizeof(length);
 		for (const auto& item : t) {
 			out += traits.save(out, item);
@@ -1161,7 +1161,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		memcpy(&num_elements, data, sizeof(num_elements));
 		data += sizeof(num_elements);
 		t.resize(context.arena(), num_elements);
-		for (int i = 0; i < num_elements; ++i) {
+		for (unsigned i = 0; i < num_elements; ++i) {
 			data += traits.load(data, t[i], context);
 		}
 		ASSERT(data - p == size);

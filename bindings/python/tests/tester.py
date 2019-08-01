@@ -142,6 +142,7 @@ def test_db_options(db):
     db.options.set_transaction_size_limit(100000)
     db.options.set_transaction_retry_limit(10)
     db.options.set_transaction_retry_limit(-1)
+    db.options.set_transaction_causal_read_risky()
 
 
 @fdb.transactional
