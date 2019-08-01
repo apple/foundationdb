@@ -86,6 +86,7 @@
     <ActorCompiler Include="networksender.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+    <ClInclude Include="Stats.h" />
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="IRateControl.h" />
     <ClInclude Include="Platform.h" />

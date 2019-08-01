@@ -31,6 +31,7 @@
 #include "fdbclient/CommitTransaction.h"
 
 #include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -132,7 +133,7 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID, static_cast<TimedRequest&>(*this));
+		serializer(ar, transaction, reply, arena, flags, debugID);
 	}
 };
 
@@ -189,7 +190,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, debugID, reply, static_cast<TimedRequest&>(*this));
+		serializer(ar, transactionCount, flags, debugID, reply);
 	}
 };
 
