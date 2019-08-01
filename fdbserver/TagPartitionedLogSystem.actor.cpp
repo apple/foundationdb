@@ -1868,12 +1868,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
-				if(nonShardedTxs) {
-					localTags.push_back(txsTag);
-				} else {
-					for(int i = 0; i < self->txsTags; i++) {
-						localTags.push_back(Tag(tagLocalityTxs, i));
-					}
+			}
+		}
+
+		if(oldLogSystem->tLogs.size()) {
+			if(nonShardedTxs) {
+				localTags.push_back(txsTag);
+			} else {
+				for(int i = 0; i < self->txsTags; i++) {
+					localTags.push_back(Tag(tagLocalityTxs, i));
 				}
 			}
 		}
