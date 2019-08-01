@@ -28,6 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
@@ -135,7 +136,7 @@ struct GetValueRequest : TimedRequest {
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		serializer(ar, key, version, debugID, reply, static_cast<TimedRequest&>(*this));
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 
@@ -185,7 +186,7 @@ struct GetKeyValuesRequest : TimedRequest {
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena, static_cast<TimedRequest&>(*this));
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena);
 	}
 };
 
@@ -214,7 +215,7 @@ struct GetKeyRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, sel, version, reply, arena, static_cast<TimedRequest&>(*this));
+		serializer(ar, sel, version, reply, arena);
 	}
 };
 
