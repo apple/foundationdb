@@ -368,9 +368,9 @@ Future<std::invoke_result_t<F, T>> map(Future<T> what, F func)
 
 //maps a vector of futures
 template<class T, class F>
-std::vector<Future<std::invoke_result<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
+std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
 {
-	std::vector<Future<std::invoke_result<F, T>>> ret;
+	std::vector<Future<std::invoke_result_t<F, T>>> ret;
 	for(auto f : what)
 		ret.push_back(map( f, func ));
 	return ret;
@@ -378,7 +378,7 @@ std::vector<Future<std::invoke_result<F, T>>> map(std::vector<Future<T>> const& 
 
 //maps a stream
 ACTOR template<class T, class F>
-Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_result<F, T>> output )
+Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_result_t<F, T>> output )
 {
 	loop {
 		try {
