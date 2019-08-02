@@ -34,8 +34,8 @@
 #include <cstdint>
 #include <cstdarg>
 
+#include "fdbserver/RestoreWorkerInterface.h"
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
@@ -69,5 +69,5 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	}
 };
 
-
+#include "flow/unactorcompiler.h"
 #endif //FDBSERVER_RESTOREWORKER_H

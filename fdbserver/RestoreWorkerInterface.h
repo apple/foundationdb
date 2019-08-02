@@ -1,5 +1,5 @@
 /*
- * RestoreWorkerInterface.actor.h
+ * RestoreWorkerInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,11 +22,8 @@
 // which are RestoreMaster, RestoreLoader, and RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-#include "fdbserver/RestoreWorkerInterface.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
+#ifndef FDBSERVER_RESTORE_WORKER_INTERFACE_H
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -38,8 +35,6 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 #define DUMPTOKEN(name)                                                                                                \
 	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
@@ -476,78 +471,4 @@ std::string getRoleStr(RestoreRole role);
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
 
-// Send each request in requests via channel of the request's interface.
-// Do not expect a meaningful reply
-// The UID in a request is the UID of the interface to handle the request
-ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                               std::vector<std::pair<UID, Request>> requests) {
-
-	if (requests.empty()) {
-		return Void();
-	}
-
-	loop {
-		try {
-			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			for (auto& request : requests) {
-				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
-				cmdReplies.push_back(stream->getReply(request.second));
-			}
-
-			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
-			// getReply will automatically keep retrying for you.
-			// Alex: you probably do NOT need the timeoutError.
-			std::vector<REPLY_TYPE(Request)> reps = wait(
-				timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT));
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
-			for (auto& request : requests) {
-				TraceEvent(SevWarn, "FastRestore")
-				    .detail("SendBatchRequests", requests.size())
-				    .detail("RequestID", request.first)
-				    .detail("Request", request.second.toString());
-			}
-		}
-	}
-
-	return Void();
-}
-
-// Similar to sendBatchRequests except that the caller expect to process the reply.
-// This actor can be combined with sendBatchRequests(...)
-ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                             std::map<UID, Request> requests, std::vector<REPLY_TYPE(Request)>* replies) {
-
-	if (requests.empty()) {
-		return Void();
-	}
-
-	loop {
-		try {
-			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			for (auto& request : requests) {
-				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
-				cmdReplies.push_back(stream->getReply(request.second));
-			}
-
-			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
-			// getReply will automatically keep retrying for you.
-			std::vector<REPLY_TYPE(Request)> reps = wait(
-			    timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)); 
-			*replies = reps;
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "getBatchReplies Error code:%d, error message:%s\n", e.code(), e.what());
-		}
-	}
-
-	return Void();
-}
-
-#include "flow/unactorcompiler.h"
 #endif

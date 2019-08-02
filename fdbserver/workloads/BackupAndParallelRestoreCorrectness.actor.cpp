@@ -23,7 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/RestoreWorkerInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
@@ -706,7 +706,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				wait(checkDB(cx, "FinishRestore", self));
 
 				for (auto& restore : restores) {
-					assert(!restore.isError());
+					ASSERT(!restore.isError());
 				}
 			}
 

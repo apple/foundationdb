@@ -373,7 +373,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 		readerKey.consume(logRangeMutationFirstLength);
 	}
 
-	uint8_t hashValue = readerKey.consume<uint8_t>();
+	readerKey.consume<uint8_t>(); // uint8_t hashValue = readerKey.consume<uint8_t>()
 	uint64_t commitVersion = readerKey.consumeNetworkUInt64();
 	uint32_t part = readerKey.consumeNetworkUInt32();
 	// Use commitVersion as id
@@ -543,8 +543,8 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
 	state int end = data.size();
 	state int numConcatenated = 0;
 	for (int i = start; i < end; ++i) {
-		Key k = data[i].key.withPrefix(mutationLogPrefix);
-		ValueRef v = data[i].value;
+		//Key k = data[i].key.withPrefix(mutationLogPrefix);
+		//ValueRef v = data[i].value;
 		// Concatenate the backuped param1 and param2 (KV) at the same version.
 		bool concatenated =
 		    concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value);

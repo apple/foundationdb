@@ -71,6 +71,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		batchIndex = 0;
 	}
 
+	~RestoreMasterData() = default;
+
 	std::string describeNode() {
 		std::stringstream ss;
 		ss << "Master versionBatch:" << batchIndex;
@@ -116,7 +118,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vbIter->second.logFiles.push_back(allFiles[i]);
 			}
 		}
-		printf("versionBatches.size:%d\n", versionBatches.size());
+		TraceEvent("FastRestore").detail("VersionBatches", versionBatches.size());
 		// Sanity check
 		for (auto& versionBatch : versionBatches) {
 			for (auto& logFile : versionBatch.second.logFiles) {

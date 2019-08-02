@@ -35,12 +35,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
-// #include "fdbserver/RestoreUtil.h"
-// #include "fdbserver/RestoreWorkerInterface.actor.h"
-// #include "fdbserver/RestoreCommon.actor.h"
-// #include "fdbserver/RestoreRoleCommon.actor.h"
-// #include "fdbserver/RestoreLoader.actor.h"
-// #include "fdbserver/RestoreApplier.actor.h"
+#include "fdbserver/RestoreWorker.actor.h"
 #include "fdbserver/RestoreMaster.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

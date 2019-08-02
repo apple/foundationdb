@@ -216,13 +216,10 @@
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
     <ClInclude Include="RestoreUtil.h" />
-    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+    <ActorCompiler Include="RestoreWorker.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="RestoreRoleCommon.actor.h">
-      <EnableCompile>false</EnableCompile>
-    </ActorCompiler>
-    <ActorCompiler Include="RestoreWorker.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="RestoreMaster.actor.h">
