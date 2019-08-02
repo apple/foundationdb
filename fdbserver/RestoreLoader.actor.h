@@ -22,10 +22,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_LOADER_G_H)
-	#define FDBSERVER_RESTORE_LOADER_G_H
-	#include "fdbserver/RestoreLoader.actor.g.h"
+#define FDBSERVER_RESTORE_LOADER_G_H
+#include "fdbserver/RestoreLoader.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_LOADER_H)
-	#define FDBSERVER_RESTORE_LOADER_H
+#define FDBSERVER_RESTORE_LOADER_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -45,9 +45,11 @@
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 
-	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
-	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
+	// range2Applier is in master and loader. Loader uses this to determine which applier a mutation should be sent
+	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Standalone<KeyRef>, UID> range2Applier;
+	// keyOpsCount is the number of operations per key which is used to determine the key-range boundary for appliers
+	std::map<Standalone<KeyRef>, int> keyOpsCount;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
@@ -66,12 +68,12 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str()
-			<< "] [NodeIndex:" << std::to_string(nodeIndex) << "]";
+		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
+		   << "]";
 		return ss.str();
 	}
 
-    void resetPerVersionBatch() {
+	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		RestoreRoleData::resetPerVersionBatch();
 		range2Applier.clear();
@@ -81,25 +83,24 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 
 	// Only get the appliers that are responsible for a range
-    std::vector<UID> getWorkingApplierIDs() {
-        std::vector<UID> applierIDs;
-        for ( auto &applier : range2Applier ) {
-            applierIDs.push_back(applier.second);
-        }
+	std::vector<UID> getWorkingApplierIDs() {
+		std::vector<UID> applierIDs;
+		for (auto& applier : range2Applier) {
+			applierIDs.push_back(applier.second);
+		}
 
-        ASSERT( !applierIDs.empty() );
-        return applierIDs;
-    }
+		ASSERT(!applierIDs.empty());
+		return applierIDs;
+	}
 
 	void initBackupContainer(Key url) {
-		if ( bcUrl == url && bc.isValid() ) {
+		if (bcUrl == url && bc.isValid()) {
 			return;
 		}
 		bcUrl = url;
 		bc = IBackupContainer::openContainer(url.toString());
 	}
 };
-
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx);
 

@@ -615,16 +615,13 @@ const KeyRangeRef restoreWorkersKeys(
 );
 const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
-
 const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
 const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
-const KeyRangeRef restoreRequestKeys(
-		LiteralStringRef("\xff\x02/restoreRequests/"),
-		LiteralStringRef("\xff\x02/restoreRequests0")
-);
+const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
+                                     LiteralStringRef("\xff\x02/restoreRequests0"));
 
 // Encode restore worker key for workerID
-const Key restoreWorkerKeyFor( UID const& workerID ) {
+const Key restoreWorkerKeyFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreWorkersKeys.begin );
 	wr << workerID;
@@ -632,78 +629,78 @@ const Key restoreWorkerKeyFor( UID const& workerID ) {
 }
 
 // Encode restore agent value
-const Value restoreWorkerInterfaceValue( RestoreWorkerInterface const& cmdInterf ) {
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
 	BinaryWriter wr(IncludeVersion());
 	wr << cmdInterf;
 	return wr.toValue();
 }
 
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue( ValueRef const& value ) {
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
 	RestoreWorkerInterface s;
-	BinaryReader reader( value, IncludeVersion() );
+	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
 	return s;
 }
 
 // Encode and decode restore request value
 // restoreRequestTrigger key
-const Value restoreRequestTriggerValue (UID randomID, int const numRequests) {
+const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
 	BinaryWriter wr(IncludeVersion());
 	wr << numRequests;
 	wr << randomID;
 	return wr.toValue();
 }
-const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
+const int decodeRestoreRequestTriggerValue(ValueRef const& value) {
 	int s;
 	UID randomID;
-	BinaryReader reader( value, IncludeVersion() );
+	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
 	reader >> randomID;
 	return s;
 }
 
 // restoreRequestDone key
-const Value restoreRequestDoneVersionValue (Version readVersion) {
+const Value restoreRequestDoneVersionValue(Version readVersion) {
 	BinaryWriter wr(IncludeVersion());
 	wr << readVersion;
 	return wr.toValue();
 }
-Version decodeRestoreRequestDoneVersionValue( ValueRef const& value ) {
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value) {
 	Version v;
-	BinaryReader reader( value, IncludeVersion() );
+	BinaryReader reader(value, IncludeVersion());
 	reader >> v;
 	return v;
 }
 
-const Key restoreRequestKeyFor( int const& index ) {
+const Key restoreRequestKeyFor(int const& index) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreRequestKeys.begin );
+	wr.serializeBytes(restoreRequestKeys.begin);
 	wr << index;
 	return wr.toValue();
 }
 
-const Value restoreRequestValue( RestoreRequest const& request ) {
+const Value restoreRequestValue(RestoreRequest const& request) {
 	BinaryWriter wr(IncludeVersion());
 	wr << request;
 	return wr.toValue();
 }
 
-RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
 	RestoreRequest s;
-	BinaryReader reader( value, IncludeVersion() );
+	BinaryReader reader(value, IncludeVersion());
 	reader >> s;
 	return s;
 }
 
 // TODO: Register restore performance data to restoreStatus key
-const Key restoreStatusKeyFor ( StringRef statusType) {
+const Key restoreStatusKeyFor(StringRef statusType) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreStatusKey);
 	wr << statusType;
 	return wr.toValue();
 }
 
-const Value restoreStatusValue( double const& val ) {
+const Value restoreStatusValue(double const& val) {
 	BinaryWriter wr(IncludeVersion());
 	wr << StringRef(std::to_string(val));
 	return wr.toValue();

@@ -254,9 +254,7 @@ struct KeyRangeRef {
 		}
 	};
 
-	std::string toString() const {
-		return "Begin:" + begin.printable() + "End:" + end.printable();
-	}
+	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
 };
 
 template<>
@@ -586,8 +584,9 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	}
 
 	std::string toString() const {
-		return "more:" + std::to_string(more) + " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]")
-			   + " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
 

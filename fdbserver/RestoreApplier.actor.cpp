@@ -32,13 +32,16 @@
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self);
-ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx);
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+                                                          Reference<RestoreApplierData> self);
+ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
+                                                 Database cx);
 
 ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
-	state Reference<RestoreApplierData> self = Reference<RestoreApplierData>( new RestoreApplierData(applierInterf.id(), nodeIndex) );
+	state Reference<RestoreApplierData> self =
+	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
 
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
@@ -46,42 +49,47 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	loop {
 		double loopTopTime = now();
 		double elapsedTime = loopTopTime - lastLoopTopTime;
-		if( elapsedTime > 0.050 ) {
+		if (elapsedTime > 0.050) {
 			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreApplierLoopx100").detail("NodeDesc", self->describeNode()).detail("Elapsed", elapsedTime);
+				TraceEvent(SevWarn, "SlowRestoreApplierLoopx100")
+				    .detail("NodeDesc", self->describeNode())
+				    .detail("Elapsed", elapsedTime);
 		}
 		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
 
 		try {
 			choose {
-				when ( RestoreSimpleRequest req = waitNext(applierInterf.heartbeat.getFuture()) ) {
+				when(RestoreSimpleRequest req = waitNext(applierInterf.heartbeat.getFuture())) {
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
-				when ( RestoreSendMutationVectorVersionedRequest req = waitNext(applierInterf.sendMutationVector.getFuture()) ) {
+				when(RestoreSendMutationVectorVersionedRequest req =
+				         waitNext(applierInterf.sendMutationVector.getFuture())) {
 					requestTypeStr = "sendMutationVector";
-					actors.add( handleSendMutationVectorRequest(req, self) );
+					actors.add(handleSendMutationVectorRequest(req, self));
 				}
-				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.applyToDB.getFuture()) ) {
+				when(RestoreVersionBatchRequest req = waitNext(applierInterf.applyToDB.getFuture())) {
 					requestTypeStr = "applyToDB";
-					actors.add( handleApplyToDBRequest(req, self, cx) );
+					actors.add(handleApplyToDBRequest(req, self, cx));
 				}
-				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture()) ) {
+				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
 					actors.add(handleInitVersionBatchRequest(req, self));
 				}
-				when ( RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture()) ) {
+				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
-					exitRole =  handleFinishRestoreRequest(req, self);
+					exitRole = handleFinishRestoreRequest(req, self);
 				}
-				when ( wait(exitRole) ) {
+				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
 					break;
 				}
 			}
-		} catch (Error &e) {
-			TraceEvent(SevWarn, "FastRestore").detail("RestoreLoaderError", e.what()).detail("RequestType", requestTypeStr);
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FastRestore")
+			    .detail("RestoreLoaderError", e.what())
+			    .detail("RequestType", requestTypeStr);
 			break;
 		}
 	}
@@ -92,25 +100,29 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // The actor may be invovked multiple times and executed async.
 // No race condition as long as we do not wait or yield when operate the shared data, it should be fine,
 // because all actors run on 1 thread.
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req, Reference<RestoreApplierData> self) {
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+                                                          Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
 
-	TraceEvent("FastRestore").detail("ApplierNode", self->id())
-			.detail("LogVersion", self->logVersion.get()).detail("RangeVersion", self->rangeVersion.get())
-			.detail("Request", req.toString());
+	TraceEvent("FastRestore")
+	    .detail("ApplierNode", self->id())
+	    .detail("LogVersion", self->logVersion.get())
+	    .detail("RangeVersion", self->rangeVersion.get())
+	    .detail("Request", req.toString());
 
-	if ( req.isRangeFile ) {
-		wait( self->rangeVersion.whenAtLeast(req.prevVersion) );
+	if (req.isRangeFile) {
+		wait(self->rangeVersion.whenAtLeast(req.prevVersion));
 	} else {
-		wait( self->logVersion.whenAtLeast(req.prevVersion) );
+		wait(self->logVersion.whenAtLeast(req.prevVersion));
 	}
 
-	if ( (req.isRangeFile &&  self->rangeVersion.get() == req.prevVersion) ||
-	     (!req.isRangeFile && self->logVersion.get() == req.prevVersion) )  {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+	// Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+	if ((req.isRangeFile && self->rangeVersion.get() == req.prevVersion) ||
+	    (!req.isRangeFile && self->logVersion.get() == req.prevVersion)) { 
 		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 		state Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
-		if ( self->kvOps.find(commitVersion) == self->kvOps.end() ) {
+		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
 		}
 		state int mIndex = 0;
@@ -121,7 +133,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		}
 
 		// Notify the same actor and unblock the request at the next version
-		if ( req.isRangeFile ) {
+		if (req.isRangeFile) {
 			self->rangeVersion.set(req.version);
 		} else {
 			self->logVersion.set(req.version);
@@ -132,8 +144,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	return Void();
 }
 
- ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
- 	state std::string typeStr = "";
+ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
+	state std::string typeStr = "";
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
@@ -144,15 +156,18 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator end = self->kvOps.end();
 	end--;
 	ASSERT_WE_THINK(end != self->kvOps.end());
-	TraceEvent("FastRestore").detail("ApplierApplyToDB", self->id()).detail("FromVersion", begin->first).detail("EndVersion", end->first);
-	
+	TraceEvent("FastRestore")
+	    .detail("ApplierApplyToDB", self->id())
+	    .detail("FromVersion", begin->first)
+	    .detail("EndVersion", end->first);
+
 	self->sanityCheckMutationOps();
 
- 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = self->kvOps.begin();
+	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = self->kvOps.begin();
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator prevIt = it;
 	state int index = 0;
 	state int prevIndex = index;
- 	state int count = 0;
+	state int count = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int numVersion = 0;
 	state double transactionSize = 0;
@@ -163,32 +178,34 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			transactionSize = 0;
 
-			for ( ; it != self->kvOps.end(); ++it ) {
+			for (; it != self->kvOps.end(); ++it) {
 				numVersion++;
 				//TraceEvent("FastRestore").detail("Applier", self->id()).detail("ApplyKVsToDBVersion", it->first);
 				state MutationRef m;
-				for ( ; index < it->second.size(); ++index ) {
+				for (; index < it->second.size(); ++index) {
 					m = it->second[index];
-					if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
+					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP)
 						typeStr = typeString[m.type];
 					else {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					if ( m.type == MutationRef::SetValue ) {
+					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
-					} else if ( m.type == MutationRef::ClearRange ) {
+					} else if (m.type == MutationRef::ClearRange) {
 						KeyRangeRef mutationRange(m.param1, m.param2);
 						tr->clear(mutationRange);
-					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
+					} else if (isAtomicOp((MutationRef::Type)m.type)) {
 						tr->atomicOp(m.param1, m.param2, m.type);
 					} else {
-						TraceEvent(SevError, "FastRestore").detail("UnhandledMutationType", m.type).detail("TypeName", typeStr);
+						TraceEvent(SevError, "FastRestore")
+						    .detail("UnhandledMutationType", m.type)
+						    .detail("TypeName", typeStr);
 					}
 					++count;
 					transactionSize += m.expectedSize();
-					
-					if ( transactionSize >= opConfig.transactionBatchSizeThreshold ) { // commit per 1000 mutations
+
+					if (transactionSize >= opConfig.transactionBatchSizeThreshold) { // commit per 1000 mutations
 						wait(tr->commit());
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -199,7 +216,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 					}
 				}
 
-				if ( transactionSize > 0 ) { // the commit batch should NOT across versions
+				if (transactionSize > 0) { // the commit batch should NOT across versions
 					wait(tr->commit());
 					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -215,7 +232,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 				wait(tr->commit());
 			}
 			break;
-		} catch(Error &e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 			it = prevIt;
 			index = prevIndex;
@@ -223,20 +240,23 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		}
 	}
 
- 	self->kvOps.clear();
+	self->kvOps.clear();
 
- 	return Void();
- }
+	return Void();
+}
 
- ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self, Database cx) {
-	TraceEvent("FastRestore").detail("ApplierApplyToDB", self->id()).detail("DBApplierPresent", self->dbApplier.present());
-	if ( !self->dbApplier.present() ) {
+ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
+                                                 Database cx) {
+	TraceEvent("FastRestore")
+	    .detail("ApplierApplyToDB", self->id())
+	    .detail("DBApplierPresent", self->dbApplier.present());
+	if (!self->dbApplier.present()) {
 		self->dbApplier = applyToDB(self, cx);
 	}
 
 	ASSERT(self->dbApplier.present());
 
-	wait( self->dbApplier.get() );
+	wait(self->dbApplier.get());
 	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();

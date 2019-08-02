@@ -29,60 +29,63 @@
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreMaster.actor.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class Database;
 struct RestoreWorkerData;
 
-// id is the id of the worker to be monitored	
+// id is the id of the worker to be monitored
 // This actor is used for both restore loader and restore applier
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
-	wait( delayJittered(5.0) ); // Random jitter reduces heat beat monitor's pressure
+	wait(delayJittered(5.0)); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id));
 
 	return Void();
 }
 
 ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	if ( self->versionBatchStart ) {
+	if (self->versionBatchStart) {
 		self->versionBatchStart = false;
 	}
 
-	TraceEvent("FastRestore").detail("FinishRestoreRequest", req.batchID)
-			.detail("Role", getRoleStr(self->role)).detail("Node", self->id());
-
-	req.reply.send( RestoreCommonReply(self->id()) );
-
-	return Void();
- }
-
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	if ( !self->versionBatchStart ) {
-		self->versionBatchStart = true;
-		self->resetPerVersionBatch();
-	}
-	TraceEvent("FastRestore").detail("InitVersionBatch", req.batchID)
-			.detail("Role", getRoleStr(self->role)).detail("Node", self->id());
+	TraceEvent("FastRestore")
+	    .detail("FinishRestoreRequest", req.batchID)
+	    .detail("Role", getRoleStr(self->role))
+	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();
 }
 
+ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+	if (!self->versionBatchStart) {
+		self->versionBatchStart = true;
+		self->resetPerVersionBatch();
+	}
+	TraceEvent("FastRestore")
+	    .detail("InitVersionBatch", req.batchID)
+	    .detail("Role", getRoleStr(self->role))
+	    .detail("Node", self->id());
+
+	req.reply.send(RestoreCommonReply(self->id()));
+
+	return Void();
+}
 
 //-------Helper functions
 std::string getHexString(StringRef input) {
 	std::stringstream ss;
-	for (int i = 0; i<input.size(); i++) {
-		if ( i % 4 == 0 )
-			ss << " ";
-		if ( i == 12 ) { //The end of 12bytes, which is the version size for value
+	for (int i = 0; i < input.size(); i++) {
+		if (i % 4 == 0) ss << " ";
+		if (i == 12) { // The end of 12bytes, which is the version size for value
 			ss << "|";
 		}
-		if ( i == (12 + 12) ) { //The end of version + header
+		if (i == (12 + 12)) { // The end of version + header
 			ss << "@";
 		}
-		ss << std::setfill('0') << std::setw(2) << std::hex << (int) input[i]; // [] operator moves the pointer in step of unit8
+		ss << std::setfill('0') << std::setw(2) << std::hex
+		   << (int)input[i]; // [] operator moves the pointer in step of unit8
 	}
 	return ss.str();
 }

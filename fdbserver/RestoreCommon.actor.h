@@ -19,15 +19,15 @@
  */
 
 // This file includes the code copied from the old restore in FDB 5.2
-// The functions and structure declared in this file can be shared by 
+// The functions and structure declared in this file can be shared by
 // the old restore and the new performant restore systems
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
-	#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
-	#include "fdbserver/RestoreCommon.actor.g.h"
+#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
+#include "fdbserver/RestoreCommon.actor.g.h"
 #elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
-	#define FDBSERVER_RESTORECOMMON_ACTOR_H
+#define FDBSERVER_RESTORECOMMON_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
@@ -38,23 +38,24 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-
 // RestoreConfig copied from FileBackupAgent.actor.cpp
-// We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing code
+// We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing
+// code
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 typedef FileBackupAgent::ERestoreState ERestoreState;
 struct RestoreFileFR;
 
-// We copy RestoreConfig copied from FileBackupAgent.actor.cpp instead of using (and potentially changing) it in place to avoid conflict with the existing code
-// Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in RestoreCommon.actor.cpp,
-// so that we can use in both the existing restore and the new fast restore subsystems
-// We use RestoreConfig as a Reference<RestoreConfig>, which leads to some non-functional changes in RestoreConfig
+// We copy RestoreConfig copied from FileBackupAgent.actor.cpp instead of using (and potentially changing) it in place
+// to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in
+// Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
+// the new fast restore subsystems We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
+// non-functional changes in RestoreConfig
 class RestoreConfig : public KeyBackedConfig, public ReferenceCounted<RestoreConfig> {
 public:
 	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
 	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
 
-	KeyBackedProperty<ERestoreState> stateEnum(); 
+	KeyBackedProperty<ERestoreState> stateEnum();
 
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr);
 
@@ -92,29 +93,30 @@ public:
 	KeyBackedBinaryValue<int64_t> fileBlockCount();
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr);
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr);
+	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
+	                                                                          Reference<ReadYourWritesTransaction> tr);
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
 	struct RestoreFile {
 		Version version;
 		std::string fileName;
-		bool isRange;  // false for log file
+		bool isRange; // false for log file
 		int64_t blockSize;
 		int64_t fileSize;
-		Version endVersion;  // not meaningful for range files
+		Version endVersion; // not meaningful for range files
 
 		Tuple pack() const {
-			//fprintf(stderr, "Filename:%s\n", fileName.c_str());
+			// fprintf(stderr, "Filename:%s\n", fileName.c_str());
 			return Tuple()
-				.append(version)
-				.append(StringRef(fileName))
-				.append(isRange)
-				.append(fileSize)
-				.append(blockSize)
-				.append(endVersion);
+			    .append(version)
+			    .append(StringRef(fileName))
+			    .append(isRange)
+			    .append(fileSize)
+			    .append(blockSize)
+			    .append(endVersion);
 		}
-		static RestoreFile unpack(Tuple const &t) {
+		static RestoreFile unpack(Tuple const& t) {
 			RestoreFile r;
 			int i = 0;
 			r.version = t.getInt(i++);
@@ -127,12 +129,12 @@ public:
 		}
 	};
 
-	//typedef KeyBackedSet<RestoreFile> FileSetT;
+	// typedef KeyBackedSet<RestoreFile> FileSetT;
 	KeyBackedSet<RestoreFile> fileSet();
 
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr);
 
-	Future<Void> logError(Database cx, Error e, std::string const &details, void *taskInstance = nullptr);
+	Future<Void> logError(Database cx, Error e, std::string const& details, void* taskInstance = nullptr);
 
 	Key mutationLogPrefix();
 
@@ -152,10 +154,12 @@ public:
 
 	Future<Version> getApplyEndVersion(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfig> restore, Reference<ReadYourWritesTransaction> tr);
+	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfig> restore,
+	                                                  Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfig> restore, Reference<ReadYourWritesTransaction> tr);
+	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfig> restore,
+	                                                    Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr);
 
 	std::string toString(); // Added by Meng
@@ -163,33 +167,34 @@ public:
 
 typedef RestoreConfig::RestoreFile RestoreFile;
 
-
 // Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 // incrementally advancing through the map, saving the version and path of the next starting point.
-// NOTE: The struct RestoreFileFR can NOT be named RestoreFile, because compiler will get confused in linking which RestoreFile should be used.
-// If we use RestoreFile, the compilation can succeed, but weird segmentation fault will happen.
+// NOTE: The struct RestoreFileFR can NOT be named RestoreFile, because compiler will get confused in linking which
+// RestoreFile should be used. If we use RestoreFile, compilation succeeds, but weird segmentation fault will happen.
 struct RestoreFileFR {
 	Version version;
 	std::string fileName;
-	bool isRange;  // false for log file
+	bool isRange; // false for log file
 	int64_t blockSize;
 	int64_t fileSize;
-	Version endVersion;  // not meaningful for range files
-	Version beginVersion;  // range file's beginVersion == endVersion; log file contains mutations in version [beginVersion, endVersion)
-	int64_t cursor; //The start block location to be restored. All blocks before cursor have been scheduled to load and restore
+	Version endVersion; // not meaningful for range files
+	Version beginVersion; // range file's beginVersion == endVersion; log file contains mutations in version
+	                      // [beginVersion, endVersion)
+	int64_t cursor; // The start block location to be restored. All blocks before cursor have been scheduled to load and
+	                // restore
 
 	Tuple pack() const {
 		return Tuple()
-				.append(version)
-				.append(StringRef(fileName))
-				.append(isRange)
-				.append(fileSize)
-				.append(blockSize)
-				.append(endVersion)
-				.append(beginVersion)
-				.append(cursor);
+		    .append(version)
+		    .append(StringRef(fileName))
+		    .append(isRange)
+		    .append(fileSize)
+		    .append(blockSize)
+		    .append(endVersion)
+		    .append(beginVersion)
+		    .append(cursor);
 	}
-	static RestoreFileFR unpack(Tuple const &t) {
+	static RestoreFileFR unpack(Tuple const& t) {
 		RestoreFileFR r;
 		int i = 0;
 		r.version = t.getInt(i++);
@@ -205,25 +210,31 @@ struct RestoreFileFR {
 
 	bool operator<(const RestoreFileFR& rhs) const { return beginVersion < rhs.beginVersion; }
 
-	RestoreFileFR() : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion), beginVersion(invalidVersion), cursor(0) {}
+	RestoreFileFR()
+	  : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion),
+	    beginVersion(invalidVersion), cursor(0) {}
 
-	RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize, Version endVersion, Version beginVersion) : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize), endVersion(endVersion), beginVersion(beginVersion), cursor(0) {}
-
+	RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize,
+	              Version endVersion, Version beginVersion)
+	  : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize),
+	    endVersion(endVersion), beginVersion(beginVersion), cursor(0) {}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "version:" << std::to_string(version) << " fileName:" << fileName  << " isRange:" << std::to_string(isRange)
-				<< " blockSize:" << std::to_string(blockSize) << " fileSize:" << std::to_string(fileSize)
-				<< " endVersion:" << std::to_string(endVersion) << std::to_string(beginVersion)  
-				<< " cursor:" << std::to_string(cursor);
+		ss << "version:" << std::to_string(version) << " fileName:" << fileName
+		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
+		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
+		   << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor);
 		return ss.str();
 	}
 };
 
 namespace parallelFileRestore {
-	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len);
-	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len);
-}
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                      int len);
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                    int len);
+} // namespace parallelFileRestore
 
 #include "flow/unactorcompiler.h"
-#endif //FDBCLIENT_Restore_H
+#endif // FDBCLIENT_Restore_H

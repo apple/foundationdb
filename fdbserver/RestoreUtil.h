@@ -34,8 +34,8 @@
 #include <cstdint>
 #include <cstdarg>
 
-enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
-BINARY_SERIALIZABLE( RestoreRole );
+enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
+BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
@@ -45,18 +45,18 @@ extern int numRoles;
 struct FastRestoreOpConfig {
 	int num_loaders = 120;
 	int num_appliers = 40;
-	// transactionBatchSizeThreshold is used when applier applies multiple mutations in a transaction to DB 
-	double transactionBatchSizeThreshold = 512; //512 in Bytes
+	// transactionBatchSizeThreshold is used when applier applies multiple mutations in a transaction to DB
+	double transactionBatchSizeThreshold = 512; // 512 in Bytes
 };
 extern FastRestoreOpConfig opConfig;
 
 struct RestoreCommonReply {
 	constexpr static FileIdentifier file_identifier = 56140435;
 	UID id; // unique ID of the server who sends the reply
-	
+
 	RestoreCommonReply() = default;
 	explicit RestoreCommonReply(UID id) : id(id) {}
-	
+
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "ServerNodeID:" << id.toString();
@@ -76,8 +76,8 @@ struct RestoreSimpleRequest : TimedRequest {
 
 	RestoreSimpleRequest() = default;
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, reply);
 	}
 
@@ -88,4 +88,4 @@ struct RestoreSimpleRequest : TimedRequest {
 	}
 };
 
-#endif //FDBSERVER_RESTOREUTIL_ACTOR_H
+#endif // FDBSERVER_RESTOREUTIL_ACTOR_H

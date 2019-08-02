@@ -35,10 +35,11 @@
 
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
-template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val); // { return Tuple().append(val); }
-template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { return (ERestoreState)val.getInt(0); }
+template <> Tuple Codec<ERestoreState>::pack(ERestoreState const& val);
+template <> ERestoreState Codec<ERestoreState>::unpack(Tuple const& val);
 
-// Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in RestoreCommon.actor.cpp
+// Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
+// RestoreCommon.actor.cpp
 KeyBackedProperty<ERestoreState> RestoreConfig::stateEnum() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
@@ -98,7 +99,8 @@ Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault(Reference
 	return getRestoreRangesOrDefault_impl(this, tr);
 }
 
-ACTOR Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault_impl(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault_impl(
+    RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
 	state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
 	if (ranges.empty()) {
 		state KeyRange range = wait(self->restoreRange().getD(tr));
@@ -107,28 +109,25 @@ ACTOR Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault_imp
 	return ranges;
 }
 
-
 KeyBackedSet<RestoreFile> RestoreConfig::fileSet() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 
 Future<bool> RestoreConfig::isRunnable(Reference<ReadYourWritesTransaction> tr) {
-	return map(stateEnum().getD(tr), [](ERestoreState s) -> bool { return   s != ERestoreState::ABORTED
-																		&& s != ERestoreState::COMPLETED
-																		&& s != ERestoreState::UNITIALIZED;
+	return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
+		return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
 	});
 }
 
-Future<Void> RestoreConfig::logError(Database cx, Error e, std::string const &details, void *taskInstance) {
-	if(!uid.isValid()) {
+Future<Void> RestoreConfig::logError(Database cx, Error e, std::string const& details, void* taskInstance) {
+	if (!uid.isValid()) {
 		TraceEvent(SevError, "FileRestoreErrorNoUID").error(e).detail("Description", details);
 		return Void();
 	}
 	TraceEvent t(SevWarn, "FileRestoreError");
 	t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
 	// These should not happen
-	if(e.code() == error_code_key_not_found)
-		t.backtrace();
+	if (e.code() == error_code_key_not_found) t.backtrace();
 
 	return updateErrorInfo(cx, e, details);
 }
@@ -138,7 +137,7 @@ Key RestoreConfig::mutationLogPrefix() {
 }
 
 Key RestoreConfig::applyMutationsMapPrefix() {
-		return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+	return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
 }
 
 ACTOR Future<int64_t> RestoreConfig::getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
@@ -147,8 +146,7 @@ ACTOR Future<int64_t> RestoreConfig::getApplyVersionLag_impl(Reference<ReadYourW
 	state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), true);
 	wait(success(beginVal) && success(endVal));
 
-	if(!beginVal.get().present() || !endVal.get().present())
-		return 0;
+	if (!beginVal.get().present() || !endVal.get().present()) return 0;
 
 	Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 	Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
@@ -177,7 +175,7 @@ void RestoreConfig::initApplyMutations(Reference<ReadYourWritesTransaction> tr, 
 
 void RestoreConfig::clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-	
+
 	// Clear add/remove prefix keys
 	tr->clear(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid));
 	tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
@@ -205,13 +203,14 @@ void RestoreConfig::setApplyEndVersion(Reference<ReadYourWritesTransaction> tr, 
 }
 
 Future<Version> RestoreConfig::getApplyEndVersion(Reference<ReadYourWritesTransaction> tr) {
-	return map(tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid)), [=](Optional<Value> const &value) -> Version {
+	return map(tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid)), [=](Optional<Value> const& value) -> Version {
 		return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
 	});
 }
 
 // Meng: Change RestoreConfig to Reference<RestoreConfig> because FastRestore pass the Reference<RestoreConfig> around
-ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfig> restore, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfig> restore,
+                                                          Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -227,46 +226,42 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfi
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore->getUid();
-	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) && success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(lag) && success(tag) && success(lastError));
+	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
+	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(lag) && success(tag) &&
+	     success(lastError));
 
 	std::string errstr = "None";
-	if(lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
+	if (lastError.get().second != 0)
+		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(),
+		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
 	TraceEvent("FileRestoreProgress")
-		.detail("RestoreUID", uid)
-		.detail("Tag", tag.get())
-		.detail("State", status.get().toString())
-		.detail("FileCount", fileCount.get())
-		.detail("FileBlocksFinished", fileBlocksFinished.get())
-		.detail("FileBlocksTotal", fileBlockCount.get())
-		.detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
-		.detail("BytesWritten", bytesWritten.get())
-		.detail("ApplyLag", lag.get())
-		.detail("TaskInstance", THIS_ADDR)
-		.backtrace();
+	    .detail("RestoreUID", uid)
+	    .detail("Tag", tag.get())
+	    .detail("State", status.get().toString())
+	    .detail("FileCount", fileCount.get())
+	    .detail("FileBlocksFinished", fileBlocksFinished.get())
+	    .detail("FileBlocksTotal", fileBlockCount.get())
+	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
+	    .detail("BytesWritten", bytesWritten.get())
+	    .detail("ApplyLag", lag.get())
+	    .detail("TaskInstance", THIS_ADDR)
+	    .backtrace();
 
-
-	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
-					tag.get().c_str(),
-					uid.toString().c_str(),
-					status.get().toString().c_str(),
-					fileBlocksFinished.get(),
-					fileBlockCount.get(),
-					fileBlocksDispatched.get() - fileBlocksFinished.get(),
-					fileCount.get(),
-					bytesWritten.get(),
-					lag.get(),
-					errstr.c_str()
-				);
+	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
+	              "%lld  ApplyVersionLag: %lld  LastError: %s",
+	              tag.get().c_str(), uid.toString().c_str(), status.get().toString().c_str(), fileBlocksFinished.get(),
+	              fileBlockCount.get(), fileBlocksDispatched.get() - fileBlocksFinished.get(), fileCount.get(),
+	              bytesWritten.get(), lag.get(), errstr.c_str());
 }
-Future<std::string> RestoreConfig::getProgress(Reference<ReadYourWritesTransaction> tr) { 
+Future<std::string> RestoreConfig::getProgress(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfig> restore = Reference<RestoreConfig>(this);
-	return getProgress_impl(restore, tr); 
+	return getProgress_impl(restore, tr);
 }
 
 // Meng: Change RestoreConfig to Reference<RestoreConfig>
-ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(Reference<RestoreConfig> restore, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(Reference<RestoreConfig> restore,
+                                                            Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -279,18 +274,16 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(Reference<RestoreCon
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore->getUid();
-	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) && success(progress));
+	wait(success(ranges) && success(addPrefix) && success(removePrefix) &&
+		 success(url) && success(restoreVersion) && success(progress));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
-	for (auto &range : ranges.get()) {
+	for (auto& range : ranges.get()) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
 	}
-	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
-						printable(addPrefix.get()).c_str(),
-						printable(removePrefix.get()).c_str(),
-						restoreVersion.get()
-					);
+	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld", printable(addPrefix.get()).c_str(),
+	                    printable(removePrefix.get()).c_str(), restoreVersion.get());
 	return returnStr;
 }
 Future<std::string> RestoreConfig::getFullStatus(Reference<ReadYourWritesTransaction> tr) {
@@ -306,154 +299,143 @@ std::string RestoreConfig::toString() {
 
 typedef RestoreConfig::RestoreFile RestoreFile;
 
-
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
-// The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp 
+// The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
 namespace parallelFileRestore {
-	// Helper class for reading restore data from a buffer and throwing the right errors.
-	struct StringRefReader {
-		StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
+// Helper class for reading restore data from a buffer and throwing the right errors.
+struct StringRefReader {
+	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
 
-		// Return remainder of data as a StringRef
-		StringRef remainder() {
-			return StringRef(rptr, end - rptr);
-		}
+	// Return remainder of data as a StringRef
+	StringRef remainder() { return StringRef(rptr, end - rptr); }
 
-		// Return a pointer to len bytes at the current read position and advance read pos
-		const uint8_t * consume(unsigned int len) {
-			if(rptr == end && len != 0)
-				throw end_of_stream();
-			const uint8_t *p = rptr;
-			rptr += len;
-			if(rptr > end)
-				throw failure_error;
-			return p;
-		}
-
-		// Return a T from the current read position and advance read pos
-		template<typename T> const T consume() {
-			return *(const T *)consume(sizeof(T));
-		}
-
-		// Functions for consuming big endian (network byte order) integers.
-		// Consumes a big endian number, swaps it to little endian, and returns it.
-		const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-		const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
-
-		bool eof() { return rptr == end; }
-
-		const uint8_t *rptr, *end;
-		Error failure_error;
-	};
-
-
-	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len) {
-		state Standalone<StringRef> buf = makeString(len);
-		int rLen = wait(file->read(mutateString(buf), len, offset));
-		if(rLen != len)
-			throw restore_bad_read();
-
-		Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-		state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
-
-		try {
-			// Read header, currently only decoding version 1001
-			if(reader.consume<int32_t>() != 1001)
-				throw restore_unsupported_file_version();
-
-			// Read begin key, if this fails then block was invalid.
-			uint32_t kLen = reader.consumeNetworkUInt32();
-			const uint8_t *k = reader.consume(kLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-			// Read kv pairs and end key
-			while(1) {
-				// Read a key.
-				kLen = reader.consumeNetworkUInt32();
-				k = reader.consume(kLen);
-
-				// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-				if(reader.eof() || *reader.rptr == 0xFF) {
-					results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-					break;
-				}
-
-				// Read a value, which must exist or the block is invalid
-				uint32_t vLen = reader.consumeNetworkUInt32();
-				const uint8_t *v = reader.consume(vLen);
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-				// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-				if(reader.eof() || *reader.rptr == 0xFF)
-					break;
-			}
-
-			// Make sure any remaining bytes in the block are 0xFF
-			for(auto b : reader.remainder())
-				if(b != 0xFF)
-					throw restore_corrupted_data_padding();
-
-			return results;
-
-		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
-				.error(e)
-				.detail("Filename", file->getFilename())
-				.detail("BlockOffset", offset)
-				.detail("BlockLen", len)
-				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-			throw;
-		}
+	// Return a pointer to len bytes at the current read position and advance read pos
+	const uint8_t* consume(unsigned int len) {
+		if (rptr == end && len != 0) throw end_of_stream();
+		const uint8_t* p = rptr;
+		rptr += len;
+		if (rptr > end) throw failure_error;
+		return p;
 	}
 
-	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len)  {
-		state Standalone<StringRef> buf = makeString(len);
-		int rLen = wait(file->read(mutateString(buf), len, offset));
-		if(rLen != len)
-			throw restore_bad_read();
-
-		Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-		state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
-
-		try {
-			// Read header, currently only decoding version 2001
-			if(reader.consume<int32_t>() != 2001)
-				throw restore_unsupported_file_version();
-
-			// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
-			while(1) {
-				// If eof reached or first key len bytes is 0xFF then end of block was reached.
-				if(reader.eof() || *reader.rptr == 0xFF)
-					break;
-
-				// Read key and value.  If anything throws then there is a problem.
-				uint32_t kLen = reader.consumeNetworkUInt32();
-				const uint8_t *k = reader.consume(kLen);
-				uint32_t vLen = reader.consumeNetworkUInt32();
-				const uint8_t *v = reader.consume(vLen);
-
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-			}
-
-			// Make sure any remaining bytes in the block are 0xFF
-			for(auto b : reader.remainder())
-				if(b != 0xFF)
-					throw restore_corrupted_data_padding();
-
-			return results;
-
-		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
-				.error(e)
-				.detail("Filename", file->getFilename())
-				.detail("BlockOffset", offset)
-				.detail("BlockLen", len)
-				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-			throw;
-		}
+	// Return a T from the current read position and advance read pos
+	template <typename T>
+	const T consume() {
+		return *(const T*)consume(sizeof(T));
 	}
 
+	// Functions for consuming big endian (network byte order) integers.
+	// Consumes a big endian number, swaps it to little endian, and returns it.
+	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+
+	bool eof() { return rptr == end; }
+
+	const uint8_t *rptr, *end;
+	Error failure_error;
+};
+
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                      int len) {
+	state Standalone<StringRef> buf = makeString(len);
+	int rLen = wait(file->read(mutateString(buf), len, offset));
+	if (rLen != len) throw restore_bad_read();
+
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
+
+	try {
+		// Read header, currently only decoding version 1001
+		if (reader.consume<int32_t>() != 1001) throw restore_unsupported_file_version();
+
+		// Read begin key, if this fails then block was invalid.
+		uint32_t kLen = reader.consumeNetworkUInt32();
+		const uint8_t* k = reader.consume(kLen);
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+
+		// Read kv pairs and end key
+		while (1) {
+			// Read a key.
+			kLen = reader.consumeNetworkUInt32();
+			k = reader.consume(kLen);
+
+			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+			if (reader.eof() || *reader.rptr == 0xFF) {
+				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+				break;
+			}
+
+			// Read a value, which must exist or the block is invalid
+			uint32_t vLen = reader.consumeNetworkUInt32();
+			const uint8_t* v = reader.consume(vLen);
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+
+			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
+			if (reader.eof() || *reader.rptr == 0xFF) break;
+		}
+
+		// Make sure any remaining bytes in the block are 0xFF
+		for (auto b : reader.remainder())
+			if (b != 0xFF) throw restore_corrupted_data_padding();
+
+		return results;
+
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
+		    .error(e)
+		    .detail("Filename", file->getFilename())
+		    .detail("BlockOffset", offset)
+		    .detail("BlockLen", len)
+		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
+		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		throw;
+	}
 }
+
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                    int len) {
+	state Standalone<StringRef> buf = makeString(len);
+	int rLen = wait(file->read(mutateString(buf), len, offset));
+	if (rLen != len) throw restore_bad_read();
+
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
+
+	try {
+		// Read header, currently only decoding version 2001
+		if (reader.consume<int32_t>() != 2001) throw restore_unsupported_file_version();
+
+		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
+		while (1) {
+			// If eof reached or first key len bytes is 0xFF then end of block was reached.
+			if (reader.eof() || *reader.rptr == 0xFF) break;
+
+			// Read key and value.  If anything throws then there is a problem.
+			uint32_t kLen = reader.consumeNetworkUInt32();
+			const uint8_t* k = reader.consume(kLen);
+			uint32_t vLen = reader.consumeNetworkUInt32();
+			const uint8_t* v = reader.consume(vLen);
+
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		}
+
+		// Make sure any remaining bytes in the block are 0xFF
+		for (auto b : reader.remainder())
+			if (b != 0xFF) throw restore_corrupted_data_padding();
+
+		return results;
+
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
+		    .error(e)
+		    .detail("Filename", file->getFilename())
+		    .detail("BlockOffset", offset)
+		    .detail("BlockLen", len)
+		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
+		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		throw;
+	}
+}
+
+} // namespace parallelFileRestore

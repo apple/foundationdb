@@ -703,7 +703,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		wait( waitForAll( checks ) );
 
 		printf("checking tests DONE num_workloads:%d\n", workloads.size());
-		
+
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {

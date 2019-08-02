@@ -76,8 +76,9 @@ struct LogFile {
 
 	std::string toString() const {
 		std::string ret;
-		ret = "beginVersion:" + std::to_string(beginVersion) + " endVersion:" + std::to_string(endVersion)
-			  + " blockSize:" + std::to_string(blockSize) + " filename:" + fileName + " fileSize:" + std::to_string(fileSize);
+		ret = "beginVersion:" + std::to_string(beginVersion) + " endVersion:" + std::to_string(endVersion) +
+		      " blockSize:" + std::to_string(blockSize) + " filename:" + fileName +
+		      " fileSize:" + std::to_string(fileSize);
 		return ret;
 	}
 };
@@ -95,8 +96,8 @@ struct RangeFile {
 
 	std::string toString() const {
 		std::string ret;
-		ret = "version:" + std::to_string(version) + " blockSize:" + std::to_string(blockSize) + " fileName:" + fileName
-			  + " fileSize:" + std::to_string(fileSize);
+		ret = "version:" + std::to_string(version) + " blockSize:" + std::to_string(blockSize) +
+		      " fileName:" + fileName + " fileSize:" + std::to_string(fileSize);
 		return ret;
 	}
 };

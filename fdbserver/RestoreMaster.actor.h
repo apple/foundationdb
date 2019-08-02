@@ -22,10 +22,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_MASTER_G_H)
-	#define FDBSERVER_RESTORE_MASTER_G_H
-	#include "fdbserver/RestoreMaster.actor.g.h"
+#define FDBSERVER_RESTORE_MASTER_G_H
+#include "fdbserver/RestoreMaster.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_MASTER_H)
-	#define FDBSERVER_RESTORE_MASTER_H
+#define FDBSERVER_RESTORE_MASTER_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -48,14 +48,13 @@ struct VersionBatch {
 	std::vector<RestoreFileFR> logFiles;
 	std::vector<RestoreFileFR> rangeFiles;
 
-	bool isEmpty() {
-		return logFiles.empty() && rangeFiles.empty();
-	}
+	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
 };
 
-struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
-	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
-	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
+	// range2Applier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
+	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Standalone<KeyRef>, UID> range2Applier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex;
@@ -74,56 +73,57 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "Master versionBatch:"  << batchIndex;
+		ss << "Master versionBatch:" << batchIndex;
 		return ss.str();
 	}
 
 	// Split allFiles into multiple versionBatches based on files' version
-	void buildVersionBatches(const std::vector<RestoreFileFR>& allFiles, std::map<Version, VersionBatch>& versionBatches) {
-		// A version batch includes a log file 
-		// Because log file's verion range does not overlap, we use log file's version range as the version range of a version batch
-		// Create a version batch for a log file
+	void buildVersionBatches(const std::vector<RestoreFileFR>& allFiles,
+	                         std::map<Version, VersionBatch>& versionBatches) {
+		// A version batch includes a log file; Because log file's verion range does not overlap,
+		// we use log file's version range as the version range of a version batch.
 		Version beginVersion = 0;
 		Version maxVersion = 0;
-		for ( int i = 0; i < allFiles.size(); ++i ) {
-			if ( !allFiles[i].isRange ) {
-				ASSERT( versionBatches.find(allFiles[i].beginVersion) ==  versionBatches.end() );
+		for (int i = 0; i < allFiles.size(); ++i) {
+			if (!allFiles[i].isRange) {
+				ASSERT(versionBatches.find(allFiles[i].beginVersion) == versionBatches.end());
 				VersionBatch vb;
 				vb.beginVersion = beginVersion;
 				vb.endVersion = allFiles[i].endVersion;
-				versionBatches[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
+				versionBatches[vb.beginVersion] = vb; // Ensure continuous version range across version batches
 				beginVersion = allFiles[i].endVersion;
 			}
-			if ( maxVersion < allFiles[i].endVersion ) {
+			if (maxVersion < allFiles[i].endVersion) {
 				maxVersion = allFiles[i].endVersion;
 			}
 		}
 		// In case there is no log file
-		if ( versionBatches.empty() ) {
+		if (versionBatches.empty()) {
 			VersionBatch vb;
 			vb.beginVersion = 0;
 			vb.endVersion = maxVersion + 1; // version batch's endVersion is exclusive
 			versionBatches[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
 		}
 		// Put range and log files into its version batch
-		for ( int i = 0; i < allFiles.size(); ++i ) {
-			std::map<Version, VersionBatch>::iterator vbIter = versionBatches.upper_bound(allFiles[i].beginVersion); // vbiter's beginVersion > allFiles[i].beginVersion
+		for (int i = 0; i < allFiles.size(); ++i) {
+			// vbiter's beginVersion > allFiles[i].beginVersion.
+			std::map<Version, VersionBatch>::iterator vbIter = versionBatches.upper_bound(allFiles[i].beginVersion);
 			--vbIter;
-			ASSERT_WE_THINK( vbIter != versionBatches.end() );
-			if ( allFiles[i].isRange ) {
-				vbIter->second.rangeFiles.push_back(allFiles[i]);	
+			ASSERT_WE_THINK(vbIter != versionBatches.end());
+			if (allFiles[i].isRange) {
+				vbIter->second.rangeFiles.push_back(allFiles[i]);
 			} else {
 				vbIter->second.logFiles.push_back(allFiles[i]);
 			}
 		}
 		printf("versionBatches.size:%d\n", versionBatches.size());
 		// Sanity check
-		for (auto &versionBatch : versionBatches) {
-			for ( auto &logFile : versionBatch.second.logFiles ) {
+		for (auto& versionBatch : versionBatches) {
+			for (auto& logFile : versionBatch.second.logFiles) {
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
 			}
-			for ( auto &rangeFile : versionBatch.second.rangeFiles ) {
+			for (auto& rangeFile : versionBatch.second.rangeFiles) {
 				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
 				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
@@ -133,13 +133,13 @@ struct RestoreMasterData :  RestoreRoleData, public ReferenceCounted<RestoreMast
 
 	void logApplierKeyRange() {
 		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", range2Applier.size());
-		for (auto &applier : range2Applier) {
+		for (auto& applier : range2Applier) {
 			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
 		}
 	}
 
 	void initBackupContainer(Key url) {
-		if ( bcUrl == url && bc.isValid() ) {
+		if (bcUrl == url && bc.isValid()) {
 			return;
 		}
 		printf("initBackupContainer, url:%s\n", url.toString().c_str());

@@ -468,7 +468,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						auto range = self->restoreRanges[restoreIndex];
 						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 						restoreTags.push_back(restoreTag);
-						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for restoreIndex:%d tag:%s ranges:%s\n", restoreIndex, range.toString().c_str(), restoreTag.toString().c_str());
+						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
+						       "restoreIndex:%d tag:%s ranges:%s\n",
+						       restoreIndex, range.toString().c_str(), restoreTag.toString().c_str());
 						restores.push_back(backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
 					}
 				}
@@ -476,7 +478,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					multipleRangesInOneTag = true;
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
-					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n", restoreIndex, restoreTag.toString().c_str());
+					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+					       restoreIndex, restoreTag.toString().c_str());
 					restores.push_back(backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()), self->restoreRanges, true, targetVersion, true, Key(), Key(), self->locked));
 				}
 

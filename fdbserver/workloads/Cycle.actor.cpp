@@ -144,8 +144,11 @@ struct CycleWorkload : TestWorkload {
 	void logTestData(const VectorRef<KeyValueRef>& data) {
 		TraceEvent("MXTestFailureDetail");
 		int index = 0;
-		for(auto &entry : data) {
-			TraceEvent("CurrentDataEntry").detail("Index", index).detail("Key", entry.key.toString()).detail("Value", entry.value.toString());
+		for (auto& entry : data) {
+			TraceEvent("CurrentDataEntry")
+			    .detail("Index", index)
+			    .detail("Key", entry.key.toString())
+			    .detail("Value", entry.value.toString());
 			index++;
 		}
 	}
@@ -154,7 +157,10 @@ struct CycleWorkload : TestWorkload {
 		if (data.size() != nodeCount) {
 			logTestData(data);
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
-			TraceEvent(SevError, "TestFailureInfo").detail("DataSize", data.size()).detail("NodeCount", nodeCount).detail("Workload", description());
+			TraceEvent(SevError, "TestFailureInfo")
+			    .detail("DataSize", data.size())
+			    .detail("NodeCount", nodeCount)
+			    .detail("Workload", description());
 			return false;
 		}
 		int i=0;

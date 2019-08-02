@@ -22,14 +22,14 @@
 
 #include "fdbserver/RestoreUtil.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::vector<std::string> RestoreRoleStr = {"Invalid", "Master", "Loader", "Applier"};
+const std::vector<std::string> RestoreRoleStr = { "Invalid", "Master", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
 
 std::string getRoleStr(RestoreRole role) {
-	if ( (int) role >= numRoles || (int) role < 0) {
-		printf("[ERROR] role:%d is out of scope\n", (int) role);
+	if ((int)role >= numRoles || (int)role < 0) {
+		printf("[ERROR] role:%d is out of scope\n", (int)role);
 		return "[Unset]";
 	}
 	return RestoreRoleStr[(int)role];

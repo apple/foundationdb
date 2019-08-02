@@ -22,10 +22,10 @@
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_APPLIER_G_H)
-	#define FDBSERVER_RESTORE_APPLIER_G_H
-	#include "fdbserver/RestoreApplier.actor.g.h"
+#define FDBSERVER_RESTORE_APPLIER_G_H
+#include "fdbserver/RestoreApplier.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_APPLIER_H)
-	#define FDBSERVER_RESTORE_APPLIER_H
+#define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -40,15 +40,16 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-
-struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> { 
+struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
 	NotifiedVersion rangeVersion; // All requests of mutations in range file below this version has been processed
 	NotifiedVersion logVersion; // All requests of mutations in log file below this version has been processed
 	Optional<Future<Void>> dbApplier;
 
-	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
-	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
+	// range2Applier is in master and loader. Loader uses it to determine which applier a mutation should be sent
+	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Standalone<KeyRef>, UID> range2Applier;
+	// keyOpsCount is the number of operations per key that is used to determine the key-range boundary for appliers
+	std::map<Standalone<KeyRef>, int> keyOpsCount;
 
 	// For master applier to hold the lower bound of key ranges for each appliers
 	std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
@@ -67,7 +68,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		nodeIndex = assignedIndex;
 
 		// Q: Why do we need to initMetric?
-		//version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
+		// version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
 
 		role = RestoreRole::Applier;
 	}
@@ -89,18 +90,17 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 
 	void sanityCheckMutationOps() {
-		if (kvOps.empty())
-			return;
+		if (kvOps.empty()) return;
 
-		ASSERT_WE_THINK( isKVOpsSorted() );
-		ASSERT_WE_THINK( allOpsAreKnown() );
+		ASSERT_WE_THINK(isKVOpsSorted());
+		ASSERT_WE_THINK(allOpsAreKnown());
 	}
 
 	bool isKVOpsSorted() {
 		bool ret = true;
 		auto prev = kvOps.begin();
-		for ( auto it = kvOps.begin(); it != kvOps.end(); ++it ) {
-			if ( prev->first > it->first ) {
+		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
+			if (prev->first > it->first) {
 				ret = false;
 				break;
 			}
@@ -111,10 +111,10 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	bool allOpsAreKnown() {
 		bool ret = true;
-		for ( auto it = kvOps.begin(); it != kvOps.end(); ++it ) {
-			for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
-				if ( m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange
-					|| isAtomicOp((MutationRef::Type) m->type) )
+		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
+			for (auto m = it->second.begin(); m != it->second.end(); ++m) {
+				if (m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange ||
+				    isAtomicOp((MutationRef::Type)m->type))
 					continue;
 				else {
 					TraceEvent(SevError, "FastRestore").detail("UnknownMutationType", m->type);
@@ -126,9 +126,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 };
 
-
 ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx);
-
 
 #include "flow/unactorcompiler.h"
 #endif

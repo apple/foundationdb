@@ -844,7 +844,10 @@ public:
 	}
 };
 
-Future<Version> fastRestore(Database const& cx, Standalone<StringRef> const& tagName, Standalone<StringRef> const& url, bool const& waitForComplete, long const& targetVersion, bool const& verbose, Standalone<KeyRangeRef> const& range, Standalone<StringRef> const& addPrefix, Standalone<StringRef> const& removePrefix);
+Future<Version> fastRestore(Database const& cx, Standalone<StringRef> const& tagName, Standalone<StringRef> const& url,
+                            bool const& waitForComplete, long const& targetVersion, bool const& verbose,
+                            Standalone<KeyRangeRef> const& range, Standalone<StringRef> const& addPrefix,
+                            Standalone<StringRef> const& removePrefix);
 
 #include "flow/unactorcompiler.h"
 #endif

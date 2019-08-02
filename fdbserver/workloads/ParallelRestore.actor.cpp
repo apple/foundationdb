@@ -24,24 +24,18 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-
-//A workload which test the correctness of backup and restore process
+// A workload which test the correctness of backup and restore process
 struct RunRestoreWorkerWorkload : TestWorkload {
 	Future<Void> worker;
-	RunRestoreWorkerWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx) {
+	RunRestoreWorkerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		TraceEvent("RunRestoreWorkerWorkloadMX");
 	}
 
-	virtual std::string description() {
-		return "RunRestoreWorkerWorkload";
-	}
+	virtual std::string description() { return "RunRestoreWorkerWorkload"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
 		int num_myWorkers = 3;
@@ -57,12 +51,9 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	virtual Future<bool> check(Database const& cx) { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 };
 
 WorkloadFactory<RunRestoreWorkerWorkload> RunRestoreWorkerWorkloadFactory("RunRestoreWorkerWorkload");

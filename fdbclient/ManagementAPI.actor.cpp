@@ -1749,7 +1749,7 @@ ACTOR Future<Void> checkDatabaseLock( Transaction* tr, UID id ) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
-	if ( val.present() ) {
+	if (val.present()) {
 		printf("DB is locked at uid:%s\n", id.toString().c_str());
 	} else {
 		printf("DB is not locked!\n");
@@ -1768,8 +1768,7 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
-
-	if ( val.present() ) {
+	if (val.present()) {
 		printf("DB is locked at uid:%s\n", id.toString().c_str());
 	} else {
 		printf("DB is not locked!\n");

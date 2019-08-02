@@ -21,14 +21,12 @@
 // This file declare and define the interface for RestoreWorker and restore roles
 // which are RestoreMaster, RestoreLoader, and RestoreApplier
 
-
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-	#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-	#include "fdbserver/RestoreWorkerInterface.actor.g.h"
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
+#include "fdbserver/RestoreWorkerInterface.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
-	#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
-
+#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -43,7 +41,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
+#define DUMPTOKEN(name)                                                                                                \
+	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 class RestoreConfig;
 
@@ -56,7 +55,6 @@ struct RestoreSendMutationVectorVersionedRequest;
 struct RestoreSetApplierKeyRangeVectorRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
-
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -82,23 +80,23 @@ struct RestoreWorkerInterface {
 	RequestStream<RestoreRecruitRoleRequest> recruitRole;
 	RequestStream<RestoreSimpleRequest> terminateWorker;
 
-	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
+	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
-	UID id() const { return interfID; } //cmd.getEndpoint().token;
+	UID id() const { return interfID; } // cmd.getEndpoint().token;
 
 	NetworkAddress address() const { return recruitRole.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		recruitRole.getEndpoint( TaskPriority::LoadBalancedEndpoint );// Q: Why do we need this? 
-		terminateWorker.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		recruitRole.getEndpoint(TaskPriority::LoadBalancedEndpoint); // Q: Why do we need this?
+		terminateWorker.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 
 		interfID = deterministicRandom()->randomUniqueID();
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
 	}
 };
@@ -108,11 +106,9 @@ struct RestoreRoleInterface {
 	UID nodeID;
 	RestoreRole role;
 
-	RestoreRoleInterface() {
-		role = RestoreRole::Invalid;
-	}
+	RestoreRoleInterface() { role = RestoreRole::Invalid; }
 
-	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role) {};
+	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role){};
 
 	UID id() const { return nodeID; }
 
@@ -123,7 +119,7 @@ struct RestoreRoleInterface {
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
+	void serialize(Ar& ar) {
 		serializer(ar, nodeID, role);
 	}
 };
@@ -139,10 +135,10 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces; // TODO: Change to collectRestoreRoleInterfaces
 	RequestStream<RestoreVersionBatchRequest> finishRestore;
 
-	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
+	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
-	RestoreLoaderInterface () {
+	RestoreLoaderInterface() {
 		role = RestoreRole::Loader;
 		nodeID = deterministicRandom()->randomUniqueID();
 	}
@@ -150,23 +146,21 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		updateRestoreSysInfo.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		setApplierKeyRangeVectorRequest.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		loadFile.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		initVersionBatch.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		collectRestoreRoleInterfaces.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		finishRestore.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		updateRestoreSysInfo.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		setApplierKeyRangeVectorRequest.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, * (RestoreRoleInterface*) this, heartbeat, updateRestoreSysInfo,
-				setApplierKeyRangeVectorRequest, loadFile,
-				initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+	void serialize(Ar& ar) {
+		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, setApplierKeyRangeVectorRequest,
+		           loadFile, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
-
 
 struct RestoreApplierInterface : RestoreRoleInterface {
 	constexpr static FileIdentifier file_identifier = 54253048;
@@ -178,9 +172,8 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreVersionBatchRequest> finishRestore;
 
-
-	bool operator == (RestoreWorkerInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreWorkerInterface const& r) const { return id() != r.id(); }
+	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
 
 	RestoreApplierInterface() {
 		role = RestoreRole::Applier;
@@ -190,26 +183,25 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		heartbeat.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		sendMutationVector.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		applyToDB.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		initVersionBatch.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		collectRestoreRoleInterfaces.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
-		finishRestore.getEndpoint( TaskPriority::LoadBalancedEndpoint ); 
+		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		sendMutationVector.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		applyToDB.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar,  * (RestoreRoleInterface*) this, heartbeat, 
-				sendMutationVector, applyToDB, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+	void serialize(Ar& ar) {
+		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, sendMutationVector, applyToDB, initVersionBatch,
+		           collectRestoreRoleInterfaces, finishRestore);
 	}
 
-	std::string toString() {
-		return nodeID.toString();
-	}
+	std::string toString() { return nodeID.toString(); }
 };
 
-// TODO: MX: It is probably better to specify the (beginVersion, endVersion] for each loadingParam. beginVersion (endVersion) is the version the applier is before (after) it receives the request.
+// TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
+// beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
 	constexpr static FileIdentifier file_identifier = 17023837;
 
@@ -228,24 +220,25 @@ struct LoadingParam {
 	Key mutationLogPrefix;
 
 	// TODO: Compare all fields for loadingParam
-	bool operator == ( const LoadingParam& r ) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
-	bool operator != ( const LoadingParam& r ) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
-	bool operator < ( const LoadingParam& r ) const {
-		return (isRangeFile < r.isRangeFile) ||
-			(isRangeFile == r.isRangeFile && filename < r.filename);
+	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
+	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
+	bool operator<(const LoadingParam& r) const {
+		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && filename < r.filename);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, version, filename, offset, length, blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, version, filename, offset, length, blockSize,
+		           restoreRange, addPrefix, removePrefix, mutationLogPrefix);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		str << "isRangeFile:" << isRangeFile << "url:" << url.toString() << " prevVersion:" << prevVersion << " endVersion:" << endVersion << " version:" << version
-			<<  " filename:" << filename  << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-			<< " restoreRange:" << restoreRange.toString()
-			<< " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
+		str << "isRangeFile:" << isRangeFile << "url:" << url.toString() << " prevVersion:" << prevVersion
+		    << " endVersion:" << endVersion << " version:" << version << " filename:" << filename
+		    << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
+		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString()
+		    << " removePrefix:" << removePrefix.toString();
 		return str.str();
 	}
 };
@@ -259,11 +252,13 @@ struct RestoreRecruitRoleReply : TimedRequest {
 	Optional<RestoreApplierInterface> applier;
 
 	RestoreRecruitRoleReply() = default;
-	explicit RestoreRecruitRoleReply(UID id, RestoreRole role, RestoreLoaderInterface const& loader): id(id), role(role), loader(loader) {}
-	explicit RestoreRecruitRoleReply(UID id, RestoreRole role, RestoreApplierInterface const& applier): id(id), role(role), applier(applier) {}
+	explicit RestoreRecruitRoleReply(UID id, RestoreRole role, RestoreLoaderInterface const& loader)
+	  : id(id), role(role), loader(loader) {}
+	explicit RestoreRecruitRoleReply(UID id, RestoreRole role, RestoreApplierInterface const& applier)
+	  : id(id), role(role), applier(applier) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, id, role, loader, applier);
 	}
 
@@ -271,12 +266,12 @@ struct RestoreRecruitRoleReply : TimedRequest {
 		std::stringstream ss;
 		ss << "roleInterf role:" << getRoleStr(role) << " replyID:" << id.toString();
 		if (loader.present()) {
-			ss << "loader:" <<  loader.get().toString();
+			ss << "loader:" << loader.get().toString();
 		}
 		if (applier.present()) {
 			ss << "applier:" << applier.get().toString();
 		}
-			
+
 		return ss.str();
 	}
 };
@@ -289,23 +284,21 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 
 	ReplyPromise<RestoreRecruitRoleReply> reply;
 
-	RestoreRecruitRoleRequest() :  role(RestoreRole::Invalid) {}
-	explicit RestoreRecruitRoleRequest(RestoreRole role, int nodeIndex) : role(role), nodeIndex(nodeIndex){}
+	RestoreRecruitRoleRequest() : role(RestoreRole::Invalid) {}
+	explicit RestoreRecruitRoleRequest(RestoreRole role, int nodeIndex) : role(role), nodeIndex(nodeIndex) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, role, nodeIndex, reply);
 	}
 
 	std::string printable() {
 		std::stringstream ss;
-		ss <<  "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex;
+		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex;
 		return ss.str();
 	}
 
-	std::string toString() {
-		return printable();
-	}
+	std::string toString() { return printable(); }
 };
 
 struct RestoreSysInfoRequest : TimedRequest {
@@ -325,11 +318,10 @@ struct RestoreSysInfoRequest : TimedRequest {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss <<  "RestoreSysInfoRequest";
+		ss << "RestoreSysInfoRequest";
 		return ss.str();
 	}
 };
-
 
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
@@ -342,14 +334,14 @@ struct RestoreLoadFileRequest : TimedRequest {
 	RestoreLoadFileRequest() = default;
 	explicit RestoreLoadFileRequest(LoadingParam param) : param(param) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, param, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss <<  "RestoreLoadFileRequest param:" << param.toString();
+		ss << "RestoreLoadFileRequest param:" << param.toString();
 		return ss.str();
 	}
 };
@@ -364,21 +356,22 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(Version prevVersion, Version version, bool isRangeFile, VectorRef<MutationRef> mutations) :
-			 prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+	explicit RestoreSendMutationVectorVersionedRequest(Version prevVersion, Version version, bool isRangeFile,
+	                                                   VectorRef<MutationRef> mutations)
+	  : prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
+		ss << "prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
+		   << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
-
 
 struct RestoreVersionBatchRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 13018413;
@@ -390,14 +383,14 @@ struct RestoreVersionBatchRequest : TimedRequest {
 	RestoreVersionBatchRequest() = default;
 	explicit RestoreVersionBatchRequest(int batchID) : batchID(batchID) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, batchID, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest BatchID:"  <<  batchID;
+		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
 		return ss.str();
 	}
 };
@@ -406,20 +399,21 @@ struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 92038306;
 
 	std::map<Standalone<KeyRef>, UID> range2Applier;
-	
+
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSetApplierKeyRangeVectorRequest() = default;
-	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> range2Applier) : range2Applier(range2Applier) {}
+	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> range2Applier)
+	  : range2Applier(range2Applier) {}
 
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, range2Applier, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest range2ApplierSize:"  <<  range2Applier.size();
+		ss << "RestoreVersionBatchRequest range2ApplierSize:" << range2Applier.size();
 		return ss.str();
 	}
 };
@@ -427,7 +421,7 @@ struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
 struct RestoreRequest {
 	constexpr static FileIdentifier file_identifier = 49589770;
 
-	//Database cx;
+	// Database cx;
 	int index;
 	Key tagName;
 	Key url;
@@ -442,34 +436,36 @@ struct RestoreRequest {
 
 	int testData;
 	std::vector<int> restoreRequests;
-	//Key restoreTag;
+	// Key restoreTag;
 
-	ReplyPromise< struct RestoreCommonReply > reply;
+	ReplyPromise<struct RestoreCommonReply> reply;
 
 	RestoreRequest() : testData(0) {}
 	explicit RestoreRequest(int testData) : testData(testData) {}
-	explicit RestoreRequest(int testData, std::vector<int> &restoreRequests) : testData(testData), restoreRequests(restoreRequests) {}
+	explicit RestoreRequest(int testData, std::vector<int>& restoreRequests)
+	  : testData(testData), restoreRequests(restoreRequests) {}
 
-	explicit RestoreRequest(const int index, const Key &tagName, const Key &url, bool waitForComplete, Version targetVersion, bool verbose,
-							const KeyRange &range, const Key &addPrefix, const Key &removePrefix, bool lockDB,
-							const UID &randomUid) : index(index), tagName(tagName), url(url), waitForComplete(waitForComplete),
-													targetVersion(targetVersion), verbose(verbose), range(range),
-													addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
-													randomUid(randomUid) {}
+	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, bool waitForComplete,
+	                        Version targetVersion, bool verbose, const KeyRange& range, const Key& addPrefix,
+	                        const Key& removePrefix, bool lockDB, const UID& randomUid)
+	  : index(index), tagName(tagName), url(url), waitForComplete(waitForComplete), targetVersion(targetVersion),
+	    verbose(verbose), range(range), addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
+	    randomUid(randomUid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, index , tagName , url ,  waitForComplete , targetVersion , verbose , range , addPrefix , removePrefix , lockDB , randomUid ,
-		testData , restoreRequests , reply);
+		serializer(ar, index, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix,
+		           lockDB, randomUid, testData, restoreRequests, reply);
 	}
 
-	//Q: Should I convert this toString() to a function to dump RestoreRequest to TraceEvent?
 	std::string toString() const {
 		std::stringstream ss;
-		ss <<  "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString() << " url:" << url.contents().toString()
-			   << " waitForComplete:" << std::to_string(waitForComplete) << " targetVersion:" << std::to_string(targetVersion)
-			   << " verbose:" << std::to_string(verbose) << " range:" << range.toString() << " addPrefix:" << addPrefix.contents().toString()
-			   << " removePrefix:" << removePrefix.contents().toString() << " lockDB:" << std::to_string(lockDB) << " randomUid:" << randomUid.toString();
+		ss << "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString()
+		   << " url:" << url.contents().toString() << " waitForComplete:" << std::to_string(waitForComplete)
+		   << " targetVersion:" << std::to_string(targetVersion) << " verbose:" << std::to_string(verbose)
+		   << " range:" << range.toString() << " addPrefix:" << addPrefix.contents().toString()
+		   << " removePrefix:" << removePrefix.contents().toString() << " lockDB:" << std::to_string(lockDB)
+		   << " randomUid:" << randomUid.toString();
 		return ss.str();
 	}
 };
@@ -480,81 +476,78 @@ std::string getRoleStr(RestoreRole role);
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
 
-
 // Send each request in requests via channel of the request's interface.
 // Do not expect a meaningful reply
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
-//Future< REPLY_TYPE(Request) > 
-Future<Void> sendBatchRequests(
-	RequestStream<Request> Interface::* channel,
-	std::map<UID, Interface> interfaces,
-	std::vector<std::pair<UID, Request>> requests) {
-	
-	if ( requests.empty() ) {
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+                               std::vector<std::pair<UID, Request>> requests) {
+
+	if (requests.empty()) {
 		return Void();
 	}
 
-	loop{
-		try {		
+	loop {
+		try {
 			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			for(auto& request : requests) {
-				RequestStream<Request> const* stream = & (interfaces[request.first].*channel);
-				cmdReplies.push_back( stream->getReply(request.second) );
+			for (auto& request : requests) {
+				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
+				cmdReplies.push_back(stream->getReply(request.second));
 			}
 
-			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise, getReply will automatically keep retrying for you.
-			std::vector<REPLY_TYPE(Request)> reps = wait( timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT) ); //tryGetReply. Use GetReply. // Alex: you probably do NOT need the timeoutError. 
-			//wait( waitForAll(cmdReplies) ); //tryGetReply. Use GetReply. // Alex: you probably do NOT need the timeoutError. 
+			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
+			// getReply will automatically keep retrying for you.
+			// Alex: you probably do NOT need the timeoutError.
+			std::vector<REPLY_TYPE(Request)> reps = wait(
+				timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT));
 			break;
-		} catch (Error &e) {
-			if ( e.code() == error_code_operation_cancelled ) break;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) break;
 			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
-			for (auto& request : requests ) {
-				TraceEvent(SevWarn, "FastRestore").detail("SendBatchRequests", requests.size())
-					.detail("RequestID", request.first).detail("Request", request.second.toString());
+			for (auto& request : requests) {
+				TraceEvent(SevWarn, "FastRestore")
+				    .detail("SendBatchRequests", requests.size())
+				    .detail("RequestID", request.first)
+				    .detail("Request", request.second.toString());
 			}
 		}
 	}
 
 	return Void();
-} 
+}
 
 // Similar to sendBatchRequests except that the caller expect to process the reply.
 // This actor can be combined with sendBatchRequests(...)
 ACTOR template <class Interface, class Request>
-//Future< REPLY_TYPE(Request) > 
-Future<Void> getBatchReplies(
-	RequestStream<Request> Interface::* channel,
-	std::map<UID, Interface> interfaces,
-	std::map<UID, Request> requests,
-	std::vector<REPLY_TYPE(Request)>* replies) {
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+                             std::map<UID, Request> requests, std::vector<REPLY_TYPE(Request)>* replies) {
 
-	if ( requests.empty() ) {
+	if (requests.empty()) {
 		return Void();
 	}
 
-	loop{
-		try {		
+	loop {
+		try {
 			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			for(auto& request : requests) {
-				RequestStream<Request> const* stream = & (interfaces[request.first].*channel);
-				cmdReplies.push_back( stream->getReply(request.second) );
+			for (auto& request : requests) {
+				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
+				cmdReplies.push_back(stream->getReply(request.second));
 			}
 
-			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise, getReply will automatically keep retrying for you.
-			std::vector<REPLY_TYPE(Request)> reps = wait( timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT) ); //tryGetReply. Use GetReply. // Alex: you probably do NOT need the timeoutError. 
+			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
+			// getReply will automatically keep retrying for you.
+			std::vector<REPLY_TYPE(Request)> reps = wait(
+			    timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)); 
 			*replies = reps;
 			break;
-		} catch (Error &e) {
-			if ( e.code() == error_code_operation_cancelled ) break;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) break;
 			fprintf(stdout, "getBatchReplies Error code:%d, error message:%s\n", e.code(), e.what());
 		}
 	}
 
 	return Void();
-} 
-
+}
 
 #include "flow/unactorcompiler.h"
 #endif
