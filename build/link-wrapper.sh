@@ -22,15 +22,15 @@ case $1 in
 
 	if [[ "${OPTIONS}" == *"-static-libstdc++"* ]]; then
 	  staticlibs=()
-		staticpaths=''
+	  staticpaths=''
 	  if [[ "${CC}" == *"gcc"* ]]; then
 	    staticlibs+=('libstdc++.a')
 	  elif [[ "${CXX}" == *"clang++"* ]]; then
 	    staticlibs+=('libc++.a' 'libc++abi.a')
 	  fi
     for staticlib in "${staticlibs[@]}"; do
-			staticpaths+="$("${CC}" -print-file-name="${staticlib}") "
-		done
+	    staticpaths+="$("${CC}" -print-file-name="${staticlib}") "
+	  done
 	  OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ "${staticpaths}"\ -lm, )
 	fi
 
