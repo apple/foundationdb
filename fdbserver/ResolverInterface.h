@@ -23,6 +23,9 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
+#include "fdbclient/CommitTransaction.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;

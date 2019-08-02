@@ -37,7 +37,7 @@ class TemplateGenerator:
             includesForFile.append(set())
             sysIncludesForFile.append(set())
             typesForFile.append(set())
-
+            
             for include in target["includes"] if 'includes' in target else []:
                 includesForFile[i].add(include)
             for include in target["sysincludes"] if 'sysincludes' in target else []:

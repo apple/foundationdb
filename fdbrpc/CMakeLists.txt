@@ -70,7 +70,7 @@ set(FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING
 add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_WITHOUT_WAIT_WARNING ${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING})
-generate_serialization_code(TARGET fdbrpc)
+generate_serialization_code(TARGET fdbrpc NUM_FILES 1)
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PRIVATE thirdparty)
 target_link_libraries(fdbrpc PUBLIC flow)

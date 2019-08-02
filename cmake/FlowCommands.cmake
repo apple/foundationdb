@@ -255,6 +255,7 @@ function(generate_serialization_code)
             ${CMAKE_SOURCE_DIR}/cmake/generate_templates.py
             -t ${GEN_TARGET}
             -o ${CMAKE_CURRENT_BINARY_DIR}/SerializeImpl
+            -N ${NUM_FILES}
             ${CMAKE_SOURCE_DIR}/cmake/templates.json
     MAIN_DEPENDENCY ${CMAKE_SOURCE_DIR}/cmake/templates.json
     COMMENT "Generating serializer instantiations"

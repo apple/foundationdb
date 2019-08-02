@@ -107,6 +107,6 @@ void NetworkSendAndReceive<T>::sendError(const Error& err, Endpoint endpoint) {
 	}
 }
 
-#define IMPLEMENT_SERIALIZATION_FOR(T) template struct NetworkSendAndReceive<T>;
+#define IMPLEMENT_SERIALIZATION_FOR(...) template struct NetworkSendAndReceive<__VA_ARGS__>;
 
 #endif

@@ -23,6 +23,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/SerializeImpl.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees );
@@ -220,3 +221,5 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 
 	return Void(); // We are no longer leader
 }
+
+template struct StringSerializer<ClusterControllerFullInterface, _IncludeVersion>;

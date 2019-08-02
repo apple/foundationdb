@@ -14,6 +14,7 @@
             {
                 "includes": [],
                 "types": [
+                    "bool",
                     "int8_t",
                     "uint8_t",
                     "int16_t",
@@ -23,7 +24,10 @@
                     "int64_t",
                     "uint64_t",
                     "Void",
+                    "std::vector<std::pair<int64_t, int64_t>>",
+                    "std::pair<int64_t, int64_t>",
                     "ReplyPromise<Void>",
+                    "ReplyPromise<bool>",
                     "ReplyPromise<int64_t>"
                 ]
             }
@@ -63,11 +67,13 @@
                     "GetClientWorkersRequest ",
                     "ForceRecoveryRequest",
                     "StatusReply",
-                    "StatusRequest"
+                    "StatusRequest",
+                    "FailureMonitoringReply"
                 ]
             }, {
                 "includes": ["fdbclient/MasterProxyInterface.h"],
                 "types": [
+                    "MasterProxyInterface",
                     "ClientDBInfo",
                     "CommitTransactionRequest",
                     "GetReadVersionRequest",
@@ -102,6 +108,7 @@
             }, {
                 "includes": ["fdbclient/FDBTypes.h"],
                 "types": [
+                    "KeyValueStoreType",
                     "ReplyPromise<KeyValueStoreType>"
                 ]
             }
@@ -113,6 +120,135 @@
             "fdbrpc/SerializeImpl.h"
         ],
         "templates": [
+            {
+                "includes": ["fdbserver/WorkerInterface.actor.h"],
+                "types": [
+                    "InitializeTLogRequest",
+                    "RecruitMasterRequest",
+                    "InitializeMasterProxyRequest",
+                    "InitializeDataDistributorRequest",
+                    "InitializeRatekeeperRequest",
+                    "InitializeResolverRequest",
+                    "InitializeStorageRequest",
+                    "InitializeLogRouterRequest",
+                    "LoadedPingRequest",
+                    "CoordinationPingMessage",
+                    "SetMetricsLogRateRequest",
+                    "EventLogRequest",
+                    "TraceBatchDumpRequest",
+                    "DiskStoreRequest",
+                    "ExecuteRequest",
+                    "WorkerSnapRequest",
+                    "InitializeStorageReply",
+                    "LoadedReply",
+                    "Standalone<VectorRef<UID>>",
+                    "std::vector<WorkerDetails>"
+                ]
+            }, {
+                "includes": ["fdbserver/RestoreInterface.h"],
+                "types": [
+                    "TestRequest",
+                    "TestReply"
+                ]
+            }, {
+                "includes": ["fdbserver/TLogInterface.h"],
+                "types": [
+                    "TLogInterface",
+                    "TLogPeekRequest",
+                    "TLogPopRequest",
+                    "TLogCommitRequest",
+                    "TLogQueuingMetricsRequest",
+                    "TLogConfirmRunningRequest",
+                    "TLogRecoveryFinishedRequest",
+                    "TLogDisablePopRequest",
+                    "TLogEnablePopRequest",
+                    "TLogSnapRequest",
+                    "TLogLockResult",
+                    "ReplyPromise<TLogLockResult>",
+                    "TLogPeekReply",
+                    "TLogQueuingMetricsReply"
+                ]
+            }, {
+                "includes": ["fdbserver/ServerDBInfo.h"],
+                "types": ["ServerDBInfo"]
+            }, {
+                "includes": ["fdbserver/TesterInterface.actor.h"],
+                "types": [
+                    "WorkloadInterface",
+                    "WorkloadRequest",
+                    "std::vector<PerfMetric>",
+                    "ReplyPromise<std::vector<PerfMetric>>"
+                ]
+            }, {
+                "includes":["fdbserver/CoordinationInterface.h"],
+                "types":[
+                    "GenerationRegReadRequest",
+                    "GenerationRegWriteRequest",
+                    "CandidacyRequest",
+                    "LeaderHeartbeatRequest",
+                    "ForwardRequest",
+                    "GenerationRegReadReply",
+                    "UniqueGeneration"
+                ]
+            }, {
+                "includes":["fdbserver/MasterInterface.h"],
+                "types":[
+                    "MasterInterface",
+                    "TLogRejoinRequest",
+                    "ChangeCoordinatorsRequest",
+                    "GetCommitVersionRequest",
+                    "GetCommitVersionReply"
+                ]
+            }, {
+                "includes":["fdbserver/RatekeeperInterface.h"],
+                "types":[
+                    "RatekeeperInterface",
+                    "GetRateInfoRequest",
+                    "HaltRatekeeperRequest",
+                    "GetRateInfoReply"
+                ]
+            }, {
+                "includes": ["fdbserver/NetworkTest.h"],
+                "types":[
+                    "NetworkTestRequest",
+                    "NetworkTestReply"
+                ]
+            }, {
+                "includes":["flow/Trace.h"],
+                "types":["TraceEventFields"]
+            }, {
+                "includes":["fdbserver/ClusterRecruitmentInterface.h"],
+                "types":[
+                    "RecruitFromConfigurationRequest",
+                    "RecruitRemoteFromConfigurationRequest",
+                    "RecruitRemoteFromConfigurationReply",
+                    "RecruitStorageRequest",
+                    "RegisterWorkerRequest",
+                    "GetWorkersRequest",
+                    "RegisterMasterRequest",
+                    "GetServerDBInfoRequest",
+                    "RecruitFromConfigurationReply",
+                    "RecruitStorageReply",
+                    "RegisterWorkerReply"
+                ]       
+            }, {
+                "includes":["fdbserver/ResolverInterface.h"],
+                "types":[
+                    "ResolverInterface",
+                    "ResolveTransactionBatchRequest",
+                    "ResolutionMetricsRequest",
+                    "ResolutionSplitRequest",
+                    "ResolveTransactionBatchReply",
+                    "ResolutionSplitReply"
+                ]
+            }, {
+                "includes":["fdbserver/DataDistributorInterface.h"],
+                "types":[
+                    "DataDistributorInterface",
+                    "HaltDataDistributorRequest",
+                    "DistributorSnapRequest"
+                ]
+            }
         ]
     }
 }
