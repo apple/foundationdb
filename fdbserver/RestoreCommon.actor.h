@@ -39,21 +39,28 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // RestoreConfig copied from FileBackupAgent.actor.cpp
-// We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing
-// code
+// We copy RestoreConfig instead of using (and potentially changing) it in place 
+// to avoid conflict with the existing code.
+// We also made minor changes to allow RestoreConfig to be ReferenceCounted
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
+// For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
+// template <> Tuple Codec<ERestoreState>::pack(ERestoreState const& val);
+// template <> ERestoreState Codec<ERestoreState>::unpack(Tuple const& val);
+template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
+template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
+
 struct RestoreFileFR;
 
 // We copy RestoreConfig copied from FileBackupAgent.actor.cpp instead of using (and potentially changing) it in place
 // to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in
 // Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
-// the new fast restore subsystems We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
+// the new fast restore subsystems. We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
 // non-functional changes in RestoreConfig
-class RestoreConfig : public KeyBackedConfig, public ReferenceCounted<RestoreConfig> {
+class RestoreConfigFR : public KeyBackedConfig, public ReferenceCounted<RestoreConfigFR> {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+	RestoreConfigFR(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfigFR(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum();
 
@@ -93,7 +100,7 @@ public:
 	KeyBackedBinaryValue<int64_t> fileBlockCount();
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr);
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
+	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
 	                                                                          Reference<ReadYourWritesTransaction> tr);
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
@@ -154,18 +161,18 @@ public:
 
 	Future<Version> getApplyEndVersion(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfig> restore,
+	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfigFR> restore,
 	                                                  Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfig> restore,
+	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfigFR> restore,
 	                                                    Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr);
 
 	std::string toString(); // Added by Meng
 };
 
-typedef RestoreConfig::RestoreFile RestoreFile;
+//typedef RestoreConfigFR::RestoreFile RestoreFile;
 
 // Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 // incrementally advancing through the map, saving the version and path of the next starting point.

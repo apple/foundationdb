@@ -193,8 +193,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreRequest request, Refer
 
 	self->initBackupContainer(request.url);
 
-	wait(
-	    _collectBackupFiles(self->bc, &files, cx, request)); // Get all backup files' description and save them to files
+	// Get all backup files' description and save them to files
+	wait(_collectBackupFiles(self->bc, &files, cx, request));
 	self->buildVersionBatches(files, self->versionBatches); // Divide files into version batches
 
 	state std::map<Version, VersionBatch>::iterator versionBatch;
@@ -220,7 +220,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		files = &versionBatch.rangeFiles;
 	} else {
 		files = &versionBatch.logFiles;
-		Reference<RestoreConfig> restoreConfig(new RestoreConfig(request.randomUid));
+		Reference<RestoreConfigFR> restoreConfig(new RestoreConfigFR(request.randomUid));
 		mutationLogPrefix = restoreConfig->mutationLogPrefix();
 	}
 

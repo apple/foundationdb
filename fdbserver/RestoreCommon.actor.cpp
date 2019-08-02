@@ -33,74 +33,69 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 
-// For convenience
-typedef FileBackupAgent::ERestoreState ERestoreState;
-template <> Tuple Codec<ERestoreState>::pack(ERestoreState const& val);
-template <> ERestoreState Codec<ERestoreState>::unpack(Tuple const& val);
-
-// Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
+// Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
-KeyBackedProperty<ERestoreState> RestoreConfig::stateEnum() {
+KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
-Future<StringRef> RestoreConfig::stateText(Reference<ReadYourWritesTransaction> tr) {
+Future<StringRef> RestoreConfigFR::stateText(Reference<ReadYourWritesTransaction> tr) {
 	return map(stateEnum().getD(tr), [](ERestoreState s) -> StringRef { return FileBackupAgent::restoreStateText(s); });
 }
-KeyBackedProperty<Key> RestoreConfig::addPrefix() {
+KeyBackedProperty<Key> RestoreConfigFR::addPrefix() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
-KeyBackedProperty<Key> RestoreConfig::removePrefix() {
+KeyBackedProperty<Key> RestoreConfigFR::removePrefix() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
-KeyBackedProperty<KeyRange> RestoreConfig::restoreRange() {
+KeyBackedProperty<KeyRange> RestoreConfigFR::restoreRange() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
-KeyBackedProperty<std::vector<KeyRange>> RestoreConfig::restoreRanges() {
+KeyBackedProperty<std::vector<KeyRange>> RestoreConfigFR::restoreRanges() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
-KeyBackedProperty<Key> RestoreConfig::batchFuture() {
+KeyBackedProperty<Key> RestoreConfigFR::batchFuture() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
-KeyBackedProperty<Version> RestoreConfig::restoreVersion() {
+KeyBackedProperty<Version> RestoreConfigFR::restoreVersion() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 
-KeyBackedProperty<Reference<IBackupContainer>> RestoreConfig::sourceContainer() {
+KeyBackedProperty<Reference<IBackupContainer>> RestoreConfigFR::sourceContainer() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // Get the source container as a bare URL, without creating a container instance
-KeyBackedProperty<Value> RestoreConfig::sourceContainerURL() {
+KeyBackedProperty<Value> RestoreConfigFR::sourceContainerURL() {
 	return configSpace.pack(LiteralStringRef("sourceContainer"));
 }
 
 // Total bytes written by all log and range restore tasks.
-KeyBackedBinaryValue<int64_t> RestoreConfig::bytesWritten() {
+KeyBackedBinaryValue<int64_t> RestoreConfigFR::bytesWritten() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // File blocks that have had tasks created for them by the Dispatch task
-KeyBackedBinaryValue<int64_t> RestoreConfig::filesBlocksDispatched() {
+KeyBackedBinaryValue<int64_t> RestoreConfigFR::filesBlocksDispatched() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // File blocks whose tasks have finished
-KeyBackedBinaryValue<int64_t> RestoreConfig::fileBlocksFinished() {
+KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileBlocksFinished() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // Total number of files in the fileMap
-KeyBackedBinaryValue<int64_t> RestoreConfig::fileCount() {
+KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileCount() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 // Total number of file blocks in the fileMap
-KeyBackedBinaryValue<int64_t> RestoreConfig::fileBlockCount() {
+KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileBlockCount() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 
-Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
+Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 	return getRestoreRangesOrDefault_impl(this, tr);
 }
 
-ACTOR Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault_impl(
-    RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault_impl(
+    RestoreConfigFR* self, Reference<ReadYourWritesTransaction> tr) {
 	state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
 	if (ranges.empty()) {
 		state KeyRange range = wait(self->restoreRange().getD(tr));
@@ -109,17 +104,17 @@ ACTOR Future<std::vector<KeyRange>> RestoreConfig::getRestoreRangesOrDefault_imp
 	return ranges;
 }
 
-KeyBackedSet<RestoreFile> RestoreConfig::fileSet() {
+KeyBackedSet<RestoreConfigFR::RestoreFile> RestoreConfigFR::fileSet() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
 
-Future<bool> RestoreConfig::isRunnable(Reference<ReadYourWritesTransaction> tr) {
+Future<bool> RestoreConfigFR::isRunnable(Reference<ReadYourWritesTransaction> tr) {
 	return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
 		return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
 	});
 }
 
-Future<Void> RestoreConfig::logError(Database cx, Error e, std::string const& details, void* taskInstance) {
+Future<Void> RestoreConfigFR::logError(Database cx, Error e, std::string const& details, void* taskInstance) {
 	if (!uid.isValid()) {
 		TraceEvent(SevError, "FileRestoreErrorNoUID").error(e).detail("Description", details);
 		return Void();
@@ -132,15 +127,15 @@ Future<Void> RestoreConfig::logError(Database cx, Error e, std::string const& de
 	return updateErrorInfo(cx, e, details);
 }
 
-Key RestoreConfig::mutationLogPrefix() {
+Key RestoreConfigFR::mutationLogPrefix() {
 	return uidPrefixKey(applyLogKeys.begin, uid);
 }
 
-Key RestoreConfig::applyMutationsMapPrefix() {
+Key RestoreConfigFR::applyMutationsMapPrefix() {
 	return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
 }
 
-ACTOR Future<int64_t> RestoreConfig::getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
+ACTOR Future<int64_t> RestoreConfigFR::getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
 	// Both of these are snapshot reads
 	state Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), true);
 	state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), true);
@@ -153,11 +148,11 @@ ACTOR Future<int64_t> RestoreConfig::getApplyVersionLag_impl(Reference<ReadYourW
 	return endVersion - beginVersion;
 }
 
-Future<int64_t> RestoreConfig::getApplyVersionLag(Reference<ReadYourWritesTransaction> tr) {
+Future<int64_t> RestoreConfigFR::getApplyVersionLag(Reference<ReadYourWritesTransaction> tr) {
 	return getApplyVersionLag_impl(tr, uid);
 }
 
-void RestoreConfig::initApplyMutations(Reference<ReadYourWritesTransaction> tr, Key addPrefix, Key removePrefix) {
+void RestoreConfigFR::initApplyMutations(Reference<ReadYourWritesTransaction> tr, Key addPrefix, Key removePrefix) {
 	// Set these because they have to match the applyMutations values.
 	this->addPrefix().set(tr, addPrefix);
 	this->removePrefix().set(tr, removePrefix);
@@ -173,7 +168,7 @@ void RestoreConfig::initApplyMutations(Reference<ReadYourWritesTransaction> tr, 
 	tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
 }
 
-void RestoreConfig::clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
+void RestoreConfigFR::clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 	// Clear add/remove prefix keys
@@ -194,22 +189,22 @@ void RestoreConfig::clearApplyMutationsKeys(Reference<ReadYourWritesTransaction>
 	tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
 }
 
-void RestoreConfig::setApplyBeginVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
+void RestoreConfigFR::setApplyBeginVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
 	tr->set(uidPrefixKey(applyMutationsBeginRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 }
 
-void RestoreConfig::setApplyEndVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
+void RestoreConfigFR::setApplyEndVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
 	tr->set(uidPrefixKey(applyMutationsEndRange.begin, uid), BinaryWriter::toValue(ver, Unversioned()));
 }
 
-Future<Version> RestoreConfig::getApplyEndVersion(Reference<ReadYourWritesTransaction> tr) {
+Future<Version> RestoreConfigFR::getApplyEndVersion(Reference<ReadYourWritesTransaction> tr) {
 	return map(tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid)), [=](Optional<Value> const& value) -> Version {
 		return value.present() ? BinaryReader::fromStringRef<Version>(value.get(), Unversioned()) : 0;
 	});
 }
 
-// Meng: Change RestoreConfig to Reference<RestoreConfig> because FastRestore pass the Reference<RestoreConfig> around
-ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfig> restore,
+// Meng: Change RestoreConfigFR to Reference<RestoreConfigFR> because FastRestore pass the Reference<RestoreConfigFR> around
+ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreConfigFR> restore,
                                                           Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -254,13 +249,13 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(Reference<RestoreConfi
 	              fileBlockCount.get(), fileBlocksDispatched.get() - fileBlocksFinished.get(), fileCount.get(),
 	              bytesWritten.get(), lag.get(), errstr.c_str());
 }
-Future<std::string> RestoreConfig::getProgress(Reference<ReadYourWritesTransaction> tr) {
-	Reference<RestoreConfig> restore = Reference<RestoreConfig>(this);
+Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransaction> tr) {
+	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
 	return getProgress_impl(restore, tr);
 }
 
-// Meng: Change RestoreConfig to Reference<RestoreConfig>
-ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(Reference<RestoreConfig> restore,
+// Meng: Change RestoreConfigFR to Reference<RestoreConfigFR>
+ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreConfigFR> restore,
                                                             Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -286,22 +281,22 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(Reference<RestoreCon
 	                    printable(removePrefix.get()).c_str(), restoreVersion.get());
 	return returnStr;
 }
-Future<std::string> RestoreConfig::getFullStatus(Reference<ReadYourWritesTransaction> tr) {
-	Reference<RestoreConfig> restore = Reference<RestoreConfig>(this);
+Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTransaction> tr) {
+	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
 	return getFullStatus_impl(restore, tr);
 }
 
-std::string RestoreConfig::toString() {
+std::string RestoreConfigFR::toString() {
 	std::stringstream ss;
 	ss << "uid:" << uid.toString() << " prefix:" << prefix.contents().toString();
 	return ss.str();
 }
 
-typedef RestoreConfig::RestoreFile RestoreFile;
+//typedef RestoreConfigFR::RestoreFile RestoreFileFR;
 
-// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
+// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 // The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp
-// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
+// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReader {

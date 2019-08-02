@@ -46,7 +46,7 @@ int NUM_APPLIERS = 40;
 
 int restoreStatusIndex = 0;
 
-class RestoreConfig;
+class RestoreConfigFR;
 struct RestoreWorkerData; // Only declare the struct exist but we cannot use its field
 
 void initRestoreWorkerConfig();
@@ -62,11 +62,6 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
                                  RestoreWorkerInterface myWorkerInterf);
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf,
                                             Database cx);
-
-template <>
-Tuple Codec<ERestoreState>::pack(ERestoreState const& val);
-template <>
-ERestoreState Codec<ERestoreState>::unpack(Tuple const& val);
 
 // Remove the worker interface from restoreWorkerKey and remove its roles interfaces from their keys.
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self,

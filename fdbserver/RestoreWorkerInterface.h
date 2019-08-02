@@ -39,7 +39,7 @@
 #define DUMPTOKEN(name)                                                                                                \
 	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
-class RestoreConfig;
+class RestoreConfigFR;
 
 struct RestoreCommonReply;
 struct RestoreRecruitRoleRequest;
