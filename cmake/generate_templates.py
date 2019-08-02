@@ -25,35 +25,50 @@ class TemplateGenerator:
     def generate(self):
         target = self.descr[self.targetName]
         dependencies = []
+        includesForFile = []
+        sysIncludesForFile = []
+        typesForFile = []
         for dep in target['dependencies'] if 'dependencies' in target else []:
             if dep not in self.descr:
                 print("ERROR: {} was declared as dependency of {} but does not exist".format(dep, self.targetName))
                 raise InternalError
             dependencies.append((dep, self.descr[dep]))
         for i in range(0, self.numFiles):
+            includesForFile.append(set())
+            sysIncludesForFile.append(set())
+            typesForFile.append(set())
+
+            for include in target["includes"] if 'includes' in target else []:
+                includesForFile[i].add(include)
+            for include in target["sysincludes"] if 'sysincludes' in target else []:
+                sysIncludesForFile[i].add(include)
+            j = 0
+            templates = target['templates'] if 'templates' in target else []
+            for template in templates:
+                if j % self.numFiles == i:
+                    for inc in template["includes"] if "includes" in template else []:
+                        includesForFile[i].add(inc)
+                    for inc in template["sysincludes"] if "sysincludes" in template else []:
+                        includesForFile[i].add(inc)
+                    for t in template["types"]:
+                        typesForFile[i].add(t)
+                j += 1
+
+        for i in range(0, self.numFiles):
             outFile = "{}{}.cpp".format(self.fileName, i)
             tmpFile = "{}.tmp".format(outFile)
             with open(tmpFile, 'w') as f:
                 f.write('// This file was generated - DO NOT CHANGE\n\n')
-                for include in target["includes"] if 'includes' in target else []:
-                    f.write('#include "{}"\n'.format(include))
-                for include in target["sysincludes"] if 'sysincludes' in target else []:
-                    f.write('#include <{}>\n'.format(include))
-                j = 0
-                f.write('\n\n\n')
-                templates = target['templates'] if 'templates' in target else []
-                templates.sort()
-                for template in templates:
-                    for dep in dependencies:
-                        ts = dep[1]['templates'] if 'templates' in dep[1] else []
-                        if template in ts:
-                            print("ERROR: {} is also defined in {} which is a dependency".format(template, dep[0]))
-                            raise InternalError
-                    if j % self.numFiles == i:
-                        f.write('template struct {};\n'.format(template))
-                    j += 1
-            # Compiling these files will be quite expensive. So we make sure to only
-            # write them if they have changed
+                for inc in sysIncludesForFile[i]:
+                    f.write('#include <{}>\n'.format(inc))
+                f.write("\n")
+                for inc in includesForFile[i]:
+                    f.write('#include "{}"\n'.format(inc))
+                f.write("\n\n")
+                for t in typesForFile[i]:
+                    f.write('IMPLEMENT_SERIALIZATION_FOR({})\n'.format(t))
+                # Compiling these files will be quite expensive. So we make sure to only
+                # write them if they have changed
             if (not os.path.exists(outFile)) or (not filecmp.cmp(outFile, tmpFile)):
                 shutil.copyfile(tmpFile, outFile)
 

@@ -85,37 +85,11 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 
 	virtual void destroy() { delete this; }
 	virtual void receive(ArenaReader& reader) {
-		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
-		this->addPromiseRef();
-		bool ok;
-		SerializedMsg<ArenaReader, bool>::deserialize(reader, ok);
-		//reader >> ok;
-		if (ok) {
-			T message;
-			SerializedMsg<ArenaReader, T>::deserialize(reader, message);
-			//reader >> message;
-			SAV<T>::sendAndDelPromiseRef(message);
-		}
-		else {
-			Error error;
-			SerializedMsg<ArenaReader, Error>::deserialize(reader, error);
-			//reader >> error;
-			SAV<T>::sendErrorAndDelPromiseRef(error);
-		}
+		NetworkSendAndReceive<T>::receive(this, reader);
 	}
-	virtual void receive(ArenaObjectReader& reader);
-	//virtual void receive(ArenaObjectReader& reader) {
-	//	if (!SAV<T>::canBeSet()) return;
-	//	this->addPromiseRef();
-	//	ErrorOr<EnsureTable<T>> message;
-	//	ObjectSerializedMsg<ErrorOr<EnsureTable<T>>>::deserialize(reader, message);
-	//	//reader.deserialize(message);
-	//	if (message.isError()) {
-	//		SAV<T>::sendErrorAndDelPromiseRef(message.getError());
-	//	} else {
-	//		SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
-	//	}
-	//}
+	virtual void receive(ArenaObjectReader& reader) {
+		NetworkSendAndReceive<T>::receive(this, reader);
+	}
 };
 
 
@@ -245,19 +219,10 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 
 	virtual void destroy() { delete this; }
 	virtual void receive(ArenaReader& reader) {
-		this->addPromiseRef();
-		T message;
-		SerializedMsg<ArenaReader, T>::deserialize(reader, message);
-		this->send(std::move(message));
-		this->delPromiseRef();
+		NetworkSendAndReceive<T>::receive(this, reader);
 	}
 	virtual void receive(ArenaObjectReader& reader) {
-		this->addPromiseRef();
-		T message;
-		ObjectSerializedMsg<T>::deserialize(reader, message);
-		//reader.deserialize(message);
-		this->send(std::move(message));
-		this->delPromiseRef();
+		NetworkSendAndReceive<T>::receive(this, reader);
 	}
 	virtual bool isStream() const { return true; }
 };
@@ -265,13 +230,19 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 
 template <class T>
 class RequestStream {
+	void networkSend(const T& value, Endpoint e) const {
+		NetworkSendAndReceive<T>::sendUnrealiable(value, e);
+	}
+	PacketID networkSendReliable(const T& value, Endpoint e) const {
+		return NetworkSendAndReceive<T>::sendReliable(value, e);
+	}
 public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
 	void send(const T& value) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			networkSend(value, getEndpoint());
 		}
 		else
 			queue->send(value);
@@ -289,7 +260,7 @@ public:
 	template <class X>
 	Future< REPLY_TYPE(X) > getReply(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
-			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()), getEndpoint());
+			return sendCanceler(getReplyPromise(value), networkSendReliable(value, getEndpoint()), getEndpoint());
 		}
 		send(value);
 		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
@@ -323,7 +294,7 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID));
+			networkSend(value, getEndpoint(taskID));
 			auto& p = getReplyPromise(value);
 			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p);
 		}
@@ -339,7 +310,7 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			networkSend(value, getEndpoint());
 			auto& p = getReplyPromise(value);
 			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p);
 		}

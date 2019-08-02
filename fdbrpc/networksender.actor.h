@@ -30,28 +30,33 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+template <class T> struct NetNotifiedQueue;
+template <class T> struct NetSAV;
 template <class T>
-void networkSender(Future<T> const& input, Endpoint const& endpoint);
+struct NetworkSendAndReceive {
+	static void receive(NetNotifiedQueue<T>* self, ArenaReader& reader);
+	static void receive(NetNotifiedQueue<T>* self, ArenaObjectReader & reader);
+	static void receive(NetSAV<T>* self, ArenaReader& reader);
+	static void receive(NetSAV<T>* self, ArenaObjectReader & reader);
+	static void sendUnrealiable(const T& value, Endpoint e);
+	static PacketID sendReliable(const T& value, Endpoint e);
+	static void sendErrorOr(const T& value, Endpoint e);
+	static void sendError(const Error& value, Endpoint e);
+};
 
-//ACTOR template <class T>
-//void networkSender(Future<T> input, Endpoint endpoint) {
-//	try {
-//		T value = wait(input);
-//		if (g_network->useObjectSerializer()) {
-//			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint);
-//		} else {
-//			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
-//		}
-//	} catch (Error& err) {
-//		// if (err.code() == error_code_broken_promise) return;
-//		ASSERT(err.code() != error_code_actor_cancelled);
-//		if (g_network->useObjectSerializer()) {
-//			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint);
-//		} else {
-//			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);
-//		}
-//	}
-//}
+
+ACTOR template <class T>
+void networkSender(Future<T> input, Endpoint endpoint) {
+	try {
+		T value = wait(input);
+		NetworkSendAndReceive<T>::sendErrorOr(value, endpoint);
+	} catch (Error& err) {
+		// if (err.code() == error_code_broken_promise) return;
+		ASSERT(err.code() != error_code_actor_cancelled);
+		NetworkSendAndReceive<T>::sendError(err, endpoint);
+	}
+}
+
 #include "flow/unactorcompiler.h"
 
 #endif

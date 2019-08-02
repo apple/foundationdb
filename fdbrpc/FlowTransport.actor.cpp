@@ -37,6 +37,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
+#include "fdbrpc/SerializeImpl.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();

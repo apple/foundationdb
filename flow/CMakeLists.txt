@@ -81,7 +81,6 @@ set(FLOW_SRCS
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
-generate_serialization_code(TARGET flow)
 target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE AND NOT WIN32)
