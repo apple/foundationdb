@@ -151,7 +151,7 @@ else()
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-lc++abi -Wl,-build-id=sha1)
+        add_link_options(-lc++abi -Wl,-build-id=sha1 -stdlib=libc++)
       endif()
     endif()
     add_compile_options(
