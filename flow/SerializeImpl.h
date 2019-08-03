@@ -42,8 +42,8 @@ template <class T, class V>
 void MakeSerializeSource<T, V>::serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
 	if (useObjectSerializer) {
 		PacketWriterAllocator alloc{ w };
-		ObjectWriter w(alloc, AssumeVersion(w.protocolVersion()));
-		w.serialize(get());
+		ObjectWriter writer(alloc, AssumeVersion(w.protocolVersion()));
+		writer.serialize(get());
 	} else {
 		static_cast<T const*>(this)->serialize(w);
 	}
