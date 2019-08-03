@@ -26,37 +26,31 @@
 
 template <class T>
 void NetworkSendAndReceive<T>::receive(NetSAV<T>* self, ArenaReader& reader) {
-	auto sav = static_cast<SAV<T>*>(self);
-	if (!sav->canBeSet()) return; // load balancing and retries can result in the same request being answered twice
+	if (!self->canBeSet()) return; // load balancing and retries can result in the same request being answered twice
 	self->addPromiseRef();
 	bool ok;
-	SerializedMsg<ArenaReader, bool>::deserialize(reader, ok);
-	// reader >> ok;
+	reader >> ok;
 	if (ok) {
 		T message;
-		SerializedMsg<ArenaReader, T>::deserialize(reader, message);
-		// reader >> message;
-		sav->sendAndDelPromiseRef(message);
+		reader >> message;
+		self->sendAndDelPromiseRef(message);
 	} else {
 		Error error;
-		SerializedMsg<ArenaReader, Error>::deserialize(reader, error);
-		// reader >> error;
-		sav->sendErrorAndDelPromiseRef(error);
+		reader >> error;
+		self->sendErrorAndDelPromiseRef(error);
 	}
 }
 
 template <class T>
 void NetworkSendAndReceive<T>::receive(NetSAV<T>* self, ArenaObjectReader& reader) {
-	auto sav = static_cast<SAV<T>*>(self);
-	if (!sav->canBeSet()) return;
+	if (!self->canBeSet()) return;
 	self->addPromiseRef();
 	ErrorOr<EnsureTable<T>> message;
-	ObjectSerializedMsg<ErrorOr<EnsureTable<T>>>::deserialize(reader, message);
-	// reader.deserialize(message);
+	reader.deserialize(message);
 	if (message.isError()) {
-		sav->sendErrorAndDelPromiseRef(message.getError());
+		self->sendErrorAndDelPromiseRef(message.getError());
 	} else {
-		sav->sendAndDelPromiseRef(message.get().asUnderlyingType());
+		self->sendAndDelPromiseRef(message.get().asUnderlyingType());
 	}
 }
 
@@ -64,7 +58,7 @@ template <class T>
 void NetworkSendAndReceive<T>::receive(NetNotifiedQueue<T>* self, ArenaReader& reader) {
 	self->addPromiseRef();
 	T message;
-	SerializedMsg<ArenaReader, T>::deserialize(reader, message);
+	reader >> message;
 	self->send(std::move(message));
 	self->delPromiseRef();
 }
@@ -73,8 +67,7 @@ template <class T>
 void NetworkSendAndReceive<T>::receive(NetNotifiedQueue<T>* self, ArenaObjectReader& reader) {
 	self->addPromiseRef();
 	T message;
-	ObjectSerializedMsg<T>::deserialize(reader, message);
-	// reader.deserialize(message);
+	reader.deserialize(message);
 	self->send(std::move(message));
 	self->delPromiseRef();
 }

@@ -773,19 +773,6 @@ struct ISerializeSource {
 	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
 
-template<class Ar, class T>
-struct SerializedMsg {
-	static void serialize(Ar& w, T const& value);
-	static void deserialize(Ar& w, T value);
-};
-
-template<class T>
-struct ObjectSerializedMsg {
-	static void serialize(PacketWriter& w, T const& value);
-	static void serialize(ObjectWriter& w, T const& value);
-	static void deserialize(ArenaObjectReader& reader, T& value);
-};
-
 template<class T, class VersionOptions>
 struct StringSerializer {
 	T deserialize(StringRef, VersionOptions vo, bool useFlatBuffers);
@@ -796,14 +783,8 @@ template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
 
-	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
-		if (useObjectSerializer) {
-			ObjectSerializedMsg<V>::serialize(w, get());
-		} else {
-			static_cast<T const*>(this)->serialize(w);
-		}
-	}
-	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
+	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const;
+	virtual void serializeBinaryWriter(BinaryWriter& w) const;
 	virtual value_type const& get() const = 0;
 };
 
@@ -812,12 +793,8 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	using value_type = T;
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
-	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		ObjectSerializedMsg<T>::serialize(w, value);
-	}
-	template <class Ar> void serialize(Ar& ar) const {
-		SerializedMsg<Ar, T>::serialize(ar, value);
-	}
+	virtual void serializeObjectWriter(ObjectWriter& w) const;
+	template <class Ar> void serialize(Ar& ar) const;
 	virtual T const& get() const { return value; }
 };
 
@@ -827,10 +804,7 @@ struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
 	bool b;
 	T const& value;
 	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
-	template <class Ar> void serialize(Ar& ar) const {
-		SerializedMsg<Ar, bool>::serialize(ar, b);
-		SerializedMsg<Ar, T>::serialize(ar, value);
-	}
+	template <class Ar> void serialize(Ar& ar) const;
 	virtual void serializeObjectWriter(ObjectWriter& w) const {
 		ASSERT(false);
 	}

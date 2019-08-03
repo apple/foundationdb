@@ -38,38 +38,37 @@ struct PacketWriterAllocator {
 };
 } // namespace
 
-template <class Ar, class T>
-void SerializedMsg<Ar, T>::serialize(Ar& ar, T const& value) {
-	if constexpr (Ar::isSerializing) {
-		ar << value;
+template <class T, class V>
+void MakeSerializeSource<T, V>::serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
+	if (useObjectSerializer) {
+		PacketWriterAllocator alloc{ w };
+		ObjectWriter w(alloc, AssumeVersion(w.protocolVersion()));
+		w.serialize(get());
 	} else {
-		UNSTOPPABLE_ASSERT(false);
+		static_cast<T const*>(this)->serialize(w);
 	}
 }
 
-template <class Ar, class T>
-void SerializedMsg<Ar, T>::deserialize(Ar& ar, T value) {
-	if constexpr (!Ar::isSerializing) {
-		ar >> value;
-	} else {
-		UNSTOPPABLE_ASSERT(false);
-	}
+template <class T, class V>
+void MakeSerializeSource<T, V>::serializeBinaryWriter(BinaryWriter& w) const {
+	static_cast<T const*>(this)->serialize(w);
 }
 
 template <class T>
-void ObjectSerializedMsg<T>::serialize(PacketWriter& w, T const& value) {
-	ObjectWriter writer(PacketWriterAllocator{ w }, AssumeVersion(w.protocolVersion()));
-	writer.serialize(value);
-}
-
-template <class T>
-void ObjectSerializedMsg<T>::serialize(ObjectWriter& w, T const& value) {
+void SerializeSource<T>::serializeObjectWriter(ObjectWriter& w) const {
 	w.serialize(value);
 }
 
 template <class T>
-void ObjectSerializedMsg<T>::deserialize(ArenaObjectReader& reader, T& value) {
-	reader.deserialize(value);
+template <class Ar>
+void SerializeSource<T>::serialize(Ar& ar) const {
+	ar << value;
+}
+
+template <class T>
+template <class Ar>
+void SerializeBoolAnd<T>::serialize(Ar& ar) const {
+	ar << b << value;
 }
 
 template <class T, class VersionOptions>
@@ -85,7 +84,8 @@ T StringSerializer<T, VersionOptions>::deserialize(StringRef data, VersionOption
 }
 
 template <class T, class VersionOptions>
-Standalone<StringRef> StringSerializer<T, VersionOptions>::serialize(const T &value, VersionOptions vo, bool useFlatBuffers) {
+Standalone<StringRef> StringSerializer<T, VersionOptions>::serialize(const T& value, VersionOptions vo,
+                                                                     bool useFlatBuffers) {
 	if (useFlatBuffers) {
 		return ObjectWriter::toValue(value, vo);
 	} else {

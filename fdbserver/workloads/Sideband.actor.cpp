@@ -38,8 +38,6 @@ struct SidebandMessage {
 	}
 };
 
-template struct SerializedMsg<ArenaReader, SidebandMessage>;
-
 struct SidebandInterface {
 	constexpr static FileIdentifier file_identifier = 15950544;
 	RequestStream<SidebandMessage> updates;
