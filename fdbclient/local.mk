@@ -20,6 +20,7 @@
 
 # -*- mode: makefile; -*-
 
+NUM_SERIALIZER_FILES = 6
 fdbclient_CFLAGS := $(fdbrpc_CFLAGS)
 
 fdbclient_GENERATED_SOURCES += fdbclient/FDBOptions.g.h

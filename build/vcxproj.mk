@@ -57,7 +57,7 @@ ${GENNAME()_SERIALIZERS}: $(OBJDIR)/GENDIR/make_serializers.timestamp
 $(OBJDIR)/GENDIR/make_serializers.timestamp: cmake/templates.json cmake/generate_templates.py $(ALL_MAKEFILES)
 	@echo "Instantiating  GENNAME()"
 	@mkdir -p $(OBJDIR)/GENDIR && \
-	python cmake/generate_templates.py -N $$((${NUM_SERIALIZER_FILES}-1)) -t GENDIR -o $(OBJDIR)/GENDIR/SerializeImpl cmake/templates.json && \
+	python cmake/generate_templates.py -N $$((${NUM_SERIALIZER_FILES})) -t GENDIR -o $(OBJDIR)/GENDIR/SerializeImpl cmake/templates.json && \
 	touch $@
 
 GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(filter-out $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))) $(filter $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))

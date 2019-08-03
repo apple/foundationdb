@@ -20,6 +20,7 @@
 
 # -*- mode: makefile; -*-
 
+NUM_SERIALIZER_FILES = 13
 fdbserver_CFLAGS := $(fdbclient_CFLAGS)
 fdbserver_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdbserver_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)

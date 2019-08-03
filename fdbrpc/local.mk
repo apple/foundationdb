@@ -20,6 +20,7 @@
 
 # -*- mode: makefile; -*-
 
+NUM_SERIALIZER_FILES = 1
 fdbrpc_BUILD_SOURCES += fdbrpc/libeio/eio.c
 
 fdbrpc_CFLAGS := -isystem$(BOOSTDIR) -I. -Ifdbrpc/libeio -DUSE_UCONTEXT
