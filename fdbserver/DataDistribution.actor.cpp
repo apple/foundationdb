@@ -594,6 +594,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<bool> zeroOptimalTeams;
 
 	AsyncMap< AddressExclusion, bool > excludedServers;  // true if an address is in the excluded list in the database.  Updated asynchronously (eventually)
+	std::set< AddressExclusion > failedServers;
 
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
@@ -2949,13 +2950,16 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 				std::set<AddressExclusion> excluded;
 				for(auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
 					AddressExclusion addr = decodeExcludedServersKey(r->key);
-					if (addr.isValid())
+					if (addr.isValid()) {
 						excluded.insert( addr );
+					}
 				}
 				for(auto r = failedResults.begin(); r != failedResults.end(); ++r) {
 					AddressExclusion addr = decodeFailedServersKey(r->key);
-					if (addr.isValid())
+					if (addr.isValid()) {
 						excluded.insert( addr );
+						self->failedServers.insert(addr);
+					}
 				}
 
 				TraceEvent("DDExcludedServersChanged", self->distributorId)
@@ -3133,7 +3137,12 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
+				TraceEvent("FailedServerDataRemoved")
+					.detail("CanRemove", canRemove)
+					.detail("NumShards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+				// Current implementation of server erasure is sort of a hack that sets # shards to 0
+				// Defensive check for negative values instead of just 0
+				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) <= 0) {
 					return Void();
 				}
 			}
@@ -3306,13 +3315,20 @@ ACTOR Future<Void> storageServerTracker(
 
 			// If the storage server is in the excluded servers list, it is undesired
 			NetworkAddress a = server->lastKnownInterface.address();
-			AddressExclusion addr( a.ip, a.port );
-			AddressExclusion ipaddr( a.ip );
+			state AddressExclusion addr( a.ip, a.port );
+			state AddressExclusion ipaddr( a.ip );
 			if (self->excludedServers.get( addr ) || self->excludedServers.get( ipaddr )) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
 					.detail("Excluded", self->excludedServers.get( addr ) ? addr.toString() : ipaddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
+				if (self->failedServers.find(addr) != self->failedServers.end()) {
+					TraceEvent("FailedServerRemoveKeys")
+						.detail("Address", addr.toString())
+						.detail("ServerID", server->id);
+					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
+					self->shardsAffectedByTeamFailure->eraseServer(server->id);
+				}
 			}
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
 			otherChanges.push_back( self->excludedServers.onChange( ipaddr ) );

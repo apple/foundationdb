@@ -174,6 +174,7 @@ public:
 	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
 	void finishMove( KeyRangeRef keys );
 	void check();
+	void eraseServer(UID ssID);
 private:
 	struct OrderByTeamKey {
 		bool operator()( const std::pair<Team,KeyRange>& lhs, const std::pair<Team,KeyRange>& rhs ) const {

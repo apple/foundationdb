@@ -713,6 +713,10 @@ void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
 	}
 }
 
+void ShardsAffectedByTeamFailure::eraseServer(UID ssID) {
+	storageServerShards[ssID] = 0;
+}
+
 void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
 	if(team_shards.insert( std::pair<Team,KeyRange>( team, range ) ).second) {
 		for(auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)

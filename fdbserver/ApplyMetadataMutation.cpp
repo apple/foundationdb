@@ -132,7 +132,8 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
-					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
+					if((!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) &&
+						(!m.param1.startsWith( failedServersPrefix ) && m.param1 != failedServersVersionKey)) {
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid)
 							.detail("M", m.toString())
