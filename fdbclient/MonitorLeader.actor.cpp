@@ -511,7 +511,7 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 		new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, g_network->useObjectSerializer());
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 	loop {
 		choose {
 			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
@@ -645,7 +645,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 			}
 
 			if (leader.get().first.serializedInfo.size()) {
-				if (g_network->useObjectSerializer()) {
+				if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 					ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
 					ClusterControllerClientInterface res;
 					reader.deserialize(res);
