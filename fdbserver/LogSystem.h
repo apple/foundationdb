@@ -662,6 +662,8 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped ) = 0;
 		// Same contract as peek(), but only for peeking the txsLocality. It allows specifying a preferred peek locality.
 
+	virtual Future<Version> getTxsPoppedVersion() = 0;
+
 	virtual Version getKnownCommittedVersion() = 0;
 
 	virtual Future<Void> onKnownCommittedVersionChange() = 0;

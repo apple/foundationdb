@@ -906,6 +906,41 @@ namespace oldTLog_4_6 {
 
 		state Version endVersion = logData->version.get() + 1;
 
+		Version poppedVer = poppedVersion(logData, oldTag);
+		if(poppedVer > req.begin) {
+			TLogPeekReply rep;
+			rep.maxKnownVersion = logData->version.get();
+			rep.minKnownCommittedVersion = 0;
+			rep.popped = poppedVer;
+			rep.end = poppedVer;
+			rep.onlySpilled = false;
+
+			if(req.sequence.present()) {
+				auto& trackerData = self->peekTracker[peekId];
+				auto& sequenceData = trackerData.sequence_version[sequence+1];
+				trackerData.lastUpdate = now();
+				if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
+					req.reply.sendError(timed_out());
+					if (!sequenceData.isSet())
+						sequenceData.sendError(timed_out());
+					return Void();
+				}
+				if(sequenceData.isSet()) {
+					if(sequenceData.getFuture().get() != rep.end) {
+						TEST(true); //tlog peek second attempt ended at a different version
+						req.reply.sendError(timed_out());
+						return Void();
+					}
+				} else {
+					sequenceData.send(rep.end);
+				}
+				rep.begin = req.begin;
+			}
+
+			req.reply.send( rep );
+			return Void();
+		}
+
 		//grab messages from disk
 		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
 		if( req.begin <= logData->persistentDataDurableVersion ) {
@@ -948,19 +983,13 @@ namespace oldTLog_4_6 {
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 		}
 
-		Version poppedVer = poppedVersion(logData, oldTag);
-
 		TLogPeekReply reply;
 		reply.maxKnownVersion = logData->version.get();
 		reply.minKnownCommittedVersion = 0;
 		reply.onlySpilled = false;
-		if(poppedVer > req.begin) {
-			reply.popped = poppedVer;
-			reply.end = poppedVer;
-		} else {
-			reply.messages = messages.toValue();
-			reply.end = endVersion;
-		}
+		reply.messages = messages.toValue();
+		reply.end = endVersion;
+
 		//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 		if(req.sequence.present()) {
