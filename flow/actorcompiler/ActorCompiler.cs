@@ -1169,7 +1169,7 @@ namespace actorcompiler
                     if (cb.CallbackGroup != lastGroup)
                     {
                         lastGroup = cb.CallbackGroup;
-                        cancelFunc.WriteLine("case {0}: this->a_callback_error(({1}*)0, actor_cancelled()); break;", cb.CallbackGroup, cb.type);
+                        cancelFunc.WriteLine("case {0}: this->a_callback_error(({1}*)nullptr, actor_cancelled()); break;", cb.CallbackGroup, cb.type);
                     }
                 cancelFunc.WriteLine("}");
                 WriteFunction(writer, cancelFunc, cancelFunc.BodyText);
