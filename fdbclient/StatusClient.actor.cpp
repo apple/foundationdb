@@ -465,7 +465,7 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 
 	try {
-		state int64_t clientTime = time(0);
+		state int64_t clientTime = time(nullptr);
 
 		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
 

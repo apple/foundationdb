@@ -75,7 +75,7 @@ struct Barrier {
 	void reached() {
 		mutex.enter();
 		bool ready = (++numReached == numRequired);
-		Event *myEvent = NULL;
+		Event* myEvent = nullptr;
 
 		if(ready)
 			fire();
@@ -124,8 +124,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Reference<ITransaction> tr;
 
-	ThreadSafetyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), tr(NULL), stopped(false) {
+	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), tr(nullptr), stopped(false) {
 
 		threadsPerClient = getOption(options, LiteralStringRef("threadsPerClient"), 3);
 		threadDuration = getOption(options, LiteralStringRef("threadDuration"), 60.0);
@@ -205,12 +204,14 @@ struct ThreadSafetyWorkload : TestWorkload {
 		info->self->commitBarrier.decrementNumRequired();
 
 		//Signal completion back to the main thread
-		onMainThreadVoid( [=]() { 
-			if(error.code() != error_code_success)
-				info->done.sendError(error);
-			else
-				info->done.send(Void()); 
-		}, NULL );
+		onMainThreadVoid(
+		    [=]() {
+			    if (error.code() != error_code_success)
+				    info->done.sendError(error);
+			    else
+				    info->done.send(Void());
+		    },
+		    nullptr);
 
 		THREAD_RETURN;
 	}

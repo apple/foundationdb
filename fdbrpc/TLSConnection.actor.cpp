@@ -41,7 +41,7 @@ static int send_func(void* ctx, const uint8_t* buf, int len) {
 		sb.bytes_sent = 0;
 		sb.bytes_written = len;
 		sb.data = buf;
-		sb.next = 0;
+		sb.next = nullptr;
 
 		int w = conn->conn->write( &sb );
 		return w;
@@ -88,7 +88,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 }
 
 TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
-	const char * serverName = host.empty() ? NULL : host.c_str();
+	const char* serverName = host.empty() ? nullptr : host.c_str();
 	session = Reference<ITLSSession>( policy->create_session(is_client, serverName, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
 		// If session is NULL, we're trusting policy->create_session
@@ -271,7 +271,7 @@ void TLSOptions::set_key_file( std::string const& key_file ) {
 void TLSOptions::set_key_data( std::string const& key_data ) {
 	if (!policyVerifyPeersSet.get() || !policyVerifyPeersNotSet.get())
 		init_plugin();
-	const char *passphrase = policyInfo.keyPassword.empty() ? NULL : policyInfo.keyPassword.c_str();
+	const char* passphrase = policyInfo.keyPassword.empty() ? nullptr : policyInfo.keyPassword.c_str();
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
 	policyInfo.key_contents = Standalone<StringRef>(key_data);
 	if ( !policyVerifyPeersSet.get()->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), passphrase) )

@@ -47,7 +47,8 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
-			delete userObject; userObject = 0;
+			delete userObject;
+			userObject = nullptr;
 			stopped.set();
 		}
 		static void dispatch( PThreadAction action ) {
@@ -69,8 +70,11 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 		PThreadAction action;
 		ActionWrapper(PThreadAction action) : action(action) {}
 		// HACK: Boost won't use move constructors, so we just assume the last copy made is the one that will be called or cancelled
-		ActionWrapper(ActionWrapper const& r) : action(r.action) { const_cast<ActionWrapper&>(r).action=NULL; }
-		void operator()() { Thread::dispatch(action); action = NULL; }
+		ActionWrapper(ActionWrapper const& r) : action(r.action) { const_cast<ActionWrapper&>(r).action = nullptr; }
+		void operator()() {
+			Thread::dispatch(action);
+			action = nullptr;
+		}
 		~ActionWrapper() { if (action) { action->cancel(); } }
 	private:
 		void operator=(ActionWrapper const&);

@@ -104,7 +104,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
-	cx = NULL;
+	cx = nullptr;
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -112,7 +112,7 @@ StorageServerInfo::~StorageServerInfo() {
 		auto it = cx->server_interf.find( interf.id() );
 		if( it != cx->server_interf.end() )
 			cx->server_interf.erase( it );
-		cx = NULL;
+		cx = nullptr;
 	}
 }
 
@@ -791,15 +791,15 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
 
 			TraceEvent("ClientStart")
-				.detail("SourceVersion", getHGVersion())
-				.detail("Version", FDB_VT_VERSION)
-				.detail("PackageName", FDB_VT_PACKAGE_NAME)
-				.detail("ClusterFile", connFile->getFilename().c_str())
-				.detail("ConnectionString", connFile->getConnectionString().toString())
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-				.detail("ApiVersion", apiVersion)
-				.detailf("ImageOffset", "%p", platform::getImageOffset())
-				.trackLatest("ClientStart");
+			    .detail("SourceVersion", getHGVersion())
+			    .detail("Version", FDB_VT_VERSION)
+			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+			    .detail("ClusterFile", connFile->getFilename().c_str())
+			    .detail("ConnectionString", connFile->getConnectionString().toString())
+			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+			    .detail("ApiVersion", apiVersion)
+			    .detailf("ImageOffset", "%p", platform::getImageOffset())
+			    .trackLatest("ClientStart");
 
 			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
 
@@ -1864,7 +1864,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 							transaction_too_old(), future_version()
 								});
 				}
-				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskPriority::DefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				GetKeyValuesReply rep = wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req,
+				                                         TaskPriority::DefaultPromiseEndpoint, false,
+				                                         cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());

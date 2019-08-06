@@ -275,7 +275,7 @@ ACTOR Future<bool> bucketExists_impl(Reference<BlobStoreEndpoint> b, std::string
 	std::string resource = std::string("/") + bucket;
 	HTTP::Headers headers;
 
-	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	return r->code == 200;
 }
 
@@ -289,7 +289,7 @@ ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
-	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	return r->code == 200;
 }
 
@@ -303,7 +303,7 @@ ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered successful
-	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204, 404 }));
 
 	// But if the object already did not exist then the 'delete' is assumed to be successful but a warning is logged.
 	if(r->code == 404) {
@@ -381,7 +381,7 @@ ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string
 	if(!exists) {
 		std::string resource = std::string("/") + bucket;
 		HTTP::Headers headers;
-		Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
+		Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
 	}
 	return Void();
 }
@@ -396,7 +396,7 @@ ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::strin
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
-	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	if(r->code == 404)
 		throw file_not_found();
 	return r->contentLen;
@@ -725,7 +725,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 		HTTP::Headers headers;
 		state std::string fullResource = resource + HTTP::urlEncode(lastFile);
 		lastFile.clear();
-		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, NULL, 0, {200}));
+		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
 
 		try {
@@ -770,7 +770,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					if(size == nullptr) {
 						throw http_bad_response();
 					}
-					object.size = strtoull(size->value(), NULL, 10);
+					object.size = strtoull(size->value(), nullptr, 10);
 
 					listResult.objects.push_back(object);
 				}
@@ -946,7 +946,7 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<BlobStoreEndpoint> bstor
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
-	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
 	if(r->code == 404)
 		throw file_not_found();
 	return r->content;
@@ -979,7 +979,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 
 ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string content) {
 	state UnsentPacketQueue packets;
-	PacketWriter pw(packets.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(packets.getWriteBuffer(), nullptr, Unversioned());
 	pw.serializeBytes(content);
 	if(content.size() > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
@@ -1017,7 +1017,7 @@ ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::stri
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
-	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 206, 404}));
+	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
 	if(r->code == 404)
 		throw file_not_found();
 	if(r->contentLen != r->content.size())  // Double check that this wasn't a header-only response, probably unnecessary
@@ -1036,7 +1036,7 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEn
 
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
-	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, NULL, 0, {200}));
+	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 }));
 
 	try {
 		xml_document<> doc;
@@ -1102,7 +1102,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstor
 
 	std::string resource = format("/%s/%s?uploadId=%s", bucket.c_str(), object.c_str(), uploadID.c_str());
 	HTTP::Headers headers;
-	PacketWriter pw(part_list.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(part_list.getWriteBuffer(), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), {200}));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then the next retry

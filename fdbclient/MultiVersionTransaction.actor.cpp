@@ -210,7 +210,8 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : nullptr,
+	                                       value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
@@ -248,14 +249,15 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr,
+	                                    value.present() ? value.get().size() : 0));
 }
 	
 // DLApi
 template<class T>
 void loadClientFunction(T *fp, void *lib, std::string libPath, const char *functionName, bool requireFunction = true) {
 	*(void**)(fp) = loadFunction(lib, functionName);
-	if(*fp == NULL && requireFunction) {
+	if (*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
 		throw platform_error();
 	}
@@ -269,7 +271,7 @@ void DLApi::init() {
 	}
 
 	void* lib = loadLibrary(fdbCPath.c_str());
-	if(lib == NULL) {
+	if (lib == nullptr) {
 		TraceEvent(SevError, "ErrorLoadingExternalClientLibrary").detail("LibraryPath", fdbCPath);
 		throw platform_error();
 	}
@@ -332,7 +334,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
-	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, NULL, 0));
+	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {
@@ -344,7 +346,8 @@ const char* DLApi::getClientVersion() {
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : nullptr,
+	                                   value.present() ? value.get().size() : 0));
 }
 
 void DLApi::setupNetwork() {
@@ -725,46 +728,46 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 
 void MultiVersionDatabase::Connector::connect() {
 	addref();
-	onMainThreadVoid([this]() {
-		if(!cancelled) {
-			connected = false;
-			if(connectionFuture.isValid()) {
-				connectionFuture.cancel();
-			}
-			
-			candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
-			if(client->external) {
-				connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
-			}
-			else { 
-				connectionFuture = ThreadFuture<Void>(Void());
-			}
+	onMainThreadVoid(
+	    [this]() {
+		    if (!cancelled) {
+			    connected = false;
+			    if (connectionFuture.isValid()) {
+				    connectionFuture.cancel();
+			    }
 
-			connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
-				if(ready.isError()) {
-					return ErrorOr<ThreadFuture<Void>>(ready.getError());
-				}
+			    candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
+			    if (client->external) {
+				    connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
+			    } else {
+				    connectionFuture = ThreadFuture<Void>(Void());
+			    }
 
-				tr = candidateDatabase->createTransaction();
-				return ErrorOr<ThreadFuture<Void>>(mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
-					// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-					if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
-						return ErrorOr<Void>(v.getError());
-					}
-					else {
-						return ErrorOr<Void>(Void());
-					}
-				}));
-			});
+			    connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
+				    if (ready.isError()) {
+					    return ErrorOr<ThreadFuture<Void>>(ready.getError());
+				    }
 
+				    tr = candidateDatabase->createTransaction();
+				    return ErrorOr<ThreadFuture<Void>>(
+				        mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
+					        // If the version attempt returns an error, we regard that as a connection (except
+					        // operation_cancelled)
+					        if (v.isError() && v.getError().code() == error_code_operation_cancelled) {
+						        return ErrorOr<Void>(v.getError());
+					        } else {
+						        return ErrorOr<Void>(Void());
+					        }
+				        }));
+			    });
 
-			int userParam;
-			connectionFuture.callOrSetAsCallback(this, userParam, 0);
-		}
-		else {
-			delref();
-		}
-	}, NULL);
+			    int userParam;
+			    connectionFuture.callOrSetAsCallback(this, userParam, 0);
+		    } else {
+			    delref();
+		    }
+	    },
+	    nullptr);
 }
 
 // Only called from main thread
@@ -777,13 +780,15 @@ void MultiVersionDatabase::Connector::cancel() {
 }
 
 void MultiVersionDatabase::Connector::fire(const Void &unused, int& userParam) {
-	onMainThreadVoid([this]() {
-		if(!cancelled) {
-			connected = true;
-			dbState->stateChanged();
-		}
-		delref();
-	}, NULL);
+	onMainThreadVoid(
+	    [this]() {
+		    if (!cancelled) {
+			    connected = true;
+			    dbState->stateChanged();
+		    }
+		    delref();
+	    },
+	    nullptr);
 }
 
 void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
@@ -798,7 +803,7 @@ void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState()
-	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))), currentClientIndex(-1) {}
+  : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), currentClientIndex(-1) {}
 
 // Only called from main thread
 void MultiVersionDatabase::DatabaseState::stateChanged() {
@@ -868,15 +873,17 @@ void MultiVersionDatabase::DatabaseState::startConnections() {
 
 void MultiVersionDatabase::DatabaseState::cancelConnections() {
 	addref();
-	onMainThreadVoid([this](){
-		for(auto c : connectionAttempts) {
-			c->cancel();
-		}
+	onMainThreadVoid(
+	    [this]() {
+		    for (auto c : connectionAttempts) {
+			    c->cancel();
+		    }
 
-		connectionAttempts.clear();
-		clients.clear();
-		delref();
-	}, NULL);
+		    connectionAttempts.clear();
+		    clients.clear();
+		    delref();
+	    },
+	    nullptr);
 }
 
 // MultiVersionApi
@@ -1019,9 +1026,11 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 	ASSERT(networkSetup);
 
 	// This option must be set on the main thread because it modifes structures that can be used concurrently by the main thread
-	onMainThreadVoid([this, versions](){
-		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
-	}, NULL);
+	onMainThreadVoid(
+	    [this, versions]() {
+		    localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
+	    },
+	    nullptr);
 
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([this, versions](Reference<ClientInfo> client){
@@ -1631,9 +1640,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 			checkUndestroyed.blockUntilReady();
 		}
 
-		onMainThreadVoid([done](){
-			*done = true;
-		}, NULL);
+		onMainThreadVoid([done]() { *done = true; }, nullptr);
 	}
 	catch(Error &e) {
 		printf("Caught error in test: %s\n", e.name());

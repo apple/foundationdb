@@ -309,8 +309,8 @@ void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) {
 	if(impl) {
 		delete impl;
 	}
-	impl = av.impl; 
-	av.impl = 0; 
+	impl = av.impl;
+	av.impl = nullptr;
 }
 MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
 MovableCoordinatedState::~MovableCoordinatedState() { 

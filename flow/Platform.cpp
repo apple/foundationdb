@@ -506,8 +506,8 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT( platform_error, "getInterfaceName" );
 	static char iname[20];
 
-	struct ifaddrs* interfaces = NULL;
-	const char* ifa_name = NULL;
+	struct ifaddrs* interfaces = nullptr;
+	const char* ifa_name = nullptr;
 
 	if (getifaddrs(&interfaces)) {
 		TraceEvent(SevWarnAlways, "GetInterfaceAddrs").GetLastError();
@@ -542,7 +542,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	if (ifa_name)
 		return iname;
 	else
-		return NULL;
+		return nullptr;
 }
 #endif
 
@@ -783,14 +783,14 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 
 	size_t len;
 
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+	if (sysctl(mib, 6, nullptr, &len, nullptr, 0) < 0) {
 		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
 		throw platform_error();
 	}
 
 	char *buf = (char*)malloc(len);
 
-	if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
+	if (sysctl(mib, 6, buf, &len, nullptr, 0) < 0) {
 		free(buf);
 		TraceEvent(SevError, "GetNetworkTrafficReadInterfacesError").GetLastError();
 		throw platform_error();
@@ -885,7 +885,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		disk = tdisk;
 	}
 
-	CFDictionaryRef disk_dict = NULL;
+	CFDictionaryRef disk_dict = nullptr;
 	if (IORegistryEntryCreateCFProperties(disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault, kNilOptions) != kIOReturnSuccess) {
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
@@ -896,7 +896,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	// Here and below, note that memory returned by CFDictionaryGetValue() is not owned by us, and should not be CFRelease()'d by us.
 	CFDictionaryRef stats_dict = (CFDictionaryRef)CFDictionaryGetValue(disk_dict, CFSTR(kIOBlockStorageDriverStatisticsKey));
 
-	if (stats_dict == NULL) {
+	if (stats_dict == nullptr) {
 		CFRelease(disk_dict);
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
@@ -1103,8 +1103,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 #endif
 
 SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState, bool logDetails) {
-	if( (*statState) == NULL )
-		(*statState) = new SystemStatisticsState();
+	if ((*statState) == nullptr) (*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
 
 	double nowTime = timer();
@@ -1314,7 +1313,7 @@ struct OffsetTimer {
 		offset = mach_absolute_time();
 
 		struct timeval tv;
-		gettimeofday(&tv, NULL);
+		gettimeofday(&tv, nullptr);
 
 		offset_seconds = tv.tv_sec + 1e-6 * tv.tv_usec;
 	}
@@ -1347,7 +1346,7 @@ double timer() {
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
 #elif defined(__APPLE__)
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	return double(tv.tv_sec) + (tv.tv_usec * 1e-6);
 #else
 #error Port me!
@@ -1367,7 +1366,7 @@ uint64_t timer_int() {
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
 #elif defined(__APPLE__)
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	return uint64_t(tv.tv_sec) * 1e9 + (tv.tv_usec * 1e3);
 #else
 #error Port me!
@@ -1381,7 +1380,7 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 		throw platform_error();
 	}
 #elif defined(__unixish__)
-	if(localtime_r(timep, result) == NULL) {
+	if (localtime_r(timep, result) == nullptr) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
 		throw platform_error();
 	}
@@ -1516,7 +1515,7 @@ static void *allocateInternal(size_t length, bool largePages) {
 #elif defined(__APPLE__)
 	int flags = MAP_PRIVATE|MAP_ANON;
 
-	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
+	return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 #else
 #error Port me!
 #endif
@@ -1669,7 +1668,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 #endif
 
 void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
-	FILE* f = 0;
+	FILE* f = nullptr;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
@@ -1744,10 +1743,10 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		}
 
 		if(fclose(f) != 0) {
-			f = 0;
+			f = nullptr;
 			throw io_error();
 		}
-		f = 0;
+		f = nullptr;
 
 		if(rename( tempfilename.c_str(), path.c_str() ) != 0)
 			throw io_error();
@@ -2075,9 +2074,9 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 #elif (defined(__linux__) || defined(__APPLE__))
 	DIR *dip;
 
-	if ((dip = opendir(directory.c_str())) != NULL) {
+	if ((dip = opendir(directory.c_str())) != nullptr) {
 		struct dirent *dit;
-		while ((dit = readdir(dip)) != NULL) {
+		while ((dit = readdir(dip)) != nullptr) {
 			std::string name(dit->d_name);
 			struct stat buf;
 			if (stat(joinPath(directory, name).c_str(), &buf)) {
@@ -2190,7 +2189,7 @@ THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
 #elif (defined(__linux__) || defined(__APPLE__))
 THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 	pthread_t t;
-	pthread_create(&t, NULL, func, arg);
+	pthread_create(&t, nullptr, func, arg);
 	return t;
 }
 #else
@@ -2201,7 +2200,7 @@ void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
 	WaitForSingleObject(thread, INFINITE);
 #elif (defined(__linux__) || defined(__APPLE__))
-	pthread_join(thread, NULL);
+	pthread_join(thread, nullptr);
 #else
 	#error Port me!
 #endif
@@ -2356,7 +2355,7 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite)
 #endif
 std::string getWorkingDirectory() {
 	char *buf;
-	if( (buf = getcwd(NULL, 0)) == NULL ) {
+	if ((buf = getcwd(nullptr, 0)) == nullptr) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
 		throw platform_error();
 	}
@@ -2545,7 +2544,7 @@ struct ImageInfo {
 	void *offset;
 	std::string symbolFileName;
 
-	ImageInfo() : offset(NULL), symbolFileName("") {}
+	ImageInfo() : offset(nullptr), symbolFileName("") {}
 };
 
 ImageInfo getImageInfo(const void *symbol) {
@@ -2641,7 +2640,7 @@ bool isLibraryLoaded(const char* lib_path) {
 #error Port me!
 #endif
 
-	void* dlobj = NULL;
+	void* dlobj = nullptr;
 
 #if defined(__unixish__)
 	dlobj = dlopen( lib_path, RTLD_NOLOAD | RTLD_LAZY );
@@ -2649,7 +2648,7 @@ bool isLibraryLoaded(const char* lib_path) {
 	dlobj = GetModuleHandle( lib_path );
 #endif
 
-	return dlobj != NULL;
+	return dlobj != nullptr;
 }
 
 void* loadLibrary(const char* lib_path) {
@@ -2657,11 +2656,11 @@ void* loadLibrary(const char* lib_path) {
 #error Port me!
 #endif
 
-	void* dlobj = NULL;
+	void* dlobj = nullptr;
 
 #if defined(__unixish__)
 	dlobj = dlopen( lib_path, RTLD_LAZY | RTLD_LOCAL );
-	if(dlobj == NULL) {
+	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
 #else
@@ -2675,11 +2674,11 @@ void* loadLibrary(const char* lib_path) {
 }
 
 void* loadFunction(void* lib, const char* func_name) {
-	void* dlfcn = NULL;
+	void* dlfcn = nullptr;
 
 #if defined(__unixish__)
 	dlfcn = dlsym( lib, func_name );
-	if(dlfcn == NULL) {
+	if (dlfcn == nullptr) {
 		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).detail("Error", dlerror());
 	}
 #else
@@ -2876,7 +2875,7 @@ void* checkThread(void *arg) {
 	return NULL;
 #else
 	// No slow task profiling for other platforms!
-	return NULL;
+	return nullptr;
 #endif
 }
 

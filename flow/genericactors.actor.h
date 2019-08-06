@@ -773,7 +773,8 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
+Future<Void> resetAfter(Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1,
+                        double warningResetDelay = 0, const char* context = nullptr) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
 	state int resetCount = 0;
@@ -867,7 +868,7 @@ struct Quorum : SAV<Void> {
 		for (int i = 0; i < count; i++)
 			if (callbacks()[i].next) {
 				callbacks()[i].remove();
-				callbacks()[i].next = 0;
+				callbacks()[i].next = nullptr;
 				++cancelled_callbacks;
 			}
 		if (canBeSet())
@@ -904,12 +905,12 @@ public:
 	}
 	virtual void fire(const T& value) {
 		Callback<T>::remove();
-		Callback<T>::next = 0;
+		Callback<T>::next = nullptr;
 		head->oneSuccess();
 	}
 	virtual void error(Error error) {
 		Callback<T>::remove();
-		Callback<T>::next = 0;
+		Callback<T>::next = nullptr;
 		head->oneError(error);
 	}
 
@@ -927,7 +928,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 	QuorumCallback<T>* nextCallback = q->callbacks();
 	for (auto & r : results) {
 		if (r.isReady()) {
-			nextCallback->next = 0;
+			nextCallback->next = nullptr;
 			if (r.isError())
 				q->oneError(r.getError());
 			else
@@ -1054,7 +1055,7 @@ Future<T> reportErrorsExcept( Future<T> in, const char* context, UID id, std::se
 
 template <class T>
 Future<T> reportErrors( Future<T> const& in, const char* context, UID id = UID() ) {
-	return reportErrorsExcept(in, context, id, NULL);
+	return reportErrorsExcept(in, context, id, nullptr);
 }
 
 ACTOR template <class T>
@@ -1229,7 +1230,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	struct Releaser : NonCopyable {
 		FlowLock* lock;
 		int remaining;
-		Releaser() : lock(0), remaining(0) {}
+		Releaser() : lock(nullptr), remaining(0) {}
 		Releaser( FlowLock& lock, int64_t amount = 1 ) : lock(&lock), remaining(amount) {}
 		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) { if (remaining) lock->release(remaining); lock = r.lock; remaining = r.remaining; r.remaining = 0; }

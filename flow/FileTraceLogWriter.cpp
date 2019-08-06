@@ -113,16 +113,19 @@ void FileTraceLogWriter::open() {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
 
 			int errorNum = errno;
-			onMainThreadVoid([finalname, errorNum]{
-				TraceEvent(SevWarnAlways, "TraceFileOpenError")
-					.detail("Filename", finalname)
-					.detail("ErrorCode", errorNum)
-					.detail("Error", strerror(errorNum))
-					.trackLatest("TraceFileOpenError"); }, NULL);
+			onMainThreadVoid(
+			    [finalname, errorNum] {
+				    TraceEvent(SevWarnAlways, "TraceFileOpenError")
+				        .detail("Filename", finalname)
+				        .detail("ErrorCode", errorNum)
+				        .detail("Error", strerror(errorNum))
+				        .trackLatest("TraceFileOpenError");
+			    },
+			    nullptr);
 			threadSleep(FLOW_KNOBS->TRACE_RETRY_OPEN_INTERVAL);
 		}
 	}
-	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	onMainThreadVoid([] { latestEventCache.clear("TraceFileOpenError"); }, nullptr);
 	lastError(0);
 }
 

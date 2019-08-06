@@ -261,7 +261,7 @@ struct Profiler {
 	}
 };
 
-Profiler* Profiler::active_profiler = 0;
+Profiler* Profiler::active_profiler = nullptr;
 
 std::string findAndReplace( std::string const& fn, std::string const& symbol, std::string const& value ) {
 	auto i = fn.find(symbol);

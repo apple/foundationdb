@@ -2344,7 +2344,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["messages"] = messages;
 
-		int64_t clusterTime = time(0);
+		int64_t clusterTime = time(nullptr);
 		if (clusterTime != -1){
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}

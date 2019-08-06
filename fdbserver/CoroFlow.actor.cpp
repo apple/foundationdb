@@ -25,8 +25,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-
-Coro *current_coro = 0, *main_coro = 0;
+Coro *current_coro = nullptr, *main_coro = nullptr;
 Coro* swapCoro( Coro* n ) {
 	Coro* t = current_coro;
 	current_coro = n;
@@ -48,8 +47,7 @@ protected:
 struct Coroutine /*: IThreadlike*/ {
 	Coroutine() {
 		coro = Coro_new();
-		if (coro == NULL)
-			platform::outOfMemory();
+		if (coro == nullptr) platform::outOfMemory();
 	}
 
 	~Coroutine() {
@@ -292,8 +290,7 @@ void CoroThreadPool::init()
 {
 	if (!current_coro) {
 		current_coro = main_coro = Coro_new();
-		if (main_coro == NULL) 
-			platform::outOfMemory();
+		if (main_coro == nullptr) platform::outOfMemory();
 
 		Coro_initializeMainCoro(main_coro);
 		//printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));

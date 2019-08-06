@@ -101,8 +101,8 @@ bool onlyBeforeSimulatorInit() {
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
-ISimulator* g_pSimulator = 0;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
+ISimulator* g_pSimulator = nullptr;
+thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 int openCount = 0;
 
 struct SimClogging {
@@ -1013,7 +1013,7 @@ public:
 
 		// This is for async operations on non-durable files.
 		// These files must live on after process kills for sim purposes.
-		if( machine.machineProcess == 0 ) {
+		if (machine.machineProcess == nullptr) {
 			NetworkAddress machineAddress(ip, 0, false, false);
 			machine.machineProcess = new ProcessInfo("Machine", locality, startingClass, {machineAddress}, this, "", "");
 			machine.machineProcess->machine = &machine;
@@ -1039,7 +1039,7 @@ public:
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
-		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
+		m->setGlobal(enASIOTimedOut, (flowGlobalType) nullptr);
 
 		TraceEvent("NewMachine").detail("Name", name).detail("Address", m->address).detail("MachineId", m->locality.machineId()).detail("Excluded", m->excluded).detail("Cleared", m->cleared);
 
@@ -1059,7 +1059,7 @@ public:
 				}
 			}
 		}
-		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+		return canKillProcesses(processesLeft, processesDead, KillInstantly, nullptr);
 	}
 
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
@@ -1668,8 +1668,7 @@ public:
 		return delay( 0, taskID, process );
 	}
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
-		if( process->machine == 0 )
-			return Void();
+		if (process->machine == nullptr) return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
 	}
 
@@ -1759,13 +1758,12 @@ Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64
 #include <Windows.h>
 
 int sf_open( const char* filename, int flags, int convFlags, int mode ) {
-	HANDLE wh = CreateFile( filename, GENERIC_READ | ((flags&IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
-		(flags&IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW :
-			(flags&IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS :
-			OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL,
-		NULL );
+	HANDLE wh = CreateFile(filename, GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
+	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+	                       (flags & IAsyncFile::OPEN_EXCLUSIVE)
+	                           ? CREATE_NEW
+	                           : (flags & IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS : OPEN_EXISTING,
+	                       FILE_ATTRIBUTE_NORMAL, nullptr);
 	int h = -1;
 	if (wh != INVALID_HANDLE_VALUE) h = _open_osfhandle( (intptr_t)wh, convFlags );
 	else errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;

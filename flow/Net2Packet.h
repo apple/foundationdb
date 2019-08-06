@@ -40,7 +40,7 @@ struct ReliablePacket : FastAllocated<ReliablePacket> {
 
 class UnsentPacketQueue : NonCopyable {
 public:
-	UnsentPacketQueue() : unsent_first(0), unsent_last(0) {}
+	UnsentPacketQueue() : unsent_first(nullptr), unsent_last(nullptr) {}
 	~UnsentPacketQueue() { discardAll(); }
 
 	// Get a PacketBuffer to write new packets into
@@ -75,7 +75,7 @@ private:
 class ReliablePacketList : NonCopyable {
 public:
 	ReliablePacketList() {
-		reliable.buffer = 0;
+		reliable.buffer = nullptr;
 		reliable.prev = reliable.next = &reliable;
 	}
 	bool empty() const { return reliable.next == &reliable; }

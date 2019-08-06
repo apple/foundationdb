@@ -79,7 +79,7 @@ void EndpointMap::realloc() {
 	int oldSize = data.size();
 	data.resize( std::max(128, oldSize*2) );
 	for(int i=oldSize; i<data.size(); i++) {
-		data[i].receiver = 0;
+		data[i].receiver = nullptr;
 		data[i].nextFree = i+1;
 	}
 	data[data.size()-1].nextFree = firstFree;
@@ -99,7 +99,7 @@ NetworkMessageReceiver* EndpointMap::get( Endpoint::Token const& token ) {
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() )
 		return data[index].receiver;
-	return 0;
+	return nullptr;
 }
 
 TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
@@ -112,7 +112,7 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
-		data[index].receiver = 0;
+		data[index].receiver = nullptr;
 		data[index].nextFree = firstFree;
 		firstFree = index;
 	}
@@ -1181,7 +1181,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		bool firstUnsent = peer->unsent.empty();
 
 		PacketBuffer* pb = peer->unsent.getWriteBuffer();
-		ReliablePacket* rp = reliable ? new ReliablePacket : 0;
+		ReliablePacket* rp = reliable ? new ReliablePacket : nullptr;
 
 		int prevBytesWritten = pb->bytes_written;
 		PacketBuffer* checksumPb = pb;

@@ -223,38 +223,16 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int8_t primaryLocality;
 	bool neverCreated;
 
-	MasterData(
-		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
-		MasterInterface const& myInterface,
-		ServerCoordinators const& coordinators,
-		ClusterControllerFullInterface const& clusterController,
-		Standalone<StringRef> const& dbId,
-		PromiseStream<Future<Void>> const& addActor,
-		bool forceRecovery
-		)
-		: dbgid(myInterface.id()),
-		  myInterface(myInterface),
-		  dbInfo(dbInfo),
-		  cstate(coordinators, addActor, dbgid),
-		  coordinators(coordinators),
-		  clusterController(clusterController),
-		  dbId(dbId),
-		  forceRecovery(forceRecovery),
-		  safeLocality(tagLocalityInvalid),
-		  primaryLocality(tagLocalityInvalid),
-		  neverCreated(false),
-		  lastEpochEnd(invalidVersion),
-		  recoveryTransactionVersion(invalidVersion),
-		  lastCommitTime(0),
-		  registrationCount(0),
-		  version(invalidVersion),
-		  lastVersionTime(0),
-		  txnStateStore(0),
-		  memoryLimit(2e9),
-		  addActor(addActor),
-		  hasConfiguration(false),
-		  recruitmentStalled( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) )
-	{
+	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo, MasterInterface const& myInterface,
+	           ServerCoordinators const& coordinators, ClusterControllerFullInterface const& clusterController,
+	           Standalone<StringRef> const& dbId, PromiseStream<Future<Void>> const& addActor, bool forceRecovery)
+	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
+	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
+	    lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
+	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9),
+	    addActor(addActor), hasConfiguration(false),
+	    recruitmentStalled(Reference<AsyncVar<bool>>(new AsyncVar<bool>())) {
 		if(forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
 			forceRecovery = false;
@@ -1344,7 +1322,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
-	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
+	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()),
+	                       self->txnStateStore, nullptr, nullptr);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion;  // lastEpochEnd would make more sense, but isn't in the initial window of the resolver(s)

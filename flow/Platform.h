@@ -481,7 +481,7 @@ inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*
 #if defined(_WIN32)
 inline static void flushOutputStreams() { _flushall(); }
 #elif defined(__unixish__)
-inline static void flushOutputStreams() { fflush(NULL); }
+inline static void flushOutputStreams() { fflush(nullptr); }
 #else
 #error Missing flush output stream
 #endif
@@ -495,7 +495,7 @@ inline static void flushOutputStreams() { fflush(NULL); }
 #error Missing symbol export
 #endif
 
-#define crashAndDie() (*(volatile int*)0 = 0)
+#define crashAndDie() (*(volatile int*)nullptr = 0)
 
 #ifdef _WIN32
 #define strcasecmp stricmp

@@ -293,15 +293,15 @@ private:
 			clear();
 		}
 
-		void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+		void set(KeyValueRef keyValue, const Arena* arena = nullptr) {
 			queue_op(OpSet, keyValue.key, keyValue.value, arena);
 		}
 
-		void clear( KeyRangeRef range, const Arena* arena = NULL ) {
+		void clear(KeyRangeRef range, const Arena* arena = nullptr) {
 			queue_op(OpClear, range.begin, range.end, arena);
 		}
 
-		void clear_to_end( StringRef fromKey, const Arena* arena = NULL ) {
+		void clear_to_end(StringRef fromKey, const Arena* arena = nullptr) {
 			queue_op(OpClearToEnd, fromKey, StringRef(), arena);
 		}
 
@@ -309,7 +309,7 @@ private:
 			numBytes += p1.size() + p2.size() + sizeof(OpHeader) + sizeof(OpRef);
 
 			OpRef r; r.op = op; r.p1 = p1; r.p2 = p2;
-			if(arena == NULL) {
+			if (arena == nullptr) {
 				operations.push_back_deep( operations.arena(), r );
 			} else {
 				operations.push_back( operations.arena(), r );

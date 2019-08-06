@@ -407,18 +407,14 @@ public:
 		Node *alreadyChecked;
 		StringRef value;
 
-		Finger() : level(MaxLevels), x(NULL), alreadyChecked(NULL) {}
+		Finger() : level(MaxLevels), x(nullptr), alreadyChecked(nullptr) {}
 
-		Finger( Node* header, const StringRef& ptr ) :
-			value(ptr), level(MaxLevels),
-			alreadyChecked(NULL), x(header)
-		{
-		}
+		Finger(Node* header, const StringRef& ptr) : value(ptr), level(MaxLevels), alreadyChecked(nullptr), x(header) {}
 
 		void init(const StringRef& value, Node *header){
 			this->value = value;
 			x = header;
-			alreadyChecked = NULL;
+			alreadyChecked = nullptr;
 			level = MaxLevels;
 		}
 
@@ -464,8 +460,8 @@ public:
 			Node *n = finger[0]->getNext(0);	// or alreadyChecked, but that is more easily invalidated
 			if (n && n->length() == value.size() && !memcmp(n->value(), value.begin(), value.size()))
 				return n;
-			else 
-				return NULL;
+			else
+				return nullptr;
 		}
 
 		StringRef getValue() const {
@@ -487,22 +483,18 @@ public:
 	explicit SkipList( Version version = 0 ) {
 		header = Node::create(StringRef(), MaxLevels-1);
 		for(int l=0; l<MaxLevels; l++) {
-			header->setNext(l, NULL);
+			header->setNext(l, nullptr);
 			header->setMaxVersion(l, version);
 		}
 	}
 	~SkipList() {
 		destroy();
 	}
-	SkipList(SkipList&& other) BOOST_NOEXCEPT
-		: header(other.header)
-	{
-		other.header = NULL;
-	}
+	SkipList(SkipList&& other) BOOST_NOEXCEPT : header(other.header) { other.header = nullptr; }
 	void operator=(SkipList&& other) BOOST_NOEXCEPT {
 		destroy();
 		header = other.header;
-		other.header = NULL;
+		other.header = nullptr;
 	}
 	void swap( SkipList& other ) {
 		std::swap(header, other.header);
@@ -513,8 +505,7 @@ public:
 			const Finger& startF = fingers[r*2];
 			const Finger& endF = fingers[r*2+1];
 
-			if (endF.found()==NULL)
-				insert(endF, endF.finger[0]->getMaxVersion(0));
+			if (endF.found() == nullptr) insert(endF, endF.finger[0]->getMaxVersion(0));
 
 			remove( startF, endF );
 			insert( startF, version );
@@ -578,7 +569,7 @@ public:
 				ends[i].finger[l]->setNext( l, input[i+1].header->getNext(l) );
 				if (l && (!i || ends[i].finger[l] != input[i].header))
 					ends[i].finger[l]->calcVersionForLevel(l);
-				input[i+1].header->setNext( l, NULL );
+				input[i + 1].header->setNext(l, nullptr);
 			}
 		}
 		swap(input[0]);
@@ -608,7 +599,7 @@ public:
 		for(int i=1; i<count; i++) {
 			results[i].level = startLevel;
 			results[i].x = x;
-			results[i].alreadyChecked = NULL;
+			results[i].alreadyChecked = nullptr;
 			results[i].value = values[i];
 			for(int j=startLevel; j<MaxLevels; j++)
 				results[i].finger[j] = results[0].finger[j];
@@ -841,7 +832,7 @@ private:
 		right.header->setMaxVersion(0, f.finger[0]->getMaxVersion(0));
 		for(int l=0; l<MaxLevels; l++) {
 			right.header->setNext(l, f.finger[l]->getNext(l));
-			f.finger[l]->setNext(l, NULL);
+			f.finger[l]->setNext(l, nullptr);
 			/*if (l) {
 				// SOMEDAY: Do we actually need these?
 				right.header->calcVersionForLevel(l);
@@ -854,8 +845,7 @@ private:
 		Node* node = header;
 		for(int l=MaxLevels-1; l>=0; l--) {
 			Node* next;
-			while ( (next=node->getNext(l)) != NULL ) 
-				node = next;
+			while ((next = node->getNext(l)) != nullptr) node = next;
 			end.finger[l] = node;
 		}
 		end.level = 0;
@@ -928,7 +918,7 @@ struct ConflictSet {
 		static_assert(PARALLEL_THREAD_COUNT == 0, "workerThread() not implemented");
 		static_assert(PARALLEL_THREAD_COUNT == 0 || FASTALLOC_THREAD_SAFE, "Thread safe fast allocator required for multithreaded conflict set");
 		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) {
-			worker_nextAction.push_back( NULL );
+			worker_nextAction.push_back(nullptr);
 			worker_ready.push_back( new Event );
 			worker_finished.push_back( new Event );
 		}
@@ -937,7 +927,7 @@ struct ConflictSet {
 	}
 	~ConflictSet() {
 		for(int i=0; i<worker_nextAction.size(); i++) {
-			worker_nextAction[i] = 0;
+			worker_nextAction[i] = nullptr;
 			worker_ready[i]->set();
 		}
 		// Wait for workers to terminate; otherwise can get crashes at shutdown time
@@ -1270,7 +1260,7 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 		for(int s=0; s<splits.size(); s++)
 			splits[s] = combinedWriteConflictRanges[ (s+1)*combinedWriteConflictRanges.size()/parts.size() ].first;
 
-		cs->versionHistory.partition( splits.size() ? &splits[0] : NULL, splits.size(), &parts[0] );
+		cs->versionHistory.partition(splits.size() ? &splits[0] : nullptr, splits.size(), &parts[0]);
 		std::vector<double> tstart(PARALLEL_THREAD_COUNT), tend(PARALLEL_THREAD_COUNT);
 		Event done[PARALLEL_THREAD_COUNT ? PARALLEL_THREAD_COUNT : 1];
 		double before = timer();

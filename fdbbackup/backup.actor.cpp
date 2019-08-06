@@ -2543,15 +2543,15 @@ int main(int argc, char* argv[]) {
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
-		setvbuf(stdout, NULL, _IONBF, 0);
-		setvbuf(stderr, NULL, _IONBF, 0);
+		setvbuf(stdout, nullptr, _IONBF, 0);
+		setvbuf(stderr, nullptr, _IONBF, 0);
 
 		enumProgramExe programExe = getProgramType(argv[0]);
 		enumBackupType backupType = BACKUP_UNDEFINED;
 		enumRestoreType restoreType = RESTORE_UNKNOWN;
 		enumDBType dbType = DB_UNDEFINED;
 
-		CSimpleOpt* args = NULL;
+		CSimpleOpt* args = nullptr;
 
 		switch (programExe)
 		{
@@ -2769,6 +2769,7 @@ int main(int argc, char* argv[]) {
 		//_set_output_format(_TWO_DIGIT_EXPONENT);
 	#endif
 
+		// clang-format off
 		while (args->Next()) {
 			lastError = args->LastError();
 
@@ -2822,12 +2823,12 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_SUCCESS;
 					break;
 				case OPT_NOBUFSTDOUT:
-					setvbuf(stdout, NULL, _IONBF, 0);
-					setvbuf(stderr, NULL, _IONBF, 0);
-					break;
+					setvbuf(stdout, nullptr, _IONBF, 0);
+					setvbuf(stderr, nullptr, _IONBF, 0);
+				break;
 				case OPT_BUFSTDOUTERR:
-					setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-					setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+					setvbuf(stdout, nullptr, _IOFBF, BUFSIZ);
+					setvbuf(stderr, nullptr, _IOFBF, BUFSIZ);
 					break;
 				case OPT_QUIET:
 					quietDisplay = true;
@@ -3087,6 +3088,7 @@ int main(int argc, char* argv[]) {
 					break;
 			}
 		}
+		// clang-format on
 
 		// Process the extra arguments
 		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++)
@@ -3160,7 +3162,7 @@ int main(int argc, char* argv[]) {
 		if (args)
 		{
 			delete args;
-			args = NULL;
+			args = nullptr;
 		}
 
 		std::string commandLine;
@@ -3290,16 +3292,16 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
-			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
-			.detail("Version", FDB_VT_VERSION )
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-			.setMaxFieldLength(10000)
-			.detail("CommandLine", commandLine)
-			.setMaxFieldLength(0)
-			.detail("MemoryLimit", memLimit)
-			.trackLatest("ProgramStart");
+		    .setMaxEventLength(12000)
+		    .detail("SourceVersion", getHGVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .setMaxFieldLength(10000)
+		    .detail("CommandLine", commandLine)
+		    .setMaxFieldLength(0)
+		    .detail("MemoryLimit", memLimit)
+		    .trackLatest("ProgramStart");
 
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();

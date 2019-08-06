@@ -328,7 +328,7 @@ private:
 };
 
 UID getSharedMemoryMachineId() {
-	UID *machineId = NULL;
+	UID* machineId = nullptr;
 	int numTries = 0;
 
 	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
@@ -338,7 +338,8 @@ UID getSharedMemoryMachineId() {
 	loop {
 		try {
 			// "0" is the default parameter "addr"
-			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
+			boost::interprocess::managed_shared_memory segment(
+			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, nullptr, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
@@ -904,8 +905,8 @@ int main(int argc, char* argv[]) {
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
-		setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-		setvbuf(stderr, NULL, _IOLBF, BUFSIZ);
+		setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
+		setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
@@ -945,7 +946,7 @@ int main(int argc, char* argv[]) {
 		std::string testServersStr;
 		std::string whitelistBinPaths;
 		std::vector<std::string> publicAddressStrs, listenAddressStrs;
-		const char *targetKey = NULL;
+		const char* targetKey = nullptr;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
 		bool buggifyEnabled = false, restarting = false;
@@ -1013,6 +1014,7 @@ int main(int argc, char* argv[]) {
 			std::string argStr;
 			std::vector<std::string> tmpStrings;
 
+			// clang-format off
 			switch (args.OptionId()) {
 				case OPT_HELP:
 					printUsage(argv[0], false);
@@ -1048,12 +1050,12 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_SUCCESS);
 					break;
 				case OPT_NOBUFSTDOUT:
-					setvbuf(stdout, NULL, _IONBF, 0);
-					setvbuf(stderr, NULL, _IONBF, 0);
+					setvbuf(stdout, nullptr, _IONBF, 0);
+					setvbuf(stderr, nullptr, _IONBF, 0);
 					break;
 				case OPT_BUFSTDOUTERR:
-					setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-					setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+					setvbuf(stdout, nullptr, _IOFBF, BUFSIZ);
+					setvbuf(stderr, nullptr, _IOFBF, BUFSIZ);
 					break;
 				case OPT_ROLE:
 					sRole = args.OptionArg();
@@ -1370,6 +1372,7 @@ int main(int argc, char* argv[]) {
 					break;
 #endif
 			}
+			// clang-format on
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
@@ -1632,23 +1635,23 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
-			.setMaxEventLength(12000)
-			.detail("RandomSeed", randomSeed)
-			.detail("SourceVersion", getHGVersion())
-			.detail("Version", FDB_VT_VERSION )
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detail("FileSystem", fileSystemPath)
-			.detail("DataFolder", dataFolder)
-			.detail("WorkingDirectory", cwd)
-			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
-			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-			.setMaxFieldLength(10000)
-			.detail("CommandLine", commandLine)
-			.setMaxFieldLength(0)
-			.detail("BuggifyEnabled", buggifyEnabled)
-			.detail("MemoryLimit", memLimit)
-			.trackLatest("ProgramStart");
+		    .setMaxEventLength(12000)
+		    .detail("RandomSeed", randomSeed)
+		    .detail("SourceVersion", getHGVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detail("FileSystem", fileSystemPath)
+		    .detail("DataFolder", dataFolder)
+		    .detail("WorkingDirectory", cwd)
+		    .detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
+		    .detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .setMaxFieldLength(10000)
+		    .detail("CommandLine", commandLine)
+		    .setMaxFieldLength(0)
+		    .detail("BuggifyEnabled", buggifyEnabled)
+		    .detail("MemoryLimit", memLimit)
+		    .trackLatest("ProgramStart");
 
 		// Test for TraceEvent length limits
 		/*std::string foo(4096, 'x');
@@ -1722,10 +1725,10 @@ int main(int argc, char* argv[]) {
 				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
-				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
+				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
 				if (isRestoringStr) {
 					isRestoring = atoi(isRestoringStr);
-					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", NULL);
+					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", nullptr);
 					if (isRestoring && backupFailedStr) {
 						backupFailed = atoi(backupFailedStr);
 					}

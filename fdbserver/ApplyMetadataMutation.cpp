@@ -135,9 +135,9 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid)
-							.detail("M", m.toString())
-							.detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
-							.detail("ToCommit", toCommit!=NULL);
+						    .detail("M", m.toString())
+						    .detail("PrevValue", t.present() ? t.get() : LiteralStringRef("(none)"))
+						    .detail("ToCommit", toCommit != nullptr);
 						if(confChange) *confChange = true;
 					}
 				}
@@ -170,7 +170,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			}
 			else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
-				if(uid_applyMutationsData != NULL) {
+				if (uid_applyMutationsData != nullptr) {
 					Key uid = m.param1.removePrefix(applyMutationsEndRange.begin);
 					auto &p = (*uid_applyMutationsData)[uid];
 					p.endVersion = BinaryReader::fromStringRef<Version>(m.param2, Unversioned());
@@ -189,7 +189,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			}
 			else if (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
-				if(uid_applyMutationsData != NULL) {
+				if (uid_applyMutationsData != nullptr) {
 					if(m.param1.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID)) {
 						Key uid = m.param1.substr(applyMutationsKeyVersionMapRange.begin.size(), sizeof(UID));
 						Key k = m.param1.substr(applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID));
@@ -204,7 +204,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (vecBackupKeys) {
 					Key logDestination;
-					KeyRef logRangeBegin = logRangesDecodeKey(m.param1, NULL);
+					KeyRef logRangeBegin = logRangesDecodeKey(m.param1, nullptr);
 					Key	logRangeEnd = logRangesDecodeValue(m.param2, &logDestination);
 
 					// Insert the logDestination into each range of vecBackupKeys overlapping the decoded range
@@ -344,7 +344,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			if(range.intersects(applyMutationsEndRange)) {
 				KeyRangeRef commonEndRange(range & applyMutationsEndRange);
 				if(!initialCommit) txnStateStore->clear(commonEndRange);
-				if(uid_applyMutationsData != NULL) {
+				if (uid_applyMutationsData != nullptr) {
 					uid_applyMutationsData->erase(uid_applyMutationsData->lower_bound(m.param1.substr(applyMutationsEndRange.begin.size())),
 						m.param2 == applyMutationsEndRange.end ? uid_applyMutationsData->end() : uid_applyMutationsData->lower_bound(m.param2.substr(applyMutationsEndRange.begin.size())));
 				}
@@ -352,7 +352,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 			if(range.intersects(applyMutationsKeyVersionMapRange)) {
 				KeyRangeRef commonApplyRange(range & applyMutationsKeyVersionMapRange);
 				if(!initialCommit) txnStateStore->clear(commonApplyRange);
-				if(uid_applyMutationsData != NULL) {
+				if (uid_applyMutationsData != nullptr) {
 					if(m.param1.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID) && m.param2.size() >= applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID)) {
 						Key uid = m.param1.substr(applyMutationsKeyVersionMapRange.begin.size(), sizeof(UID));
 						Key uid2 = m.param2.substr(applyMutationsKeyVersionMapRange.begin.size(), sizeof(UID));
@@ -388,7 +388,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 					for (auto logRangeAffected : logRangesAffected)
 					{
 						// Parse the backup key and name
-						logKeyBegin = logRangesDecodeKey(logRangeAffected.key, NULL);
+						logKeyBegin = logRangesDecodeKey(logRangeAffected.key, nullptr);
 
 						// Decode the log destination and key value
 						logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);

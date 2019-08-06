@@ -54,7 +54,7 @@ void initSignalSafeUnwind() {
 	initChain();
 
 	phdr_cache.clear();
-	if (chain_dl_iterate_phdr(&phdr_cache_add, 0))
+	if (chain_dl_iterate_phdr(&phdr_cache_add, nullptr))
 		criticalError(FDB_EXIT_ERROR, "DLIterateError", "dl_iterate_phdr error");
 	phdr_cache_initialized = true;
 }

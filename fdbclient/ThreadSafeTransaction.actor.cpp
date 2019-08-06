@@ -77,22 +77,24 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion](){ 
-		try {
-			Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db).extractPtr();
-		}
-		catch(Error &e) {
-			new (db) DatabaseContext(e);
-		}
-		catch(...) {
-			new (db) DatabaseContext(unknown_error());
-		}
-	}, NULL);
+	onMainThreadVoid(
+	    [db, connFile, apiVersion]() {
+		    try {
+			    Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(),
+			                             db)
+			        .extractPtr();
+		    } catch (Error& e) {
+			    new (db) DatabaseContext(e);
+		    } catch (...) {
+			    new (db) DatabaseContext(unknown_error());
+		    }
+	    },
+	    nullptr);
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
 	DatabaseContext *db = this->db;
-	onMainThreadVoid( [db](){ db->delref(); }, NULL );
+	onMainThreadVoid([db]() { db->delref(); }, nullptr);
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
@@ -110,18 +112,17 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 		    cx->addref();
 		    new (tr) ReadYourWritesTransaction(Database(cx));
 	    },
-	    NULL);
+	    nullptr);
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction *tr = this->tr;
-	if (tr)
-		onMainThreadVoid( [tr](){ tr->delref(); }, NULL );
+	if (tr) onMainThreadVoid([tr]() { tr->delref(); }, nullptr);
 }
 
 void ThreadSafeTransaction::cancel() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->cancel(); }, NULL );
+	onMainThreadVoid([tr]() { tr->cancel(); }, nullptr);
 }
 
 void ThreadSafeTransaction::setVersion( Version v ) {
@@ -320,17 +321,17 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 void ThreadSafeTransaction::reset() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->reset(); }, NULL );
+	onMainThreadVoid([tr]() { tr->reset(); }, nullptr);
 }
 
 extern const char* getHGVersion();

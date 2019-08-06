@@ -24,9 +24,9 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-INetwork *g_network = 0;
+INetwork* g_network = nullptr;
 
-FILE* randLog = 0;
+FILE* randLog = nullptr;
 thread_local Reference<IRandom> seededRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;

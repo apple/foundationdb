@@ -526,7 +526,9 @@ private:
 		EventMetricHandle<SlowAioSubmit> slowAioSubmitMetric;
 
 		uint32_t opsIssued;
-		Context() : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true), fallocateZeroSupported(true), submittedRequestList(nullptr) {
+		Context()
+		  : iocx(nullptr), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true),
+		    fallocateZeroSupported(true), submittedRequestList(nullptr) {
 			setIOTimeout(0);
 		}
 

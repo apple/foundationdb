@@ -415,7 +415,7 @@ public:
 			wait( pushed );
 
 			delete pageMem;
-			pageMem = 0;
+			pageMem = nullptr;
 
 			Future<Void> sync = syncFiles[0]->onSync();
 			for(int i=1; i<syncFiles.size(); i++) sync = sync && syncFiles[i]->onSync();
@@ -772,11 +772,12 @@ public:
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
-	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
-		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
-	{
-	}
+	DiskQueue(std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion,
+	          int64_t fileSizeWarningLimit)
+	  : rawQueue(new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit)), dbgid(dbgid),
+	    diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	    nextReadLocation(-1), readBufPage(nullptr), readBufPos(0), pushed_page_buffer(nullptr), recovered(false),
+	    initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true) {}
 
 	virtual location push( StringRef contents ) {
 		ASSERT( recovered );
@@ -861,7 +862,7 @@ public:
 		lastCommittedSeq = backPage().endSeq();
 		auto f = rawQueue->pushAndCommit( pushed_page_buffer->ref(), pushed_page_buffer, poppedSeq/sizeof(Page) - lastPoppedSeq/sizeof(Page) );
 		lastPoppedSeq = poppedSeq;
-		pushed_page_buffer = 0;
+		pushed_page_buffer = nullptr;
 		return f;
 	}
 
@@ -1183,7 +1184,7 @@ private:
 				// if done, return
 				if (!bytes) return result.str;
 				ASSERT( self->readBufPos == self->readBufPage->payloadSize );
-				self->readBufPage = 0;
+				self->readBufPage = nullptr;
 				self->nextReadLocation += sizeof(Page) - self->readBufPos;
 				self->readBufPos = 0;
 			}

@@ -66,8 +66,9 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		// references so that we don't need to maintain the set of 2^arity lvalue and rvalue reference
 		// combinations, but still take advantage of move constructors when available (or required).
 		template <class T_, class Metric_>
-		Node(T_&& data, Metric_&& m, Node* parent=0) : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
-			child[0] = child[1] = NULL;
+		Node(T_&& data, Metric_&& m, Node* parent = nullptr)
+		  : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
+			child[0] = child[1] = nullptr;
 		}
 		~Node(){
 			delete child[0];
@@ -84,7 +85,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 public:
 	struct iterator{
 		typename IndexedSet::Node *i;
-		iterator() : i(0) {};
+		iterator() : i(nullptr){};
 		iterator(typename IndexedSet::Node *n) : i(n) {};
 		T& operator*() { return i->data; };
 		T* operator->() { return &i->data; }
@@ -94,10 +95,15 @@ public:
 		bool operator != ( const iterator& r ) const { return i != r.i; }
 	};
 
-	IndexedSet() : root(NULL) {};
+	IndexedSet() : root(nullptr){};
 	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = NULL; }
-	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
+	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = nullptr; }
+	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT {
+		delete root;
+		root = r.root;
+		r.root = nullptr;
+		return *this;
+	}
 
 	iterator begin() const;
 	iterator end() const { return iterator(); }
@@ -105,7 +111,10 @@ public:
 	iterator lastItem() const;
 
 	bool empty() const { return !root; }
-	void clear() { delete root; root = NULL; }
+	void clear() {
+		delete root;
+		root = nullptr;
+	}
 	void swap( IndexedSet& r ) { std::swap( root, r.root ); }
 
 	// Place data in the set with the given metric.  If an item equal to data is already in the set and,
@@ -220,7 +229,7 @@ private:
 	}
 
 public: // but testonly
-	std::pair<int, int> testonly_assertBalanced(Node*n=0, int d=0, bool a=true);
+	std::pair<int, int> testonly_assertBalanced(Node* n = nullptr, int d = 0, bool a = true);
 };
 
 class NoMetric {
@@ -600,7 +609,7 @@ Metric IndexedSet<T,Metric>::addMetric(T_&& data, Metric_&& metric){
 
 template <class T, class Metric> template<class T_, class Metric_>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, Metric_&& metric, bool replaceExisting){
-	if (root == NULL){
+	if (root == nullptr) {
 		root = new Node(std::forward<T_>(data), std::forward<Metric_>(metric));
 		return root;
 	}
@@ -673,17 +682,17 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 template <class T, class Metric>
 int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVector, bool replaceExisting) {
 	int num_inserted = 0;
-	Node *blockStart = NULL;
-	Node *blockEnd = NULL;
+	Node* blockStart = nullptr;
+	Node* blockEnd = nullptr;
 
 	for(int i = 0; i < dataVector.size(); ++i) {
 		Metric metric = dataVector[i].second;
 		T data = std::move(dataVector[i].first);
 
 		int d = 1; // direction
-		if(blockStart == NULL || (blockEnd != NULL && data >= blockEnd->data)) {
-			blockEnd = NULL;
-			if (root == NULL){
+		if (blockStart == nullptr || (blockEnd != nullptr && data >= blockEnd->data)) {
+			blockEnd = nullptr;
+			if (root == nullptr) {
 				root = new Node(std::move(data), metric);
 				num_inserted++;
 				blockStart = root;
@@ -822,8 +831,8 @@ Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, in
 				metricDelta = metricDelta - n->total;
 				n->parent = start->parent;
 			}
-			
-			start->child[fromDir] = NULL;
+
+			start->child[fromDir] = nullptr;
 			toFree.push_back( start );
 		}
 
@@ -877,7 +886,7 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	int heightDelta = leftHeightDelta + rightHeightDelta; 
 
 	// Rebalance and update metrics for all nodes from subRoot up to the root
-	for(auto p = subRoot; p != NULL; p = p->parent) {
+	for (auto p = subRoot; p != nullptr; p = p->parent) {
 		p->total = p->total - metricDelta;
 
 		auto& pc = p->parent ? p->parent->child[p->parent->child[1]==p] : root;
@@ -918,7 +927,7 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 			if (rebalanceNode) rebalanceDir = rebalanceNode->child[1] == t;
 			int d = !t->child[0];  // Only one child, on this side (or no children!)
 			replacePointer(t, t->child[d]);
-			t->child[d] = 0;
+			t->child[d] = nullptr;
 			delete t;
 		} else {  // Remove node with two children
 			Node* predecessor = t->child[0];
@@ -944,7 +953,7 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 				if (c) {
 					c->parent = predecessor;
 					predecessor->total = predecessor->total + c->total;
-					t->child[i] = 0;
+					t->child[i] = nullptr;
 				}
 			}
 			delete t;

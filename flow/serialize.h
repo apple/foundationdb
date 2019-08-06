@@ -336,11 +336,13 @@ public:
 	int getLength() { return size; }
 	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
-	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
+	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
+		vo.write(*this);
+	}
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
-		rhs.data = 0;
+		rhs.data = nullptr;
 	}
 	void operator=( BinaryWriter&& r) {
 		arena = std::move(r.arena);
@@ -350,7 +352,7 @@ public:
 		m_protocolVersion = r.m_protocolVersion;
 		r.size = 0;
 		r.allocated = 0;
-		r.data = 0;
+		r.data = nullptr;
 	}
 
 	template <class T, class VersionOptions>
@@ -553,7 +555,7 @@ public:
 	}
 
 	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
+	ArenaReader(Arena const& arena, const StringRef& input, VersionOptions vo) : m_pool(arena), check(nullptr) {
 		begin = (const char*)input.begin();
 		end = begin + input.size();
 		vo.read(*this);
@@ -571,9 +573,9 @@ public:
 	}
 
 	void rewind() {
-		ASSERT(check != NULL);
+		ASSERT(check != nullptr);
 		begin = check;
-		check = NULL;
+		check = nullptr;
 	}
 
 private:
@@ -608,7 +610,7 @@ public:
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
-		if (!bytes) return NULL;
+		if (!bytes) return nullptr;
 		uint8_t* dat = new (arena()) uint8_t[ bytes ];
 		serializeBytes( dat, bytes );
 		return dat;
@@ -678,7 +680,7 @@ public:
 
 private:
 	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
-		next = 0;
+		next = nullptr;
 		bytes_written = bytes_sent = 0;
 		((SendBuffer*)this)->data = reinterpret_cast<uint8_t*>(this + 1);
 		static_assert(sizeof(PacketBuffer) == PACKET_BUFFER_OVERHEAD);

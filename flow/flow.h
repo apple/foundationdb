@@ -557,9 +557,7 @@ public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
-	bool isValid() const {
-		return sav != 0;
-	}
+	bool isValid() const { return sav != nullptr; }
 	bool isReady() const {
 		return sav->isSet();
 	}
@@ -571,13 +569,13 @@ public:
 		return sav->error_state;
 	}
 
-	Future() : sav(0) {}
+	Future() : sav(nullptr) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav) sav->addFutureRef();
 		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
 	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
-		rhs.sav = 0;
+		rhs.sav = nullptr;
 		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
 	Future(const T& presentValue)
@@ -597,8 +595,8 @@ public:
 	}
 
 #ifndef NO_INTELLISENSE
-	template<class U>
-	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
+	template <class U>
+	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = nullptr) {}
 #endif
 
 	~Future() {
@@ -614,7 +612,7 @@ public:
 		if (sav != rhs.sav) {
 			if (sav) sav->delFutureRef();
 			sav = rhs.sav;
-			rhs.sav = 0;
+			rhs.sav = nullptr;
 		}
 	}
 	bool operator == (const Future& rhs) { return rhs.sav == sav; }
@@ -626,17 +624,17 @@ public:
 
 	void addCallbackAndClear(Callback<T>* cb) {
 		sav->addCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* cb) {
 		sav->addYieldedCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
 		sav->addCallbackChainAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -683,10 +681,10 @@ public:
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
 	bool isSet() { return sav->isSet(); }
 	bool canBeSet() { return sav->canBeSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = nullptr; }
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -698,7 +696,7 @@ public:
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
-			rhs.sav = 0;
+			rhs.sav = nullptr;
 		}
 	}
 	void reset() {
@@ -723,9 +721,7 @@ private:
 template <class T>
 class FutureStream {
 public:
-	bool isValid() const {
-		return queue != 0;
-	}
+	bool isValid() const { return queue != nullptr; }
 	bool isReady() const {
 		return queue->isReady();
 	}
@@ -735,9 +731,9 @@ public:
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
-		queue = 0;
+		queue = nullptr;
 	}
-	FutureStream() : queue(NULL) {}
+	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
@@ -750,7 +746,7 @@ public:
 		if (rhs.queue != queue) {
 			if (queue) queue->delFutureRef();
 			queue = rhs.queue;
-			rhs.queue = 0;
+			rhs.queue = nullptr;
 		}
 	}
 	bool operator == (const FutureStream& rhs) { return rhs.queue == queue; }
@@ -840,7 +836,7 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = nullptr; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
@@ -850,7 +846,7 @@ public:
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
-			rhs.queue = 0;
+			rhs.queue = nullptr;
 		}
 	}
 	~PromiseStream() {

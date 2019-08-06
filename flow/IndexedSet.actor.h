@@ -56,7 +56,7 @@ Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
 
 		if (n->child[0]) toFree.push_back(n->child[0]);
 		if (n->child[1]) toFree.push_back(n->child[1]);
-		n->child[0] = n->child[1] = 0;
+		n->child[0] = n->child[1] = nullptr;
 		delete n;
 		++eraseCount;
 

@@ -45,7 +45,7 @@ struct EvictablePage {
 
 	virtual bool evict() = 0; // true if page was evicted, false if it isn't immediately evictable (but will be evicted regardless if possible)
 
-	EvictablePage(Reference<EvictablePageCache> pageCache) : data(0), index(-1), pageCache(pageCache) {}
+	EvictablePage(Reference<EvictablePageCache> pageCache) : data(nullptr), index(-1), pageCache(pageCache) {}
 	virtual ~EvictablePage();
 };
 
@@ -130,8 +130,8 @@ struct OpenFileInfo : NonCopyable {
 	IAsyncFile* f;
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
-	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo() : f(nullptr) {}
+	OpenFileInfo(OpenFileInfo&& r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = nullptr; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);

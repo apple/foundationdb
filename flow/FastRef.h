@@ -99,17 +99,19 @@ template <class P>
 class Reference
 {
 public:
-	Reference() : ptr(NULL) {}
+	Reference() : ptr(nullptr) {}
 	explicit Reference( P* ptr ) : ptr(ptr) {}
 	static Reference<P> addRef( P* ptr ) { ptr->addref(); return Reference(ptr); }
 
 	Reference(const Reference& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
-	Reference(Reference && r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = NULL; }
+	Reference(Reference&& r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = nullptr; }
 
 	template <class Q>
 	Reference(const Reference<Q>& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
 	template <class Q>
-	Reference(Reference<Q> && r) : ptr(r.getPtr()) { r.setPtrUnsafe(NULL); }
+	Reference(Reference<Q>&& r) : ptr(r.getPtr()) {
+		r.setPtrUnsafe(nullptr);
+	}
 
 	~Reference() { if (ptr) delref(ptr); }
 	Reference& operator=(const Reference& r) {
@@ -126,7 +128,7 @@ public:
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
 		if (oldPtr != newPtr) {
-			r.ptr = NULL;
+			r.ptr = nullptr;
 			ptr = newPtr;
 			if (oldPtr) delref(oldPtr);
 		}
@@ -136,7 +138,7 @@ public:
 	void clear() {
 		P* oldPtr = ptr;
 		if (oldPtr) {
-			ptr = NULL;
+			ptr = nullptr;
 			delref(oldPtr);
 		}
 	}
@@ -147,15 +149,19 @@ public:
 
 	void setPtrUnsafe( P* p ) { ptr = p; }
 
-	P* extractPtr() { auto *p = ptr; ptr = NULL; return p; }
+	P* extractPtr() {
+		auto* p = ptr;
+		ptr = nullptr;
+		return p;
+	}
 
 	template <class T>
 	Reference<T> castTo() {
 		return Reference<T>::addRef((T*)ptr);
 	}
 
-	bool isValid() const { return ptr != NULL; }
-	explicit operator bool() const { return ptr != NULL; }
+	bool isValid() const { return ptr != nullptr; }
+	explicit operator bool() const { return ptr != nullptr; }
 
 private:
 	P *ptr;

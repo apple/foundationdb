@@ -76,7 +76,7 @@ void* FastAllocator<Size>::freelist = nullptr;
 
 typedef void (*ThreadInitFunction)();
 
-ThreadInitFunction threadInitFunction = 0;  // See ThreadCleanup.cpp in the C binding
+ThreadInitFunction threadInitFunction = nullptr; // See ThreadCleanup.cpp in the C binding
 void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) { 
 	ASSERT( !threadInitFunction );
 	threadInitFunction = f; 

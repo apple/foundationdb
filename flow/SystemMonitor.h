@@ -135,7 +135,7 @@ struct StatisticsState {
 	NetworkData networkState;
 	NetworkMetrics networkMetricsState;
 
-	StatisticsState() : systemState(NULL) {}
+	StatisticsState() : systemState(nullptr) {}
 };
 
 void systemMonitor();

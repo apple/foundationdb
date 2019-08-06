@@ -335,7 +335,10 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	  }
 
 	  if (iRegion >= memInfo->regions.size()) {
-		  if (!bExtend) { *pp = NULL; return SQLITE_OK; }
+		  if (!bExtend) {
+			  *pp = nullptr;
+			  return SQLITE_OK;
+		  }
 		  while (memInfo->regions.size() <= iRegion) {
 			  void *mem = new uint8_t[ szRegion ];
 			  memset( mem, 0, szRegion );
@@ -444,7 +447,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	  VFSAsyncFile *pDbFd = (VFSAsyncFile*)fd;
 	  SharedMemoryInfo* memInfo = pDbFd->sharedMemory;
 	  if (!memInfo) return SQLITE_OK;
-	  pDbFd->sharedMemory = 0;
+	  pDbFd->sharedMemory = nullptr;
 
 	  //printf("Connection %p closed shared memory\n", fd);
 
@@ -518,8 +521,7 @@ static int asyncOpen(
 
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile; /* Populate this structure */
 
-	if( zName==0 )
-		return SQLITE_IOERR;
+	if (zName == nullptr) return SQLITE_IOERR;
 
 	static_assert( SQLITE_OPEN_EXCLUSIVE == IAsyncFile::OPEN_EXCLUSIVE && 
 				   SQLITE_OPEN_CREATE == IAsyncFile::OPEN_CREATE &&
@@ -677,14 +679,14 @@ bool vfsAsyncIsOpen( std::string filename ) {
 ** this functionality, so the following functions are no-ops.
 */
 static void *asyncDlOpen(sqlite3_vfs *pVfs, const char *zPath){
-  return 0;
+	return nullptr;
 }
 static void asyncDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){
   sqlite3_snprintf(nByte, zErrMsg, "Loadable extensions are not supported");
   zErrMsg[nByte-1] = '\0';
 }
 static void (*asyncDlSym(sqlite3_vfs *pVfs, void *pH, const char *z))(void){
-  return 0;
+	return nullptr;
 }
 static void asyncDlClose(sqlite3_vfs *pVfs, void *pHandle){
   return;
@@ -734,7 +736,7 @@ static int asyncCurrentTimeInt64(sqlite3_vfs *NotUsed, sqlite3_int64 *piNow){
 #if __unixish__
 	static const sqlite3_int64 unixEpoch = 24405875*(sqlite3_int64)8640000;
 	struct timeval sNow;
-	gettimeofday(&sNow, NULL);
+	gettimeofday(&sNow, nullptr);
 	*piNow = unixEpoch + 1000*(sqlite3_int64)sNow.tv_sec + sNow.tv_usec/1000;
 #elif defined(_WIN32)
 	static const sqlite3_int64 winFiletimeEpoch = 23058135*(sqlite3_int64)8640000;
@@ -770,30 +772,30 @@ static int asyncGetLastError(sqlite3_vfs *NotUsed, int NotUsed2, char *NotUsed3)
 **   sqlite3_vfs_register(sqlite3_asyncvfs(), 0);
 */
 sqlite3_vfs *vfsAsync(){
-  static sqlite3_vfs asyncvfs = {
-	3,                            /* iVersion */
-	sizeof(VFSAsyncFile),         /* szOsFile */
-	MAXPATHNAME,                  /* mxPathname */
-	0,                            /* pNext */
-	"fdb_async",                  /* zName */
-	0,                            /* pAppData */
-	asyncOpen,                    /* xOpen */
-	asyncDelete,                  /* xDelete */
-	asyncAccess,                  /* xAccess */
-	asyncFullPathname,            /* xFullPathname */
-	asyncDlOpen,                  /* xDlOpen */
-	asyncDlError,                 /* xDlError */
-	asyncDlSym,                   /* xDlSym */
-	asyncDlClose,                 /* xDlClose */
-	asyncRandomness,              /* xRandomness */
-	asyncSleep,                   /* xSleep */
-	asyncCurrentTime,             /* xCurrentTime */
-	asyncGetLastError,     /* xGetLastError */
-	asyncCurrentTimeInt64, /* xCurrentTimeInt64 */
-	0,    /* xSetSystemCall */
-	0,    /* xGetSystemCall */
-	0,   /* xNextSystemCall */
+	static sqlite3_vfs asyncvfs = {
+		3, /* iVersion */
+		sizeof(VFSAsyncFile), /* szOsFile */
+		MAXPATHNAME, /* mxPathname */
+		nullptr, /* pNext */
+		"fdb_async", /* zName */
+		nullptr, /* pAppData */
+		asyncOpen, /* xOpen */
+		asyncDelete, /* xDelete */
+		asyncAccess, /* xAccess */
+		asyncFullPathname, /* xFullPathname */
+		asyncDlOpen, /* xDlOpen */
+		asyncDlError, /* xDlError */
+		asyncDlSym, /* xDlSym */
+		asyncDlClose, /* xDlClose */
+		asyncRandomness, /* xRandomness */
+		asyncSleep, /* xSleep */
+		asyncCurrentTime, /* xCurrentTime */
+		asyncGetLastError, /* xGetLastError */
+		asyncCurrentTimeInt64, /* xCurrentTimeInt64 */
+		nullptr, /* xSetSystemCall */
+		nullptr, /* xGetSystemCall */
+		nullptr, /* xNextSystemCall */
 
-  };
-  return &asyncvfs;
+	};
+	return &asyncvfs;
 }

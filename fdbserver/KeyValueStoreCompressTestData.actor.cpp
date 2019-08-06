@@ -43,10 +43,10 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	virtual KeyValueStoreType getType() { return store->getType(); }
 	virtual StorageBytes getStorageBytes() { return store->getStorageBytes(); }
 
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) {
 		store->set( KeyValueRef( keyValue.key, pack(keyValue.value) ), arena );
 	}
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) { store->clear( range, arena ); }
+	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) { store->clear(range, arena); }
 	virtual Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
 
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) {

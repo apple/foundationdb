@@ -305,8 +305,8 @@ private:
 	static void* operator new(size_t s);  // not implemented
 };
 
-inline Arena::Arena() : impl( NULL ) {}
-inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
+inline Arena::Arena() : impl(nullptr) {}
+inline Arena::Arena(size_t reservedSize) : impl(nullptr) {
 	UNSTOPPABLE_ASSERT( reservedSize < std::numeric_limits<int>::max() );
 	if (reservedSize)
 		ArenaBlock::create((int)reservedSize,impl);
@@ -544,7 +544,7 @@ extern std::string format(const char* form, ...);
 class StringRef {
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
-	StringRef() : data(0), length(0) {}
+	StringRef() : data(nullptr), length(0) {}
 	StringRef( Arena& p, const StringRef& toCopy ) : data( new (p) uint8_t[toCopy.size()] ), length( toCopy.size() ) {
 		memcpy( (void*)data, toCopy.data, length );
 	}
@@ -884,7 +884,7 @@ public:
 	static_assert(SerStrategy == VecSerStrategy::FlatBuffers || string_serialized_traits<T>::value);
 
 	// T must be trivially destructible (and copyable)!
-	VectorRef() : data(0), m_size(0), m_capacity(0) {}
+	VectorRef() : data(nullptr), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>
 	VectorRef(const VectorRef<T, S>& other)

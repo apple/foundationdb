@@ -218,7 +218,7 @@ public:
 	// all of the objects in the bucket under the given prefix.
 	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
 	// a deletion of an object completes.
-	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = NULL);
+	Future<Void> deleteRecursively(std::string const& bucket, std::string prefix = "", int* pNumDeleted = nullptr);
 
 	// Create a bucket if it does not already exists.
 	Future<Void> createBucket(std::string const &bucket);

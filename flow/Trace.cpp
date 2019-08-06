@@ -48,7 +48,7 @@ thread_local int g_trace_depth = 0;
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
-	DummyThreadPool() : thread(NULL) {}
+	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() {
 		return errors.getFuture();
 	}
@@ -377,7 +377,7 @@ public:
 		if(!logTraceEventMetrics)
 			return;
 
-		EventMetricHandle<TraceEventNameID> *m = NULL;
+		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch(severity)
 		{
 			case SevError:       m = &SevErrorNames;      break;
@@ -388,8 +388,7 @@ public:
 			default:
 			break;
 		}
-		if(m != NULL)
-		{
+		if (m != nullptr) {
 			(*m)->name = StringRef((uint8_t*)name, strlen(name));
 			(*m)->id = id.toString();
 			(*m)->log(event_ts);
@@ -627,7 +626,8 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	std::string ip = na.ip.toString();
 	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
-	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	g_traceLog.open(directory, baseName, logGroup, format("%lld", time(nullptr)), rollsize, maxLogsSize,
+	                !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();

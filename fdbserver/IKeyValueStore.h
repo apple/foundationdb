@@ -38,8 +38,8 @@ public:
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() = 0;
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) = 0;
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) = 0;
+	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
+	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(bool sequential = false) = 0;  // returns when prior sets and clears are (atomically) durable
 
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) = 0;

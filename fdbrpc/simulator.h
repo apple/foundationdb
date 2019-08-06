@@ -34,7 +34,11 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator()
+	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
+	    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
+	    allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(nullptr),
+	    allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -68,12 +72,11 @@ public:
 		double fault_injection_p1, fault_injection_p2;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
-					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass),
-			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-			  fault_injection_r(0), machine(0), cleared(false) {}
+		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
+		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
+		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
+		    failed(false), excluded(false), cpuTicks(0), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+		    fault_injection_r(0), machine(nullptr), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -108,7 +111,7 @@ public:
 			return listener->second;
 		}
 
-		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
+		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : nullptr; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
@@ -132,7 +135,7 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	machineId;
 
-		MachineInfo() : machineProcess(0) {}
+		MachineInfo() : machineProcess(nullptr) {}
 	};
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
@@ -147,9 +150,12 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false,
+	                         KillType* ktFinal = nullptr) = 0;
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false,
+	                      KillType* ktFinal = nullptr) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false,
+	                            KillType* ktFinal = nullptr) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;

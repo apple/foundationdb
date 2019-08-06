@@ -260,16 +260,18 @@ struct ProxyCommitData {
 		return tags;
 	}
 
-	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
-		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-			logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false),
-			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
-			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
-			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
-			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
-			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
-	{}
+	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit,
+	                Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
+	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
+	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
+	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
+	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
+	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
+	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0) {}
 };
 
 struct ResolutionRequestBuilder {
@@ -299,7 +301,7 @@ struct ResolutionRequestBuilder {
 
 	void addTransaction(CommitTransactionRef& trIn, int transactionNumberInBatch) {
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
-		outTr.assign(requests.size(), NULL);
+		outTr.assign(requests.size(), nullptr);
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
 
 		bool isTXNStateTransaction = false;
@@ -593,8 +595,12 @@ ACTOR Future<Void> commitBatch(
 			for (int resolver = 0; resolver < resolution.size(); resolver++)
 				committed = committed && resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed)
-				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, NULL, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
-			
+				applyMetadataMutations(
+				    self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
+				    self->txnStateStore, nullptr, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys,
+				    &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : nullptr, self->commit, self->cx,
+				    &self->committedVersion, &self->storageCache, &self->tag_popped);
+
 			if( resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() && firstStateMutations ) {
 				ASSERT(committed);
 				firstStateMutations = false;
@@ -673,7 +679,11 @@ ACTOR Future<Void> commitBatch(
 	{
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			commitCount++;
-			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
+			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit,
+			                       &forceRecovery, self->logSystem, commitVersion + 1, &self->vecBackupKeys,
+			                       &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : nullptr,
+			                       self->commit, self->cx, &self->committedVersion, &self->storageCache,
+			                       &self->tag_popped);
 		}
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
@@ -816,7 +826,7 @@ ACTOR Future<Void> commitBatch(
 
 		Key			val;
 		MutationRef backupMutation;
-		uint32_t*	partBuffer = NULL;
+		uint32_t* partBuffer = nullptr;
 
 		// Serialize the log range mutations within the map
 		for (auto& logRangeMutation : logRangeMutations)
@@ -831,7 +841,7 @@ ACTOR Future<Void> commitBatch(
 			wr << bigEndian64(commitVersion);
 
 			backupMutation.type = MutationRef::SetValue;
-			partBuffer = NULL;
+			partBuffer = nullptr;
 
 			val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
 
@@ -1728,7 +1738,12 @@ ACTOR Future<Void> masterProxyServerCore(
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, NULL, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : NULL, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, &commitData.tag_popped, true );
+						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, nullptr,
+						                       &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys,
+						                       &commitData.keyInfo,
+						                       commitData.firstProxy ? &commitData.uid_applyMutationsData : nullptr,
+						                       commitData.commit, commitData.cx, &commitData.committedVersion,
+						                       &commitData.storageCache, &commitData.tag_popped, true);
 					}
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();

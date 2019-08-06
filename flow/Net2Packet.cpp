@@ -34,7 +34,7 @@ void PacketWriter::init(PacketBuffer* buf, ReliablePacket* reliable) {
 PacketBuffer* PacketWriter::finish() {
 	length += buffer->bytes_written;
 	if (reliable) {
-		reliable->cont = NULL;
+		reliable->cont = nullptr;
 		reliable->end = buffer->bytes_written;
 	}
 	return buffer;
@@ -74,7 +74,7 @@ void PacketWriter::writeAhead( int bytes, struct SplitBuffer* buf ) {
 		buf->begin = buffer->data() + buffer->bytes_written;
 		buf->first_length = bytes;
 		buffer->bytes_written += bytes;
-		buf->next = 0;
+		buf->next = nullptr;
 	} else {
 		buf->begin = buffer->data() + buffer->bytes_written;
 		buf->first_length = buffer->bytes_unwritten();
@@ -151,7 +151,7 @@ void UnsentPacketQueue::sent(int bytes) {
 		b->bytes_sent = b->bytes_written;
 		ASSERT(b->bytes_written <= b->size());
 		unsent_first = b->nextPacketBuffer();
-		if (!unsent_first) unsent_last = NULL;
+		if (!unsent_first) unsent_last = nullptr;
 		b->delref();
 	}
 }
@@ -162,7 +162,7 @@ void UnsentPacketQueue::discardAll() {
 		unsent_first->delref();
 		unsent_first = n;
 	}
-	unsent_last = 0;
+	unsent_last = nullptr;
 }
 
 PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end) {

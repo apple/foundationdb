@@ -91,7 +91,7 @@ class Net2;
 class Peer;
 class Connection;
 
-Net2 *g_net2 = 0;
+Net2* g_net2 = nullptr;
 
 class Task {
 public:
@@ -106,7 +106,7 @@ struct OrderedTask {
 	bool operator < (OrderedTask const& rhs) const { return priority < rhs.priority; }
 };
 
-thread_local INetwork* thread_network = 0;
+thread_local INetwork* thread_network = nullptr;
 
 class Net2 sealed : public INetwork, public INetworkConnections {
 
@@ -136,7 +136,7 @@ public:
 			stopImmediately();
 		else
 			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
-			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
 	}
 
 	virtual bool isSimulated() const { return false; }
@@ -146,7 +146,7 @@ public:
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr );
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
+	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 	virtual bool useObjectSerializer() const { return _useObjectSerializer; }
 	std::vector<flowGlobalType>		globals;
@@ -387,7 +387,8 @@ private:
 		SendBuffer const* p;
 		int limit;
 
-		SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
+		SendBufferIterator(SendBuffer const* p = nullptr, int limit = std::numeric_limits<int>::max())
+		  : p(p), limit(limit) {
 			ASSERT(limit > 0);
 		}
 
@@ -398,7 +399,7 @@ private:
 			if(limit > 0)
 				p = p->next;
 			else
-				p = NULL;
+				p = nullptr;
 		}
 
 		boost::asio::const_buffer operator*() const {
@@ -741,7 +742,7 @@ void Net2::processThreadReady() {
 		Optional<OrderedTask> t = threadReady.pop();
 		if (!t.present()) break;
 		t.get().priority -= ++tasksIssued;
-		ASSERT( t.get().task != 0 );
+		ASSERT(t.get().task != nullptr);
 		ready.push( t.get() );
 		++numReady;
 	}

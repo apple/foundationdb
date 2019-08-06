@@ -2820,12 +2820,12 @@ public:
 		return delayed(m_error.getFuture());
 	};
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) {
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
 
-    virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) {
 		debug_printf("SET %s\n", keyValue.key.printable().c_str());
 		m_tree->set(keyValue);
 	}

@@ -142,12 +142,16 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 		delete adding;
 	}
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, NULL, NULL); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, NULL, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), NULL); }
-	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), NULL); }
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
+		return new ShardInfo(keys, new AddingShard(data, keys), nullptr);
+	}
+	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
+		return new ShardInfo(keys, new AddingShard(oldShard, keys), nullptr);
+	}
 
-	bool isReadable() const { return readWrite!=NULL; }
+	bool isReadable() const { return readWrite != nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
@@ -528,22 +532,17 @@ public:
 		}
 	} counters;
 
-	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
-		:	instanceID(deterministicRandom()->randomUniqueID().first()),
-			storage(this, storage), db(db),
-			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
-			durableInProgress(Void()),
-			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0),
-			shardChangeCounter(0),
-			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
-			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
-			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
-			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
-			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
-	{
+	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db,
+	              StorageServerInterface const& ssi)
+	  : instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage), db(db), lastTLogVersion(0),
+	    lastVersionWithData(0), restoredVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
+	    durableInProgress(Void()), versionLag(0), primaryLocality(tagLocalityInvalid), updateEagerReads(nullptr),
+	    shardChangeCounter(0), fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
+	    shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
+	    logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
+	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false),
+	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
+	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -2751,7 +2750,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 		if(injectedChanges) data->lastVersionWithData = ver;
 
-		data->updateEagerReads = NULL;
+		data->updateEagerReads = nullptr;
 		data->debug_inApplyUpdate = false;
 
 		if(ver == invalidVersion && !fii.changes.empty() ) {
@@ -3009,7 +3008,8 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	data->addMutationToMutationLogOrStorage(version, MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = NULL) {
+ACTOR Future<Void> applyByteSampleResult(StorageServer* data, IKeyValueStore* storage, Key begin, Key end,
+                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;

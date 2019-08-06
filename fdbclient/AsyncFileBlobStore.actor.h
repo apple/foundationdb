@@ -59,7 +59,7 @@ public:
 	virtual void delref() { ReferenceCounted<AsyncFileBlobStoreWrite>::delref(); }
 
 	struct Part : ReferenceCounted<Part> {
-		Part(int n) : number(n), writer(content.getWriteBuffer(), NULL, Unversioned()), length(0) {
+		Part(int n) : number(n), writer(content.getWriteBuffer(), nullptr, Unversioned()), length(0) {
 			etag = std::string();
 			::MD5_Init(&content_md5_buf);
 		}

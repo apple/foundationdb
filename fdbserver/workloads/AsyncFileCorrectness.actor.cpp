@@ -79,8 +79,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 	PerfIntCounter numOperations;
 
 	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
-		: AsyncFileWorkload(wcx), success(true), numOperations("Num Operations"), memoryFile(NULL)
-	{
+	  : AsyncFileWorkload(wcx), success(true), numOperations("Num Operations"), memoryFile(nullptr) {
 		maxOperationSize = getOption(options, LiteralStringRef("maxOperationSize"), 4096);
 		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
 		targetFileSize = getOption(options, LiteralStringRef("targetFileSize"), (uint64_t)163840);
@@ -447,7 +446,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		}
 		else if(info.operation == SYNC)
 		{
-			info.data = Reference<AsyncFileBuffer>(NULL);
+			info.data = Reference<AsyncFileBuffer>(nullptr);
 			wait(self->fileHandle->file->sync());
 		}
 		else if(info.operation == REOPEN)

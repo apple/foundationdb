@@ -38,10 +38,10 @@ public:
 	typedef int32_t difference_type;
 	typedef uint32_t size_type;
 
-	Deque() : arr(0), begin(0), end(0), mask(-1) {}
+	Deque() : arr(nullptr), begin(0), end(0), mask(-1) {}
 
 	// TODO: iterator construction, other constructors
-	Deque(Deque const& r) : arr(0), begin(0), end(r.size()), mask(r.mask) {
+	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
 		if(r.capacity() > 0)
 			arr = (T*)aligned_alloc(__alignof(T), capacity()*sizeof(T));
 		ASSERT(capacity() >= end || end == 0);
@@ -53,7 +53,7 @@ public:
 	void operator=(Deque const& r) {
 		cleanup();
 
-		arr = 0;
+		arr = nullptr;
 		begin = 0;
 		end = r.size();
 		mask = r.mask;
@@ -66,7 +66,7 @@ public:
 	}
 
 	Deque(Deque&& r) BOOST_NOEXCEPT : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
-		r.arr = 0;
+		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
@@ -78,8 +78,8 @@ public:
 		end = r.end;
 		mask = r.mask;
 		arr = r.arr;
-		
-		r.arr = 0;
+
+		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
