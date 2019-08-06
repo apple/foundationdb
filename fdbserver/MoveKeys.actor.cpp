@@ -738,13 +738,17 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fExclIP = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip ))) );
+			state Future<Optional<Value>> fFailProc = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
+			state Future<Optional<Value>> fFailIP = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip ))) );
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) && success(fHistoryTags) );
+			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) && success(fTags) && success(fHistoryTags) );
 
-			// If we have been added to the excluded state servers list, we have to fail
-			if (fExclProc.get().present() || fExclIP.get().present())
+			// If we have been added to the excluded/failed state servers list, we have to fail
+			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() || fFailIP.get().present() )
 				throw recruitment_failed();
 
 			if(fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
