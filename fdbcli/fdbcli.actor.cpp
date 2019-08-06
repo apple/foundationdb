@@ -486,10 +486,6 @@ void initHelp() {
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
-	helpMap["snapshot"] = CommandHelp(
-		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
-		"snapshot the database",
-		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",
@@ -555,11 +551,12 @@ void initHelp() {
 		"Calling this command with `on' prevents data distribution from moving data away from the processes with the specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this command with `off' will disable maintenance.\n");
 	helpMap["consistencycheck"] = CommandHelp(
 		"consistencycheck [on|off]",
-		"enables or disables consistencycheck",
-		"Calling this command with `on' enables consistency check to run and `off' will disable the same. Calling this command with no arguments will display setting for consistency check.\n");
+		"permits or prevents consistency checking",
+		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
+	hiddenCommands.insert("snapshot");
 }
 
 void printVersion() {
