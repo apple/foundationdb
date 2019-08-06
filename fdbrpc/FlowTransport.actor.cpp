@@ -337,7 +337,7 @@ struct Peer : NonCopyable {
 
 		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
 		pkt.protocolVersion = currentProtocolVersion;
-		if (g_network->useObjectSerializer()) {
+		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 			pkt.protocolVersion.addObjectSerializerFlag();
 		}
 		pkt.connectionId = transport->transportId;
@@ -654,7 +654,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			if (g_network->useObjectSerializer()) {
+			if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 				StringRef data = reader.arenaReadAll();
 				ASSERT(data.size() > 8);
 				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
@@ -858,7 +858,7 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if(g_network->useObjectSerializer() != pkt.protocolVersion.hasObjectSerializerFlag() ||
+						if((FLOW_KNOBS->USE_OBJECT_SERIALIZER != 0) != pkt.protocolVersion.hasObjectSerializerFlag() ||
 						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
@@ -896,8 +896,7 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId)
-								.detail("UseObjectSerializer", g_network->useObjectSerializer());
+								.detail("ConnectionId", connectionId);
 						}
 
 						if(connectionId > 1) {
@@ -1149,7 +1148,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 		Standalone<StringRef> copy;
-		if (g_network->useObjectSerializer()) {
+		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 			ObjectWriter wr(AssumeVersion(currentProtocolVersion));
 			what.serializeObjectWriter(wr);
 			copy = wr.toStringRef();
@@ -1198,7 +1197,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 		wr << destination.token;
-		what.serializePacketWriter(wr, g_network->useObjectSerializer());
+		what.serializePacketWriter(wr, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 		pb = wr.finish();
 		len = wr.size() - packetInfoSize;
 
