@@ -2723,6 +2723,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 			}
 
+			// Failed server should not trigger DD if SS failures are set to be ignored
+			if (!badTeam && self->healthyZone.get().present() && (self->healthyZone.get().get() == ignoreSSFailuresZoneString)) {
+				ASSERT_WE_THINK(serversLeft == self->configuration.storageTeamSize);
+			}
+
 			if( !self->initialFailureReactionDelay.isReady() ) {
 				change.push_back( self->initialFailureReactionDelay );
 			}
@@ -2880,11 +2885,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.keys = shards[i];
 						rs.priority = maxPriority;
 
-						// Failed server should not trigger DD if SS failures are set to be ignored
-						if (rs.priority == PRIORITY_TEAM_UNHEALTHY) {
-							ASSERT_WE_THINK(!(!badTeam && self->healthyZone.get().present() &&
-							                  (self->healthyZone.get().get() == ignoreSSFailuresZoneString)));
-						}
 						self->output.send(rs);
 						if(deterministicRandom()->random01() < 0.01) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
