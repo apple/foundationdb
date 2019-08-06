@@ -618,7 +618,7 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSyste
 	}
 }
 
-ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
+ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem, Version txsPoppedVersion ) {
 	state Reference<AsyncVar<PeekTxsInfo>> myLocality = Reference<AsyncVar<PeekTxsInfo>>( new AsyncVar<PeekTxsInfo>(PeekTxsInfo(tagLocalityInvalid,tagLocalityInvalid,invalidVersion) ) );
 	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
@@ -630,7 +630,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, myLocality );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, myLocality, txsPoppedVersion );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -802,7 +802,7 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 	initialConfChanges->push_back(regionCommit);
 }
 
-ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem, vector<StorageServerInterface>* seedServers, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
+ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem, vector<StorageServerInterface>* seedServers, vector<Standalone<CommitTransactionRef>>* initialConfChanges, Future<Version> poppedTxsVersion ) {
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
@@ -812,7 +812,8 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	if(BUGGIFY)
 		wait( delay(10.0) );
 
-	wait( readTransactionSystemState( self, oldLogSystem ) );
+	Version txsPoppedVersion = wait( poppedTxsVersion );
+	wait( readTransactionSystemState( self, oldLogSystem, txsPoppedVersion ) );
 	for (auto& itr : *initialConfChanges) {
 		for(auto& m : itr.mutations) {
 			self->configuration.applyMutation( m );
@@ -1249,6 +1250,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
 	state Future<Void> minRecoveryDuration;
+	state Future<Version> poppedTxsVersion;
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
@@ -1256,6 +1258,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			logChanges = triggerUpdates(self, oldLogSystem);
 			if(!minRecoveryDuration.isValid()) {
 				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
+				poppedTxsVersion = oldLogSystem->getTxsPoppedVersion();
 			}
 		}
 
@@ -1263,7 +1266,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		self->registrationTrigger.trigger();
 
 		choose {
-			when (wait( oldLogSystem ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges) : Never() )) { reg.cancel(); break; }
+			when (wait( oldLogSystem ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion) : Never() )) { reg.cancel(); break; }
 			when (wait( oldLogSystems->onChange() )) {}
 			when (wait( reg )) { throw internal_error(); }
 			when (wait( recoverAndEndEpoch )) {}
