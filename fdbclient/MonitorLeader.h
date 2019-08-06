@@ -67,7 +67,7 @@ template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
 							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
-		return asyncDeserialize(serializedInfo, outKnownLeader, g_network->useObjectSerializer());
+		return asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 	}
 };
 

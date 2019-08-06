@@ -61,9 +61,9 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
 	Future<Void> m = tryBecomeLeaderInternal(
 		coordinators,
-		g_network->useObjectSerializer() ? ObjectWriter::toValue(proposedInterface, IncludeVersion()) : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
+		FLOW_KNOBS->USE_OBJECT_SERIALIZER ? ObjectWriter::toValue(proposedInterface, IncludeVersion()) : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
 		serializedInfo, hasConnected, asyncPriorityInfo);
-	return m || asyncDeserialize(serializedInfo, outKnownLeader, g_network->useObjectSerializer());
+	return m || asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 }
 
 #pragma endregion

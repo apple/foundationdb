@@ -34,7 +34,7 @@ ACTOR template <class T>
 void networkSender(Future<T> input, Endpoint endpoint) {
 	try {
 		T value = wait(input);
-		if (g_network->useObjectSerializer()) {
+		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint);
 		} else {
 			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
@@ -42,7 +42,7 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;
 		ASSERT(err.code() != error_code_actor_cancelled);
-		if (g_network->useObjectSerializer()) {
+		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint);
 		} else {
 			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);

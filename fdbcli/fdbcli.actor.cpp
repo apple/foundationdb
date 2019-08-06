@@ -70,8 +70,7 @@ enum {
 	OPT_NO_STATUS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
-	OPT_TRACE_FORMAT,
-	OPT_USE_OBJECT_SERIALIZER
+	OPT_TRACE_FORMAT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -89,8 +88,6 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	                                  { OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	                                  { OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -2415,7 +2412,6 @@ struct CLIOptions {
 	bool trace;
 	std::string traceDir;
 	std::string traceFormat;
-	bool useObjectSerializer = true;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2517,20 +2513,6 @@ struct CLIOptions {
 			    }
 			    traceFormat = args.OptionArg();
 			    break;
-		    case OPT_USE_OBJECT_SERIALIZER: {
-			    std::string s = args.OptionArg();
-			    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-			    if (s == "on" || s == "true" || s == "1") {
-				    useObjectSerializer = true;
-			    } else if (s == "off" || s == "false" || s == "0") {
-				    useObjectSerializer = false;
-			    } else {
-				    fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-				    printProgramUsage(program_name.c_str());
-				    flushAndExit(FDB_EXIT_ERROR);
-			    }
-			    break;
-		    }
 		    case OPT_VERSION:
 			    printVersion();
 			    return FDB_EXIT_SUCCESS;
@@ -3647,12 +3629,6 @@ int main(int argc, char **argv) {
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
-	// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as zero =
-	// false, non-zero = true.
-	setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
-	                 opt.useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
-	                                         : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
-
 	initHelp();
 
 	// deferred TLS options
