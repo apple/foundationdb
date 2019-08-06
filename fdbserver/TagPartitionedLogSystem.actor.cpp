@@ -244,14 +244,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) override {
 		switch (type) {
 		case ProcessClass::LogRouterClass:
-			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tag.locality) > 0) {
+			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tagLocalityLogRouterMapped) > 0) {
 				tag.locality = tagLocalityLogRouterMapped;
 			}
 			break;
 
 		case ProcessClass::BackupClass:
-			if (tag.locality == tagLocalityBackup) {
-				ASSERT(pseudoLocalities.count(tag.locality) > 0);
+			if (tag.locality == tagLocalityLogRouter) {
+				ASSERT(pseudoLocalities.count(tagLocalityBackup) > 0);
 				tag.locality = tagLocalityBackup;
 			}
 			break;
@@ -1226,6 +1226,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.recruitmentID = recruitmentID;
 		logSystemConfig.stopped = stopped;
 		logSystemConfig.recoveredAt = recoveredAt;
+		logSystemConfig.pseudoLocalities = pseudoLocalities;
 		for (const Reference<LogSet>& logSet : tLogs) {
 			if (logSet->isLocal || remoteLogsWrittenToCoreState) {
 				logSystemConfig.tLogs.emplace_back(*logSet);

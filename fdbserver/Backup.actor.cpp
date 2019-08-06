@@ -87,6 +87,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	loop {
 		ASSERT(self->messages.size() == self->versions.size());
 		while (!self->messages.empty()) {
+			// if (self->versions[0] > self->minKnownCommittedVersion) break;
 			popVersion = std::max(popVersion, self->versions[0]);
 			// TODO: consume the messages
 			self->messages.erase(self->messages.begin());
@@ -119,8 +120,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = 0;
-	state Version tagPopped = 0;
-	state Version lastVersion = 0;
 
 	loop {
 		loop choose {
@@ -128,7 +127,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				break;
 			}
 			when (wait(logSystemChange)) {
-				if (r) tagPopped = std::max(tagPopped, r->popped());
 				if (self->logSystem.get()) {
 					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
 				} else {
@@ -142,6 +140,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// TODO: avoid peeking uncommitted messages
 		// Should we wait until knownCommittedVersion == startVersion - 1 ? In this way, we know previous
 		// epoch has finished and then starting for this epoch.
+		Version lastVersion = 0;
 		while (r->hasMessage()) {
 			lastVersion = r->version().version;
 			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
@@ -150,7 +149,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		tagAt = std::max(r->version().version, lastVersion);
-		TraceEvent("BackupWorkerGot", self->myId).detail("V", tagAt);
+		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (tagAt > self->endVersion) return Void();
 	}
 }
@@ -196,6 +195,9 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
 				self.logSystem.set(ILogSystem::fromServerDBInfo(self.myId, db->get(), true));
+				TraceEvent("BackupWorkerLogSystem", interf.id())
+				    .detail("HasBackupLocality",
+				            self.logSystem.get() ? self.logSystem.get()->hasPseudoLocality(tagLocalityBackup) : false);
 			}
 			when(HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
 				req.reply.send(Void());
