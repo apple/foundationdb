@@ -35,7 +35,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/BlobStore.h"
-#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "json_spirit/json_spirit_writer_template.h"
 
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/TLSConnection.h"
@@ -67,7 +67,7 @@ using std::endl;
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 

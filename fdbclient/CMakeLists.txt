@@ -71,11 +71,6 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   WriteMap.h
-  json_spirit/json_spirit_error_position.h
-  json_spirit/json_spirit_reader_template.h
-  json_spirit/json_spirit_value.h
-  json_spirit/json_spirit_writer_options.h
-  json_spirit/json_spirit_writer_template.h
   libb64/cdecode.c
   libb64/cencode.c
   md5/md5.c
@@ -89,3 +84,4 @@ vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc)
+target_include_directories(fdbclient SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party)

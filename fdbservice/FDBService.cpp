@@ -28,8 +28,8 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "..\flow\SimpleOpt.h"
-#include "..\fdbmonitor\SimpleIni.h"
+#include "SimpleOpt.h"
+#include "SimpleIni.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif

@@ -24,7 +24,7 @@
 #include "fdbrpc/simulator.h"
 
 #undef state
-#include "fdbmonitor/SimpleIni.h"
+#include "SimpleIni.h"
 #define state
 #undef max
 #undef min

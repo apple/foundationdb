@@ -3,6 +3,7 @@ find_package(Boost 1.67)
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost)
+  set(BOOST_INCLUDE_DIR ${Boost_INCLUDE_DIR})
 else()
   include(ExternalProject)
   ExternalProject_add(boostProject
@@ -18,9 +19,10 @@ else()
   ExternalProject_Get_property(boostProject SOURCE_DIR)
 
   set(BOOST_INCLUDE_DIR ${SOURCE_DIR})
-  message(STATUS "Boost include dir ${BOOST_INCLUDE_DIR}")
 
   add_library(boost_target INTERFACE)
   add_dependencies(boost_target boostProject)
-  target_include_directories(boost_target INTERFACE ${BOOST_INCLUDE_DIR})
 endif()
+
+target_include_directories(boost_target SYSTEM INTERFACE ${BOOST_INCLUDE_DIR})
+message(STATUS "Boost include dir ${BOOST_INCLUDE_DIR}")

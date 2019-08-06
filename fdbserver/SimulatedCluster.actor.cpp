@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "SimpleIni.h"
 #include <fstream>
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FailureMonitorClient.h"
@@ -28,7 +29,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbclient/ManagementAPI.actor.h"

@@ -3,6 +3,7 @@ set(FDBBACKUP_SRCS
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
+target_include_directories(fdbbackup SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 
 if(NOT OPEN_FOR_IDE)
   fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)

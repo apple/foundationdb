@@ -36,7 +36,7 @@
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
 

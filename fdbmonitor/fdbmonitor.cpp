@@ -69,8 +69,8 @@
 #include <pwd.h>
 #include <grp.h>
 
-#include "flow/SimpleOpt.h"
 #include "SimpleIni.h"
+#include "SimpleOpt.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"

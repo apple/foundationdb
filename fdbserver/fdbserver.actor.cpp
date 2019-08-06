@@ -62,7 +62,7 @@
 #include "versions.h"
 #endif
 
-#include "fdbmonitor/SimpleIni.h"
+#include "SimpleIni.h"
 
 #ifdef  __linux__
 #include <execinfo.h>
@@ -78,7 +78,7 @@
 #include <Windows.h>
 #endif
 
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {

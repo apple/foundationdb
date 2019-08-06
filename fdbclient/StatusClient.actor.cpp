@@ -25,8 +25,8 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/json_spirit/json_spirit_writer_template.h"
-#include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "json_spirit/json_spirit_writer_template.h"
+#include "json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 

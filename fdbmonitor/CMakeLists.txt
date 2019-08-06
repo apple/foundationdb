@@ -1,4 +1,4 @@
-set(FDBMONITOR_SRCS ConvertUTF.h SimpleIni.h fdbmonitor.cpp)
+set(FDBMONITOR_SRCS fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
 strip_debug_symbols(fdbmonitor)
@@ -9,6 +9,7 @@ endif()
 # FIXME: This include directory is an ugly hack. We probably want to fix this
 # as soon as we get rid of the old build system
 target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
+target_include_directories(fdbmonitor SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 
 fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
 

@@ -43,7 +43,6 @@ set(FLOW_SRCS
   Profiler.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
-  SimpleOpt.h
   Stats.actor.cpp
   Stats.h
   SystemMonitor.cpp
@@ -73,14 +72,21 @@ set(FLOW_SRCS
   network.h
   serialize.h
   serialize.cpp
-  stacktrace.amalgamation.cpp
-  stacktrace.h
   version.cpp)
+
+add_library(fdb_stacktrace STATIC
+  stacktrace.amalgamation.cpp
+  stacktrace.h)
+
+# Suppress warnings in stacktrace since it's third party
+if(NOT WIN32)
+  target_compile_options(fdb_stacktrace BEFORE PRIVATE -w) # disable warnings for third party
+endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
-target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+target_include_directories(flow SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
@@ -88,6 +94,7 @@ elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
+target_link_libraries(flow PRIVATE fdb_stacktrace)
 target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)

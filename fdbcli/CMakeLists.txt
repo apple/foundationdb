@@ -10,5 +10,6 @@ endif()
 
 add_flow_target(EXECUTABLE NAME fdbcli SRCS ${FDBCLI_SRCS})
 target_link_libraries(fdbcli PRIVATE fdbclient)
+target_include_directories(fdbcli SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 
 fdb_install(TARGETS fdbcli DESTINATION bin COMPONENT clients)
