@@ -69,7 +69,6 @@
 //    // Retrieves the previously stored boolean
 //    bool getPrefixSource() const;
 //
-#pragma pack(push,1)
 template <typename T, typename DeltaT = typename T::Delta, typename OffsetT = uint16_t>
 struct DeltaTree {
 
@@ -77,6 +76,7 @@ struct DeltaTree {
 		return std::numeric_limits<OffsetT>::max();
 	};
 
+#pragma pack(push,1)
 	struct Node {
 		OffsetT leftChildOffset;
 		OffsetT rightChildOffset;

@@ -29,7 +29,7 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_always(...) { fprintf(stdout, "%s %f ", g_network->getLocalAddress().toString().c_str(), now()), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
+#define debug_printf_always(...) { fprintf(stdout, "%s %f (%s:%d) ", g_network->getLocalAddress().toString().c_str(), now(), __FUNCTION__, __LINE__), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
 
 #define debug_printf_noop(...)
 
@@ -80,6 +80,10 @@ class IPagerSnapshot {
 public:
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) = 0;
 	virtual Version getVersion() const = 0;
+
+	virtual Key getMetaKey() const {
+		return Key();
+	}
 
 	virtual ~IPagerSnapshot() {}
 
@@ -144,6 +148,65 @@ public:
 
 protected:
 	~IPager() {} // Destruction should be done using close()/dispose() from the IClosable interface
+};
+
+class IPager2 : public IClosable {
+public:
+	// Returns an IPage that can be passed to writePage. The data in the returned IPage might not be zeroed.
+	virtual Reference<IPage> newPageBuffer() = 0;
+
+	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
+	// For a given pager instance, separate calls to this function must return the same value.
+	// Only valid to call after recovery is complete.
+	virtual int getUsablePageSize() = 0;
+
+	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
+	// regardless of whether or not it was written to.
+	virtual Future<LogicalPageID> newPageID() = 0;
+
+	// Replace the contents of a page with new data.  Existing holders of a page reference for pageID
+	// will see the effects of this write.
+	virtual void updatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
+
+	// Try to atomically update the contents of a page as of the next successful commit()
+	// If the pager is unable to do this at this time, it may choose to write the data to a new page,
+	// call freePage(pageID), and return the new page id.  Otherwise the pageID argument will be returned.
+	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
+
+	// Free pageID to be used again after the next commit
+	virtual void freePage(LogicalPageID pageID) = 0;
+
+	// Returns the data for a page by LogicalPageID
+	// The data returned will be the later of
+	//   - the most recent committed atomic write
+	//   - the most recent non-atomic write
+	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID) = 0;
+
+	// Get a snapshot of the metakey and all pages as of the latest committed version.
+	// When a pager snapshot is created, the pager is guaraunteed to not remove or reuse any pages
+	// that were freed after the creation of this snapshot until the snapshot is destroyed
+	virtual Reference<IPagerSnapshot> getReadSnapshot() = 0;
+
+	// Atomically make durable all pending page writes, page frees, and update the metadata string.
+	virtual Future<Void> commit() = 0;
+
+	// Get the latest meta key set or committed
+	virtual Key getMetaKey() const = 0;
+
+	// Set the metakey which will be stored in the next commit
+	virtual void setMetaKey(KeyRef metaKey) = 0;
+
+	// Sets the next commit version
+	virtual void setVersion(Version v) = 0;
+
+	virtual StorageBytes getStorageBytes() = 0;
+
+	// Returns latest committed version
+	// After the returned future is ready, future calls must not wait.
+	virtual Future<Version> getLatestVersion() = 0;
+
+protected:
+	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
 };
 
 #endif
