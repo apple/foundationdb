@@ -101,7 +101,7 @@ From 6.1, `wait()` on `Void` actors shouldn't assign the resulting value. So, th
 
 ```c++
 Future<Void> asyncTask(); //defined elsewhere
-wait(asyncTask());
+Void _ = _wait(asyncTask());
 ```
 
 becomes
