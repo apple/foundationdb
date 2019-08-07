@@ -553,15 +553,33 @@ public:
 		PageCacheEntry &cacheEntry = pageCache.get(pageID);
 		debug_printf("COWPager op=write id=%u cached=%d\n", pageID, cacheEntry.page.isValid());
 
-		// If the cache entry exists and has already been read, copy data over top of the page in the cache
-		// so any holders of the page reference see the change.  
-		if(cacheEntry.page.isValid()) {
-			// It should not be the case that we write a page that is still being read.
-			ASSERT(cacheEntry.page.isReady());
+		// If the page is still being read then it's not also being written because a write places
+		// the new content in the cache entry when the write is launched, not when it is completed.
+		// Any waiting readers should not see this write (though this might change)
+		if(cacheEntry.reading()) {
+			// Wait for the read to finish, then start the right.
+			cacheEntry.writeFuture = map(success(cacheEntry.page), [=](Void) {
+				writePhysicalPage(pageID, data);
+				return Void();
+			});
+		} 
+		else {
+			// If the page is being written, wait for this write before issuing the new write
+			if(cacheEntry.writing()) {
+				cacheEntry.writeFuture = map(cacheEntry.writeFuture, [=](Void) {
+					writePhysicalPage(pageID, data);
+					return Void();
+				});
+			}
+			else {
+				cacheEntry.writeFuture = writePhysicalPage(pageID, data);
+			}
 		}
-		cacheEntry.page = data;
 
-		writes.add(writePhysicalPage(pageID, data));
+		writes.add(cacheEntry.writeFuture);
+
+		// Always update the page contents immediately regardless of what happened above.
+		cacheEntry.page = data;
 	}
 
 	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data) {
@@ -759,13 +777,19 @@ private:
 
 	struct PageCacheEntry {
 		Future<Reference<IPage>> page;
+		Future<Void> writeFuture;
+
+		bool reading() const {
+			return page.isValid() && !page.isReady();
+		}
+
+		bool writing() const {
+			return writeFuture.isValid() && !writeFuture.isReady();
+		}
 
 		bool evictable() const {
-			// Don't evict if a page is still being read
-			return page.isReady();
-		}
-		~PageCacheEntry() {
-			page.cancel();
+			// Don't evict if a page is still being read or written
+			return page.isReady() && !writing();
 		}
 	};
 
