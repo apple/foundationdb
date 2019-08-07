@@ -27,6 +27,7 @@
 #include "flow/UnitTest.h"
 #include "fdbserver/IPager.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/crc32c.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/MemoryPager.h"
 #include "fdbserver/IndirectShadowPager.h"
