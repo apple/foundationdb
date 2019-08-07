@@ -87,7 +87,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
 	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
-	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -165,8 +165,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
@@ -603,10 +601,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-		   "                 Use object serializer for sending messages. The object serializer\n"
-		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
-		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -970,7 +964,6 @@ int main(int argc, char* argv[]) {
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 		uint64_t rsssize = -1;
-		bool useObjectSerializer = true;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -1331,21 +1324,6 @@ int main(int argc, char* argv[]) {
 						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 					}
 					break;
-				case OPT_USE_OBJECT_SERIALIZER:
-				{
-					std::string s = args.OptionArg();
-					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-					if (s == "on" || s == "true" || s == "1") {
-						useObjectSerializer = true;
-					} else if (s == "off" || s == "false" || s == "0") {
-						useObjectSerializer = false;
-					}  else {
-						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				}
 				case OPT_WHITELIST_BINPATH:
 					whitelistBinPaths = args.OptionArg();
 					break;
@@ -1562,10 +1540,10 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator(useObjectSerializer);
+			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true, useObjectSerializer);
+			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);

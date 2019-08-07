@@ -1455,7 +1455,7 @@ ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future
 }
 
 ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData) {
-	TraceEvent("SnapMasterProxy.SnapReqEnter")
+	TraceEvent("SnapMasterProxy_SnapReqEnter")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
 	try {
@@ -1463,7 +1463,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		ExecCmdValueString execArg(snapReq.snapPayload);
 		StringRef binPath = execArg.getBinaryPath();
 		if (!isWhitelisted(commitData->whitelistedBinPathVec, binPath)) {
-			TraceEvent("SnapMasterProxy.WhiteListCheckFailed")
+			TraceEvent("SnapMasterProxy_WhiteListCheckFailed")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
 			throw transaction_not_permitted();
@@ -1475,7 +1475,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			// Currently, snapshot of old tlog generation is not
 			// supported and hence failing the snapshot request until
 			// cluster is fully_recovered.
-			TraceEvent("SnapMasterProxy.ClusterNotFullyRecovered")
+			TraceEvent("SnapMasterProxy_ClusterNotFullyRecovered")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
 			throw cluster_not_fully_recovered();
@@ -1490,7 +1490,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		// FIXME: logAntiQuorum not supported, remove it later,
 		// In version2, we probably don't need this limtiation, but this needs to be tested.
 		if (logAntiQuorum > 0) {
-			TraceEvent("SnapMasterProxy.LogAnitQuorumNotSupported")
+			TraceEvent("SnapMasterProxy_LogAnitQuorumNotSupported")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
 			throw txn_exec_log_anti_quorum();
@@ -1506,7 +1506,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		try {
 			wait(throwErrorOr(ddSnapReq));
 		} catch (Error& e) {
-			TraceEvent("SnapMasterProxy.DDSnapResponseError")
+			TraceEvent("SnapMasterProxy_DDSnapResponseError")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID)
 				.error(e, true /*includeCancelled*/ );
@@ -1514,7 +1514,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("SnapMasterProxy.SnapReqError")
+		TraceEvent("SnapMasterProxy_SnapReqError")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID)
 			.error(e, true /*includeCancelled*/);
@@ -1524,7 +1524,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			throw e;
 		}
 	}
-	TraceEvent("SnapMasterProxy.SnapReqExit")
+	TraceEvent("SnapMasterProxy_SnapReqExit")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
 	return Void();
