@@ -19,7 +19,7 @@ Performance
 * Close connections which have been idle for a long period of time. `(PR #1768) <https://github.com/apple/foundationdb/pull/1768>`_.
 * Each client connects to exactly one coordinator, and at most five proxies. `(PR #1909) <https://github.com/apple/foundationdb/pull/1909>`_.
 * Ratekeeper will throttle traffic when too many storage servers are not making versions durable fast enough. `(PR #1784) <https://github.com/apple/foundationdb/pull/1784>`_.
-* Storage servers recovering a memory storage engine will abort recovery if the cluster is already healthy.  ``(PR #1713) <https://github.com/apple/foundationdb/pull/1713>``_.
+* Storage servers recovering a memory storage engine will abort recovery if the cluster is already healthy.  `(PR #1713) <https://github.com/apple/foundationdb/pull/1713>`_.
 * Improved how the data distribution algorithm balances data across teams of storage servers. `(PR #1785) <https://github.com/apple/foundationdb/pull/1785>`_.
 * Lowered the priority for data distribution team removal, to avoid prioritizing team removal work over splitting shards. `(PR #1853) <https://github.com/apple/foundationdb/pull/1853>`_.
 * Made the storage cache eviction policy configurable, and added an LRU policy. `(PR #1506) <https://github.com/apple/foundationdb/pull/1506>`_.
