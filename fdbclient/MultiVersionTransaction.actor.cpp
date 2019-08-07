@@ -47,7 +47,7 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		int64_t version;
-		FdbCApi::fdb_error_t error = api->futureGetVersion(f, &version); 
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &version);
 		ASSERT(!error);
 		return version;
 	});
@@ -195,6 +195,20 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
+	if(!api->transactionGetApproximateSize) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->transactionGetApproximateSize(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t size = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
+		ASSERT(!error);
+		return size;
+	});
+}
+
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
@@ -287,6 +301,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
 	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
 	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
+	loadClientFunction(&api->transactionGetApproximateSize, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 620);
 	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
 	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
@@ -294,7 +309,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
-	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
+	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
@@ -408,17 +423,39 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParame
 }
 
 // MultiVersionTransaction
-MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db) : db(db) {
+MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db, UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions) : db(db) {
+	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
 
-// SOMEDAY: This function is unsafe if it's possible to set Database options that affect subsequently created transactions. There are currently no such options.
+void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options) {
+	MutexHolder holder(db->dbState->optionLock);
+	std::copy(options.begin(), options.end(), std::back_inserter(persistentOptions));
+}
+
 void MultiVersionTransaction::updateTransaction() {
 	auto currentDb = db->dbState->dbVar->get();
 
 	TransactionInfo newTr;
 	if(currentDb.value) {
 		newTr.transaction = currentDb.value->createTransaction();
+
+		Optional<StringRef> timeout;
+		for (auto option : persistentOptions) {
+			if(option.first == FDBTransactionOptions::TIMEOUT) {
+				timeout = option.second.castTo<StringRef>();
+			}
+			else {
+				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+			}
+		}
+	
+		// Setting a timeout can immediately cause a transaction to fail. The only timeout 
+		// that matters is the one most recently set, so we ignore any earlier set timeouts
+		// that might inadvertently fail the transaction.
+		if(timeout.present()) {
+			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
+		}
 	}
 
 	newTr.onChange = currentDb.onChange;
@@ -573,7 +610,22 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	return invalidVersion;
 }
 
+ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getApproximateSize() : ThreadFuture<int64_t>(Never());
+	return abortableFuture(f, tr.onChange);
+}
+
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
+	auto itr = FDBTransactionOptions::optionInfo.find(option);
+	if(itr == FDBTransactionOptions::optionInfo.end()) {
+		TraceEvent("UnknownTransactionOption").detail("Option", option);
+		throw invalid_option();
+	}
+	
+	if(MultiVersionApi::apiVersionAtLeast(610) && itr->second.persistent) {
+		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+	}
 	auto tr = getTransaction();
 	if(tr.transaction) {
 		tr.transaction->setOption(option, value);
@@ -588,11 +640,26 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	else {
 		auto tr = getTransaction();
 		auto f = tr.transaction ? tr.transaction->onError(e) : ThreadFuture<Void>(Never());
-		return abortableFuture(f, tr.onChange);
+		f = abortableFuture(f, tr.onChange);
+
+		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
+			if(!ready.isError() || ready.getError().code() != error_code_cluster_version_changed) {
+				if(ready.isError()) {
+					return ErrorOr<ThreadFuture<Void>>(ready.getError());
+				}
+
+				return ErrorOr<ThreadFuture<Void>>(Void());
+			}
+
+			updateTransaction();
+			return ErrorOr<ThreadFuture<Void>>(onError(e));
+		});
 	}
 }
 
 void MultiVersionTransaction::reset() {
+	persistentOptions.clear();
+	setDefaultOptions(db->dbState->transactionDefaultOptions);
 	updateTransaction();
 }
 
@@ -630,27 +697,30 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this)));
+	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(dbState->optionLock);
 
-
 	auto itr = FDBDatabaseOptions::optionInfo.find(option);
-	if(itr != FDBDatabaseOptions::optionInfo.end()) {
-		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
-	}
-	else {
+	if(itr == FDBDatabaseOptions::optionInfo.end()) {
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
 
-	if(dbState->db) {
-		dbState->db->setOption(option, value);
+	int defaultFor = itr->second.defaultFor;
+	if (defaultFor >= 0) {
+		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
+		       FDBTransactionOptions::optionInfo.end());
+		dbState->transactionDefaultOptions.addOption((FDBTransactionOptions::Option)defaultFor, value.castTo<Standalone<StringRef>>());
 	}
 
 	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
+
+	if(dbState->db) {
+		dbState->db->setOption(option, value);
+	}
 }
 
 void MultiVersionDatabase::Connector::connect() {
@@ -810,6 +880,11 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 }
 
 // MultiVersionApi
+
+bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
+	ASSERT(MultiVersionApi::api->apiVersion != 0);
+	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
+}
 
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
 void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientInfo>)> func, bool runOnFailedClients) {

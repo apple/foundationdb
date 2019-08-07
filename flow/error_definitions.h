@@ -69,6 +69,8 @@ ERROR( transaction_not_permitted, 1045, "Operation not permitted")
 ERROR( cluster_not_fully_recovered, 1046, "Cluster not fully recovered")
 ERROR( txn_exec_log_anti_quorum, 1047, "Execute Transaction not supported when log anti quorum is configured")
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
+ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
+ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

@@ -2,6 +2,23 @@
 Release Notes
 #############
 
+6.1.12
+======
+
+Fixes
+-----
+
+* Fixed a thread safety issue while writing large keys or values. `(Issue #1846) <https://github.com/apple/foundationdb/issues/1846>`_
+* An untracked data distributor could prevent a newly recruited data distributor from being started. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
+
+6.1.11
+======
+
+Fixes
+-----
+
+* Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
+
 6.1.10
 ======
 

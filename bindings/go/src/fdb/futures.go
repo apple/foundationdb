@@ -23,7 +23,7 @@
 package fdb
 
 //  #cgo LDFLAGS: -lfdb_c -lm
-//  #define FDB_API_VERSION 610
+//  #define FDB_API_VERSION 620
 //  #include <foundationdb/fdb_c.h>
 //  #include <string.h>
 //
@@ -331,7 +331,7 @@ func (f *futureInt64) Get() (int64, error) {
 	f.BlockUntilReady()
 
 	var ver C.int64_t
-	if err := C.fdb_future_get_version(f.ptr, &ver); err != 0 {
+	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
 		return 0, Error{int(err)}
 	}
 

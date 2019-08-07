@@ -61,6 +61,7 @@ struct WorkerInterface {
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
 	RequestStream<struct ExecuteRequest> execReq;
+	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 
 	TesterInterface testerInterface;
 
@@ -72,7 +73,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
 	}
 };
 
@@ -108,6 +109,7 @@ struct InitializeTLogRequest {
 	bool isPrimary;
 	Version startVersion;
 	int logRouterTags;
+	int txsTags;
 
 	ReplyPromise< struct TLogInterface > reply;
 
@@ -115,7 +117,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags, storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply, logVersion, spillType);
+		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags, storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply, logVersion, spillType, txsTags);
 	}
 };
 
@@ -257,6 +259,23 @@ struct ExecuteRequest {
 	}
 };
 
+struct WorkerSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8194122;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	WorkerSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	WorkerSnapRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
+	}
+};
+
 struct LoadedReply {
 	constexpr static FileIdentifier file_identifier = 9956350;
 	Standalone<StringRef> payload;
@@ -369,6 +388,7 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
+	static const Role COORDINATOR;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -392,7 +412,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error
 
 struct ServerDBInfo;
 
-class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID = TaskDefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
+class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 

@@ -42,6 +42,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
 
+	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
+	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
+	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
+	init( MAX_CLIENT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_CLIENT_PROXY_CONNECTIONS = 1;
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -192,7 +197,4 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-
-	// TLS related
-	init( CHECK_CONNECTED_COORDINATOR_NUM_DELAY,  1.0 ); if( randomize && BUGGIFY ) CHECK_CONNECTED_COORDINATOR_NUM_DELAY =  deterministicRandom()->random01() * 60.0; // In seconds
 }

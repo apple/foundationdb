@@ -26,6 +26,7 @@ set(FDBRPC_SRCS
   ReplicationUtils.cpp
   sim2.actor.cpp
   sim_validation.cpp
+  TimedRequest.h
   TLSConnection.actor.cpp
   TraceFileIO.cpp)
 

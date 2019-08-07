@@ -285,13 +285,15 @@ namespace actorcompiler
         bool LineNumbersEnabled;
         int chooseGroups = 0, whenCount = 0;
         string This;
+        bool generateProbes;
 
-        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled)
+        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled, bool generateProbes)
         {
             this.actor = actor;
             this.sourceFile = sourceFile;
             this.isTopLevel = isTopLevel;
             this.LineNumbersEnabled = lineNumbersEnabled;
+            this.generateProbes = generateProbes;
 
             if (actor.returnType == null)
                 actor.isUncancellable = true;
@@ -362,6 +364,7 @@ namespace actorcompiler
             writer.WriteLine("public:");
             LineNumber(writer, actor.SourceLine);
             WriteStateConstructor(writer);
+            WriteStateDestructor(writer);
             WriteFunctions(writer);
             foreach (var st in state)
             {
@@ -419,6 +422,32 @@ namespace actorcompiler
             }
 
             Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
+        }
+
+        const string thisAddress = "reinterpret_cast<unsigned long>(this)";
+
+        void ProbeEnter(Function fun, string name, int index = -1) {
+            if (generateProbes) {
+                fun.WriteLine("fdb_probe_actor_enter(\"{0}\", {1}, {2});", name, thisAddress, index);
+            }
+        }
+
+        void ProbeExit(Function fun, string name, int index = -1) {
+            if (generateProbes) {
+                fun.WriteLine("fdb_probe_actor_exit(\"{0}\", {1}, {2});", name, thisAddress, index);
+            }
+        }
+
+        void ProbeCreate(Function fun, string name) {
+            if (generateProbes) {
+                fun.WriteLine("fdb_probe_actor_create(\"{0}\", {1});", name, thisAddress);
+            }
+        }
+
+        void ProbeDestroy(Function fun, string name) {
+            if (generateProbes) {
+                fun.WriteLine("fdb_probe_actor_destroy(\"{0}\", {1});", name, thisAddress);
+            }
         }
 
         void LineNumber(TextWriter writer, int SourceLine)
@@ -782,10 +811,12 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
+                ProbeEnter(cbFunc, actor.name, ch.Index);
                 cbFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(cbFunc), cx.catchFErr, cx.tryLoopDepth, () => {
                     cbFunc.WriteLine("{0};", ch.Body.call("value", "0"));
                 }, false);
+                ProbeExit(cbFunc, actor.name, ch.Index);
 
                 var errFunc = new Function
                 {
@@ -799,11 +830,13 @@ namespace actorcompiler
                 };
                 functions.Add(string.Format("{0}#{1}", errFunc.name, ch.Index), errFunc);
                 errFunc.Indent(codeIndent);
+                ProbeEnter(errFunc, actor.name, ch.Index);
                 errFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(cx.WithTarget(errFunc), cx.catchFErr, cx.tryLoopDepth, () =>
                 {
                     errFunc.WriteLine("{0};", cx.catchFErr.call("err", "0"));
                 }, false);
+                ProbeExit(errFunc, actor.name, ch.Index);
             }
 
             bool firstChoice = true;
@@ -1159,7 +1192,9 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
+            ProbeEnter(constructor, actor.name);
             constructor.WriteLine("this->{0};", body.call());
+            ProbeExit(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 
@@ -1200,7 +1235,25 @@ namespace actorcompiler
             constructor.Indent(-1);
             constructor.WriteLine("{");
             constructor.Indent(+1);
+            ProbeCreate(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
+        }
+
+        void WriteStateDestructor(TextWriter writer) {
+            Function destructor = new Function
+            {
+                name = String.Format("~{0}", stateClassName),
+                returnType = "",
+                formalParameters = new string[0],
+                endIsUnreachable = true,
+                publicName = true,
+            };
+            destructor.Indent(codeIndent);
+            destructor.Indent(-1);
+            destructor.WriteLine("{");
+            destructor.Indent(+1);
+            ProbeDestroy(destructor, actor.name);
+            WriteFunction(writer, destructor, destructor.BodyText);
         }
 
         IEnumerable<Statement> Flatten(Statement stmt)

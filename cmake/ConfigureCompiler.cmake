@@ -1,5 +1,4 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
-set(PORTABLE_BINARY OFF CACHE BOOL "Create a binary that runs on older OS versions")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
@@ -8,6 +7,13 @@ set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
+set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
+set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
+
+set(rel_debug_paths OFF)
+if(RELATIVE_DEBUG_PATHS)
+  set(rel_debug_paths ON)
+endif()
 
 if(USE_GPERFTOOLS)
   find_package(Gperftools REQUIRED)
@@ -103,6 +109,10 @@ else()
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--disable-new-dtags")
   endif()
 
+  if(rel_debug_paths)
+    add_compile_options("-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=." "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=.")
+  endif()
+
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
@@ -121,6 +131,11 @@ else()
     set(CMAKE_SHARED_LINKER_FLAGS "-static-libstdc++ -static-libgcc ${CMAKE_SHARED_LINKER_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS    "-static-libstdc++ -static-libgcc ${CMAKE_EXE_LINKER_FLAGS}")
   endif()
+  if(STATIC_LINK_LIBCXX)
+    if (NOT USE_LIBCXX AND NOT APPLE)
+      add_link_options(-static-libstdc++ -static-libgcc)
+    endif()
+  endif()
   # Instruction sets we require to be supported by the CPU
   add_compile_options(
     -maes
@@ -136,7 +151,7 @@ else()
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-stdlib=libc++ -lc++abi -Wl,-build-id=sha1)
+        add_link_options(-lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
     add_compile_options(
@@ -168,6 +183,13 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+
+  # Check whether we can use dtrace probes
+  include(CheckSymbolExists)
+  check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
+  if(SUPPORT_DTRACE)
+    add_compile_definitions(DTRACE_PROBES)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

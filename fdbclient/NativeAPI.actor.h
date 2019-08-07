@@ -61,21 +61,20 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
-	bool useObjectSerializer;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(false) {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
 };
 
 class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
-	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
+	static Database createDatabase( std::string connFileName, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
@@ -89,6 +88,8 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+
+	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
 private:
 	Reference<DatabaseContext> db;
@@ -116,37 +117,13 @@ void runNetwork();
 // Throws network_not_setup if g_network has not been initalized
 void stopNetwork();
 
-/*
- * Starts and holds the monitorLeader and failureMonitorClient actors
- */
-class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
-public:
-	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
-
-	~Cluster();
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> getClusterInterface();
-	Reference<ClusterConnectionFile> getConnectionFile() { return connectionFile; }
-
-	Future<Void> onConnected();
-
-private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
-	Reference<ClusterConnectionFile> connectionFile;
-
-	Future<Void> failMon;
-	Future<Void> connected;
-};
-
 struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
 	uint32_t getReadVersionFlags;
 	uint32_t sizeLimit;
+	int maxTransactionLoggingFieldLength;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
@@ -163,26 +140,27 @@ struct TransactionOptions {
 
 struct TransactionInfo {
 	Optional<UID> debugID;
-	int taskID;
+	TaskPriority taskID;
 	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
-	TransactionLogInfo() : logLocation(DONT_LOG) {}
-	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
-	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id) {}
+	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
+	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
+	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id), maxFieldLength(0) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
+
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty())
-			event.logEvent(identifier);
+			event.logEvent(identifier, maxFieldLength);
 		}
 
 		if (flushed) {
@@ -200,6 +178,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	bool logsAdded{ false };
 	bool flushed{ false };
 	int logLocation;
+	int maxFieldLength;
 	std::string identifier;
 };
 
@@ -263,14 +242,6 @@ public:
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
-	// execute operation is similar to set, but the command will reach
-	// one of the proxies, all the TLogs and all the storage nodes.
-	// instead of setting a key and value on the DB, it executes the command
-	// that is passed in the value field.
-	// - cmdType can be used for logging purposes
-	// - cmdPayload contains the details of the command to be executed:
-	// format of the cmdPayload : <binary-path>:<arg1=val1>,<arg2=val2>...
-	void execute(const KeyRef& cmdType, const ValueRef& cmdPayload);
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
@@ -282,11 +253,12 @@ public:
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
+	uint32_t getSize();
 	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskDefaultEndpoint ) {}
+	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();

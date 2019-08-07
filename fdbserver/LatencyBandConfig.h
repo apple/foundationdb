@@ -36,21 +36,7 @@ struct LatencyBandConfig {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			uint64_t bandsSize = (uint64_t)bands.size();
-			serializer(ar, bandsSize);
-
-			if(ar.isDeserializing) {
-				double band;
-				for(uint64_t i = 0; i < bandsSize; i++) {
-					serializer(ar, band);
-					bands.insert(band);
-				}
-			}
-			else {
-				for(double band : bands) {
-					serializer(ar, band);
-				}
-			}
+			serializer(ar, bands);
 		}
 
 	protected:

@@ -10,6 +10,7 @@
 #if defined(CMAKE_BUILD) || !defined(_WIN32)
 #include "versions.h"
 #endif
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
@@ -84,13 +85,13 @@ void ExecCmdValueString::dbgPrint() {
 }
 
 #if defined(_WIN32) || defined(__APPLE__)
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
 {
 	wait(delay(0.0));
 	return 0;
 }
 #else
-ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync)
+ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
 {
 	state std::string argsString;
 	for (auto const& elem : paramList) {
@@ -103,10 +104,15 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	state boost::process::child c(binPath, boost::process::args(paramList),
 								  boost::process::std_err > boost::process::null);
 
-	// for async calls in simulator, always delay by a fixed time, otherwise
-	// the predictability of the simulator breaks
+	// for async calls in simulator, always delay by a deterinistic amount of time and do the call
+	// synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
-		wait(delay(deterministicRandom()->random01()));
+		double snapDelay = std::max(maxSimDelayTime - 1, 0.0);
+		// add some randomness
+		snapDelay += deterministicRandom()->random01();
+		TraceEvent("SnapDelaySpawnProcess")
+			.detail("SnapDelay", snapDelay);
+		wait(delay(snapDelay));
 	}
 
 	if (!isSync && !g_network->isSimulated()) {
@@ -151,6 +157,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
 	state int err = 0;
 	state Future<int> cmdErr;
+	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	if (!g_network->isSimulated()) {
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
@@ -169,17 +176,19 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		versionString += version;
 		paramList.push_back(versionString);
 		paramList.push_back(role);
-		cmdErr = spawnProcess(snapBin.toString(), paramList, 3.0, false /*isSync*/);
+		cmdErr = spawnProcess(snapBin.toString(), paramList, maxWaitTime, false /*isSync*/, 0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 	} else {
 		// copy the files
 		state std::string folderFrom = folder + "/.";
 		state std::string folderTo = folder + "-snap-" + uidStr.toString();
+		double maxSimDelayTime = 10.0;
+		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, 3.0, false /*isSync*/);
+		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {
@@ -188,7 +197,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 			paramList.push_back("-a");
 			paramList.push_back(folderFrom);
 			paramList.push_back(folderTo);
-			cmdErr = spawnProcess(cpBin, paramList, 3.0, true /*isSync*/);
+			cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
 		}
@@ -232,4 +241,35 @@ void unregisterTLog(UID uid) {
 bool isTLogInSameNode() {
 	NetworkAddress addr = g_network->getLocalAddress();
 	return tLogsAlive[addr].size() >= 1;
+}
+
+struct StorageVersionInfo {
+	Version version;
+	Version durableVersion;
+};
+
+// storage nodes get snapshotted through the worker interface which does not have context about version information,
+// following info is gathered at worker level to facilitate printing of version info during storage snapshots.
+typedef std::map<UID, StorageVersionInfo> UidStorageVersionInfo;
+
+std::map<NetworkAddress, UidStorageVersionInfo> workerStorageVersionInfo;
+
+void setDataVersion(UID uid, Version version) {
+	NetworkAddress addr = g_network->getLocalAddress();
+	workerStorageVersionInfo[addr][uid].version = version;
+}
+
+void setDataDurableVersion(UID uid, Version durableVersion) {
+	NetworkAddress addr = g_network->getLocalAddress();
+	workerStorageVersionInfo[addr][uid].durableVersion = durableVersion;
+}
+
+void printStorageVersionInfo() {
+	NetworkAddress addr = g_network->getLocalAddress();
+	for (auto itr = workerStorageVersionInfo[addr].begin(); itr != workerStorageVersionInfo[addr].end(); itr++) {
+		TraceEvent("StorageVersionInfo")
+			.detail("UID", itr->first)
+			.detail("Version", itr->second.version)
+			.detail("DurableVersion", itr->second.durableVersion);
+	}
 }

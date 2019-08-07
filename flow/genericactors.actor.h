@@ -90,17 +90,6 @@ T sorted(T range) {
 }
 
 template <class T>
-inline std::vector<T>& operator , (std::vector<T>& v, T a) {
-	v.push_back(a);
-	return v;
-}
-
-template <class T>
-inline std::vector<T>& operator , (std::vector<T> && v, T a) {
-	return (const_cast<std::vector<T>&>(v), a);
-}
-
-template <class T>
 ErrorOr<T> errorOr( T t ) {
 	return ErrorOr<T>(t);
 }
@@ -183,7 +172,7 @@ Future<Void> waitForAllReady( std::vector<Future<T>> results ) {
 }
 
 ACTOR template <class T>
-Future<T> timeout( Future<T> what, double time, T timedoutValue, int taskID = TaskDefaultDelay ) {
+Future<T> timeout( Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	Future<Void> end = delay( time, taskID );
 	choose {
 		when( T t = wait( what ) ) { return t; }
@@ -201,7 +190,7 @@ Future<Optional<T>> timeout( Future<T> what, double time ) {
 }
 
 ACTOR template <class T>
-Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDelay ) {
+Future<T> timeoutError( Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	Future<Void> end = delay( time, taskID );
 	choose {
 		when( T t = wait( what ) ) { return t; }
@@ -209,8 +198,9 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 	}
 }
 
+
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
+Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
 	try {
 		state T t = wait( what );
 		wait( delay( time, taskID ) );
@@ -223,7 +213,7 @@ Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDe
 }
 
 ACTOR template<class Func>
-Future<Void> recurring( Func what, double interval, int taskID = TaskDefaultDelay ) {
+Future<Void> recurring( Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	loop choose {
 		when ( wait( delay( interval, taskID ) ) ) { what(); }
 	}
@@ -319,9 +309,9 @@ Future<U> mapAsync(Future<T> what, F actorFunc)
 
 //maps a vector of futures with an asynchronous function
 template<class T, class F>
-std::vector<Future<decltype(actorFunc(T()).getValue())>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
+std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
 {
-	std::vector<typename std::result_of<F(T)>::type> ret;
+	std::vector<std::invoke_result_t<F, T>> ret;
 	for(auto f : what)
 		ret.push_back(mapAsync( f, actorFunc ));
 	return ret;
@@ -370,7 +360,7 @@ Future<Void> mapAsync( FutureStream<T> input, F actorFunc, PromiseStream<U> outp
 
 //Waits for a future to be ready, and then applies a function to it.
 ACTOR template<class T, class F>
-Future<typename std::result_of<F(T)>::type> map(Future<T> what, F func)
+Future<std::invoke_result_t<F, T>> map(Future<T> what, F func)
 {
 	T val = wait(what);
 	return func(val);
@@ -378,9 +368,9 @@ Future<typename std::result_of<F(T)>::type> map(Future<T> what, F func)
 
 //maps a vector of futures
 template<class T, class F>
-std::vector<Future<typename std::result_of<F(T)>>> map(std::vector<Future<T>> const& what, F const& func)
+std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
 {
-	std::vector<Future<typename std::result_of<F(T)>>> ret;
+	std::vector<Future<std::invoke_result_t<F, T>>> ret;
 	for(auto f : what)
 		ret.push_back(map( f, func ));
 	return ret;
@@ -388,7 +378,7 @@ std::vector<Future<typename std::result_of<F(T)>>> map(std::vector<Future<T>> co
 
 //maps a stream
 ACTOR template<class T, class F>
-Future<Void> map( FutureStream<T> input, F func, PromiseStream<typename std::result_of<F(T)>> output )
+Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_result_t<F, T>> output )
 {
 	loop {
 		try {
@@ -740,7 +730,7 @@ ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Stand
 	loop {
 		if (input->get().size()) {
 			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin());
+				ObjectReader reader(input->get().begin(), IncludeVersion());
 				T res;
 				reader.deserialize(res);
 				output->set(res);
@@ -951,7 +941,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 }
 
 ACTOR template <class T>
-Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
+Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, TaskPriority taskID = TaskPriority::DefaultDelay ) {
 	if (results.empty() && required == 0) return Void();
 	wait(quorum(results, required));
 	choose {
@@ -1259,7 +1249,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	FlowLock() : permits(1), active(0) {}
 	explicit FlowLock(int64_t permits) : permits(permits), active(0) {}
 
-	Future<Void> take(int taskID = TaskDefaultYield, int64_t amount = 1) {
+	Future<Void> take(TaskPriority taskID = TaskPriority::DefaultYield, int64_t amount = 1) {
 		if (active + amount <= permits || active == 0) {
 			active += amount;
 			return safeYieldActor(this, taskID, amount);
@@ -1298,7 +1288,7 @@ private:
 	int64_t active;
 	Promise<Void> broken_on_destruct;
 
-	ACTOR static Future<Void> takeActor(FlowLock* lock, int taskID, int64_t amount) {
+	ACTOR static Future<Void> takeActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
 		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
 
 		try {
@@ -1330,7 +1320,7 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, int taskID, int64_t amount) {
+	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
 		try {
 			choose{
 				when(wait(yield(taskID))) {}
@@ -1351,7 +1341,7 @@ private:
 };
 
 ACTOR template <class T>
-Future<Void> yieldPromiseStream( FutureStream<T> input, PromiseStream<T> output, int taskID = TaskDefaultYield ) {
+Future<Void> yieldPromiseStream( FutureStream<T> input, PromiseStream<T> output, TaskPriority taskID = TaskPriority::DefaultYield ) {
 	loop {
 		T f = waitNext( input );
 		output.send( f );

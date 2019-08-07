@@ -43,6 +43,7 @@ enum {
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6,
+	tagLocalityTxs = -7,
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
 
@@ -81,8 +82,8 @@ struct struct_like_traits<Tag> : std::true_type {
 	using Member = Tag;
 	using types = pack<uint16_t, int8_t>;
 
-	template <int i>
-	static const index_t<i, types>& get(const Member& m) {
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member& m, Context&) {
 		if constexpr (i == 0) {
 			return m.id;
 		} else {
@@ -91,8 +92,8 @@ struct struct_like_traits<Tag> : std::true_type {
 		}
 	}
 
-	template <int i, class Type>
-	static const void assign(Member& m, const Type& t) {
+	template <int i, class Type, class Context>
+	static const void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {
@@ -319,6 +320,43 @@ struct KeyValueRef {
 			return a.key > b;
 		}
 	};
+};
+
+template<>
+struct string_serialized_traits<KeyValueRef> : std::true_type {
+	int32_t getSize(const KeyValueRef& item) const {
+		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
+	}
+
+	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
+		auto begin = out;
+		uint32_t sz = item.key.size();
+		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		out += sizeof(sz);
+		memcpy(out, item.key.begin(), sz);
+		out += sz;
+		sz = item.value.size();
+		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		out += sizeof(sz);
+		memcpy(out, item.value.begin(), sz);
+		out += sz;
+		return out - begin;
+	}
+
+	template <class Context>
+	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
+		auto begin = data;
+		uint32_t sz;
+		memcpy(&sz, data, sizeof(sz));
+		data += sizeof(sz);
+		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
+		data += sz;
+		memcpy(&sz, data, sizeof(sz));
+		data += sizeof(sz);
+		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
+		data += sz;
+		return data - begin;
+	}
 };
 
 template<>
@@ -601,8 +639,9 @@ struct TLogVersion {
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
+		V4 = 4, // 6.2
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V3,
+		MAX_SUPPORTED = V4,
 		MIN_RECRUITABLE = V2,
 		DEFAULT = V3,
 	} version;
@@ -624,6 +663,7 @@ struct TLogVersion {
 	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
+		if (s == LiteralStringRef("4")) return V4;
 		return default_error_or();
 	}
 };

@@ -216,6 +216,9 @@ extern const KeyRangeRef fdbClientInfoPrefixRange;
 extern const KeyRef fdbClientInfoTxnSampleRate;
 extern const KeyRef fdbClientInfoTxnSizeLimit;
 
+// Consistency Check settings
+extern const KeyRef fdbShouldConsistencyCheckBeSuspended;
+
 // Request latency measurement key
 extern const KeyRef latencyBandConfigKey;
 
@@ -279,13 +282,11 @@ extern const KeyRangeRef restoreWorkersKeys;
 const Key restoreWorkerKeyFor( UID const& agentID );
 
 extern const KeyRef healthyZoneKey;
+extern const StringRef ignoreSSFailuresZoneString;
+extern const KeyRef rebalanceDDIgnoreKey;
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version );
 std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
-extern const StringRef execSnap;
-extern const StringRef execDisableTLogPop;
-extern const StringRef execEnableTLogPop;
-extern const StringRef snapTestFailStatus;
 
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.

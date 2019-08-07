@@ -82,8 +82,13 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
+};
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
@@ -129,6 +134,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
 	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
 	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
 	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
@@ -159,8 +165,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
@@ -494,7 +498,7 @@ Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<Stri
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring( &systemMonitor, 5.0, TaskFlushTrace );
+	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
 }
 
 void testIndexedSet();
@@ -522,7 +526,7 @@ void* parentWatcher(void *arg) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -571,21 +575,32 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-		   "                 to a random value shared by all fdbserver processes on this\n"
-		   "                 machine.\n");
+	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
+	       "                 Defaults to a random value shared by all fdbserver processes\n"
+	       "                 on this machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
+	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
+	       "                 LOCALITYVALUE is not.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
+	printf("  -M SIZE, --storage_memory SIZE\n"
+	       "                 Maximum amount of memory used for storage. The default\n"
+	       "                 value is 1GiB. When specified without a unit, MB is\n"
+	       "                 assumed.\n");
+	printf("  --cache_memory SIZE\n"
+	       "                 The amount of memory to use for caching disk pages.\n"
+	       "                 The default value is 2GiB. When specified without a unit,\n"
+	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-		   "                 Use object serializer for sending messages. The object serializer\n"
-		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
-		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -611,14 +626,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -s SEED, --seed SEED\n"
 			   "                 Random seed.\n");
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  -m SIZE, --memory SIZE\n"
-			   "                 Memory limit. The default value is 8GiB. When specified\n"
-			   "                 without a unit, MiB is assumed.\n");
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -M SIZE, --storage_memory SIZE\n"
-			   "                 Maximum amount of memory used for storage. The default\n"
-			   "                 value is 1GiB. When specified without a unit, MB is\n"
-			   "                 assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -655,8 +663,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("                 Must be specified if using a different database for metrics.\n");
 		printf("  --knob_KNOBNAME KNOBVALUE\n");
 		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --locality_LOCALITYKEY LOCALITYVALUE\n");
-		printf("                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
 		printf("  --io_trust_seconds SECONDS\n");
 		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
 		       "                 before timing out with an error. If an operation times out, all future\n"
@@ -867,6 +873,20 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
 }
 
+// moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
+void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
+	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
+	for (const auto & fileEntry: returnFiles) {
+		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
+			//rename files
+			TraceEvent("RenamingSnapFile")
+				.detail("Oldname", dirSrc + "/" + fileEntry)
+				.detail("Newname", dirToMove + "/" + fileEntry);
+			renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
+		}
+	}
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -944,7 +964,6 @@ int main(int argc, char* argv[]) {
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 		uint64_t rsssize = -1;
-		bool useObjectSerializer = false;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -1252,6 +1271,16 @@ int main(int argc, char* argv[]) {
 					}
 					storageMemLimit = ti.get();
 					break;
+				case OPT_CACHEMEMLIMIT:
+					ti = parse_with_suffix(args.OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
+					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
+					break;
 				case OPT_BUGGIFY:
 					if( !strcmp( args.OptionArg(), "on" ) )
 						buggifyEnabled = true;
@@ -1295,21 +1324,6 @@ int main(int argc, char* argv[]) {
 						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 					}
 					break;
-				case OPT_USE_OBJECT_SERIALIZER:
-				{
-					std::string s = args.OptionArg();
-					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-					if (s == "on" || s == "true" || s == "1") {
-						useObjectSerializer = true;
-					} else if (s == "off" || s == "false" || s == "0") {
-						useObjectSerializer = false;
-					}  else {
-						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				}
 				case OPT_WHITELIST_BINPATH:
 					whitelistBinPaths = args.OptionArg();
 					break;
@@ -1526,10 +1540,10 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator(useObjectSerializer);
+			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true, useObjectSerializer);
+			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1596,6 +1610,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("RandomSeed", randomSeed)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
@@ -1606,7 +1621,9 @@ int main(int argc, char* argv[]) {
 			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
 			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("BuggifyEnabled", buggifyEnabled)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");
@@ -1638,7 +1655,7 @@ int main(int argc, char* argv[]) {
 			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyMachineId))
-			localities.set(LocalityData::keyMachineId, machineId);
+			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
 			localities.set(LocalityData::keyDcId, dcId);
@@ -1701,34 +1718,33 @@ int main(int argc, char* argv[]) {
 					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
 					// delete all files (except fdb.cluster) in non-snap directories
-					for (int i = 0; i < returnList.size(); i++) {
-						if (returnList[i] == "." || returnList[i] == "..") {
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
-						if (returnList[i].find(snapStr) != std::string::npos) {
+						if (dirEntry.find(snapStr) != std::string::npos) {
 							continue;
 						}
 
-						std::string childf = absDataFolder + "/" + returnList[i];
+						std::string childf = absDataFolder + "/" + dirEntry;
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-						for (int j = 0; j < returnFiles.size(); j++) {
-							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
+						for (const auto & fileEntry : returnFiles) {
+							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
 								TraceEvent("DeletingNonSnapfiles")
-									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
-								deleteFile(childf + "/" + returnFiles[j]);
+									.detail("FileBeingDeleted", childf + "/" + fileEntry);
+								deleteFile(childf + "/" + fileEntry);
 							}
 						}
 					}
-					// move the contents from snap folder to the original folder,
-					// delete snap folders
-					for (int i = 0; i < returnList.size(); i++) {
-						if (returnList[i] == "." || returnList[i] == "..") {
+					// cleanup unwanted and partial directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
-						std::string dirSrc = absDataFolder + "/" + returnList[i];
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
 						// delete snap directories which are not part of restoreSnapUID
-						if (returnList[i].find(snapStr) == std::string::npos) {
-							if (returnList[i].find("snap") != std::string::npos) {
+						if (dirEntry.find(snapStr) == std::string::npos) {
+							if (dirEntry.find("snap") != std::string::npos) {
 								platform::eraseDirectoryRecursive(dirSrc);
 							}
 							continue;
@@ -1740,14 +1756,28 @@ int main(int argc, char* argv[]) {
 							platform::eraseDirectoryRecursive(dirSrc);
 							continue;
 						}
-						std::string origDir = returnList[i].substr(0, 32);
-						std::string dirToRemove = absDataFolder + "/" + origDir;
-						TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
-						platform::eraseDirectoryRecursive(dirToRemove);
-						renameFile(dirSrc, dirToRemove);
-						TraceEvent("RenamingSnapToOriginalDirectory")
-							.detail("Oldname", dirSrc)
-							.detail("Newname", dirToRemove);
+					}
+					// move snapshotted files to appropriate locations
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						std::string origDir = dirEntry.substr(0, 32);
+						std::string dirToMove = absDataFolder + "/" + origDir;
+						if ((dirEntry.find("snap") != std::string::npos) &&
+							(dirEntry.find("tlog") != std::string::npos)) {
+							// restore tlog files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "log");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("storage") != std::string::npos)) {
+							// restore storage files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "storage");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("coord") != std::string::npos)) {
+							// restore coordinator files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "coordination");
+						}
 					}
 				}
 			}

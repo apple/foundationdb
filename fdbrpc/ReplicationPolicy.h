@@ -276,23 +276,35 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 
 template <>
 struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
-	static WriteRawMemory save(const Reference<IReplicationPolicy>& value) {
-		BinaryWriter writer(IncludeVersion());
-		serializeReplicationPolicy(writer, const_cast<Reference<IReplicationPolicy>&>(value));
-		std::unique_ptr<uint8_t[]> memory(new uint8_t[writer.getLength()]);
-		memcpy(memory.get(), writer.getData(), writer.getLength());
-		return std::make_pair<OwnershipErasedPtr<const uint8_t>, size_t>(ownedPtr(const_cast<const uint8_t*>(memory.release())), writer.getLength());
+private:
+	using T = Reference<IReplicationPolicy>;
+
+public:
+	template <class Context>
+	static size_t size(const T& value, Context& context) {
+		// size gets called multiple times. If this becomes a performance problem, we can perform the
+		// serialization once and cache the result as a mutable member of IReplicationPolicy
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		return writer.getLength();
+	}
+
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t* out, const T& value, Context& context) {
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		memcpy(out, writer.getData(), writer.getLength());
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context&) {
+	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
 		StringRef str(buf, sz);
-		BinaryReader reader(str, IncludeVersion());
-		serializeReplicationPolicy(reader, value);
+		BinaryReader reader(str, AssumeVersion(context.protocolVersion()));
+		::load(reader, value);
 	}
 };
-
 
 #endif

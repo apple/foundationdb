@@ -66,15 +66,11 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 };
 
 // Subclasses must initialize all members in their default constructors
+// Subclasses must serialize all members
 struct LoadBalancedReply {
 	double penalty;
 	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, penalty, error);
-	}
 };
 
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
@@ -179,7 +175,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {

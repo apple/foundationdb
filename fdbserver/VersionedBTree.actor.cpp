@@ -2566,7 +2566,7 @@ private:
 
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
 		debug_printf("readPage() op=read id=%u @%" PRId64 " lower=%s upper=%s\n", id, snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
-		wait(delay(0, TaskDiskRead));
+		wait(delay(0, TaskPriority::DiskRead));
 
 		state Reference<const IPage> result = wait(snapshot->getPhysicalPage(id));
 		state int usablePageSize = result->size();

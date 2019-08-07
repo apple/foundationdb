@@ -42,8 +42,8 @@ PacketBuffer* PacketWriter::finish() {
 
 void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
 	while(true) {
-		int b = std::min( bytes, PacketBuffer::DATA_SIZE - buffer->bytes_written );
-		memcpy( buffer->data + buffer->bytes_written, data, b );
+		int b = std::min(bytes, buffer->bytes_unwritten());
+		memcpy(buffer->data() + buffer->bytes_written, data, b);
 		buffer->bytes_written += b;
 		bytes -= b;
 		if (!bytes) break;
@@ -53,14 +53,15 @@ void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
 	}
 }
 
-void PacketWriter::nextBuffer() {
-	ASSERT( buffer->bytes_written == PacketBuffer::DATA_SIZE );
-	length += PacketBuffer::DATA_SIZE;
-	buffer->next = new PacketBuffer;
+void PacketWriter::nextBuffer(size_t size) {
+	auto last_buffer_bytes_written = buffer->bytes_written;
+	length += last_buffer_bytes_written;
+
+	buffer->next = PacketBuffer::create(size);
 	buffer = buffer->nextPacketBuffer();
 
 	if (reliable) {
-		reliable->end = PacketBuffer::DATA_SIZE;
+		reliable->end = last_buffer_bytes_written;
 		reliable->cont = new ReliablePacket;
 		reliable = reliable->cont;
 		reliable->buffer = buffer; buffer->addref();
@@ -69,20 +70,19 @@ void PacketWriter::nextBuffer() {
 }
 
 void PacketWriter::writeAhead( int bytes, struct SplitBuffer* buf ) {
-	if (bytes <= PacketBuffer::DATA_SIZE - buffer->bytes_written) {
-		buf->begin = buffer->data + buffer->bytes_written;
+	if (bytes <= buffer->bytes_unwritten()) {
+		buf->begin = buffer->data() + buffer->bytes_written;
 		buf->first_length = bytes;
 		buffer->bytes_written += bytes;
 		buf->next = 0;
 	} else {
-		buf->begin = buffer->data + buffer->bytes_written;
-		buf->first_length = PacketBuffer::DATA_SIZE - buffer->bytes_written;
-		buffer->bytes_written = PacketBuffer::DATA_SIZE;
+		buf->begin = buffer->data() + buffer->bytes_written;
+		buf->first_length = buffer->bytes_unwritten();
+		buffer->bytes_written = buffer->size();
 		nextBuffer();
-		buf->next = buffer->data;
+		buf->next = buffer->data();
 		buffer->bytes_written = bytes - buf->first_length;
 	}
-
 }
 
 void SplitBuffer::write( const void* data, int len ) {
@@ -142,14 +142,14 @@ void UnsentPacketQueue::sent(int bytes) {
 
 		if (b->bytes_sent + bytes <= b->bytes_written && (b->bytes_sent + bytes != b->bytes_written || (!b->next && b->bytes_unwritten()))) {
 			b->bytes_sent += bytes;
-			ASSERT( b->bytes_sent <= PacketBuffer::DATA_SIZE );
+			ASSERT(b->bytes_sent <= b->size());
 			break;
 		}
 
 		// We've sent an entire buffer
 		bytes -= b->bytes_written - b->bytes_sent;
 		b->bytes_sent = b->bytes_written;
-		ASSERT( b->bytes_written <= PacketBuffer::DATA_SIZE );
+		ASSERT(b->bytes_written <= b->size());
 		unsent_first = b->nextPacketBuffer();
 		if (!unsent_first) unsent_last = NULL;
 		b->delref();
@@ -171,12 +171,12 @@ PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end)
 		for(ReliablePacket* c = r; c; c = c->cont) {
 			if (c->buffer == end /*&& c->begin>=c->buffer->bytes_written*/)   // quit when we hit the unsent range
 				return into;
-			if (into->bytes_written == PacketBuffer::DATA_SIZE) {
-				into->next = new PacketBuffer;
+			if (into->bytes_written == into->size()) {
+				into->next = PacketBuffer::create();
 				into = into->nextPacketBuffer();
 			}
 
-			uint8_t* data = &c->buffer->data[c->begin];
+			uint8_t* data = &c->buffer->data()[c->begin];
 			int len = c->end-c->begin;
 
 			if (len > into->bytes_unwritten()) {
@@ -190,7 +190,7 @@ PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end)
 				c->cont = e;
 			}
 
-			memcpy( into->data + into->bytes_written, data, len );
+			memcpy(into->data() + into->bytes_written, data, len);
 			c->buffer->delref(); c->buffer = into; c->buffer->addref();
 			c->begin = into->bytes_written;
 			into->bytes_written += len;

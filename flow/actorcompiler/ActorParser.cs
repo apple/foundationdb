@@ -214,11 +214,13 @@ namespace actorcompiler
         Token[] tokens;
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
+        public bool generateProbes;
 
-        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy)
+        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
+            this.generateProbes = generateProbes;
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -249,7 +251,7 @@ namespace actorcompiler
                     var actor = ParseActor(i, out end);
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks==0, LineNumbersEnabled).Write(actorWriter);
+                    new ActorCompiler(actor, sourceFile, inBlocks==0, LineNumbersEnabled, generateProbes).Write(actorWriter);
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;
