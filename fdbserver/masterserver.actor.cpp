@@ -1285,19 +1285,19 @@ std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBack
     const UID dbgid, const std::map<LogEpoch, std::map<Tag, Version>>& progress,
     const std::map<LogEpoch, Version>& epochEndVersions) {
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit;
-	for (const auto& it : progress) {
-		const LogEpoch epoch = it.first;
+
+	for (const auto& [epoch, value] : progress) {
 		auto versionIt = epochEndVersions.find(epoch);
 		if (versionIt != epochEndVersions.end()) {
 			const Version endVersion = versionIt->second;
 			std::map<Tag, Version> tagVersions;
-			for (const auto& tv : it.second) {
-				if (tv.second < endVersion - 1) {
-					tagVersions.insert({ tv.first, tv.second });
+			for (const auto& [tag, version] : value) {
+				if (version < endVersion - 1) {
+					tagVersions.insert({ tag, version });
 					TraceEvent("BW", dbgid)
 					    .detail("OldEpoch", epoch)
-					    .detail("Tag", tv.first.toString())
-					    .detail("Version", tv.second)
+					    .detail("Tag", tag.toString())
+					    .detail("Version", version)
 					    .detail("EpochEndVersion", endVersion);
 				}
 			}
@@ -1342,22 +1342,20 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	std::map<LogEpoch, std::map<Tag, Version>> progress = wait(backupProgress);
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit =
 	    getUnfinishedBackup(self->dbgid, progress, epochEndVersions);
-	for (const auto& epochData : toRecruit) {
-		const LogEpoch backupEpoch = epochData.first.first;
-		const Version epochEndVersion = epochData.first.second;
-		for (const auto& tagVersion : epochData.second) {
+	for (const auto& [epochVersion, tagVersions] : toRecruit) {
+		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
-			req.backupEpoch = backupEpoch;
-			req.routerTag = tagVersion.first;
-			req.startVersion = tagVersion.second + 1; // savedVersion + 1
-			req.endVersion = epochEndVersion - 1;
+			req.backupEpoch = epochVersion.first;
+			req.routerTag = tag;
+			req.startVersion = version; // savedVersion + 1
+			req.endVersion = epochVersion.second - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("WorkerID", worker.id())
 			    .detail("Epoch", epoch)
-			    .detail("BackupEpoch", backupEpoch)
+			    .detail("BackupEpoch", req.backupEpoch)
 			    .detail("StartVersion", req.startVersion);
 			initializationReplies.push_back(transformErrors(
 			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
