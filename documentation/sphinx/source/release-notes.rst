@@ -74,7 +74,7 @@ Other Changes
 * Improved ``TransactionMetrics`` log events by adding a random UID to distinguish multiple open connections, a flag to identify internal vs. client connections, and logging of rates and roughness in addition to total count for several metrics. `(PR #1808) <https://github.com/apple/foundationdb/pull/1808>`_.
 * FoundationDB can now be built with clang and libc++ on Linux `(PR #1666) <https://github.com/apple/foundationdb/pull/1666>`_.
 * Added experimental framework to run C and Java clients in simulator `(PR #1678) <https://github.com/apple/foundationdb/pull/1678>`_.
-* Added a new network option for client buggify which will randomly throw expected exceptions in the client. This is intended to be used for client testing. `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
+* Added new network options for client buggify which will randomly throw expected exceptions in the client. This is intended to be used for client testing. `(PR #1417) <https://github.com/apple/foundationdb/pull/1417>`_.
 * Added ``--cache_memory`` parameter for ``fdbserver`` processes to control the amount of memory dedicated to caching pages read from disk. `(PR #1889) <https://github.com/apple/foundationdb/pull/1889>`_.
 * Added ``MakoWorkload``, used as a benchmark to do performance testing of FDB. `(PR #1586) <https://github.com/apple/foundationdb/pull/1586>`_.
 * ``fdbserver`` now accepts a comma separated list of public and listen addresses. `(PR #1721) <https://github.com/apple/foundationdb/pull/1721>`_.
