@@ -3348,7 +3348,7 @@ void enableClientInfoLogging() {
 }
 
 ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
-	TraceEvent("NativeAPI.SnapshotDatabaseEnter")
+	TraceEvent("SnapshotDatabaseEnter")
 		.detail("SnapPayload", snapPayload)
 		.detail("SnapUID", snapUID);
 	try {
@@ -3365,10 +3365,10 @@ ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef sna
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("NativeAPI.SnapshotDatabaseError")
+		TraceEvent("SnapshotDatabaseError")
+			.error(e)
 			.detail("SnapPayload", snapPayload)
-			.detail("SnapUID", snapUID)
-			.error(e, true /* includeCancelled */);
+			.detail("SnapUID", snapUID);
 		throw;
 	}
 	return Void();

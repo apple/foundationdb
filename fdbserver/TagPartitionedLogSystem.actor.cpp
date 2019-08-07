@@ -1093,7 +1093,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		wait( waitForAll(poppedReady) );
+		state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
+		wait( waitForAll(poppedReady) || maxGetPoppedDuration );
+
+		if(maxGetPoppedDuration.isReady()) {
+			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+		}
 		
 		Version maxPopped = 1;
 		for(auto &it : poppedFutures) {
