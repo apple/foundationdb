@@ -401,11 +401,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		state std::vector<ISimulator::ProcessInfo*>	killProcArray;
 		state std::vector<AddressExclusion>	toKillArray;
+		state std::vector<AddressExclusion>	toKillMarkFailedArray;
 
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
+		if (toKillArray.size()) {
+			toKillMarkFailedArray.push_back(deterministicRandom()->randomChoice(toKillArray));
+		}
 
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
+		wait( excludeServers( cx, toKillMarkFailedArray, true ) );
 		wait( excludeServers( cx, toKillArray ) );
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough servers left

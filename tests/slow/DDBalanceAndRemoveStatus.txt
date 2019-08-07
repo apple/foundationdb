@@ -43,3 +43,5 @@ testTitle=DDBalance_test
 
     testName=Status
     testDuration=30.0
+
+minimumReplication=2

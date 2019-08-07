@@ -477,11 +477,14 @@ void initHelp() {
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] =
-	    CommandHelp("exclude [no_wait] <ADDRESS>*", "exclude servers from the database",
+	    CommandHelp("exclude [FORCE] [permanent] [no_wait] <ADDRESS>*", "exclude servers from the database",
 	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
 	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
 	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
-	                "command returns \nimmediately without checking if the exclusions have completed successfully.");
+	                "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
+	                "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
+	                "If 'permanent' is set, the tLog queue is dropped pre-emptively before waiting\n"
+	                "for data movement to finish and the server cannot be included again.");
 	helpMap["include"] = CommandHelp(
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
@@ -2132,7 +2135,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		wait( makeInterruptable(excludeServers(db,addresses,permanentlyFailed)) );
 
-		if (waitForAllExcluded) {
+		if (waitForAllExcluded && !permanentlyFailed) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
 			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
 		}

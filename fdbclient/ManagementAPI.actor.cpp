@@ -1335,6 +1335,7 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* t
 		if (a.isValid())
 			exclusions.push_back( a );
 	}
+	uniquify(exclusions);
 	return exclusions;
 }
 
