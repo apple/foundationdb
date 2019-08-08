@@ -1530,6 +1530,12 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	return Void();
 }
 
+ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
+	bool safe = wait(db->get().distributor.get().distributorExclCheckReq.getReply(DistributorExclusionSafetyCheckRequest(req.exclusions)));
+	req.reply.send(safe);
+	return Void();
+}
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -1670,6 +1676,9 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
 			TraceEvent(SevDebug, "SnapMasterEnqueue");
 			addActor.send(proxySnapCreate(snapReq, &commitData));
+		}
+		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
+			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;

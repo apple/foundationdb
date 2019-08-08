@@ -3922,6 +3922,7 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
+	Reference<DDTeamCollection> teamCollection;
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
 };
@@ -4120,6 +4121,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			self->teamCollection = primaryTeamCollection;
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
@@ -4284,6 +4286,33 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 	return Void();
 }
 
+ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req, Reference<DDTeamCollection> self, Database cx) {
+	state bool safe = true;
+	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
+	vector<UID> excludeServerIDs;
+	// Go through storage server interfaces and translate Address -> server ID (UID)
+	for (auto ssi : ssis) {
+		if (std::find(req.exclusions.begin(), req.exclusions.end(), AddressExclusion(ssi.address().ip, ssi.address().port)) != req.exclusions.end()) {
+			excludeServerIDs.push_back(ssi.id());
+		}
+	}
+	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
+	for (auto team : self->teams) {
+		vector<UID> teamServerIDs = team->getServerIDs();
+		std::sort(teamServerIDs.begin(), teamServerIDs.end());
+		TraceEvent("DDExclusionSafetyCheck")
+			.detail("Excluding", describe(excludeServerIDs))
+			.detail("Existing", describe(teamServerIDs));
+		// If excluding set completely contains team, it is unsafe to remove these servers
+		if (std::includes(excludeServerIDs.begin(), excludeServerIDs.end(), teamServerIDs.begin(), teamServerIDs.end())) {
+			safe = false;
+			break;
+		}
+	}
+	req.reply.send(safe);
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -4308,6 +4337,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				actors.add(ddSnapCreate(snapReq, db));
+			}
+			when(DistributorExclusionSafetyCheckRequest exclCheckReq = waitNext(di.distributorExclCheckReq.getFuture())) {
+				actors.add(ddExclusionSafetyCheck(exclCheckReq, self->teamCollection, cx));
 			}
 		}
 	}

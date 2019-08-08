@@ -2048,6 +2048,17 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		}
 
 		if(!force) {
+			if (permanentlyFailed) {
+				bool safe = wait(makeInterruptable(checkSafeExclusions(db, addresses)));
+				if (!safe) {
+					std::string errorStr =
+					    "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+					    "Please try the exclude again in 30 seconds.\n"
+					    "Type `exclude FORCE <ADDRESS>*' to exclude without performing safety checks.\n";
+					printf("%s", errorStr.c_str());
+					return true;
+				}
+			}
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
