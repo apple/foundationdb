@@ -529,7 +529,7 @@ DatabaseContext::DatabaseContext(
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
-	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
+	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
 
 	logger = databaseLogger( this );
 	locationCacheSize = g_network->isSimulated() ?
@@ -552,7 +552,6 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
 	internal(false) {}
 
-
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
 }
@@ -560,19 +559,6 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
-		it->second->notifyContextDestroyed();
-	ASSERT_ABORT( server_interf.empty() );
-	locationCache.insert( allKeys, Reference<LocationInfo>() );
-}
-
-pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
-	if( isBackward ) {
-		auto range = locationCache.rangeContainingKeyBefore(key);
-		return std::make_pair(range->range(), range->value());
-	}
-	else {
-		auto range = locationCache.rangeContaining(key);
-		return std::make_pair(range->range(), range->value());
 	}
 }
 
@@ -737,7 +723,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
-	
+
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
@@ -1439,7 +1425,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					
+
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -2409,8 +2395,10 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 
 double Transaction::getBackoff(int errCode) {
 	double b = backoff * deterministicRandom()->random01();
-	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
-				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
+	backoff =
+	    errCode == error_code_proxy_memory_limit_exceeded
+	        ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF)
+	        : std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
 }
 
@@ -2620,7 +2608,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	state double startTime = now();
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
-
 	try {
 		if(CLIENT_BUGGIFY) {
 			throw deterministicRandom()->randomChoice(std::vector<Error>{
@@ -2723,7 +2710,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
-				&& e.code() != error_code_proxy_memory_limit_exceeded)
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_batch_transaction_throttled)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -3013,7 +3001,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			}
 		}
 	} catch (Error& e) {
-		if( e.code() != error_code_broken_promise )
+		if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
 			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 		throw;
 	}
@@ -3031,14 +3019,14 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	state PromiseStream<double> replyTimes;
 	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
-
 	loop {
 		send_batch = false;
 		choose {
-			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
+			when(std::pair<Promise<GetReadVersionReply>, Optional<UID>> req = waitNext(versionStream)) {
 				if (req.second.present()) {
-					if (!debugID.present())
+					if (!debugID.present()) {
 						debugID = nondeterministicRandom()->randomUniqueID();
+					}
 					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
 				}
 				requests.push_back(req.first);
@@ -3047,29 +3035,25 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 				else if (!timeout.isValid())
 					timeout = delay(batchTime, TaskPriority::ProxyGetConsistentReadVersion);
 			}
-			when(wait(timeout.isValid() ? timeout : Never())) {
-				send_batch = true;
-			}
+			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
 			// dynamic batching monitors reply latencies
-			when(double reply_latency = waitNext(replyTimes.getFuture())){
+			when(double reply_latency = waitNext(replyTimes.getFuture())) {
 				double target_latency = reply_latency * 0.5;
 				batchTime = min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
 			}
-			when(wait(collection)){} // for errors
+			when(wait(collection)) {} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
 			ASSERT(count);
-
 			// dynamic batching
 			Promise<GetReadVersionReply> GRVReply;
 			requests.push_back(GRVReply);
-			addActor.send(timeReply(GRVReply.getFuture(), replyTimes));
+			addActor.send(timeReplyIgnoreError(GRVReply.getFuture(), replyTimes));
 
-			Future<Void> batch =
-				incrementalBroadcast(
-					getConsistentReadVersion(cx, count, flags, std::move(debugID)),
-					std::vector< Promise<GetReadVersionReply> >(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+			Future<Void> batch = incrementalBroadcastWithError(
+			    getConsistentReadVersion(cx, count, flags, std::move(debugID)),
+			    std::vector<Promise<GetReadVersionReply>>(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 			debugID = Optional<UID>();
 			requests = std::vector< Promise<GetReadVersionReply> >();
 			addActor.send(batch);
@@ -3087,8 +3071,8 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
-	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+	if (rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1) % cx->metadataVersionCache.size();
 		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
 	}
 
@@ -3143,13 +3127,14 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind)
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_batch_transaction_throttled)
 	{
 		if(e.code() == error_code_not_committed)
 			++cx->transactionsNotCommitted;
 		if(e.code() == error_code_commit_unknown_result)
 			++cx->transactionsMaybeCommitted;
-		if (e.code() == error_code_proxy_memory_limit_exceeded)
+		if (e.code() == error_code_proxy_memory_limit_exceeded || e.code() == error_code_batch_transaction_throttled)
 			++cx->transactionsResourceConstrained;
 		if (e.code() == error_code_process_behind)
 			++cx->transactionsProcessBehind;

@@ -751,8 +751,8 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
-Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+ACTOR template <class T>
+Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
 		loop {
 			wait( delay( time ) );
@@ -765,8 +765,8 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
-Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+ACTOR template <class T>
+Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 	wait( delay( time ) );
 	var->set( val );
 	return Void();
@@ -1684,6 +1684,19 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 		if( e.code() != error_code_broken_promise )
 			throw;
 	}
+	return Void();
+}
+
+ACTOR template <class T>
+Future<Void> timeReplyIgnoreError(Future<T> replyToTime, PromiseStream<double> timeOutput) {
+	state double startTime = now();
+	try {
+		T _ = wait(replyToTime);
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "ErrorInTimeReplyIgnoreError").error(e);
+	}
+	wait(delay(0));
+	timeOutput.send(now() - startTime);
 	return Void();
 }
 
