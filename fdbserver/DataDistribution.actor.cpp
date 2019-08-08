@@ -2723,6 +2723,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 			}
 
+			// Failed server should not trigger DD if SS failures are set to be ignored
+			if (!badTeam && self->healthyZone.get().present() && (self->healthyZone.get().get() == ignoreSSFailuresZoneString)) {
+				ASSERT_WE_THINK(serversLeft == self->configuration.storageTeamSize);
+			}
+
 			if( !self->initialFailureReactionDelay.isReady() ) {
 				change.push_back( self->initialFailureReactionDelay );
 			}
@@ -2880,11 +2885,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.keys = shards[i];
 						rs.priority = maxPriority;
 
-						// Failed server should not trigger DD if SS failures are set to be ignored
-						if (rs.priority == PRIORITY_TEAM_UNHEALTHY) {
-							ASSERT_WE_THINK(!(!badTeam && self->healthyZone.get().present() &&
-							                  (self->healthyZone.get().get() == ignoreSSFailuresZoneString)));
-						}
 						self->output.send(rs);
 						if(deterministicRandom()->random01() < 0.01) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
@@ -4138,7 +4138,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
-	TraceEvent("SnapDataDistributor.SnapReqEnter")
+	TraceEvent("SnapDataDistributor_SnapReqEnter")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
 	try {
@@ -4152,12 +4152,12 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForAll(disablePops));
 
-		TraceEvent("SnapDataDistributor.AfterDisableTLogPop")
+		TraceEvent("SnapDataDistributor_AfterDisableTLogPop")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
 		std::vector<WorkerInterface> storageWorkers = wait(getStorageWorkers(cx, db, true /* localOnly */));
-		TraceEvent("SnapDataDistributor.GotStorageWorkers")
+		TraceEvent("SnapDataDistributor_GotStorageWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> storageSnapReqs;
@@ -4168,7 +4168,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForAll(storageSnapReqs));
 
-		TraceEvent("SnapDataDistributor.AfterSnapStorage")
+		TraceEvent("SnapDataDistributor_AfterSnapStorage")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local tlog nodes
@@ -4180,7 +4180,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForAll(tLogSnapReqs));
 
-		TraceEvent("SnapDataDistributor.AfterTLogStorage")
+		TraceEvent("SnapDataDistributor_AfterTLogStorage")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// enable tlog pop on local tlog nodes
@@ -4192,12 +4192,12 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForAll(enablePops));
 
-		TraceEvent("SnapDataDistributor.AfterEnableTLogPops")
+		TraceEvent("SnapDataDistributor_AfterEnableTLogPops")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap the coordinators
 		std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, db));
-		TraceEvent("SnapDataDistributor.GotCoordWorkers")
+		TraceEvent("SnapDataDistributor_GotCoordWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> coordSnapReqs;
@@ -4207,11 +4207,11 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 				);
 		}
 		wait(waitForAll(coordSnapReqs));
-		TraceEvent("SnapDataDistributor.AfterSnapCoords")
+		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 	} catch (Error& e) {
-		TraceEvent("SnapDataDistributor.SnapReqExit")
+		TraceEvent("SnapDataDistributor_SnapReqExit")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID)
 			.error(e, true /*includeCancelled */);

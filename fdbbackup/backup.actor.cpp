@@ -126,7 +126,6 @@ enum {
 	OPT_CLEANUP,
 
 	OPT_TRACE_FORMAT,
-	OPT_USE_OBJECT_SERIALIZER
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
@@ -143,8 +142,6 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
@@ -184,8 +181,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -253,8 +248,6 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -285,8 +278,6 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -318,8 +309,6 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -351,8 +340,6 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -380,8 +367,6 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -411,8 +396,6 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -450,8 +433,6 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -483,8 +464,6 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -549,8 +528,6 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -593,8 +570,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -632,8 +607,6 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
@@ -664,8 +637,6 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -699,8 +670,6 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -732,8 +701,6 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -767,8 +734,6 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -798,8 +763,6 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -2893,7 +2856,6 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
-		bool useObjectSerializer = true;
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -3004,18 +2966,6 @@ int main(int argc, char* argv[]) {
 					}
 					traceFormat = args->OptionArg();
 					break;
-				case OPT_USE_OBJECT_SERIALIZER: {
-					std::string s = args->OptionArg();
-					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-					if (s == "on" || s == "true" || s == "1") {
-						useObjectSerializer = true;
-					} else if (s == "off" || s == "false" || s == "0") {
-						useObjectSerializer = false;
-					} else {
-						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-					}
-					break;
-				}
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;
@@ -3369,11 +3319,6 @@ int main(int argc, char* argv[]) {
 			setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 		}
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
-		// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as
-		// zero = false, non-zero = true.
-		setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
-		                 useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
-		                                     : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
 
 		// deferred TLS options
 		if (tlsCertPath.size()) {

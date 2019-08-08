@@ -83,6 +83,7 @@ public:
 	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
 	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
+	double TXS_POPPED_MAX_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

@@ -70,8 +70,7 @@ enum {
 	OPT_NO_STATUS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
-	OPT_TRACE_FORMAT,
-	OPT_USE_OBJECT_SERIALIZER
+	OPT_TRACE_FORMAT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -89,8 +88,6 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
-	                                  { OPT_USE_OBJECT_SERIALIZER, "-S", SO_REQ_SEP },
-	                                  { OPT_USE_OBJECT_SERIALIZER, "--object-serializer", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -489,10 +486,6 @@ void initHelp() {
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
-	helpMap["snapshot"] = CommandHelp(
-		"snapshot <BINARY-PATH>:<ARG1=VAL1>,<ARG2=VAL2>,...",
-		"snapshot the database",
-		"invokes binary provided in binary-path with the arg,value pairs on TLog, Storage and Coordinators nodes. UID is a reserved ARG key.");
 	helpMap["setclass"] = CommandHelp(
 		"setclass <ADDRESS> <unset|storage|transaction|default>",
 		"change the class of a process",
@@ -558,11 +551,12 @@ void initHelp() {
 		"Calling this command with `on' prevents data distribution from moving data away from the processes with the specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this command with `off' will disable maintenance.\n");
 	helpMap["consistencycheck"] = CommandHelp(
 		"consistencycheck [on|off]",
-		"enables or disables consistencycheck",
-		"Calling this command with `on' enables consistency check to run and `off' will disable the same. Calling this command with no arguments will display setting for consistency check.\n");
+		"permits or prevents consistency checking",
+		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
+	hiddenCommands.insert("snapshot");
 }
 
 void printVersion() {
@@ -2415,7 +2409,6 @@ struct CLIOptions {
 	bool trace;
 	std::string traceDir;
 	std::string traceFormat;
-	bool useObjectSerializer = true;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2517,20 +2510,6 @@ struct CLIOptions {
 			    }
 			    traceFormat = args.OptionArg();
 			    break;
-		    case OPT_USE_OBJECT_SERIALIZER: {
-			    std::string s = args.OptionArg();
-			    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-			    if (s == "on" || s == "true" || s == "1") {
-				    useObjectSerializer = true;
-			    } else if (s == "off" || s == "false" || s == "0") {
-				    useObjectSerializer = false;
-			    } else {
-				    fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-				    printProgramUsage(program_name.c_str());
-				    flushAndExit(FDB_EXIT_ERROR);
-			    }
-			    break;
-		    }
 		    case OPT_VERSION:
 			    printVersion();
 			    return FDB_EXIT_SUCCESS;
@@ -3647,12 +3626,6 @@ int main(int argc, char **argv) {
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
-	// The USE_OBJECT_SERIALIZER network option expects an 8 byte little endian integer which is interpreted as zero =
-	// false, non-zero = true.
-	setNetworkOption(FDBNetworkOptions::USE_OBJECT_SERIALIZER,
-	                 opt.useObjectSerializer ? LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00")
-	                                         : LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00"));
-
 	initHelp();
 
 	// deferred TLS options
