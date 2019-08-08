@@ -1275,7 +1275,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("ServerID", server.first.toString())
 			    .detail("ServerTeamOwned", server.second->teams.size())
 			    .detail("MachineID", server.second->machine->machineID.contents().toString())
-				.detail("StoreType", server.second->storeType.toString());
+				.detail("StoreType", server.second->storeType.toString())
+				.detail("InDesiredDC", server.second->inDesiredDC)
+				.detail("ToRemove", server.second->toRemove);
 		}
 		for (auto& server : server_info) {
 			const UID& uid = server.first;
@@ -2170,6 +2172,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		} else {
 			// Recruit more servers in the hope that we will get enough machines
+			TraceEvent("BuildTeam").detail("RestartRecruiting", "Because not enough machines");
 			self->restartRecruiting.trigger();
 		}
 
@@ -3300,8 +3303,11 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 
 		self->server_status.set( interf.id(), *status );
 		TraceEvent("MXTEST").detail("DDID", self->distributorId).detail("Server", interf.id()).detail("Unhealthy", status->isUnhealthy()).detail("Status", status->toString());
-		if( status->isFailed )
+		if( status->isFailed ) {
 			self->restartRecruiting.trigger();
+			TraceEvent("MXTESTTriggerRestartRecruiting").detail("DDID", self->distributorId).detail("Server", interf.id());
+			wait(delay(0.1));
+		}
 
 		Future<Void> healthChanged = Never();
 		if(status->isFailed) {
@@ -3362,7 +3368,7 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
-	state bool hasWrongDC = false;
+	state bool hasWrongDC = !inCorrectDC(self, server);
 	state bool toRemoveWrongStoreType = false;
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 
