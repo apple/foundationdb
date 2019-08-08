@@ -44,7 +44,7 @@ ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Ve
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
-	int32_t txsTags;
+	int32_t txsTags; // The number of txsTags, which may change across generations.
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
@@ -167,7 +167,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
-	std::set<int8_t> pseudoLocalities;
+	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	std::map<int8_t, Version> pseudoLocalityPopVersion;
 
 	// new members
