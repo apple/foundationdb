@@ -298,14 +298,14 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
 	if (creating) {
-		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
+		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
 	}
 
 	state Future<Void> tooLong = delay(60);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state bool oldReplicationUsesDcId = false;
 	loop {
 		try {
@@ -763,7 +763,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 
 ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 
 	if(!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; //FIXME: correct return type
@@ -790,7 +790,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			}
 
 			if(conf.address_class.size())
-				tr.set(processClassChangeKey, g_random->randomUniqueID().toString());
+				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			if(conf.auto_logs != conf.old_logs)
 				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
@@ -950,7 +950,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if ( old.coordinators() == desiredCoordinators && old.clusterKeyName() == newName)
 				return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
-			state ClusterConnectionString conn( desiredCoordinators, StringRef( newName + ':' + g_random->randomAlphaNumeric( 32 ) ) );
+			state ClusterConnectionString conn( desiredCoordinators, StringRef( newName + ':' + deterministicRandom()->randomAlphaNumeric( 32 ) ) );
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
@@ -967,7 +967,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			vector<Future<Optional<LeaderInfo>>> leaderServers;
 			ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
 			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
-				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskCoordinationReply ) );
+				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
 			choose {
 				when( wait( waitForAll( leaderServers ) ) ) {}
@@ -1047,7 +1047,7 @@ struct AutoQuorumChange : IQuorumChange {
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
 		for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
-			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskCoordinationReply ) );
+			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 		Optional<vector<Optional<LeaderInfo>>> results = wait( timeout( getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY ) );
 		if (!results.present()) return false;  // Not all responded
 		for(auto& r : results.get())
@@ -1124,7 +1124,7 @@ struct AutoQuorumChange : IQuorumChange {
 
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
-		g_random->randomShuffle(remainingWorkers);
+		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
 
@@ -1197,8 +1197,8 @@ Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuo
 
 ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
+	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
 
 	loop {
 		try {
@@ -1227,8 +1227,8 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
 	state bool includeAll = false;
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
+	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
 
 	loop {
 		try {
@@ -1301,7 +1301,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 			}
 
 			if(foundChange)
-				tr.set(processClassChangeKey, g_random->randomUniqueID().toString());
+				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			wait( tr.commit() );
 			return Void();
@@ -1403,11 +1403,12 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 					rd >> oldMode;
 				}
 			}
-			if (!mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			}
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 
 			tr.set( dataDistributionModeKey, wr.toValue() );
 
@@ -1420,13 +1421,16 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+                                                                bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return Void();
+	if (!excl.size()) return inProgressExclusion;
 
 	loop {
 		state Transaction tr(cx);
+
 		try {
 			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
@@ -1439,11 +1443,12 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
 			state bool ok = true;
+			inProgressExclusion.clear();
 			for(auto& s : serverList) {
 				auto addr = decodeServerListValue( s.value ).address();
 				if ( addressExcluded(exclusions, addr) ) {
 					ok = false;
-					break;
+					inProgressExclusion.insert(addr);
 				}
 			}
 
@@ -1454,23 +1459,38 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 				for( auto const& log : logs.first ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 				for( auto const& log : logs.second ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 			}
 
-			if (ok) return Void();
+			if (ok) return inProgressExclusion;
+			if (!waitForAllExcluded) break;
 
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			wait( tr.onError(e) );
 		}
+	}
+
+	return inProgressExclusion;
+}
+
+ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+	state UID snapUID = deterministicRandom()->randomUniqueID();
+	try {
+		wait(snapCreate(cx, snapCmd, snapUID));
+		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
+		return snapUID;
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
+		throw;
 	}
 }
 
@@ -1851,7 +1871,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		workers.push_back(data);
 	}
 
-	auto noAssignIndex = g_random->randomInt(0, workers.size());
+	auto noAssignIndex = deterministicRandom()->randomInt(0, workers.size());
 	workers[noAssignIndex].processClass._class = ProcessClass::CoordinatorClass;
 
 	change.addDesiredWorkers(chosen, workers, 5, excluded);

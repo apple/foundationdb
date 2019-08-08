@@ -1,0 +1,37 @@
+;write 1000 Keys ending with even number
+testTitle=SnapSimplePre
+        testName=SnapTest
+        numSnaps=1
+        maxSnapDelay=30.0
+        testID=0
+        clearAfterTest=false
+
+;take snap
+testTitle=SnapSimpleTakeSnap
+        testName=SnapTest
+        numSnaps=1
+        maxSnapDelay=5.0
+        testID=1
+        clearAfterTest=false
+
+;write 1000 Keys ending with odd number
+testTitle=SnapSimplePost
+        testName=SnapTest
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=2
+        clearAfterTest=false
+
+;snapCreate with binary path that is not whitelisted
+        testTitle=SnapCreateNotWhitelistedBinaryPath
+        testName=SnapTest
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=4
+
+;save and shutdown
+testTitle=SnapSimpleShutdown
+        testName=SaveAndKill
+        restartInfoLocation=simfdb/restartInfo.ini
+        testDuration=10.0
+        isRestoring=1

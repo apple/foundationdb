@@ -36,6 +36,14 @@ const KeyRef keyServersEnd = keyServersKeys.end;
 const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
+// list of reserved exec commands
+const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent state of
+                                                     // storage, TLog and coordinated state
+const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
+const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
+// used to communicate snap failures between TLog and SnapTest Workload, used only in simulator
+const StringRef snapTestFailStatus = LiteralStringRef("\xff/SnapTestFailStatus/");
+
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
 }
@@ -173,7 +181,7 @@ Version decodeServerTagHistoryKey( KeyRef const& key ) {
 Tag decodeServerTagValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, IncludeVersion() );
-	if( reader.protocolVersion() < 0x0FDB00A560010001LL ) {
+	if(!reader.protocolVersion().hasTagLocality()) {
 		int16_t id;
 		reader >> id;
 		if(id == invalidTagOld) {
@@ -433,6 +441,9 @@ const UID dataDistributionModeLock = UID(6345,3425);
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
 const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+
+// ConsistencyCheck settings
+const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
 
 // Request latency measurement key
 const KeyRef latencyBandConfigKey = LiteralStringRef("\xff\x02/latencyBandConfig");

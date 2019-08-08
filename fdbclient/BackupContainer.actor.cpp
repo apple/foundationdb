@@ -334,14 +334,14 @@ public:
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) {
-		std::string fileName = format("range,%" PRId64 ",%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
+		std::string fileName = format("range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
 
 		// In order to test backward compatibility in simulation, sometimes write to the old path format
-		if(g_network->isSimulated() && g_random->coinflip()) {
+		if(g_network->isSimulated() && deterministicRandom()->coinflip()) {
 			return writeFile(old_rangeVersionFolderString(fileVersion) + fileName);
 		}
 
@@ -1224,7 +1224,7 @@ public:
 		if(g_network->isSimulated()) {
 			if(!fileExists(fullPath))
 				throw file_not_found();
-			std::string uniquePath = fullPath + "." + g_random->randomUniqueID().toString() + ".lnk";
+			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 			fullPath = uniquePath = uniquePath;
@@ -1243,16 +1243,16 @@ public:
 				blockSize = atoi(path.substr(lastComma + 1).c_str());
 			}
 			if(blockSize <= 0) {
-				blockSize = g_random->randomInt(1e4, 1e6);
+				blockSize = deterministicRandom()->randomInt(1e4, 1e6);
 			}
-			if(g_random->random01() < .01) {
-				blockSize /= g_random->randomInt(1, 3);
+			if(deterministicRandom()->random01() < .01) {
+				blockSize /= deterministicRandom()->randomInt(1, 3);
 			}
 
 			return map(f, [=](Reference<IAsyncFile> fr) {
-				int readAhead = g_random->randomInt(0, 3);
-				int reads = g_random->randomInt(1, 3);
-				int cacheSize = g_random->randomInt(0, 3);
+				int readAhead = deterministicRandom()->randomInt(0, 3);
+				int reads = deterministicRandom()->randomInt(1, 3);
+				int cacheSize = deterministicRandom()->randomInt(0, 3);
 				return Reference<IAsyncFile>(new AsyncFileReadAheadCache(fr, blockSize, readAhead, reads, cacheSize));
 			});
 		}
@@ -1295,7 +1295,7 @@ public:
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 		std::string fullPath = joinPath(m_path, path);
 		platform::createDirectory(parentDirectory(fullPath));
-		std::string temp = fullPath  + "." + g_random->randomUniqueID().toString() + ".temp";
+		std::string temp = fullPath  + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 		Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 		return map(f, [=](Reference<IAsyncFile> f) {
 			return Reference<IBackupFile>(new BackupFile(path, f, fullPath));
@@ -1730,7 +1730,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 	if(size > 0) {
 		content = makeString(size);
 		for(int i = 0; i < content.size(); ++i)
-			mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
+			mutateString(content)[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
 
 		wait(f->append(content.begin(), content.size()));
 	}
@@ -1749,7 +1749,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 
 // Randomly advance version by up to 1 second of versions
 Version nextVersion(Version v) {
-	int64_t increment = g_random->randomInt64(1, CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	int64_t increment = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 	return v + increment;
 }
 
@@ -1773,20 +1773,20 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state std::map<Version, int64_t> snapshotSizes;
 	state int nRangeFiles = 0;
 	state std::map<Version, std::string> logs;
-	state Version v = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 2);
+	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = {0, 10000000, 5000005};
 
 	loop {
 		state Version logStart = v;
-		state int kvfiles = g_random->randomInt(0, 3);
+		state int kvfiles = deterministicRandom()->randomInt(0, 3);
 
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
 				snapshotSizes[v] = 0;
-				if(g_random->coinflip()) {
+				if(deterministicRandom()->coinflip()) {
 					v = nextVersion(v);
 				}
 			}
@@ -1799,7 +1799,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			snapshotSizes.rbegin()->second += size;
 			writes.push_back(writeAndVerifyFile(c, range, size));
 
-			if(g_random->random01() < .2) {
+			if(deterministicRandom()->random01() < .2) {
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
 				snapshotSizes[v] = 0;
@@ -1809,7 +1809,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			--kvfiles;
 		}
 
-		if(logStart == v || g_random->coinflip()) {
+		if(logStart == v || deterministicRandom()->coinflip()) {
 			v = nextVersion(v);
 		}
 		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
@@ -1818,7 +1818,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		writes.push_back(writeAndVerifyFile(c, log, size));
 
 		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
-		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && g_random->random01() < .2) {
+		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && deterministicRandom()->random01() < .2) {
 			snapshots.erase(snapshots.rbegin()->first);
 			break;
 		}
@@ -1918,7 +1918,7 @@ TEST_CASE("/backup/containers_list") {
 TEST_CASE("/backup/time") {
 	// test formatTime()
 	for(int i = 0; i < 1000; ++i) {
-		int64_t ts = g_random->randomInt64(0, std::numeric_limits<int32_t>::max());
+		int64_t ts = deterministicRandom()->randomInt64(0, std::numeric_limits<int32_t>::max());
 		ASSERT(BackupAgentBase::parseTime(BackupAgentBase::formatTime(ts)) == ts);
 	}
 

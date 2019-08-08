@@ -92,6 +92,10 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
+	if(endpoint.token.first() == -1) {
+		TraceEvent("WellKnownEndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("TokenFirst", endpoint.token.first()).detail("TokenSecond", endpoint.token.second());
+		return;
+	}
 	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }

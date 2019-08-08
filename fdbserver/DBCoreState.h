@@ -65,7 +65,7 @@ struct CoreTLogSet {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+		if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 			tLogVersion = TLogVersion::V2;
 		} else {
 			serializer(ar, tLogVersion);
@@ -76,19 +76,20 @@ struct CoreTLogSet {
 struct OldTLogCoreData {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
-	OldTLogCoreData() : epochEnd(0), logRouterTags(0) {}
+	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator == (OldTLogCoreData const& rhs) const { 
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
+		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+		if( ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, epochEnd);
 		}
 		else if(ar.isDeserializing) {
@@ -96,8 +97,11 @@ struct OldTLogCoreData {
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
-		if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+		if (ar.protocolVersion().hasPseudoLocalities()) {
 			serializer(ar, pseudoLocalities);
+		}
+		if (ar.protocolVersion().hasShardedTxsTags()) {
+			serializer(ar, txsTags);
 		}
 	}
 };
@@ -105,12 +109,13 @@ struct OldTLogCoreData {
 struct DBCoreState {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
 	
-	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
+	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -130,23 +135,26 @@ struct DBCoreState {
 	}
 
 	bool isEqual(DBCoreState const& r) const {
-		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags && pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		if(g_network->isSimulated() && ar.protocolVersion() < 0x0FDB00A460010001LL) {
+		if(g_network->isSimulated() && !ar.protocolVersion().hasMultiGenerationTLog()) {
 			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
 			flushAndExit(0);
 		}
 		
-		ASSERT(ar.protocolVersion() >= 0x0FDB00A460010001LL);
-		if(ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+		ASSERT(ar.protocolVersion().hasMultiGenerationTLog());
+		if(ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
-			if (ar.protocolVersion() > 0x0FDB00B061060001LL) {
+			if (ar.protocolVersion().hasPseudoLocalities()) {
 				serializer(ar, pseudoLocalities);
+			}
+			if (ar.protocolVersion().hasShardedTxsTags()) {
+				serializer(ar, txsTags);
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

@@ -236,7 +236,7 @@ public:
 				totalDensity += pdf[i];
 
 			int cumulativeDensity = 0;
-			int random = g_random->randomInt(0, totalDensity);
+			int random = deterministicRandom()->randomInt(0, totalDensity);
 			for(int i = 0; i < pdf.size() - 1; i++) {
 				if(cumulativeDensity + pdf[i] <= random && random < cumulativeDensity + pdf[i] + pdf[i + 1]) {
 					operation = (OperationType)i;
@@ -250,7 +250,7 @@ public:
 
 			//Test the set operation
 			if(operation == SET) {
-				bool useShortKeys = g_random->randomInt(0, 2) == 1;
+				bool useShortKeys = deterministicRandom()->randomInt(0, 2) == 1;
 				int minKeyLength = useShortKeys ? self->minShortKeyLength : self->minLongKeyLength;
 				int maxKeyLength = useShortKeys ? self->maxShortKeyLength : self->maxLongKeyLength;
 
@@ -415,8 +415,8 @@ public:
 		state Key end = std::max(key, key2);
 
 		//Generate a random maximum number of results
-		state int limit = g_random->randomInt(0, 101);
-		state bool reverse = g_random->random01() > 0.5 ? false : true;
+		state int limit = deterministicRandom()->randomInt(0, 101);
+		state bool reverse = deterministicRandom()->random01() > 0.5 ? false : true;
 
 		//Get the range from memory
 		state Standalone<RangeResultRef> storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
@@ -501,8 +501,8 @@ public:
 		}
 
 		//Choose a random maximum number of results
-		state int limit = g_random->randomInt(0, 101);
-		state bool reverse = g_random->random01() < 0.5 ? false : true;
+		state int limit = deterministicRandom()->randomInt(0, 101);
+		state bool reverse = deterministicRandom()->random01() < 0.5 ? false : true;
 
 		//Get the range from the memory store
 		state Standalone<RangeResultRef> storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);

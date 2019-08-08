@@ -44,13 +44,14 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-                ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
+                ASSERT( ar.protocolVersion().isValid() );
         }
 		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
+		getCommitVersion.getEndpoint( TaskPriority::ProxyGetConsistentReadVersion );
+		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
 	}
 };
 

@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
+#include "flow/FastRef.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
 #include <ext/hash_map>
@@ -65,7 +66,8 @@ template <class Ar> void save( Ar& ar, UID const& uid ) { const_cast<UID&>(uid).
 template <>
 struct scalar_traits<UID> : std::true_type {
 	constexpr static size_t size = sizeof(uint64_t[2]);
-	static void save(uint8_t* out, const UID& uid) {
+	template <class Context>
+	static void save(uint8_t* out, const UID& uid, Context&) {
 		uint64_t* outI = reinterpret_cast<uint64_t*>(out);
 		outI[0] = uid.first();
 		outI[1] = uid.second();
@@ -98,6 +100,9 @@ public:
 	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
 	virtual uint64_t peek() const = 0;  // returns something that is probably different for different random states.  Deterministic (and idempotent) for a deterministic generator.
 
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
 	// The following functions have fixed implementations for now:
 	template <class C>
 	decltype((fake<const C>()[0])) randomChoice( const C& c ) { return c[randomInt(0,(int)c.size())]; }
@@ -116,9 +121,19 @@ public:
 	bool coinflip() { return (this->random01() < 0.5); }
 };
 
-extern IRandom* g_random;
-extern IRandom* g_nondeterministic_random;
-extern IRandom* g_debug_random;
 extern FILE* randLog;
+
+// Sets the seed for the deterministic random number generator on the current thread
+void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+
+// Returns the random number generator that can be seeded. This generator should only 
+// be used in contexts where the choice to call it is deterministic.
+//
+// This generator is only deterministic if given a seed using setThreadLocalDeterministicRandomSeed
+Reference<IRandom> deterministicRandom();
+
+// A random number generator that cannot be manually seeded and may be called in 
+// non-deterministic contexts.
+Reference<IRandom> nondeterministicRandom();
 
 #endif

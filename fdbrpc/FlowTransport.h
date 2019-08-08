@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 
@@ -80,7 +81,7 @@ public:
 				choosePrimaryAddress();
 			}
 		} else {
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasEndpointAddrList()) {
 				addresses.secondaryAddress = Optional<NetworkAddress>();
 				serializer(ar, addresses.address, token);
 			} else {
@@ -109,9 +110,11 @@ public:
 	FlowTransport(uint64_t transportId);
 	~FlowTransport();
 
-	static void createInstance(uint64_t transportId = 0);
+	static void createInstance(bool isClient, uint64_t transportId);
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
 	// so it will be private to a simulation.
+
+	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 
 	void initMetrics();
 	// Metrics must be initialized after FlowTransport::createInstance has been called
@@ -129,19 +132,19 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
-	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
-	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 
-	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
 

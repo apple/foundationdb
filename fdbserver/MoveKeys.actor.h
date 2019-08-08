@@ -37,15 +37,20 @@ struct MoveKeysLock {
 	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
 };
 
-ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID masterId);
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
-// has been executed by a different locker since takeMoveKeysLock().
-// takeMoveKeysLock itself is a read-only operation - it does not conflict with other
-// attempts to take the lock.
+// has been executed by a different locker since takeMoveKeysLock(), as calling
+// takeMoveKeysLock() updates "moveKeysLockOwnerKey" to a random UID.
+ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 
-Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock );
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
+Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock);
+
+bool isDDEnabled();
+// checks if the in-memory DDEnabled flag is set
+
+bool setDDEnabled(bool status, UID snapUID);
+// sets the in-memory DDEnabled flag
 
 void seedShardServers(
 	Arena& trArena,

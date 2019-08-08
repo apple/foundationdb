@@ -16,7 +16,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 
 	TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startTime = getOption(options, LiteralStringRef("startTime"), 0.0);
-		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), g_random->randomInt(1, 10));
+		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, LiteralStringRef("delayBetweenRecoveries"), 0.0);
 		killAllProportion = getOption(options, LiteralStringRef("killAllProportion"), 0.1);
 		ASSERT(numRecoveries > 0 && startTime >= 0 and delayBetweenRecoveries >= 0);
@@ -114,7 +114,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		state int numRecoveriesDone = 0;
 		try {
 			loop {
-				if (g_random->random01() < self->killAllProportion) {
+				if (deterministicRandom()->random01() < self->killAllProportion) {
 					wait(self->killAll(cx));
 				} else {
 					wait(self->changeResolverConfig(cx, self));

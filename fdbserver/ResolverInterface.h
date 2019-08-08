@@ -37,15 +37,15 @@ struct ResolverInterface {
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	ResolverInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }
 	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		metrics.getEndpoint( TaskResolutionMetrics );
-		split.getEndpoint( TaskResolutionMetrics );
+		metrics.getEndpoint( TaskPriority::ResolutionMetrics );
+		split.getEndpoint( TaskPriority::ResolutionMetrics );
 	}
 
 	template <class Ar> 

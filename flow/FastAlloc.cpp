@@ -82,21 +82,23 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	threadInitFunction = f; 
 }
 
-int64_t g_hugeArenaMemory = 0;
+std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
 std::map<std::string, std::pair<int,int>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
-	auto& info = hugeArenaTraces[platform::get_backtrace()];
-	info.first++;
-	info.second+=size;
-	if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
-		for(auto& it : hugeArenaTraces) {
-			TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+	if(TraceEvent::isNetworkThread()) {
+		auto& info = hugeArenaTraces[platform::get_backtrace()];
+		info.first++;
+		info.second+=size;
+		if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
+			for(auto& it : hugeArenaTraces) {
+				TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+			}
+			hugeArenaLastLogged = now();
+			hugeArenaTraces.clear();
 		}
-		hugeArenaLastLogged = now();
-		hugeArenaTraces.clear();
 	}
 }
 
@@ -443,7 +445,7 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
-	if(FLOW_KNOBS && g_trace_depth == 0 && g_nondeterministic_random && g_nondeterministic_random->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+	if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
 		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
 	}
 	block = (void **)::allocate(magazine_size * Size, false);

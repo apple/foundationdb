@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
@@ -42,13 +42,22 @@ struct ClusterInterface {
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
+	bool hasMessage() {
+		return openDatabase.getFuture().isReady() ||
+		failureMonitoring.getFuture().isReady() || 
+		databaseStatus.getFuture().isReady() ||
+		ping.getFuture().isReady() ||
+		getClientWorkers.getFuture().isReady() ||
+		forceRecovery.getFuture().isReady();
+	}
+
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskClusterController );
-		failureMonitoring.getEndpoint( TaskFailureMonitor );
-		databaseStatus.getEndpoint( TaskClusterController );
-		ping.getEndpoint( TaskClusterController );
-		getClientWorkers.getEndpoint( TaskClusterController );
-		forceRecovery.getEndpoint( TaskClusterController );
+		openDatabase.getEndpoint( TaskPriority::ClusterController );
+		failureMonitoring.getEndpoint( TaskPriority::FailureMonitor );
+		databaseStatus.getEndpoint( TaskPriority::ClusterController );
+		ping.getEndpoint( TaskPriority::ClusterController );
+		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
+		forceRecovery.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
@@ -130,26 +139,41 @@ struct ClientVersionRef {
 	}
 };
 
+template <class T>
+struct ItemWithExamples {
+	T item;
+	int count;
+	std::vector<std::pair<NetworkAddress,Key>> examples;
+
+	ItemWithExamples() : item{}, count(0) {}
+	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress,Key>> const& examples) : item(item), count(count), examples(examples) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, item, count, examples);
+	}
+};
+
 struct OpenDatabaseRequest {
 	constexpr static FileIdentifier file_identifier = 2799502;
 	// Sent by the native API to the cluster controller to open a database and track client
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
-	Arena arena;
-	StringRef traceLogGroup;
-	VectorRef<StringRef> issues;
-	VectorRef<ClientVersionRef> supportedVersions;
-	int connectedCoordinatorsNum; // Number of coordinators connected by the client
+
+	int clientCount;
+	std::vector<ItemWithExamples<Key>> issues;
+	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
+	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
+	
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A400040001LL);
+			ASSERT(ar.protocolVersion().hasOpenDatabase());
 		}
-		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply,
-				   arena);
+		serializer(ar, clientCount, issues, supportedVersions, maxProtocolSupported, knownClientInfoID, reply);
 	}
 };
 

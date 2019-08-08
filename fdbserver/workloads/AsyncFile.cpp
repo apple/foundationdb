@@ -30,7 +30,7 @@ RandomByteGenerator::RandomByteGenerator(){
 	BUF_SIZE = 16*(1<<20);
 	b1 = new char[BUF_SIZE];
 	for (int i=0;i<BUF_SIZE/sizeof(uint32_t);i++)
-		((uint32_t*)b1)[i] = g_random->randomUInt32();
+		((uint32_t*)b1)[i] = deterministicRandom()->randomUInt32();
 }
 
 RandomByteGenerator::~RandomByteGenerator(){
@@ -41,9 +41,9 @@ RandomByteGenerator::~RandomByteGenerator(){
 void RandomByteGenerator::writeRandomBytesToBuffer(void *buf, int bytes){
 	ASSERT(bytes < BUF_SIZE-1);
 	int o1, o2;
-	o1 = g_random->randomInt(0, BUF_SIZE-bytes) / 8;
+	o1 = deterministicRandom()->randomInt(0, BUF_SIZE-bytes) / 8;
 	do {
-		o2 = g_random->randomInt(0, BUF_SIZE-bytes) / 8;
+		o2 = deterministicRandom()->randomInt(0, BUF_SIZE-bytes) / 8;
 	} while (o1==o2);
 
 	int64_t *out64 = (int64_t*)buf;

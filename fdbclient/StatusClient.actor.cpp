@@ -291,7 +291,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 
 		state vector<Future<Optional<LeaderInfo>>> leaderServers;
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskCoordinationReply));
+			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
 
 		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
 
@@ -502,10 +502,10 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 							StatusObject::Map &faultToleranceWriteable = statusObjCluster["fault_tolerance"].get_obj();
 							StatusObjectReader faultToleranceReader(faultToleranceWriteable);
 							int maxDataLoss, maxAvailLoss;
-							if (faultToleranceReader.get("max_machine_failures_without_losing_data", maxDataLoss) && faultToleranceReader.get("max_machine_failures_without_losing_availability", maxAvailLoss)) {
-								// max_machine_failures_without_losing_availability <= max_machine_failures_without_losing_data
-								faultToleranceWriteable["max_machine_failures_without_losing_data"] = std::min(maxDataLoss, coordinatorsFaultTolerance);
-								faultToleranceWriteable["max_machine_failures_without_losing_availability"] = std::min(maxAvailLoss, coordinatorsFaultTolerance);
+							if (faultToleranceReader.get("max_zone_failures_without_losing_data", maxDataLoss) && faultToleranceReader.get("max_zone_failures_without_losing_availability", maxAvailLoss)) {
+								// max_zone_failures_without_losing_availability <= max_zone_failures_without_losing_data
+								faultToleranceWriteable["max_zone_failures_without_losing_data"] = std::min(maxDataLoss, coordinatorsFaultTolerance);
+								faultToleranceWriteable["max_zone_failures_without_losing_availability"] = std::min(maxAvailLoss, coordinatorsFaultTolerance);
 							}
 						}
 					}

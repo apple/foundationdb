@@ -8,4 +8,4 @@ pointReadsPerTransaction=10
 rangeReadsPerTransaction=1
 rangeReadSize=10
 samplingProbability=0.01
-readTransactions=100
+readTransactions=10

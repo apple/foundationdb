@@ -1,5 +1,5 @@
 /*
- * serialize.h
+ * flat_buffers.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,21 +30,22 @@
 
 namespace detail {
 
-bool TraverseMessageTypes::vtableGeneratedBefore(const std::type_index& idx) {
-	return !f.known_types.insert(idx).second;
+namespace {
+std::vector<int> mWriteToOffsetsMemoy;
 }
 
-VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& members,
-                       const std::vector<unsigned>& alignments) {
+std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+
+VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
 	}
 	// first is index, second is size
 	std::vector<std::pair<unsigned, unsigned>> indexed;
-	indexed.reserve(members.size());
-	for (unsigned i = 0; i < members.size(); ++i) {
-		if (members[i] > 0) {
-			indexed.emplace_back(i, members[i]);
+	indexed.reserve(numMembers);
+	for (unsigned i = 0; i < numMembers; ++i) {
+		if (sizesAlignments[i] > 0) {
+			indexed.emplace_back(i, sizesAlignments[i]);
 		}
 	}
 	std::stable_sort(indexed.begin(), indexed.end(),
@@ -52,15 +53,15 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& members,
 		                 return lhs.second > rhs.second;
 	                 });
 	VTable result;
-	result.resize(members.size() + 2);
+	result.resize(numMembers + 2);
 	// size of the vtable is
 	// - 2 bytes per member +
 	// - 2 bytes for the size entry +
 	// - 2 bytes for the size of the object
-	result[0] = 2 * members.size() + 4;
+	result[0] = 2 * numMembers + 4;
 	int offset = 0;
 	for (auto p : indexed) {
-		auto align = alignments[p.first];
+		auto align = sizesAlignments[numMembers + p.first];
 		auto& res = result[p.first + 2];
 		res = offset % align == 0 ? offset : ((offset / align) + 1) * align;
 		offset = res + p.second;
@@ -78,8 +79,10 @@ TEST_CASE("flow/FlatBuffers/test") {
 	auto* vtable1 = detail::get_vtable<int>();
 	auto* vtable2 = detail::get_vtable<uint8_t, uint8_t, int, int64_t, int>();
 	auto* vtable3 = detail::get_vtable<uint8_t, uint8_t, int, int64_t, int>();
+	auto* vtable4 = detail::get_vtable<uint32_t>();
 	ASSERT(vtable1 != vtable2);
 	ASSERT(vtable2 == vtable3);
+	ASSERT(vtable1 == vtable4); // Different types, but same vtable! Saves space in encoded messages
 	ASSERT(vtable1->size() == 3);
 	ASSERT(vtable2->size() == 7);
 	ASSERT((*vtable2)[0] == 14);
@@ -162,11 +165,19 @@ struct Root {
 	}
 };
 
+struct TestContextArena {
+	Arena& _arena;
+	Arena& arena() { return _arena; }
+	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	uint8_t* allocate(size_t size) { return new (_arena) uint8_t[size]; }
+};
+
 TEST_CASE("flow/FlatBuffers/collectVTables") {
 	Root root;
-	const auto* vtables = detail::get_vtableset(root);
-	ASSERT(vtables == detail::get_vtableset(root));
-	ASSERT(vtables->offsets.size() == 3);
+	Arena arena;
+	TestContextArena context{ arena };
+	const auto* vtables = detail::get_vtableset(root, context);
+	ASSERT(vtables == detail::get_vtableset(root, context));
 	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
 	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
 	int root_offset = vtables->offsets.at(&root_vtable);
@@ -212,9 +223,12 @@ struct Arena {
 	}
 };
 
-struct DummyContext {
-	Arena a;
-	Arena& arena() { return a; }
+struct TestContext {
+	Arena& _arena;
+	Arena& arena() { return _arena; }
+	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	uint8_t* allocate(size_t size) { return _arena(size); }
+	TestContext& context() { return *this; }
 };
 
 TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
@@ -223,7 +237,8 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	auto out = detail::save(arena, root, FileIdentifier{});
+	TestContext context{ arena };
+	auto out = detail::save(context, root, FileIdentifier{});
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -235,7 +250,6 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 	ASSERT(root.c.c == root2.c.c);
 
 	root2 = {};
-	DummyContext context;
 	detail::load(root2, out, context);
 
 	ASSERT(root.a == root2.a);
@@ -255,7 +269,8 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	const auto* out = save_members(arena, FileIdentifier{}, root.a, root.b, root.c);
+	TestContext context{arena};
+	const auto* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -267,7 +282,6 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 	ASSERT(root.c.c == root2.c.c);
 
 	root2 = {};
-	DummyContext context;
 	load_members(out, context, root2.a, root2.b, root2.c);
 
 	ASSERT(root.a == root2.a);
@@ -286,32 +300,32 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 namespace unit_tests {
 
 TEST_CASE("flow/FlatBuffers/variant") {
-	using V = std::variant<int, double, Nested2>;
+	using V = boost::variant<int, double, Nested2>;
 	V v1;
 	V v2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
 	v1 = 1;
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(std::get<int>(v1) == std::get<int>(v2));
+	ASSERT(boost::get<int>(v1) == boost::get<int>(v2));
 
 	v1 = 1.0;
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(std::get<double>(v1) == std::get<double>(v2));
+	ASSERT(boost::get<double>(v1) == boost::get<double>(v2));
 
 	v1 = Nested2{ 1, { "abc", "def" }, 2 };
-	out = save_members(arena, FileIdentifier{}, v1);
+	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(std::get<Nested2>(v1).a == std::get<Nested2>(v2).a);
-	ASSERT(std::get<Nested2>(v1).b == std::get<Nested2>(v2).b);
-	ASSERT(std::get<Nested2>(v1).c == std::get<Nested2>(v2).c);
+	ASSERT(boost::get<Nested2>(v1).a == boost::get<Nested2>(v2).a);
+	ASSERT(boost::get<Nested2>(v1).b == boost::get<Nested2>(v2).b);
+	ASSERT(boost::get<Nested2>(v1).c == boost::get<Nested2>(v2).c);
 	return Void();
 }
 
@@ -319,60 +333,19 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	std::vector<bool> x1 = { true, false, true, false, true };
 	std::vector<bool> x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, x2);
 	ASSERT(x1 == x2);
 	return Void();
 }
 
-struct DynamicSizeThingy {
-	std::string x;
-	mutable int saves = 0;
-};
-
 } // namespace unit_tests
 
-template <>
-struct dynamic_size_traits<unit_tests::DynamicSizeThingy> : std::true_type {
-private:
-	using T = unit_tests::DynamicSizeThingy;
-
-public:
-	static WriteRawMemory save(const T& t) {
-		++t.saves;
-		T* t2 = new T(t);
-		return { { ownedPtr(reinterpret_cast<const uint8_t*>(t2->x.data()), [t2](auto*) { delete t2; }),
-			       t2->x.size() } };
-	}
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t* p, size_t n, T& t, Context&) {
-		t.x.assign(reinterpret_cast<const char*>(p), n);
-	}
-};
-
 namespace unit_tests {
-
-TEST_CASE("flow/FlatBuffers/dynamic_size_owned") {
-	DynamicSizeThingy x1 = { "abcdefg" };
-	DynamicSizeThingy x2;
-	Arena arena;
-	DummyContext context;
-	const uint8_t* out;
-
-	out = save_members(arena, FileIdentifier{}, x1);
-	ASSERT(x1.saves == 1);
-	// print_buffer(out, arena.get_size(out));
-	load_members(out, context, x2);
-	ASSERT(x1.x == x2.x);
-	return Void();
-}
 
 struct Y1 {
 	int a;
@@ -385,7 +358,7 @@ struct Y1 {
 
 struct Y2 {
 	int a;
-	std::variant<int> b;
+	boost::variant<int> b;
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
@@ -409,10 +382,10 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y1> x1 = { 1, { 2 }, 3 };
 	X<Y2> x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena};
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	load_members(out, context, x2);
 	ASSERT(x1.a == x2.a);
 	ASSERT(x1.b.a == x2.b.a);
@@ -421,7 +394,7 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	x1 = {};
 	x2.b.b = 4;
 
-	out = save_members(arena, FileIdentifier{}, x2);
+	out = save_members(context, FileIdentifier{}, x2);
 	load_members(out, context, x1);
 	ASSERT(x1.a == x2.a);
 	ASSERT(x1.b.a == x2.b.a);
@@ -433,10 +406,10 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 	std::vector<std::tuple<int16_t, bool, int64_t>> x1 = { { 1, true, 2 }, { 3, false, 4 } };
 	decltype(x1) x2;
 	Arena arena;
-	DummyContext context;
+	TestContext context{arena };
 	const uint8_t* out;
 
-	out = save_members(arena, FileIdentifier{}, x1);
+	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, x2);
 	ASSERT(x1 == x2);
@@ -445,9 +418,10 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 
 TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
+	TestContext context{arena};
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
-	out = save_members(arena, file_identifier);
+	out = save_members(context, file_identifier);
 	// print_buffer(out, arena.get_size(out));
 	ASSERT(read_file_identifier(out) == file_identifier);
 	return Void();
@@ -473,12 +447,16 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 			for (const auto& str : src) {
 				vec.push_back(arena, str);
 			}
-			ObjectWriter writer;
+			ObjectWriter writer(Unversioned());
 			writer.serialize(FileIdentifierFor<decltype(vec)>::value, arena, vec);
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
-		ArenaObjectReader reader(readerArena, serializedVector);
-		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
+		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
+		// The VectorRef and Arena arguments are intentionally in a different order from the serialize call above.
+		// Arenas need to get serialized after any Ref types whose memory they own. In order for schema evolution to be
+		// possible, it needs to be okay to reorder an Arena so that it appears after a newly added Ref type. For this
+		// reason, Arenas are ignored by the wire protocol entirely. We test that behavior here.
+		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, outVec, vecArena);
 	}
 	ASSERT(src.size() == outVec.size());
 	for (int i = 0; i < src.size(); ++i) {
@@ -490,13 +468,13 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
 	Standalone<VectorRef<StringRef>> vecIn;
-	auto numElements = g_random->randomInt(1, 20);
+	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {
-		auto str = g_random->randomAlphaNumeric(g_random->randomInt(0, 30));
+		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
 		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
 	}
-	Standalone<StringRef> value = ObjectWriter::toValue(vecIn);
-	ArenaObjectReader reader(value.arena(), value);
+	Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
+	ArenaObjectReader reader(value.arena(), value, Unversioned());
 	VectorRef<Standalone<StringRef>> vecOut;
 	reader.deserialize(vecOut);
 	ASSERT(vecOut.size() == vecIn.size());

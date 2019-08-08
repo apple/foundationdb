@@ -237,6 +237,7 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent). Th
     # class = 
     # memory = 8GiB
     # storage_memory = 1GiB
+    # cache_memory = 2GiB
     # locality_machineid = 
     # locality_zoneid = 
     # locality_data_hall = 
@@ -256,8 +257,9 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
 * ``maxlogssize``: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.
 * ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
-* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory`` parameter is increased, the ``memory`` parameter should be increased by an equal amount.
-* ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory``, you should also increase the ``memory`` parameter by the same amount.
+* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory``  or ``cache_memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
+* ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``cache_memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
 * ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
 * ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
 * ``locality_dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
@@ -316,19 +318,19 @@ Single datacenter modes
 +==============================+==+=================+=================+================+
 | Best for                     |  | 1-2 machines    | 3-4 machines    | 5+ machines    | 
 +------------------------------+--+-----------------+-----------------+----------------+
-| Replication                  |  | 1 copy          | 2 copy          | 3 copy         |
+| Total Replicas               |  | 1 copy          | 2 copies        | 3 copies       |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # live machines              |  |                 |                 |                |
+| Live machines required       |  |                 |                 |                |
 | to make progress             |  | 1               | 2               | 3              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Minimum # of machines        |  |                 |                 |                |
+| Required machines            |  |                 |                 |                |
 | for fault tolerance          |  | impossible      | 3               | 4              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Ideal # of                   |  |                 |                 |                |
+| Ideal number of              |  |                 |                 |                |
 | coordination servers         |  | 1               | 3               | 5              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # simultaneous failures      |  |                 |                 |                |
-| after which data may be lost |  | any machine     | 2+ machines     | 3+ machines    |
+| Simultaneous failures        |  |                 |                 |                |
+| after which data may be lost |  | any process     | 2+ machines     | 3+ machines    |
 +------------------------------+--+-----------------+-----------------+----------------+
 
 In the three single datacenter redundancy modes, FoundationDB replicates data across the required number of machines in the cluster, but without aiming for datacenter redundancy. Although machines may be placed in more than one datacenter, the cluster will not be tolerant of datacenter-correlated failures. 
@@ -530,7 +532,7 @@ The second feature is the ability to add one or more synchronous replicas of the
 
 An example configuration would be four total datacenters, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter on each coast would only have a few FoundationDB processes.
 
-While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from the each coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.
+While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from east coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.
 
 If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.
 
@@ -615,7 +617,7 @@ The number of replicas in each region is controlled by redundancy level. For exa
 Asymmetric configurations
 -------------------------
 
-The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoudnationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenter have failed, FoundationDB will fail over to the east coast datacenter. Because this region does not a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However this is justifiable because the region will only be active if a datacenter has already been lost.
+The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoudnationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenters has failed, FoundationDB will fail over to the east coast datacenter. Because this region does not a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However, this is justifiable because the region will only be active if a datacenter has already been lost.
 
 This is the region configuration that implements the example::
 
@@ -669,7 +671,7 @@ To configure an existing database to regions, do the following steps:
 
     4. Configure ``usable_regions=2``. This will cause the cluster to start copying data between the regions.
 
-    5. Watch ``status`` and wait until data movement is complete. This will mean signal that the remote datacenter has a full replica of all of the data in the database.
+    5. Watch ``status`` and wait until data movement is complete. This will signal that the remote datacenter has a full replica of all of the data in the database.
 
     6. Change the region configuration to have a non-negative priority for the primary datacenters in both regions. This will enable automatic failover between regions.
 
@@ -680,7 +682,7 @@ When a primary datacenter fails, the cluster will go into a degraded state. It w
 
 .. warning:: While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed, so that once the other datacenter comes back online, it can replay history to catch back up.
 
-To drop the dead datacenter do the follow steps:
+To drop the dead datacenter do the following steps:
 
     1. Configure the region configuration so that the dead datacenter has a negative priority.
 

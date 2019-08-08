@@ -24,8 +24,7 @@ stage("Build") {
 
         sh """
             |export GIT_SPECIFIER=${buildScmInfo.GIT_COMMIT}
-            |rm -rf venv
-            |virtualenv-3.4 venv
+            |virtualenv -p python3.4 venv
             |source venv/bin/activate
             |pip3 install docker-compose
             |docker-compose --version
@@ -67,8 +66,7 @@ def makeTestStep(iteration) {
                 |exec 2>&1
                 |
                 |export GIT_SPECIFIER=${scmInfo.GIT_COMMIT}
-                |rm -rf venv
-                |virtualenv-3.4 venv
+                |virtualenv -p python3.4 venv
                 |source venv/bin/activate
                 |pip3 install docker-compose
                 |docker-compose --version
@@ -85,7 +83,9 @@ def makeTestStep(iteration) {
                 |find . -name traces.json -exec gzip -c {} > \$WORKSPACE/traces_${iteration}_\${seed}.json.gz \\;
                 |#cat \$WORKSPACE/iteration_${iteration}.log
               """.stripMargin()
-              archiveArtifacts 'setup_*log,iteration_*log,traces_*.json.gz'
+              archiveArtifacts artifacts: 'setup_*log,iteration_*log,traces_*.json.gz',
+                optional: true,
+                onlyIfSuccessful: false
         }
     }
 }
@@ -104,4 +104,43 @@ stage("Test") {
             string(name: 'publish_url', value: "https://foo.bar/stuff")
         ],
         propagate: false
+}
+stage("Report") {
+    node('test-dynamic-slave') {
+        cleanWs()
+
+        sfScmInfo = checkout([$class: 'GitSCM',
+            branches: [[name: '*']],
+            doGenerateSubmoduleConfigurations: false,
+            extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'snowflake']],
+            submoduleCfg: [],
+            userRemoteConfigs: [[credentialsId: 'a0395839-84c7-4ceb-90e2-bcf66b2d6885', url: 'ssh://bitbucket-internal.int.snowflakecomputing.com:7999/opfdb/fdb_snowflake.git']]
+            ])
+        println("$sfScmInfo")
+
+        buildScmInfo = checkout([
+            $class: 'GitSCM',
+            branches: scm.branches,
+            doGenerateSubmoduleConfigurations: scm.doGenerateSubmoduleConfigurations,
+            extensions: scm.extensions,
+            userRemoteConfigs: scm.userRemoteConfigs,
+            extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'snowflake/jenkins/foundationdb']]
+            ])
+        println("$buildScmInfo")
+
+        sh """
+            |export GIT_SPECIFIER=${buildScmInfo.GIT_COMMIT}
+            |virtualenv -p python3.4 venv
+            |source venv/bin/activate
+            |git config --global user.name jenkins
+            |git config --global user.email fdb-devs@snowflake.net
+            |cd snowflake/jenkins
+            |./build.sh sql_create_report
+            |GIT_TREE=(\$(cd foundationdb && git rev-parse HEAD^{tree}))
+            |cp -f fdb6-report.txt fdb6-report-\${GIT_TREE}.txt
+          """.stripMargin()
+        archiveArtifacts artifacts: '**/fdb6-report-*.txt',
+            optional: true,
+            onlyIfSuccessful: false
+    }
 }

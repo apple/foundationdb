@@ -52,25 +52,6 @@ struct FDBLibTLSVerifyTest {
 	std::map<int, Criteria> root_criteria;
 };
 
-static std::string printable( std::string const& val ) {
-	static char const digits[] = "0123456789ABCDEF";
-	std::string s;
-
-	for ( int i = 0; i < val.size(); i++ ) {
-		uint8_t b = val[i];
-		if (b >= 32 && b < 127 && b != '\\')
-			s += (char)b;
-		else if (b == '\\')
-			s += "\\\\";
-		else {
-			s += "\\x";
-			s += digits[(b >> 4) & 15];
-			s += digits[b & 15];
-		}
-	}
-	return s;
-}
-
 static std::string criteriaToString(std::map<int, Criteria> const& criteria) {
 	std::string s;
 	for (auto &pair: criteria) {

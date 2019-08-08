@@ -127,11 +127,11 @@ struct RequestStatsWorkload : KVWorkload {
 					state int j;
 					for (j = 0; j < self->pointReadsPerTransaction; ++j) {
 						Optional<Value> v =
-						    wait(tr.get(self->keyForIndex(g_random->randomInt(0, self->keysPopulated))));
+						    wait(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->keysPopulated))));
 						ASSERT(v.present());
 					}
 					for (j = 0; j < self->rangeReadsPerTransaction; ++j) {
-						int startIndex = g_random->randomInt(0, self->keysPopulated - self->rangeReadSize + 1);
+						int startIndex = deterministicRandom()->randomInt(0, self->keysPopulated - self->rangeReadSize + 1);
 						int endIndex = startIndex + self->rangeReadSize;
 						KeyRange kr(KeyRangeRef(self->keyForIndex(startIndex), self->keyForIndex(endIndex)));
 						Standalone<RangeResultRef> r = wait(tr.getRange(kr, 1000));

@@ -140,7 +140,7 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 /*TEST_CASE("/flow/IndexedSet/performance") {
 	std::vector<int> x;
 	for (int i = 0; i<1000000; i++)
-		x.push_back(g_random->randomInt(0, 10000000));
+		x.push_back(deterministicRandom()->randomInt(0, 10000000));
 
 	IndexedSet<int, int> is;
 	double start = timer();
@@ -211,17 +211,17 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 TEST_CASE("/flow/IndexedSet/random ops") {
 	for (int t = 0; t<100; t++) {
 		IndexedSet<int, int> is;
-		int rr = g_random->randomInt(0, 600) * g_random->randomInt(0, 600);
+		int rr = deterministicRandom()->randomInt(0, 600) * deterministicRandom()->randomInt(0, 600);
 		for (int n = 0; n<rr; n++) {
-			if (g_random->random01() < (double)is.sumTo(is.end()) / rr * 2)
-				is.erase(is.lower_bound(g_random->randomInt(0, 10000000)));
+			if (deterministicRandom()->random01() < (double)is.sumTo(is.end()) / rr * 2)
+				is.erase(is.lower_bound(deterministicRandom()->randomInt(0, 10000000)));
 			else
-				is.insert(g_random->randomInt(0, 10000000), 3);
+				is.insert(deterministicRandom()->randomInt(0, 10000000), 3);
 		}
 
-		int b = g_random->randomInt(0, 10000000);
-		//int e = b + g_random->randomInt(0, 10);
-		int e = g_random->randomInt(0, 10000000);
+		int b = deterministicRandom()->randomInt(0, 10000000);
+		//int e = b + deterministicRandom()->randomInt(0, 10);
+		int e = deterministicRandom()->randomInt(0, 10000000);
 		if (e<b) std::swap(b, e);
 		auto ib = is.lower_bound(b);
 		auto ie = is.lower_bound(e);
@@ -344,8 +344,8 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 	};
 	IndexedSet<Counter, NoMetric> mySet;
 	for (int i = 0; i<1000000; i++) {
-		mySet.insert(Counter(g_random->randomInt(0, 1000000)), NoMetric());
-		mySet.erase(Counter(g_random->randomInt(0, 1000000)));
+		mySet.insert(Counter(deterministicRandom()->randomInt(0, 1000000)), NoMetric());
+		mySet.erase(Counter(deterministicRandom()->randomInt(0, 1000000)));
 	}
 	int count2 = 0;
 	for (int i = 0; i<1000000; i++)
@@ -360,13 +360,13 @@ TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 	IndexedSet<int, int> is;
 	std::set<int> ss;
 	for (int i = 0; i<1000000; i++) {
-		int p = g_random->randomInt(0, 2000000);
+		int p = deterministicRandom()->randomInt(0, 2000000);
 		is.insert(std::move(p), 1);
 		ss.insert(p);
 	}
 
 	for (int i = 0; i<2000000; i++) {
-		int p = i; //g_random->randomInt(0, 2000000);
+		int p = i; //deterministicRandom()->randomInt(0, 2000000);
 		auto sit = ss.upper_bound(p);
 		int snext = sit != ss.end() ? *sit : 2000000;
 		auto iit = is.upper_bound(p);
@@ -382,7 +382,7 @@ TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 
 TEST_CASE("/flow/IndexedSet/all numbers") {
 	IndexedSet<int, int64_t> is;
-	std::mt19937_64 urng(g_random->randomUInt32());
+	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
 
 	std::vector<int> allNumbers;
 	for (int i = 0; i<1000000; i++)
@@ -395,7 +395,7 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	ASSERT(is.sumTo(is.end()) == allNumbers.size()*(allNumbers.size() - 1) / 2);
 
 	for (int i = 0; i<100000; i++) {
-		int b = g_random->randomInt(1, (int)allNumbers.size());
+		int b = deterministicRandom()->randomInt(1, (int)allNumbers.size());
 		int64_t ntotal = int64_t(b)*(b - 1) / 2;
 		int64_t n = ntotal;
 		auto ii = is.index(n);
@@ -406,8 +406,8 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	}
 
 	for (int i = 0; i<100000; i++) {
-		int a = g_random->randomInt(0, (int)allNumbers.size());
-		int b = g_random->randomInt(0, (int)allNumbers.size());
+		int a = deterministicRandom()->randomInt(0, (int)allNumbers.size());
+		int b = deterministicRandom()->randomInt(0, (int)allNumbers.size());
 		if (a>b) std::swap(a, b);
 
 		int64_t itotal = is.sumRange(a, b);

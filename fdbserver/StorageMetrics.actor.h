@@ -101,7 +101,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	TransientStorageMetricSample( int64_t metricUnitsPerSample ) : StorageMetricSample(metricUnitsPerSample) {}
 
 	bool roll( KeyRef key, int64_t metric ) {
-		return g_random->random01() < (double)metric / metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+		return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
 	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
@@ -292,7 +292,7 @@ struct StorageServerMetrics {
 				double offset = (expectedSize - used) / divisor;
 				if( offset <= 0 )
 					return hasUsed ? lastKey : key;
-				return sample.splitEstimate( KeyRangeRef(lastKey, key), offset * ( ( 1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) + 2 * g_random->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) );
+				return sample.splitEstimate( KeyRangeRef(lastKey, key), offset * ( ( 1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) + 2 * deterministicRandom()->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) );
 			}
 		}
 
@@ -342,18 +342,19 @@ struct StorageServerMetrics {
 		}
 	}
 
-	void getPhysicalMetrics( GetPhysicalMetricsRequest req, StorageBytes sb ){
-		GetPhysicalMetricsReply rep;
+	void getStorageMetrics( GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate ){
+		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
 		rep.load = getMetrics(allKeys);
 
-		if (sb.free < 1e9 && g_random->random01() < 0.1)
+		if (sb.free < 1e9 && deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
 				.detail("Free", sb.free)
 				.detail("Total", sb.total)
 				.detail("Available", sb.available)
 				.detail("Load", rep.load.bytes);
+		}
 
 		rep.free.bytes = sb.free;
 		rep.free.iosPerKSecond = 10e6;
@@ -362,6 +363,8 @@ struct StorageServerMetrics {
 		rep.capacity.bytes = sb.total;
 		rep.capacity.iosPerKSecond = 10e6;
 		rep.capacity.bytesPerKSecond = 100e9;
+
+		rep.bytesInputRate = bytesInputRate;
 
 		req.reply.send(rep);
 	}

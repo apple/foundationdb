@@ -91,6 +91,14 @@ namespace FdbClientLogEvents {
 	    EVENTTYPEEND // End of EventType
     };
 
+	typedef int TrasactionPriorityType;
+	enum {
+		PRIORITY_DEFAULT   = 0,
+		PRIORITY_BATCH     = 1,
+		PRIORITY_IMMEDIATE = 2,
+		PRIORITY_END
+	};
+
 	struct Event {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
 		Event() { }
@@ -100,7 +108,7 @@ namespace FdbClientLogEvents {
 		EventType type{ EVENTTYPEEND };
 		double startTs{ 0 };
 
-		virtual void logEvent(std::string id) const {}
+		virtual void logEvent(std::string id, int maxFieldLength) const {}
 		virtual void addToReqStats(RequestStats &reqStats) const {}
 	};
 
@@ -117,8 +125,43 @@ namespace FdbClientLogEvents {
 
 		double latency;
 
-		override void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetVersion").detail("TransactionID", id).detail("Latency", latency);
+		override void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetVersion")
+				.detail("TransactionID", id)
+				.detail("Latency", latency);
+		}
+	};
+
+	// Version V2 of EventGetVersion starting at 6.2
+	struct EventGetVersion_V2 : public Event {
+		EventGetVersion_V2(double ts, double lat, uint32_t type) : Event(GET_VERSION_LATENCY, ts), latency(lat) {
+			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {
+				priorityType = PRIORITY_DEFAULT;
+			} else if (type == GetReadVersionRequest::PRIORITY_BATCH) {
+				priorityType = PRIORITY_BATCH;
+			} else if (type == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE){
+				priorityType = PRIORITY_IMMEDIATE;
+			} else {
+				ASSERT(0);
+			}
+		 }
+		EventGetVersion_V2() { }
+
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), latency, priorityType);
+			else
+				return serializer(ar, latency, priorityType);
+		}
+
+		double latency;
+		TrasactionPriorityType priorityType {PRIORITY_END};
+
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetVersion")
+				.detail("TransactionID", id)
+				.detail("Latency", latency)
+				.detail("PriorityType", priorityType);
 		}
 	};
 
@@ -140,14 +183,16 @@ namespace FdbClientLogEvents {
 		Key key;
 		NetworkAddress storageContacted;
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetValue")
+				.setMaxEventLength(-1)
 				.detail("TransactionID", id)
 				.detail("ReadID", readId)
 				.detail("Latency", latency)
 				.detail("ValueSizeBytes", valueSize)
-				.detail("Key", printable(key))
-				.detail("StorageContacted", storageContacted);
+				.detail("StorageContacted", storageContacted)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Key", printable(key));
 		}
 
 		override void addToReqStats(RequestStats &reqStats) const {
@@ -182,14 +227,16 @@ namespace FdbClientLogEvents {
 		Key key;
 		NetworkAddress storageContacted;
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetKey")
+				.setMaxEventLength(-1)
 				.detail("TransactionID", id)
 				.detail("ReadId", readId)
 				.detail("Latency", latency)
 				.detail("BytesFetched", key.size())
-				.detail("Key", key)
-				.detail("StorageContacted", storageContacted);
+				.detail("StorageContacted", storageContacted)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Key", key);
 		}
 
 		override void addToReqStats(RequestStats &reqStats) const {
@@ -223,11 +270,13 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetRange")
+				.setMaxEventLength(-1)
 				.detail("TransactionID", id)
 				.detail("Latency", latency)
 				.detail("RangeSizeBytes", rangeSize)
+				.setMaxFieldLength(maxFieldLength)
 				.detail("StartKey", startKey)
 				.detail("EndKey", endKey);
 		}
@@ -253,16 +302,18 @@ namespace FdbClientLogEvents {
 		Key endKey;
 		NetworkAddress storageContacted;
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_GetSubRange")
+				.setMaxEventLength(-1)
 				.detail("TransactionID", id)
 				.detail("ReadId", readId)
 				.detail("Latency", latency)
 				.detail("BytesFetched", bytesFetched)
 				.detail("KeysFetched", keysFetched)
+				.detail("StorageContacted", storageContacted)
+				.setMaxFieldLength(maxFieldLength)
 				.detail("BeginKey", beginKey)
-				.detail("EndKey", endKey)
-				.detail("StorageContacted", storageContacted);
+				.detail("EndKey", endKey);
 		}
 
 		override void addToReqStats(RequestStats &reqStats) const {
@@ -296,20 +347,38 @@ namespace FdbClientLogEvents {
 		int commitBytes;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
+				TraceEvent("TransactionTrace_Commit_ReadConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", read_range.begin)
+				.detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
+				TraceEvent("TransactionTrace_Commit_WriteConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", write_range.begin)
+				.detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_Commit_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_Commit_Mutation")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Mutation", mutation.toString());
 			}
 
-			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
+			TraceEvent("TransactionTrace_Commit")
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("NumMutations", numMutations)
+			.detail("CommitSizeBytes", commitBytes);
 		}
 	};
 
@@ -327,8 +396,13 @@ namespace FdbClientLogEvents {
 		int errCode;
 		Key key;
 
-		override void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", key);
+		override void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetError")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("Key", key);
 		}
 	};
 
@@ -347,8 +421,14 @@ namespace FdbClientLogEvents {
 		Key startKey;
 		Key endKey;
 
-		override void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", startKey).detail("EndKey", endKey);
+		override void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetRangeError")
+			.setMaxEventLength(-1)
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode)
+			.setMaxFieldLength(maxFieldLength)
+			.detail("StartKey", startKey)
+			.detail("EndKey", endKey);
 		}
 	};
 
@@ -366,20 +446,36 @@ namespace FdbClientLogEvents {
 		int errCode;
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", read_range.begin).detail("End", read_range.end);
+				TraceEvent("TransactionTrace_CommitError_ReadConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", read_range.begin)
+				.detail("End", read_range.end);
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", write_range.begin).detail("End", write_range.end);
+				TraceEvent("TransactionTrace_CommitError_WriteConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", write_range.begin)
+				.detail("End", write_range.end);
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_CommitError_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_CommitError_Mutation")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Mutation", mutation.toString());
 			}
 
-			TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
+			TraceEvent("TransactionTrace_CommitError")
+			.detail("TransactionID", id)
+			.detail("ErrCode", errCode);
 		}
 	};
 
@@ -398,7 +494,7 @@ namespace FdbClientLogEvents {
 				return serializer(ar, proxyContacted);
 		}
 
-		override void logEvent(std::string id) const {
+		override void logEvent(std::string id, int maxFieldLength) const {
 			TraceEvent("TransactionTrace_ContactedProxy")
 				.detail("TransactionID", id)
 				.detail("ProxyContacted", proxyContacted);

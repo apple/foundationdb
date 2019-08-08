@@ -154,9 +154,11 @@ ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClas
 // Get the current list of excluded servers
 ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database  cx );
 
-// Wait for the given, previously excluded servers to be evacuated (no longer used for state).  Once this returns it is safe to shut down all such
-// machines without impacting fault tolerance, until and unless any of them are explicitly included with includeServers()
-ACTOR Future<Void> waitForExcludedServers( Database  cx, vector<AddressExclusion>  servers );
+// Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
+// true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
+// unless any of them are explicitly included with includeServers()
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> servers,
+                                                                bool waitForAllExcluded);
 
 // Gets a list of all workers in the cluster (excluding testers)
 ACTOR Future<vector<ProcessData>> getWorkers( Database  cx );
@@ -190,6 +192,10 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database  cx );
 
 void schemaCoverage( std::string const& spath, bool covered=true );
 bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+
+// execute payload in 'snapCmd' on all the coordinators, TLogs and
+// storage nodes
+ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd);
 
 #include "flow/unactorcompiler.h"
 #endif
