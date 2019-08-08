@@ -40,6 +40,7 @@
 #endif
 
 #define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
+#define TRACE fprintf(stderr, "%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
