@@ -126,9 +126,8 @@ struct DBCoreState {
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
-	LogEpoch epoch;
 	
-	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty), epoch(0) {}
+	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -150,7 +149,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch;
+		       pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 
@@ -170,9 +169,6 @@ struct DBCoreState {
 			}
 			if (ar.protocolVersion().hasShardedTxsTags()) {
 				serializer(ar, txsTags);
-			}
-			if (ar.protocolVersion().hasBackupWorker()) {
-				serializer(ar, epoch);
 			}
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

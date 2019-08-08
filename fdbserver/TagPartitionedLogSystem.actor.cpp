@@ -346,7 +346,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		newState.logRouterTags = logRouterTags;
 		newState.txsTags = txsTags;
 		newState.pseudoLocalities = pseudoLocalities;
-		newState.epoch = epoch;
 		for (const auto &t : tLogs) {
 			if (t->logServers.size()) {
 				newState.tLogs.emplace_back(*t);
@@ -1335,6 +1334,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::map<LogEpoch, Version> epochEndVersion;
 		for (const auto& old : oldLogData) {
 			epochEndVersion[old.epoch] = old.epochEnd;
+			TraceEvent("BW", dbgid).detail("Epoch", old.epoch).detail("EndVersion", old.epochEnd);
 		}
 		return epochEndVersion;
 	}
@@ -1692,7 +1692,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				TEST( lastEnd.present() );  // Restarting recovery at an earlier point
 
 				Reference<TagPartitionedLogSystem> logSystem(
-				    new TagPartitionedLogSystem(dbgid, locality, prevState.epoch));
+				    new TagPartitionedLogSystem(dbgid, locality, prevState.recoveryCount));
 
 				lastEnd = minEnd;
 				logSystem->tLogs = logServers;
