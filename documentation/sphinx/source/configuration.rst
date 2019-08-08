@@ -297,7 +297,7 @@ These sections run and configure the backup agent process used for :doc:`point-i
 Choosing a redundancy mode
 ==========================
 
-FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the ``configure`` command ``fdbcli``. For example::
+FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the ``configure`` command of ``fdbcli``. For example::
 
     user@host$ fdbcli
     Using cluster file `/etc/foundationdb/fdb.cluster'.
