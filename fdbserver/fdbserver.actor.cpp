@@ -889,21 +889,21 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum Role {
-	Simulation,
-	FDBD,
-	Test,
-	MultiTester,
-	SkipListTest,
-	SearchMutations,
-	DSLTest,
-	VersionedMapTest,
+	ConsistencyCheck,
 	CreateTemplateDatabase,
+	DSLTest,
+	FDBD,
+	KVFileGenerateIOLogChecksums,
+	KVFileIntegrityCheck,
+	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
 	Restore,
-	KVFileIntegrityCheck,
-	KVFileGenerateIOLogChecksums,
-	ConsistencyCheck
+	SearchMutations,
+	Simulation,
+	SkipListTest,
+	Test,
+	VersionedMapTest,
 };
 struct CLIOptions {
 	std::string commandLine;
