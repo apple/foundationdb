@@ -84,6 +84,12 @@ Other Changes
 * Idle clusters will fsync much less frequently. `(PR #1697) <https://github.com/apple/foundationdb/pull/1697>`_.
 * CMake is now the official build system. The Makefile based build system is deprecated.
 
+Fixes only impacting 6.2.0+
+---------------------------
+
+* Clients could crash when closing connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+* Do not close idle network connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+
 Earlier release notes
 ---------------------
 * :doc:`6.1 (API Version 610) </old-release-notes/release-notes-610>`
