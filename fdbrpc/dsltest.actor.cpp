@@ -335,8 +335,7 @@ void fastAllocTest() {
 	}
 
 	t = timer();
-	for(int i=0; i<1000000; i++)
-		FastAllocator<64>::allocate();
+	for (int i = 0; i < 1000000; i++) (void)FastAllocator<64>::allocate();
 	t = timer()-t;
 	cout << "Allocations: " << (1/t) << "M/sec" << endl;
 
