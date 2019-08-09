@@ -148,7 +148,7 @@ IPv6 Support
 
 FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as ``[IP]:PORT``, e.g. "[::1]:4800", "[abcd::dead:beef]:4500".
 
-1) The cluster file can contain mix of IPv6 and IPv6 addresses. For example::
+1) The cluster file can contain mix of IPv4 and IPv6 addresses. For example::
 
      description:ID@127.0.0.1:4500,[::1]:4500,...
 
