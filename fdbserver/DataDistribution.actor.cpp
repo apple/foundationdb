@@ -3322,7 +3322,7 @@ ACTOR Future<Void> storageServerTracker(
 					.detail("Excluded", self->excludedServers.get( addr ) ? addr.toString() : ipaddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
-				if (self->failedServers.find(addr) != self->failedServers.end()) {
+				if (self->failedServers.find(addr) != self->failedServers.end() || self->failedServers.find(ipaddr) != self->failedServers.end()) {
 					TraceEvent("FailedServerRemoveKeys")
 						.detail("Address", addr.toString())
 						.detail("ServerID", server->id);
@@ -4292,8 +4292,11 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
 	for (auto ssi : ssis) {
-		if (std::find(req.exclusions.begin(), req.exclusions.end(), AddressExclusion(ssi.address().ip, ssi.address().port)) != req.exclusions.end()) {
-			excludeServerIDs.push_back(ssi.id());
+		for (AddressExclusion excl : req.exclusions) {
+			if (excl.excludes(ssi.address())) {
+				excludeServerIDs.push_back(ssi.id());
+				break;
+			}
 		}
 	}
 	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
