@@ -237,8 +237,8 @@ namespace actorcompiler
         public bool isForwardDeclaration = false;
         public bool isTestCase = false;
 
-        public bool IsCancellable { get => returnType == null || !isUncancellable; }
-        public bool IsUncancellable { set => isUncancellable = value; }
+        public bool IsCancellable() { return returnType == null || !isUncancellable; }
+        public void SetUncancellable() { isUncancellable = true; }
     };
 
     class Descr
