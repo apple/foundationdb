@@ -160,6 +160,7 @@ else()
       -Wno-dangling-else
       -Wno-sign-compare
       -Wno-comment
+      -Wno-unknown-attributes
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template

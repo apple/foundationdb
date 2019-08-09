@@ -538,7 +538,7 @@ namespace actorcompiler
                     throw new Error(actor.SourceLine, "Unrecognized tokens preceding parameter list in actor declaration");
                 }
             }
-            if (errorMessagePolicy.ActorsNoDiscardByDefault()) {
+            if (errorMessagePolicy.ActorsNoDiscardByDefault() && !actor.attributes.Contains("[[flow_allow_discard]]")) {
                 if (actor.IsCancellable() && actor.returnType != null)
                 {
                     actor.attributes.Add("[[nodiscard]]");
