@@ -179,14 +179,14 @@ public:
 		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
 	}
 
-	struct Peer* getPeer( NetworkAddress const& address, bool openConnection = true );
+	Reference<struct Peer> getPeer( NetworkAddress const& address, bool openConnection = true );
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
 
 	NetworkAddressList localAddresses;
 	std::vector<Future<Void>> listeners;
-	std::unordered_map<NetworkAddress, struct Peer*> peers;
+	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
 	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
@@ -285,12 +285,12 @@ struct ConnectPacket {
 
 #pragma pack( pop )
 
-ACTOR static Future<Void> connectionReader(TransportData* transport, Reference<IConnection> conn, Peer* peer,
-                                           Promise<Peer*> onConnected);
+ACTOR static Future<Void> connectionReader(TransportData* transport, Reference<IConnection> conn, Reference<struct Peer> peer,
+                                           Promise<Reference<struct Peer>> onConnected);
 
 static PacketID sendPacket( TransportData* self, ISerializeSource const& what, const Endpoint& destination, bool reliable, bool openConnection );
 
-struct Peer : NonCopyable {
+struct Peer : public ReferenceCounted<Peer> {
 	TransportData* transport;
 	NetworkAddress destination;
 	UnsentPacketQueue unsent;
@@ -310,9 +310,7 @@ struct Peer : NonCopyable {
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
 	  : transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {
-		connect = connectionKeeper(this);
-	}
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
 		unsent.setWriteBuffer(pb);
@@ -360,7 +358,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	void onIncomingConnection( Reference<IConnection> conn, Future<Void> reader ) {
+	void onIncomingConnection( Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader ) {
 		// In case two processes are trying to connect to each other simultaneously, the process with the larger canonical NetworkAddress
 		// gets to keep its outgoing connection.
 		if ( !destination.isPublic() && !outgoingConnectionIdle ) throw address_in_use();
@@ -379,7 +377,7 @@ struct Peer : NonCopyable {
 
 			connect.cancel();
 			prependConnectPacket();
-			connect = connectionKeeper( this, conn, reader );
+			connect = connectionKeeper( self, conn, reader );
 		} else {
 			TraceEvent("RedundantConnection", conn->getDebugID())
 				.suppressFor(1.0)
@@ -396,7 +394,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionMonitor( Peer *peer ) {
+	ACTOR static Future<Void> connectionMonitor( Reference<Peer> peer ) {
 		state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 		loop {
 			if (!FlowTransport::transport().isClient() && !peer->destination.isPublic()) {
@@ -417,12 +415,16 @@ struct Peer : NonCopyable {
 				}
 			}
 
+			//We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in connectionReader
+			//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
+			wait(delay(0));
+
 			if (peer->reliable.empty() && peer->unsent.empty()) {
 				if (peer->peerReferences == 0 &&
 				    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
 					// TODO: What about when peerReference == -1?
 					throw connection_unreferenced();
-				} else if (FlowTransport::transport().isClient() && peer->destination.isPublic() &&
+				} else if (FlowTransport::transport().isClient() && peer->compatible && peer->destination.isPublic() &&
 				           (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
 				           (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
 					// First condition is necessary because we may get here if we are server.
@@ -464,7 +466,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionWriter( Peer* self, Reference<IConnection> conn ) {
+	ACTOR static Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection> conn ) {
 		state double lastWriteTime = now();
 		loop {
 			//wait( delay(0, TaskPriority::WriteSocket) );
@@ -494,7 +496,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionKeeper( Peer* self,
+	ACTOR static Future<Void> connectionKeeper( Reference<Peer> self,
 			Reference<IConnection> conn = Reference<IConnection>(),
 			Future<Void> reader = Void()) {
 		TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
@@ -551,7 +553,7 @@ struct Peer : NonCopyable {
 						throw connection_failed();
 					}
 
-					reader = connectionReader( self->transport, conn, self, Promise<Peer*>());
+					reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
 				} else {
 					self->outgoingConnectionIdle = false;
 				}
@@ -627,7 +629,6 @@ struct Peer : NonCopyable {
 					TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
 					self->connect.cancel();
 					self->transport->peers.erase(self->destination);
-					delete self;
 					return Void();
 				}
 			}
@@ -638,7 +639,6 @@ struct Peer : NonCopyable {
 TransportData::~TransportData() {
 	for(auto &p : peers) {
 		p.second->connect.cancel();
-		delete p.second;
 	}
 }
 
@@ -794,8 +794,8 @@ static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const Netw
 ACTOR static Future<Void> connectionReader(
 		TransportData* transport,
 		Reference<IConnection> conn,
-		Peer *peer,
-		Promise<Peer*> onConnected)
+		Reference<Peer> peer,
+		Promise<Reference<Peer>> onConnected)
 {
 	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
 	// For incoming connections conn is set and peer is initially nullptr; for outgoing connections it is the reverse
@@ -812,7 +812,7 @@ ACTOR static Future<Void> connectionReader(
 	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
-	if (peer == nullptr) {
+	if (!peer) {
 		ASSERT( !peerAddress.isPublic() );
 	}
 	try {
@@ -905,7 +905,7 @@ ACTOR static Future<Void> connectionReader(
 						unprocessed_begin += connectPacketSize;
 						expectConnectPacket = false;
 
-						if (peer != nullptr) {
+						if (peer) {
 							peerProtocolVersion = protocolVersion;
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing")
@@ -966,12 +966,12 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
-		state Promise<Peer*> onConnected;
-		state Future<Void> reader = connectionReader( self, conn, nullptr, onConnected );
+		state Promise<Reference<Peer>> onConnected;
+		state Future<Void> reader = connectionReader( self, conn, Reference<Peer>(), onConnected );
 		choose {
 			when( wait( reader ) ) { ASSERT(false); return Void(); }
-			when( Peer *p = wait( onConnected.getFuture() ) ) {
-				p->onIncomingConnection( conn, reader );
+			when( Reference<Peer> p = wait( onConnected.getFuture() ) ) {
+				p->onIncomingConnection( p, conn, reader );
 			}
 			when( wait( delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT) ) ) {
 				TEST(true);  // Incoming connection timed out
@@ -1004,15 +1004,16 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	}
 }
 
-Peer* TransportData::getPeer( NetworkAddress const& address, bool openConnection ) {
+Reference<Peer> TransportData::getPeer( NetworkAddress const& address, bool openConnection ) {
 	auto peer = peers.find(address);
 	if (peer != peers.end()) {
 		return peer->second;
 	}
 	if(!openConnection) {
-		return nullptr;
+		return Reference<Peer>();
 	}
-	Peer* newPeer = new Peer(this, address);
+	Reference<Peer> newPeer = Reference<Peer>( new Peer(this, address) );
+	newPeer->connect = Peer::connectionKeeper(newPeer);
 	peers[address] = newPeer;
 	return newPeer;
 }
@@ -1093,7 +1094,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	else if (FlowTransport::transport().isClient())
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
-	Peer* peer = self->getPeer(endpoint.getPrimaryAddress());
+	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
 		peer->peerReferences = 1;
 	} else {
@@ -1103,7 +1104,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
-	Peer* peer = self->getPeer(endpoint.getPrimaryAddress(), false);
+	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress(), false);
 	if(peer) {
 		peer->peerReferences--;
 		if(peer->peerReferences < 0) {
@@ -1169,7 +1170,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		const bool checksumEnabled = !destination.getPrimaryAddress().isTLS();
 		++self->countPacketsGenerated;
 
-		Peer* peer = self->getPeer(destination.getPrimaryAddress(), openConnection);
+		Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress(), openConnection);
 
 		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 		if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) || (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {

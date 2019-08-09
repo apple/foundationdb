@@ -305,6 +305,7 @@ struct NetworkMetrics {
 
 	double oldestAlternativesFailure;
 	double newestAlternativesFailure;
+	double lastAlternativesFailureSkipDelay;
 	double lastSync;
 
 	double secSquaredSubmit;
