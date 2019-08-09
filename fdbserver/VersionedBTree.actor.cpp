@@ -4596,44 +4596,46 @@ struct SimpleCounter {
 };
 
 TEST_CASE("!/redwood/correctness/btree") {
-	state bool useDisk = true;  // MemoryPager is not being maintained currently.
-
 	state std::string pagerFile = "unittest_pageFile.redwood";
 	IPager2 *pager;
 
 	state bool serialTest = deterministicRandom()->coinflip();
 	state bool shortTest = deterministicRandom()->coinflip();
 	state bool singleVersion = true; // Multi-version mode is broken / not finished
-	state double startTime = now();
 
 	state int pageSize = shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	printf("serialTest: %d  shortTest: %d  singleVersion: %d\n", serialTest, shortTest, singleVersion);
-
-	if(useDisk) {
-		printf("Deleting existing test data...\n");
-		deleteFile(pagerFile);
-		pager = new COWPager(pageSize, pagerFile, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
-	}
-	else {
-		ASSERT(false);
-		//pager = createMemoryPager();
-	}
-
-	printf("Initializing...\n");
-	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, singleVersion);
-	wait(btree->init());
-
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
-	// TODO:  Handle arbitrarily large keys
 	state int maxKeySize = deterministicRandom()->randomInt(4, pageSize * 2);
 	state int maxValueSize = deterministicRandom()->randomInt(0, pageSize * 4);
-	state int maxCommitSize = shortTest ? 1000 : 1e5 + randomSize(10e6);
-	state int mutationBytesTarget = shortTest ? 5000 : randomSize(50e6);
-	state double clearChance = deterministicRandom()->random01() * .1;
+	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
+	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
+	state double clearProbability = deterministicRandom()->random01() * .1;
+	state double coldStartProbability = deterministicRandom()->random01();
+	state double maxWallClockDuration = 60;
 
-	printf("Using page size %d, max key size %d, max value size %d, clearchance %f, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
+	printf("\n");
+	printf("serialTest: %d\n", serialTest);
+	printf("shortTest: %d\n", shortTest);
+	printf("singleVersion: %d\n", serialTest);
+	printf("pageSize: %d\n", pageSize);
+	printf("maxKeySize: %d\n", maxKeySize);
+	printf("maxValueSize: %d\n", maxValueSize);
+	printf("maxCommitSize: %d\n", maxCommitSize);
+	printf("mutationBytesTarget: %d\n", mutationBytesTarget);
+	printf("clearProbability: %f\n", clearProbability);
+	printf("coldStartProbability: %f\n", coldStartProbability);
+	printf("\n");
+
+	printf("Deleting existing test data...\n");
+	deleteFile(pagerFile);
+
+	printf("Initializing...\n");
+	state double startTime = timer();
+	pager = new COWPager(pageSize, pagerFile, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
+	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, singleVersion);
+	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
@@ -4660,7 +4662,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	state Future<Void> commit = Void();
 
-	while(mutationBytes.get() < mutationBytesTarget) {
+	while(mutationBytes.get() < mutationBytesTarget && (timer() - startTime) < maxWallClockDuration) {
 		if(now() - startTime > 600) {
 			mutationBytesTarget = mutationBytes.get();
 		}
@@ -4672,7 +4674,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 		}
 
 		// Sometimes do a clear range
-		if(deterministicRandom()->random01() < clearChance) {
+		if(deterministicRandom()->random01() < clearProbability) {
 			Key start = randomKV(maxKeySize, 1).key;
 			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
 
@@ -4786,7 +4788,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if(!serialTest && useDisk && deterministicRandom()->random01() < .02) {
+			if(!serialTest && deterministicRandom()->random01() < coldStartProbability) {
 				printf("Recovering from disk.\n");
 
 				// Wait for outstanding commit
