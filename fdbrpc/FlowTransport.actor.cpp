@@ -417,6 +417,10 @@ struct Peer : NonCopyable {
 				}
 			}
 
+			//We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in connectionReader
+			//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
+			wait(delay(0));
+
 			if (peer->reliable.empty() && peer->unsent.empty()) {
 				if (peer->peerReferences == 0 &&
 				    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
