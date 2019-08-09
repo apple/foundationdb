@@ -295,9 +295,6 @@ namespace actorcompiler
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
 
-            if (actor.returnType == null)
-                actor.isUncancellable = true;
-
             FindState();
         }
         public void Write(TextWriter writer)
@@ -859,7 +856,7 @@ namespace actorcompiler
                     // not evaluate `expr2()`.
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);
-                    if (!actor.isUncancellable)
+                    if (actor.IsCancellable)
                         cx.target.WriteLine("if ({1}->actor_wait_state < 0) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
                 }
 
@@ -1156,7 +1153,7 @@ namespace actorcompiler
         }
         void WriteCancelFunc(TextWriter writer)
         {
-            if (!actor.isUncancellable)
+            if (actor.IsCancellable)
             {
                 Function cancelFunc = new Function
                 {

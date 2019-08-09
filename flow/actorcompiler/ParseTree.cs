@@ -231,11 +231,14 @@ namespace actorcompiler
         public CodeBlock body;
         public int SourceLine;
         public bool isStatic = false;
-        public bool isUncancellable = false;
+        private bool isUncancellable;
         public string testCaseParameters = null;
         public string nameSpace = null;
         public bool isForwardDeclaration = false;
         public bool isTestCase = false;
+
+        public bool IsCancellable { get => returnType == null || !isUncancellable; }
+        public bool IsUncancellable { set => isUncancellable = value; }
     };
 
     class Descr

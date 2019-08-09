@@ -47,6 +47,9 @@ namespace actorcompiler
                 Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
             }
         }
+        public bool ActorsNoDiscardByDefault() {
+            return !DisableActorWithoutWaitWarning;
+        }
     }
 
     class Token
@@ -489,7 +492,7 @@ namespace actorcompiler
             var uncancellableKeyword = toks.First(NonWhitespace);
             if (uncancellableKeyword.Value == "UNCANCELLABLE")
             {
-                actor.isUncancellable = true;
+                actor.IsUncancellable = true;
                 toks = range(uncancellableKeyword.Position + 1, toks.End);
             }
 
@@ -533,6 +536,12 @@ namespace actorcompiler
                 {
                     Console.WriteLine("Tokens: '{0}' {1} '{2}'", str(toks), toks.Count(), toks.Last().Value);
                     throw new Error(actor.SourceLine, "Unrecognized tokens preceding parameter list in actor declaration");
+                }
+            }
+            if (errorMessagePolicy.ActorsNoDiscardByDefault()) {
+                if (actor.IsCancellable && actor.returnType != null && actor.attributes == null)
+                {
+                    actor.attributes.Add("[[nodiscard]]");
                 }
             }
         }
