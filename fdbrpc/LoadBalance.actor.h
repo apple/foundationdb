@@ -298,8 +298,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
 					g_network->networkMetrics.oldestAlternativesFailure = now();
 				}
-
-				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
+				double elapsed = now()-g_network->networkMetrics.oldestAlternativesFailure;
+				double delay = std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY);
+				delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
+				delay = std::max(delay, FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
 
 				// Making this SevWarn means a lot of clutter
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {

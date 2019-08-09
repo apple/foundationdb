@@ -163,9 +163,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SECOND_REQUEST_BUDGET_GROWTH,                       0.05 );
 	init( SECOND_REQUEST_MAX_BUDGET,                         100.0 );
 	init( ALTERNATIVES_FAILURE_RESET_TIME,                     5.0 );
-	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
 	init( ALTERNATIVES_FAILURE_MIN_DELAY,                     0.05 );
 	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 );
+	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
+	init( ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,              0.04 );
+	init( ALTERNATIVES_FAILURE_SLOW_MAX_DELAY,                30.0 );
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
