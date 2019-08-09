@@ -163,7 +163,6 @@ else()
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
-      -Wno-unused-value
       -Wno-tautological-pointer-compare
       -Wno-format)
   endif()
