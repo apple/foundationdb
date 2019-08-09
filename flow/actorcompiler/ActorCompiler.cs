@@ -306,6 +306,9 @@ namespace actorcompiler
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
             if (actor.isForwardDeclaration) {
+                foreach (string attribute in actor.attributes) {
+                    writer.Write(attribute + " ");
+                }
                 if (actor.isStatic) writer.Write("static ");
                 writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
                 return;
@@ -402,6 +405,9 @@ namespace actorcompiler
             if (isTopLevel) writer.WriteLine("}");  // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
+            foreach (string attribute in actor.attributes) {
+                writer.Write(attribute + " ");
+            }
             if (actor.isStatic) writer.Write("static ");
             writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
             LineNumber(writer, actor.SourceLine);

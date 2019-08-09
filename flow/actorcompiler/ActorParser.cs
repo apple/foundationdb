@@ -80,6 +80,14 @@ namespace actorcompiler
                                 .Skip(1)  // skip the "<", which is considered "outside"
                                 .First()  // get the ">", which is likewise "outside"
                                 .Position);
+                case "[": return
+                    new TokenRange(range.GetAllTokens(),
+                        Position+1,
+                        BracketParser.NotInsideBrackets(
+                                    new TokenRange(range.GetAllTokens(), Position, range.End))
+                                .Skip(1)  // skip the "[", which is considered "outside"
+                                .First()  // get the "]", which is likewise "outside"
+                                .Position);
                 default: throw new NotSupportedException("Can't match this token!");
             }
             TokenRange r;
@@ -190,6 +198,22 @@ namespace actorcompiler
         int endPos;
     };
 
+    static class BracketParser
+    {
+        public static IEnumerable<Token> NotInsideBrackets(IEnumerable<Token> tokens)
+        {
+            int BracketDepth = 0;
+            int? BasePD = null;
+            foreach (var tok in tokens)
+            {
+                if (BasePD == null) BasePD = tok.ParenDepth;
+                if (tok.ParenDepth == BasePD && tok.Value == "]") BracketDepth--;
+                if (BracketDepth == 0)
+                    yield return tok;
+                if (tok.ParenDepth == BasePD && tok.Value == "[") BracketDepth++;
+            }
+        }
+    };
     static class AngleBracketParser
     {
         public static IEnumerable<Token> NotInsideAngleBrackets(IEnumerable<Token> tokens)
@@ -438,6 +462,21 @@ namespace actorcompiler
                     .ToArray();
 
                 toks = range(templateParams.End + 1, toks.End);
+            }
+            var attribute = toks.First(NonWhitespace);
+            while (attribute.Value == "[")
+            {
+                var attributeContents = attribute.GetMatchingRangeIn(toks);
+
+                var asArray = attributeContents.ToArray();
+                if (asArray.Length < 2 || asArray[0].Value != "[" || asArray[asArray.Length - 1].Value != "]")
+                {
+                    throw new Error(actor.SourceLine, "Invalid attribute: Expected [[...]]");
+                }
+                actor.attributes.Add("[" + str(NormalizeWhitespace(attributeContents)) + "]");
+                toks = range(attributeContents.End + 1, toks.End);
+
+                attribute = toks.First(NonWhitespace);
             }
 
             var staticKeyword = toks.First(NonWhitespace);
@@ -967,6 +1006,8 @@ namespace actorcompiler
             @"\}",
             @"\(",
             @"\)",
+            @"\[",
+            @"\]",
             @"//[^\n]*",
             @"/[*]([*][^/]|[^*])*[*]/",
             @"'(\\.|[^\'\n])*'",    //< SOMEDAY: Not fully restrictive

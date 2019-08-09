@@ -223,6 +223,7 @@ namespace actorcompiler
 
     class Actor
     {
+        public List<string> attributes = new List<string>();
         public string returnType;
         public string name;
         public VarDeclaration[] parameters;
