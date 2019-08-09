@@ -907,9 +907,15 @@ enum Role {
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath = "", dataFolder, connFile = "", seedConnFile = "", seedConnString = "", logFolder = ".",
-	            metricsConnFile = "", metricsPrefix = "";
+	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
+	                                                                                metricsPrefix;
 	std::string logGroup = "default";
+	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
+	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
+	bool maxLogsSizeSet = false;
+	int maxLogs = 0;
+	bool maxLogsSet = false;
+
 	Role role = FDBD;
 	uint32_t randomSeed = platform::getRandomSeed();
 
@@ -917,7 +923,10 @@ struct CLIOptions {
 	std::string kvFile;
 	std::string testServersStr;
 	std::string whitelistBinPaths;
+
 	std::vector<std::string> publicAddressStrs, listenAddressStrs;
+	NetworkAddressList publicAddresses, listenAddresses;
+
 	const char* targetKey = NULL;
 	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
@@ -929,11 +938,6 @@ struct CLIOptions {
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
 	bool useNet2 = true;
 	bool useThreadPool = false;
-	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
-	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
-	bool maxLogsSizeSet = false;
-	int maxLogs = 0;
-	bool maxLogsSet = false;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	LocalityData localities;
 	int minTesterCount = 1;
@@ -946,7 +950,6 @@ struct CLIOptions {
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
 
-	NetworkAddressList publicAddresses, listenAddresses;
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
 
