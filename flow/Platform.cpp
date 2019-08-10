@@ -948,7 +948,7 @@ void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesR
 	retransSegs = tcpstat.tcps_sndrexmitpack;
 }
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	INJECT_FAULT( platform_error, "getMachineLoad" );
 
 	long cur[CPUSTATES], last[CPUSTATES];
@@ -976,6 +976,8 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS] + cur[CP_IDLE]);
 
 	idleTime = (uint64_t)(cur[CP_IDLE]);
+
+	//need to add logging here to TraceEvent
 
 }
 
@@ -3026,6 +3028,20 @@ std::string exePath() {
 	if (len > 0 && len < PATH_MAX) {
 		buf[len] = '\0';
 		return std::string(buf.get());
+	} else {
+		throw platform_error();
+	}
+#elif defined(__FreeBSD__)
+	char binPath[2048];	
+	int mib[4];
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_PROC;
+	mib[2] = KERN_PROC_PATHNAME;
+	mib[3] = -1;
+	size_t len = sizeof(binPath);
+	if (sysctl(mib, 4, binPath, &len, NULL, 0) != 0) {
+		binPath[0] = '\0';
+		return std::string(binPath);
 	} else {
 		throw platform_error();
 	}
