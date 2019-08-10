@@ -55,7 +55,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
-	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 );
+	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
 	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
 	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
@@ -163,9 +163,12 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SECOND_REQUEST_BUDGET_GROWTH,                       0.05 );
 	init( SECOND_REQUEST_MAX_BUDGET,                         100.0 );
 	init( ALTERNATIVES_FAILURE_RESET_TIME,                     5.0 );
-	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
 	init( ALTERNATIVES_FAILURE_MIN_DELAY,                     0.05 );
 	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 );
+	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
+	init( ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,              0.04 );
+	init( ALTERNATIVES_FAILURE_SLOW_MAX_DELAY,                30.0 );
+	init( ALTERNATIVES_FAILURE_SKIP_DELAY,                     1.0 );
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );

@@ -39,6 +39,7 @@ Fixes
 * Under certain conditions, cross region replication could stall for 10 minute periods. `(PR #1818) <https://github.com/apple/foundationdb/pull/1818>`_.
 * In very rare scenarios, master recovery would restart because system metadata was loaded incorrectly. `(PR #1919) <https://github.com/apple/foundationdb/pull/1919>`_.
 * Ratekeeper will aggressively throttle when unable to fetch the list of storage servers for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
+* Proxies could become overloaded when all storage servers on a team fail. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 
 Status
 ------
@@ -83,6 +84,12 @@ Other Changes
 * Added a ``no_wait`` option to the ``fdbcli`` exclude command to avoid blocking. `(PR #1852) <https://github.com/apple/foundationdb/pull/1852>`_.
 * Idle clusters will fsync much less frequently. `(PR #1697) <https://github.com/apple/foundationdb/pull/1697>`_.
 * CMake is now the official build system. The Makefile based build system is deprecated.
+
+Fixes only impacting 6.2.0+
+---------------------------
+
+* Clients could crash when closing connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+* Do not close idle network connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 
 Earlier release notes
 ---------------------
