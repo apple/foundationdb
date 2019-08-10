@@ -181,7 +181,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	const LogEpoch epoch;
 
 	// new members
-	std::map<int8_t, Version> pseudoLocalityPopVersion;
+	std::map<Tag, Version> pseudoLocalityPopVersion;
 	Future<Void> rejoins;
 	Future<Void> recoveryComplete;
 	Future<Void> remoteRecovery;
@@ -238,7 +238,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	void addPseudoLocality(int8_t locality) {
 		ASSERT(locality < 0);
 		pseudoLocalities.insert(locality);
-		pseudoLocalityPopVersion[locality] = 0;
+		for (uint16_t i = 0; i < logRouterTags; i++) {
+			pseudoLocalityPopVersion[Tag(locality, i)] = 0;
+		}
 	}
 
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) override {
@@ -264,15 +266,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	bool hasPseudoLocality(int8_t locality) override { return pseudoLocalities.count(locality) > 0; }
 
-	Version popPseudoLocalityTag(int8_t locality, Version upTo) override {
-		ASSERT(hasPseudoLocality(locality));
-		auto& localityVersion = pseudoLocalityPopVersion[locality];
+	Version popPseudoLocalityTag(Tag tag, Version upTo) override {
+		ASSERT(isPseudoLocality(tag.locality) && hasPseudoLocality(tag.locality));
+
+		Version& localityVersion = pseudoLocalityPopVersion[tag];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
-		for (const auto& it : pseudoLocalityPopVersion) {
-			minVersion = std::min(minVersion, it.second);
+		for (const int8_t locality : pseudoLocalities) {
+			minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 		}
-		TraceEvent("Pop").detail("L", locality).detail("Version", upTo).detail("PopVersion", minVersion);
+		TraceEvent("Pop", dbgid).detail("Tag", tag.toString()).detail("Version", upTo).detail("PopVersion", minVersion);
 		return minVersion;
 	}
 
@@ -304,6 +307,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		for (const auto& oldTlogConf : lsConf.oldTLogs) {
 			logSystem->oldLogData.emplace_back(oldTlogConf);
+			//TraceEvent("BWFromLSConf")
+			//    .detail("Epoch", logSystem->oldLogData.back().epoch)
+			//    .detail("Version", logSystem->oldLogData.back().epochEnd);
 		}
 
 		logSystem->logSystemType = lsConf.logSystemType;
@@ -326,6 +332,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			for (int i = 1; i < lsConf.oldTLogs.size(); i++ ) {
 				logSystem->oldLogData.emplace_back(lsConf.oldTLogs[i]);
+				//TraceEvent("BWFromOldLSConf")
+				//    .detail("Epoch", logSystem->oldLogData.back().epoch)
+				//    .detail("Version", logSystem->oldLogData.back().epochEnd);
 			}
 		}
 		logSystem->logSystemType = lsConf.logSystemType;
@@ -360,6 +369,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(!recoveryComplete.isValid() || !recoveryComplete.isReady() || (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady()))) {
 			for (const auto& oldData : oldLogData) {
 				newState.oldTLogData.emplace_back(oldData);
+				TraceEvent("BWToCore")
+				    .detail("Epoch", newState.oldTLogData.back().epoch)
+				    .detail("Version", newState.oldTLogData.back().epochEnd);
 			}
 		}
 
@@ -1235,6 +1247,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(!recoveryCompleteWrittenToCoreState.get()) {
 			for (const auto& oldData : oldLogData) {
 				logSystemConfig.oldTLogs.emplace_back(oldData);
+				//TraceEvent("BWGetLSConf")
+				//    .detail("Epoch", logSystemConfig.oldTLogs.back().epoch)
+				//    .detail("Version", logSystemConfig.oldTLogs.back().epochEnd);
 			}
 		}
 		return logSystemConfig;
@@ -2115,6 +2130,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->oldLogData[0].epoch = oldLogSystem->epoch;
 		}
 		logSystem->oldLogData.insert(logSystem->oldLogData.end(), oldLogSystem->oldLogData.begin(), oldLogSystem->oldLogData.end());
+		//for (const auto& old : logSystem->oldLogData) {
+		//	TraceEvent("BWEndVersion").detail("Epoch", old.epoch).detail("Version", old.epochEnd);
+		//}
 
 		logSystem->tLogs[0]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;

@@ -985,7 +985,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	int8_t tagLocality = inputTag.locality;
 	if (isPseudoLocality(tagLocality)) {
 		if (logData->logSystem->get().isValid()) {
-			upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
+			upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
 			tagLocality = tagLocalityLogRouter;
 		} else {
 			// TODO: if this happens, need to save the popped version? or discard the pop?
@@ -995,6 +995,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	}
 	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);
+	TraceEvent("TLogPop0", logData->logId).detail("Tag", tag.toString()).detail("To", to).detail("UpTo", upTo).detail("Popped", tagData ? tagData->popped : -1);
 	if (!tagData) {
 		tagData = logData->createTagData(tag, upTo, true, true, false);
 	} else if (upTo > tagData->popped) {
@@ -1012,7 +1013,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
-		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
+		TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
 	}
 	return Void();
 }

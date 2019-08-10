@@ -757,7 +757,10 @@ struct ILogSystem {
 
 	virtual bool hasPseudoLocality(int8_t locality) = 0;
 
-	virtual Version popPseudoLocalityTag(int8_t locality, Version upTo) = 0;
+	// Returns the actual version to be popped from the log router tag for the given pseudo tag.
+	// For instance, a pseudo tag (-8, 2) means the actual popping tag is (-2, 2). Assuming there
+	// are multiple pseudo tags, the returned version is the min(all pseudo tags' "upTo" versions).
+	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
 	virtual void setBackupWorkers(
 	    std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers) = 0;

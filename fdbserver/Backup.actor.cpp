@@ -197,9 +197,13 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
 				if (ls && ls->hasPseudoLocality(tagLocalityBackup)) {
 					self.logSystem.set(ls);
-					TraceEvent("BackupWorkerLogSystem", interf.id()).detail("HasBackupLocality", true);
+					TraceEvent("BackupWorkerLogSystem", interf.id())
+					    .detail("HasBackupLocality", true)
+					    .detail("Tag", self.tag.toString());
 				} else {
-					TraceEvent("BackupWorkerLogSystem", interf.id()).detail("HasBackupLocality", false);
+					TraceEvent("BackupWorkerLogSystem", interf.id())
+					    .detail("HasBackupLocality", false)
+					    .detail("Tag", self.tag.toString());
 				}
 			}
 			when(HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
