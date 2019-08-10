@@ -1,5 +1,6 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
+  ApplyMetadataMutation.cpp
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
@@ -17,6 +18,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
+  FDBExecHelper.actor.cpp
+  FDBExecHelper.actor.h
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
@@ -66,13 +69,6 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
-  sqlite/btree.h
-  sqlite/hash.h
-  sqlite/sqlite3.h
-  sqlite/sqlite3ext.h
-  sqlite/sqliteInt.h
-  sqlite/sqliteLimit.h
-  sqlite/sqlite3.amalgamation.c
   Status.actor.cpp
   Status.h
   StorageMetrics.actor.h
@@ -111,6 +107,8 @@ set(FDBSERVER_SRCS
   workloads/BulkSetup.actor.h
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/TriggerRecovery.actor.cpp
+  workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
@@ -119,9 +117,11 @@ set(FDBSERVER_SRCS
   workloads/Cycle.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
+  workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
@@ -132,9 +132,11 @@ set(FDBSERVER_SRCS
   workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
+  workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
@@ -157,6 +159,7 @@ set(FDBSERVER_SRCS
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
+  workloads/SnapTest.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
@@ -166,6 +169,7 @@ set(FDBSERVER_SRCS
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
@@ -177,12 +181,33 @@ set(FDBSERVER_SRCS
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 
+add_library(fdb_sqlite STATIC
+  sqlite/btree.h
+  sqlite/hash.h
+  sqlite/sqlite3.h
+  sqlite/sqlite3ext.h
+  sqlite/sqliteInt.h
+  sqlite/sqliteLimit.h
+  sqlite/sqlite3.amalgamation.c)
+
+# Suppress warnings in sqlite since it's third party
+if(NOT WIN32)
+  target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
+  target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
+  ${CMAKE_SOURCE_DIR}/bindings/c
+  ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient)
+target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+if (GPERFTOOLS_FOUND)
+  add_compile_definitions(USE_GPERFTOOLS)
+  target_link_libraries(fdbserver PRIVATE gperftools)
+endif()
 
 fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)

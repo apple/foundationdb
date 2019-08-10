@@ -74,8 +74,6 @@ struct ConflictRangeWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload *self) {
-		state int i;
-		state int j;
 		state std::string clientID;
 		state std::string myKeyA;
 		state std::string myKeyB;
@@ -110,8 +108,8 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					if( self->testReadYourWrites ) {
 						clearedSet.clear();
-						int clearedA = g_random->randomInt(0, self->maxKeySpace-1);
-						int clearedB = g_random->randomInt(0, self->maxKeySpace-1);
+						int clearedA = deterministicRandom()->randomInt(0, self->maxKeySpace-1);
+						int clearedB = deterministicRandom()->randomInt(0, self->maxKeySpace-1);
 						clearedBegin = std::min(clearedA, clearedB);
 						clearedEnd = std::max(clearedA, clearedB)+1;
 						TraceEvent("ConflictRangeClear").detail("Begin",clearedBegin).detail("End",clearedEnd);
@@ -119,13 +117,13 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					tr0.clear( KeyRangeRef( StringRef( format( "%010d", 0 ) ), StringRef( format( "%010d", self->maxKeySpace ) ) ) );
 					for(int i = 0; i < self->maxKeySpace; i++) {
-						if( g_random->random01() > 0.5) {
+						if( deterministicRandom()->random01() > 0.5) {
 							TraceEvent("ConflictRangeInit").detail("Key",i);
 							if( self->testReadYourWrites && i >= clearedBegin && i < clearedEnd )
 								clearedSet.insert( i );
 							else {
 								insertedSet.insert( i );
-								tr0.set(StringRef( format( "%010d", i ) ),g_random->randomUniqueID().toString());
+								tr0.set(StringRef( format( "%010d", i ) ),deterministicRandom()->randomUniqueID().toString());
 							}
 						}
 					}
@@ -148,13 +146,13 @@ struct ConflictRangeWorkload : TestWorkload {
 			try {
 				//Generate a random getRange operation and execute it, if it produces results, save them, otherwise retry.
 				loop {
-					myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace ) );
-					myKeyB = format( "%010d", g_random->randomInt( 0, self->maxKeySpace ) );
-					onEqualA = g_random->randomInt( 0, 2 ) != 0;
-					onEqualB = g_random->randomInt( 0, 2 ) != 0;
-					offsetA = g_random->randomInt( -1*self->maxOffset, self->maxOffset );
-					offsetB = g_random->randomInt( -1*self->maxOffset, self->maxOffset );
-					randomLimit = g_random->randomInt( 1, self->maxKeySpace );
+					myKeyA = format( "%010d", deterministicRandom()->randomInt( 0, self->maxKeySpace ) );
+					myKeyB = format( "%010d", deterministicRandom()->randomInt( 0, self->maxKeySpace ) );
+					onEqualA = deterministicRandom()->randomInt( 0, 2 ) != 0;
+					onEqualB = deterministicRandom()->randomInt( 0, 2 ) != 0;
+					offsetA = deterministicRandom()->randomInt( -1*self->maxOffset, self->maxOffset );
+					offsetB = deterministicRandom()->randomInt( -1*self->maxOffset, self->maxOffset );
+					randomLimit = deterministicRandom()->randomInt( 1, self->maxKeySpace );
 
 					Standalone<RangeResultRef> res = wait( tr1.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB),randomLimit) );
 					if( res.size() ) {
@@ -166,7 +164,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				if( self->testReadYourWrites ) {
 					for( auto iter = clearedSet.begin(); iter != clearedSet.end(); ++iter )
-						tr1.set(StringRef( format( "%010d", (*iter) ) ),g_random->randomUniqueID().toString());
+						tr1.set(StringRef( format( "%010d", (*iter) ) ),deterministicRandom()->randomUniqueID().toString());
 					wait( tr1.commit() );
 					tr1 = Transaction(cx);
 				}
@@ -182,21 +180,23 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				//Do random operations in one of the transactions and commit.
 				//Either do all sets in locations without existing data or all clears in locations with data.
-				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
+				for (int i = 0;
+				     i < deterministicRandom()->randomInt(self->minOperationsPerTransaction, self->maxOperationsPerTransaction + 1);
+				     i++) {
 					if( randomSets ) {
 						for( int j = 0; j < 5; j++) {
-							int proposedKey = g_random->randomInt( 0, self->maxKeySpace );
+							int proposedKey = deterministicRandom()->randomInt( 0, self->maxKeySpace );
 							if( !insertedSet.count( proposedKey ) ) {
 								TraceEvent("ConflictRangeSet").detail("Key",proposedKey);
 								insertedSet.insert( proposedKey );
-								tr2.set(StringRef(format( "%010d", proposedKey )),g_random->randomUniqueID().toString());
+								tr2.set(StringRef(format( "%010d", proposedKey )),deterministicRandom()->randomUniqueID().toString());
 								break;
 							}
 						}
 					}
 					else {
 						for( int j = 0; j < 5; j++) {
-							int proposedKey = g_random->randomInt( 0, self->maxKeySpace );
+							int proposedKey = deterministicRandom()->randomInt( 0, self->maxKeySpace );
 							if( insertedSet.count( proposedKey ) ) {
 								TraceEvent("ConflictRangeClear").detail("Key",proposedKey);
 								insertedSet.erase( proposedKey );

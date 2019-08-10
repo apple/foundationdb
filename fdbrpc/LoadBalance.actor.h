@@ -65,14 +65,12 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	}
 };
 
+// Subclasses must initialize all members in their default constructors
+// Subclasses must serialize all members
 struct LoadBalancedReply {
 	double penalty;
+	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, penalty);
-	}
 };
 
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
@@ -83,24 +81,41 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
 bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
-	int errCode = result.isError() ? result.getError().code() : error_code_success;
-	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
-	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
-	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
-
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
+	int errCode;
+	if (loadBalancedReply.present()) {
+		errCode = loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code() : error_code_success;
+	}
+	else {
+		errCode = result.isError() ? result.getError().code() : error_code_success;
+	}
+
+	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
+	bool receivedResponse = loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
+	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
-	
-	if(result.present()) {
+
+	if (errCode == error_code_server_overloaded)
+	{
+		return false;
+	}
+
+	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
+		return true;
+	}
+
+	if (!loadBalancedReply.present() && result.present()) {
 		return true;
 	}
 
 	if(receivedResponse) {
-		throw result.getError();
+		throw loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
 	}
 
 	if(atMostOnce && maybeDelivered) {
@@ -108,7 +123,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw future_version();
+		throw process_behind(); 
 	}
 
 	return false;
@@ -160,7 +175,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {
@@ -177,8 +192,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 	ASSERT( alternatives->size() );
 
-	state int bestAlt = g_random->randomInt(0, alternatives->countBest());
-	state int nextAlt = g_random->randomInt(0, std::max(alternatives->size() - 1,1));
+	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
+	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1,1));
 	if( nextAlt >= bestAlt )
 		nextAlt++;
 
@@ -287,7 +302,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
 
 				// Making this SevWarn means a lot of clutter
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
 					TraceEvent("AllAlternativesFailed")
 						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
 						.detail("Alternatives", alternatives->description())

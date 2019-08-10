@@ -32,6 +32,7 @@
 #include <link.h>
 
 #include "flow/Platform.h"
+#include "flow/actorcompiler.h" // This must be the last include.
 
 extern volatile thread_local int profilingEnabled;
 
@@ -223,7 +224,7 @@ struct Profiler {
 		tv.it_interval.tv_sec = 0;
 		tv.it_interval.tv_nsec = period_ns;
 		tv.it_value.tv_sec = 0;
-		tv.it_value.tv_nsec = g_nondeterministic_random->randomInt(period_ns/2,period_ns+1);
+		tv.it_value.tv_nsec = nondeterministicRandom()->randomInt(period_ns/2,period_ns+1);
 
 		sigevent sev;
 		sev.sigev_notify = SIGEV_THREAD_ID;
@@ -247,7 +248,7 @@ struct Profiler {
 		outOffset += self->environmentInfoWriter.getLength();
 
 		loop {
-			wait( self->network->delay(1.0, TaskMinPriority) || self->network->delay(2.0, TaskMaxPriority) );
+			wait( self->network->delay(1.0, TaskPriority::Min) || self->network->delay(2.0, TaskPriority::Max) );
 
 			self->enableSignal(false);
 			std::swap( self->output_buffer, otherBuffer );

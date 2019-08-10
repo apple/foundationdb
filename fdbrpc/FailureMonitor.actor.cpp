@@ -92,6 +92,10 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
+	if(endpoint.token.first() == -1) {
+		TraceEvent("WellKnownEndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("TokenFirst", endpoint.token.first()).detail("TokenSecond", endpoint.token.second());
+		return;
+	}
 	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }
@@ -136,6 +140,12 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 		else return a->second;
 		//printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.address.toString(), a.failed ? "FAILED" : "OK", this);
 	}
+}
+
+FailureStatus SimpleFailureMonitor::getState( NetworkAddress const& address ) {
+	auto a = addressStatus.find(address);
+	if (a == addressStatus.end()) return FailureStatus();
+	else return a->second;
 }
 
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {

@@ -38,6 +38,6 @@ std::string getDefaultConfigPath();
 
 bool isSse42Supported();
 
-}; // namespace platform
+} // namespace platform
 
 #endif

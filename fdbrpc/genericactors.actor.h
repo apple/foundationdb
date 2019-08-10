@@ -50,7 +50,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request )
 }
 
 ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request, int taskID ) {
+Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request, TaskPriority taskID ) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process restarts.
 	// Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after replying with broken_promise.
@@ -70,7 +70,6 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request, 
 
 ACTOR template <class T>
 Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> output ) {
-	state double start = now();
 	state Future<Void> end = delay( time );
 	loop choose {
 		when ( T t = wait( what ) ) { return t; }

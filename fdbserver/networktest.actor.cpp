@@ -30,7 +30,7 @@ NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
 
 NetworkTestInterface::NetworkTestInterface( INetwork* local )
 {
-	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskDefaultEndpoint );
+	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint );
 }
 
 ACTOR Future<Void> networkTestServer() {
@@ -57,10 +57,8 @@ ACTOR Future<Void> networkTestServer() {
 }
 
 ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent ) {
-	state double lastTime = now();
-
 	loop {
-		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[g_random->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
+		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
 		(*sent)++;
 	}
 }

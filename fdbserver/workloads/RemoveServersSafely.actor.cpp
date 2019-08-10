@@ -52,7 +52,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		maxDelay = getOption( options, LiteralStringRef("maxDelay"), 60.0 );
 		kill1Timeout = getOption( options, LiteralStringRef("kill1Timeout"), 60.0 );
 		kill2Timeout = getOption( options, LiteralStringRef("kill2Timeout"), 6000.0 );
-		killProcesses = g_random->random01() < 0.5;
+		killProcesses = deterministicRandom()->random01() < 0.5;
 		if(g_network->isSimulated()) {
 			g_simulator.allowLogSetKills = false;
 		}
@@ -87,8 +87,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		int processCount = processAddrs.size();
-		int nToKill1 = g_random->randomInt( std::min(processCount,minMachinesToKill), std::min(processCount,maxMachinesToKill)+1 );
-		int nToKill2 = g_random->randomInt( std::min(processCount,minMachinesToKill), std::min(processCount,maxMachinesToKill)+1 );
+		int nToKill1 = deterministicRandom()->randomInt( std::min(processCount,minMachinesToKill), std::min(processCount,maxMachinesToKill)+1 );
+		int nToKill2 = deterministicRandom()->randomInt( std::min(processCount,minMachinesToKill), std::min(processCount,maxMachinesToKill)+1 );
 		toKill1 = random_subset( processAddrs, nToKill1 );
 		toKill2 = random_subset( processAddrs, nToKill2 );
 
@@ -131,7 +131,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	virtual Future<Void> start( Database const& cx ) {
 		if (!enabled)  return Void();
-		double delay = g_random->random01() * (maxDelay-minDelay) + minDelay;
+		double delay = deterministicRandom()->random01() * (maxDelay-minDelay) + minDelay;
 		return workloadMain( this, cx, delay, toKill1, toKill2 );
 	}
 
@@ -154,7 +154,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	{
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
-		UID functionId = g_nondeterministic_random->randomUniqueID();
+		UID functionId = nondeterministicRandom()->randomUniqueID();
 
 		// Get the list of process network addresses
 		for (auto& netAddr : netAddrs) {
@@ -251,7 +251,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (int killsLeft = killProcArray.size(); killsLeft > 0; killsLeft --)
 		{
 			// Select a random kill process
-			randomIndex = g_random->randomInt(0, killsLeft);
+			randomIndex = deterministicRandom()->randomInt(0, killsLeft);
 			randomProcess = killProcArray[randomIndex];
 			processesDead.push_back(randomProcess);
 			killProcArray[randomIndex] = killProcArray.back();
@@ -343,7 +343,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	virtual std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs)
 	{
-		UID functionId = g_nondeterministic_random->randomUniqueID();
+		UID functionId = nondeterministicRandom()->randomUniqueID();
 		bool removeViaClear = !BUGGIFY;
 		std::vector<ISimulator::ProcessInfo*>	killProcArray;
 		std::vector<AddressExclusion>	toKillArray;
@@ -379,7 +379,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			TraceEvent("RemoveAndKill", functionId).detail("Step", removeViaClear ? "ClearMachines" : "KillMachines").detail("Addresses", describe(killAddrs)).detail("Processes", killProcArray.size()).detail("Zones", zoneIds.size()).detail("ClusterAvailable", g_simulator.isAvailable());
 			for (auto& zoneId : zoneIds) {
 				killedMachine = g_simulator.killZone( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly );
-				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine").detailext("ZoneId", zoneId).detail(removeViaClear ? "Cleared" : "Killed", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
+				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine").detail("ZoneId", zoneId).detail(removeViaClear ? "Cleared" : "Killed", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
 			}
 		}
 
@@ -388,7 +388,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs)
 	{
-		state UID functionId = g_nondeterministic_random->randomUniqueID();
+		state UID functionId = nondeterministicRandom()->randomUniqueID();
 
 		// First clear the exclusion list and exclude the given list
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "include all").detail("ClusterAvailable", g_simulator.isAvailable());
@@ -413,7 +413,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (toKill.size()) {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "Wait For Server Exclusion").detail("Addresses", describe(toKill)).detail("ClusterAvailable", g_simulator.isAvailable());
-			wait( waitForExcludedServers( cx, toKillArray ) );
+			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("DesiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
 
@@ -454,7 +454,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	template <class T> static std::set<T> random_subset( std::vector<T> v, int n ) {
 		std::set<T>	subset;
 		// No, this isn't efficient!
-		g_random->randomShuffle(v);
+		deterministicRandom()->randomShuffle(v);
 		v.resize(n);
 		std::copy(v.begin(), v.end(), std::inserter(subset,subset.end()));
 		return subset;

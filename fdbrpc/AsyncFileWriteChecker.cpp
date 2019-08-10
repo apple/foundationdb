@@ -20,5 +20,5 @@
 
 #include "fdbrpc/AsyncFileWriteChecker.h"
 
-int AsyncFileWriteChecker::checksumHistoryBudget;
+Optional<int> AsyncFileWriteChecker::checksumHistoryBudget = {};
 int AsyncFileWriteChecker::checksumHistoryPageSize = 4096;

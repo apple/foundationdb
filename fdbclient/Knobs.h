@@ -41,6 +41,11 @@ public:
 	double FAILURE_EMERGENCY_DELAY;
 	double FAILURE_MAX_GENERATIONS;
 
+	double COORDINATOR_RECONNECTION_DELAY;
+	int CLIENT_EXAMPLE_AMOUNT;
+	double MAX_CLIENT_STATUS_AGE;
+	int MAX_CLIENT_PROXY_CONNECTIONS;
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
@@ -51,7 +56,7 @@ public:
 	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
 	int PROXY_COMMIT_OVERHEAD_BYTES;
 
-	int64_t TRANSACTION_SIZE_LIMIT;
+	int TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
 	int64_t SYSTEM_KEY_SIZE_LIMIT;
 	int64_t VALUE_SIZE_LIMIT;
@@ -182,10 +187,6 @@ public:
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
-	int CONSISTENCY_CHECK_RATE_WINDOW;
-
-	// TLS related
-	int CHECK_CONNECTED_COORDINATOR_NUM_DELAY;
 
 	ClientKnobs(bool randomize = false);
 };

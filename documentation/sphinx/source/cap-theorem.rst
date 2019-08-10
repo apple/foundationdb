@@ -22,7 +22,7 @@ What does choosing Availability mean?
 
 Let's consider an **AP** database. In such a database, reads and writes would always succeed, even when network connectivity is unavailable between nodes. If possible, these would certainly seem like desirable properties!
 
-However, the downside is stark. Imagine a simple distributed database consisting of two nodes and a network partition making them unable communicate. To be Available, each of the two nodes must continue to accept writes from clients.
+However, the downside is stark. Imagine a simple distributed database consisting of two nodes and a network partition making them unable to communicate. To be Available, each of the two nodes must continue to accept writes from clients.
 
 .. figure:: /images/AP_Partition.png
 

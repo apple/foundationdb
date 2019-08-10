@@ -22,6 +22,9 @@
 #define CONFLICTSET_H
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "fdbclient/CommitTransaction.h"
 
 struct ConflictSet;
@@ -40,23 +43,23 @@ struct ConflictBatch {
 	};
 
 	void addTransaction( const CommitTransactionRef& transaction );
-	void detectConflicts(Version now, Version newOldestVersion, vector<int>& nonConflicting, vector<int>* tooOldTransactions = NULL);
-	void GetTooOldTransactions(vector<int>& tooOldTransactions);
+	void detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting, std::vector<int>* tooOldTransactions = NULL);
+	void GetTooOldTransactions(std::vector<int>& tooOldTransactions);
 
 private:
 	ConflictSet* cs;
 	Standalone< VectorRef< struct TransactionInfo* > > transactionInfo;
-	vector<struct KeyInfo> points;
+	std::vector<struct KeyInfo> points;
 	int transactionCount;
-	vector< pair<StringRef,StringRef> > combinedWriteConflictRanges;
-	vector< struct ReadConflictRange > combinedReadConflictRanges;
+	std::vector< std::pair<StringRef,StringRef> > combinedWriteConflictRanges;
+	std::vector< struct ReadConflictRange > combinedReadConflictRanges;
 	bool* transactionConflictStatus;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();
 	void checkReadConflictRanges();
 	void mergeWriteConflictRanges(Version now);
-	void addConflictRanges(Version now, vector< pair<StringRef,StringRef> >::iterator begin, vector< pair<StringRef,StringRef> >::iterator end, class SkipList* part);
+	void addConflictRanges(Version now, std::vector< std::pair<StringRef,StringRef> >::iterator begin, std::vector< std::pair<StringRef,StringRef> >::iterator end, class SkipList* part);
 };
 
 #endif

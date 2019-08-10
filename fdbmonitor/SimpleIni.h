@@ -324,7 +324,7 @@ public:
 #endif
 
         /** Strict less ordering by name of key only */
-        struct KeyOrder : std::binary_function<Entry, Entry, bool> {
+        struct KeyOrder {
             bool operator()(const Entry & lhs, const Entry & rhs) const {
                 const static SI_STRLESS isLess = SI_STRLESS();
                 return isLess(lhs.pItem, rhs.pItem);
@@ -332,7 +332,7 @@ public:
         };
 
         /** Strict less ordering by order, and then name of key */
-        struct LoadOrder : std::binary_function<Entry, Entry, bool> {
+        struct LoadOrder {
             bool operator()(const Entry & lhs, const Entry & rhs) const {
                 if (lhs.nOrder != rhs.nOrder) {
                     return lhs.nOrder < rhs.nOrder;

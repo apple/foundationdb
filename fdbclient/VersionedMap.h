@@ -58,7 +58,7 @@ namespace PTreeImpl {
 		Reference<PTree> right(Version at) const { return child(true, at); }
 
 		PTree(const T& data, Version ver) : data(data), lastUpdateVersion(ver), updated(false) {
-			priority = g_random->randomUInt32();
+			priority = deterministicRandom()->randomUInt32();
 		}
 		PTree( uint32_t pri, T const& data, Reference<PTree> const& left, Reference<PTree> const& right, Version ver ) : priority(pri), data(data), lastUpdateVersion(ver), updated(false) {
 			pointer[0] = left; pointer[1] = right;
@@ -483,7 +483,8 @@ public:
 		return r->second;
 	}
 
-	static const int overheadPerItem = 128*4;
+	// For each item in the versioned map, 4 PTree nodes are potentially allocated:
+	static const int overheadPerItem = nextFastAllocatedSize(sizeof(PTreeT)) * 4;
 	struct iterator;
 
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
@@ -510,7 +511,7 @@ public:
 		oldestVersion = newOldestVersion;
 	}
 
-	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, int taskID = 7000 ) {
+	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
 		roots[newOldestVersion] = getRoot(newOldestVersion);
 

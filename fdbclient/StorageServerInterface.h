@@ -28,13 +28,11 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct StorageServerInterface {
-	enum { 
-		BUSY_ALLOWED = 0,
-		BUSY_FORCE = 1,
-		BUSY_LOCAL = 2
-	};
+	constexpr static FileIdentifier file_identifier = 15302073;
+	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
 
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 0 };
@@ -53,7 +51,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
-	RequestStream<struct GetPhysicalMetricsRequest> getPhysicalMetrics;
+	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
@@ -61,7 +59,7 @@ struct StorageServerInterface {
 	RequestStream<struct WatchValueRequest> watchValue;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -69,18 +67,23 @@ struct StorageServerInterface {
 	void serialize( Ar& ar ) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
-		serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 
-		if( ar.protocolVersion() >= 0x0FDB00A200090001LL )
-			serializer(ar, watchValue);
+		if constexpr (!is_fb_function<Ar>) {
+			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+		} else {
+			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			           watchValue);
+		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
 	void initEndpoints() {
-		getValue.getEndpoint( TaskLoadBalancedEndpoint );
-		getKey.getEndpoint( TaskLoadBalancedEndpoint );
-		getKeyValues.getEndpoint( TaskLoadBalancedEndpoint );
+		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 };
 
@@ -94,9 +97,22 @@ struct ServerCacheInfo {
 	std::vector<Tag> tags;
 	std::vector<Reference<StorageInfo>> src_info;
 	std::vector<Reference<StorageInfo>> dest_info;
+
+	void populateTags() {
+		if (tags.size()) return;
+
+		for (const auto& info : src_info) {
+			tags.push_back(info->tag);
+		}
+		for (const auto& info : dest_info) {
+			tags.push_back(info->tag);
+		}
+		uniquify(tags);
+	}
 };
 
 struct GetValueReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
 
 	GetValueReply() {}
@@ -104,11 +120,12 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
 	}
 };
 
 struct GetValueRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 8454530;
 	Key key;
 	Version version;
 	Optional<UID> debugID;
@@ -124,6 +141,7 @@ struct GetValueRequest : TimedRequest {
 };
 
 struct WatchValueRequest {
+	constexpr static FileIdentifier file_identifier = 14747733;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -140,34 +158,40 @@ struct WatchValueRequest {
 };
 
 struct GetKeyValuesReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
-	VectorRef<KeyValueRef> data;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
 
+	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
 	}
 };
 
 struct GetKeyValuesRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
 	Arena arena;
 	KeySelectorRef begin, end;
 	Version version;		// or latestVersion
 	int limit, limitBytes;
+	bool isFetchKeys;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
 
-	GetKeyValuesRequest() {}
+	GetKeyValuesRequest() : isFetchKeys(false) {}
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, debugID, reply, arena);
 	}
 };
 
 struct GetKeyReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
 
 	GetKeyReply() {}
@@ -175,11 +199,12 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
 	}
 };
 
 struct GetKeyRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 10457870;
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
@@ -195,6 +220,7 @@ struct GetKeyRequest : TimedRequest {
 };
 
 struct GetShardStateRequest {
+	constexpr static FileIdentifier file_identifier = 15860168;
 	enum waitMode {
 		NO_WAIT = 0,
 		FETCHING = 1,
@@ -214,6 +240,7 @@ struct GetShardStateRequest {
 };
 
 struct StorageMetrics {
+	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes;				// total storage
 	int64_t bytesPerKSecond;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond;
@@ -266,6 +293,7 @@ struct StorageMetrics {
 struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
+	constexpr static FileIdentifier file_identifier = 1795961;
 	Arena arena;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
@@ -284,6 +312,7 @@ struct WaitMetricsRequest {
 };
 
 struct SplitMetricsReply {
+	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
 
@@ -294,6 +323,7 @@ struct SplitMetricsReply {
 };
 
 struct SplitMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 10463876;
 	Arena arena;
 	KeyRangeRef keys;
 	StorageMetrics limits;
@@ -311,29 +341,24 @@ struct SplitMetricsRequest {
 	}
 };
 
-struct GetPhysicalMetricsReply {
+struct GetStorageMetricsReply {
+	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
 	StorageMetrics free;
 	StorageMetrics capacity;
+	double bytesInputRate;
+
+	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity);
+		serializer(ar, load, free, capacity, bytesInputRate);
 	}
 };
 
-struct GetPhysicalMetricsRequest {
-	ReplyPromise<GetPhysicalMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
-struct StorageQueuingMetricsRequest {
-	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
-	ReplyPromise<struct StorageQueuingMetricsReply> reply;
+struct GetStorageMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 13290999;
+	ReplyPromise<GetStorageMetricsReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -342,6 +367,7 @@ struct StorageQueuingMetricsRequest {
 };
 
 struct StorageQueuingMetricsReply {
+	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
@@ -350,10 +376,22 @@ struct StorageQueuingMetricsReply {
 	Version durableVersion; // latest version durable on storage server
 	double cpuUsage;
 	double diskUsage;
+	double localRateLimit;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage, localRateLimit);
+	}
+};
+
+struct StorageQueuingMetricsRequest {
+	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
+	constexpr static FileIdentifier file_identifier = 3978640;
+	ReplyPromise<struct StorageQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

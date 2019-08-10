@@ -37,12 +37,28 @@
 .. |node-subspace| replace:: FIXME
 .. |content-subspace| replace:: FIXME
 .. |allow-manual-prefixes| replace:: FIXME
+.. |retry-limit-transaction-option| replace:: FIXME
+.. |timeout-transaction-option| replace:: FIXME
+.. |max-retry-delay-transaction-option| replace:: FIXME
+.. |size-limit-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-disable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-database-option| replace:: FIXME
+.. |snapshot-ryw-disable-database-option| replace:: FIXME
+.. |retry-limit-database-option| replace:: FIXME
+.. |max-retry-delay-database-option| replace:: FIXME
+.. |transaction-size-limit-database-option| replace:: FIXME
+.. |timeout-database-option| replace:: FIXME
+.. |causal-read-risky-transaction-option| replace:: FIXME
+.. |causal-read-risky-database-option| replace:: FIXME
+.. |transaction-logging-max-field-length-database-option| replace:: FIXME
+.. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 
 .. include:: api-common.rst.inc
 
-.. |future-warning| replace:: :data:`future` must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.
+.. |future-warning| replace:: ``future`` must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.
 
-.. |future-get-return1| replace:: Returns zero if :data:`future` is ready and not in an error state, and a non-zero :ref:`error code <developer-guide-error-codes>` otherwise
+.. |future-get-return1| replace:: Returns zero if ``future`` is ready and not in an error state, and a non-zero :ref:`error code <developer-guide-error-codes>` otherwise
 
 .. |future-get-return2| replace:: (in which case the value of any out parameter is undefined)
 
@@ -74,9 +90,9 @@
 
 .. |snapshot| replace:: Non-zero if this is a :ref:`snapshot read <snapshots>`.
 
-.. |sets-and-clears1| replace:: Modify the database snapshot represented by :data:`transaction`
+.. |sets-and-clears1| replace:: Modify the database snapshot represented by ``transaction``
 
-.. |sets-and-clears2| replace:: The modification affects the actual database only if :data:`transaction` is later committed with :func:`fdb_transaction_commit()`.
+.. |sets-and-clears2| replace:: The modification affects the actual database only if ``transaction`` is later committed with :func:`fdb_transaction_commit()`.
 
 =====
 C API
@@ -105,7 +121,7 @@ The FoundationDB C bindings are provided as a shared object which may be linked 
 Linux
 -----
 
-When linking against ``libfdb_c.so``, you must also link against ``libm``, ``libpthread`` and ``librt``. These dependencies will be resolved by the dynamic linker when using this API via :func:`dlopen()` or an FFI.
+When linking against ``libfdb_c.so``, you must also link against ``libm``, ``libpthread`` and ``librt``. These dependencies will be resolved by the dynamic linker when using this API via ``dlopen()`` or an FFI.
 
 macOS
 --------
@@ -115,37 +131,37 @@ When linking against ``libfdb_c.dylib``, no additional libraries are required.
 API versioning
 ==============
 
-Prior to including ``fdb_c.h``, you must define the :macro:`FDB_API_VERSION` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
+Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 610
+  #define FDB_API_VERSION 620
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
 
-   Must be called before any other API functions. :data:`version` must be less than or equal to :macro:`FDB_API_VERSION` (and should almost always be equal).
+   Must be called before any other API functions. ``version`` must be less than or equal to ``FDB_API_VERSION`` (and should almost always be equal).
 
-   Language bindings implemented in C which themselves expose API versioning will usually pass the version requested by the application, instead of always passing :macro:`FDB_API_VERSION`.
+   Language bindings implemented in C which themselves expose API versioning will usually pass the version requested by the application, instead of always passing ``FDB_API_VERSION``.
 
-   Passing a version less than :macro:`FDB_API_VERSION` will cause the API to behave as it did in the older version.
+   Passing a version less than ``FDB_API_VERSION`` will cause the API to behave as it did in the older version.
 
    It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.
 
-   .. note:: This is actually implemented as a macro. If you are accessing this API via :func:`dlopen()` or an FFI, you will need to use :func:`fdb_select_api_version_impl()`.
+   .. note:: This is actually implemented as a macro. If you are accessing this API via ``dlopen()`` or an FFI, you will need to use :func:`fdb_select_api_version_impl()`.
 
    .. warning:: |api-version-multi-version-warning|
 
 .. function:: fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version)
 
-   This is the actual entry point called by the :func:`fdb_select_api_version` macro. It should never be called directly from C, but if you are accessing this API via :func:`dlopen()` or an FFI, you will need to use it. ``fdb_select_api_version(v)`` is equivalent to ``fdb_select_api_version_impl(v, FDB_API_VERSION)``.
+   This is the actual entry point called by the :func:`fdb_select_api_version` macro. It should never be called directly from C, but if you are accessing this API via ``dlopen()`` or an FFI, you will need to use it. ``fdb_select_api_version(v)`` is equivalent to ``fdb_select_api_version_impl(v, FDB_API_VERSION)``.
 
    It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.
 
-   :data:`runtime_version`
-      The version of run-time behavior the API is requested to provide. Must be less than or equal to :data:`header_version`, and should almost always be equal.
+   ``runtime_version``
+      The version of run-time behavior the API is requested to provide. Must be less than or equal to ``header_version``, and should almost always be equal.
 
       Language bindings which themselves expose API versioning will usually pass the version requested by the application.
 
-   :data:`header_version`
+   ``header_version``
       The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this *must* correspond to the version of the API you are using as a reference (currently |api-version|). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.
 
    .. warning:: |api-version-multi-version-warning|
@@ -263,7 +279,7 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. type:: FDBCallback
 
-   A pointer to a function which takes :type:`FDBFuture*` and :type:`void*` and returns :type:`void`.
+   A pointer to a function which takes :type:`FDBFuture*` and ``void*`` and returns ``void``.
 
 .. function:: void fdb_future_release_memory(FDBFuture* future)
 
@@ -277,15 +293,15 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1|.
 
-.. function:: fdb_error_t fdb_future_get_version(FDBFuture* future, int64_t* out_version)
+.. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
-   Extracts a value of type version from an :type:`FDBFuture` into a caller-provided variable of type :type:`int64_t`. |future-warning|
+   Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
 .. function:: fdb_error_t fdb_future_get_key(FDBFuture* future, uint8_t const** out_key, int* out_key_length)
 
-   Extracts a value of type key from an :type:`FDBFuture` into caller-provided variables of type :type:`uint8_t*` (a pointer to the beginning of the key) and :type:`int` (the length of the key). |future-warning|
+   Extracts a key from an :type:`FDBFuture` into caller-provided variables of type ``uint8_t*`` (a pointer to the beginning of the key) and ``int`` (the length of the key). |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -297,13 +313,13 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
-   :data:`*out_present`
+   ``*out_present``
       Set to non-zero if (and only if) the requested value was present in the database. (If zero, the other outputs are meaningless.)
 
-   :data:`*out_value`
+   ``*out_value``
       Set to point to the first byte of the value.
 
-   :data:`*out_value_length`
+   ``*out_value_length``
       Set to the length of the value (in bytes).
 
    |future-memory-mine|
@@ -314,10 +330,10 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
     |future-get-return1| |future-get-return2|.
 
-    :data:`*out_strings`
+    ``*out_strings``
       Set to point to the first string in the array.
 
-    :data:`*out_count`
+    ``*out_count``
       Set to the number of strings in the array.
 
     |future-memory-mine|
@@ -328,13 +344,13 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
-   :data:`*out_kv`
+   ``*out_kv``
       Set to point to the first :type:`FDBKeyValue` object in the array.
 
-   :data:`*out_count`
+   ``*out_count``
       Set to the number of :type:`FDBKeyValue` objects in the array.
 
-   :data:`*out_more`
+   ``*out_more``
       Set to true if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the limits requested).
 
    |future-memory-mine|
@@ -350,17 +366,17 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
          int         value_length;
      } FDBKeyValue;
 
-   :data:`key`
+   ``key``
        A pointer to a key.
 
-   :data:`key_length`
-      The length of the key pointed to by :data:`key`.
+   ``key_length``
+      The length of the key pointed to by ``key``.
 
-   :data:`value`
+   ``value``
       A pointer to a value.
 
-   :data:`value_length`
-      The length of the value pointed to by :data:`value`.
+   ``value_length``
+      The length of the value pointed to by ``value``.
 
 Database
 ========
@@ -375,10 +391,10 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Creates a new database connected the specified cluster. The caller assumes ownership of the :type:`FDBDatabase` object and must destroy it with :func:`fdb_database_destroy()`.
 
-   :data:`cluster_file_path`
+   ``cluster_file_path``
       A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
 
-   :data:`*out_database`
+   ``*out_database``
       Set to point to the newly created :type:`FDBDatabase`.
 
 .. function:: void fdb_database_destroy(FDBDatabase* database)
@@ -397,7 +413,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Creates a new transaction on the given database. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
 
-   :data:`*out_transaction`
+   ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
 
 Transaction
@@ -429,85 +445,85 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: void fdb_transaction_set_read_version(FDBTransaction* transaction, int64_t version)
 
-   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_past_version; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of :func:`fdb_transaction_get_*()` have been called on this transaction already, the result is undefined.
+   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_transaction_too_old; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of :func:`fdb_transaction_get_*()` have been called on this transaction already, the result is undefined.
 
 .. function:: FDBFuture* fdb_transaction_get_read_version(FDBTransaction* transaction)
 
-   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_version()` to extract the version into an int64_t that you provide, |future-return2|
+   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_int64()` to extract the version into an int64_t that you provide, |future-return2|
 
    The transaction obtains a snapshot read version automatically at the time of the first call to :func:`fdb_transaction_get_*()` (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.
 
 .. function:: FDBFuture* fdb_transaction_get(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t snapshot)
 
-   Reads a value from the database snapshot represented by :data:`transaction`.
+   Reads a value from the database snapshot represented by ``transaction``.
 
-   |future-return0| the value of :data:`key_name` in the database. |future-return1| call :func:`fdb_future_get_value()` to extract the value, |future-return2|
+   |future-return0| the value of ``key_name`` in the database. |future-return1| call :func:`fdb_future_get_value()` to extract the value, |future-return2|
 
-   See :func:`fdb_future_get_value()` to see exactly how results are unpacked. If :data:`key_name` is not present in the database, the result is not an error, but a zero for :data:`*out_present` returned from that function.
+   See :func:`fdb_future_get_value()` to see exactly how results are unpacked. If ``key_name`` is not present in the database, the result is not an error, but a zero for ``*out_present`` returned from that function.
 
-   :data:`key_name`
+   ``key_name``
       A pointer to the name of the key to be looked up in the database. |no-null|
 
-   :data:`key_name_length`
-      |length-of| :data:`key_name`.
+   ``key_name_length``
+      |length-of| ``key_name``.
 
-   :data:`snapshot`
+   ``snapshot``
       |snapshot|
 
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
-   Resolves a :ref:`key selector <key-selectors>` against the keys in the database snapshot represented by :data:`transaction`.
+   Resolves a :ref:`key selector <key-selectors>` against the keys in the database snapshot represented by ``transaction``.
 
    |future-return0| the key in the database matching the :ref:`key selector <key-selectors>`. |future-return1| call :func:`fdb_future_get_key()` to extract the key, |future-return2|
 
-   :data:`key_name`, :data:`key_name_length`, :data:`or_equal`, :data:`offset`
+   ``key_name``, ``key_name_length``, ``or_equal``, ``offset``
       The four components of a :ref:`key selector <key-selectors>`.
 
-   :data:`snapshot`
+   ``snapshot``
       |snapshot|
 
 .. function:: FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length)
 
-    Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing :data:`key_name` and its associated value.
+    Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing ``key_name`` and its associated value.
 
     |future-return0| an array of strings. |future-return1| call :func:`fdb_future_get_string_array()` to extract the string array, |future-return2|
 
-    :data:`key_name`
+    ``key_name``
         A pointer to the name of the key whose location is to be queried.
 
-    :data:`key_name_length`
-        |length-of| :data:`key_name`.
+    ``key_name_length``
+        |length-of| ``key_name``.
 
-.. |range-limited-by| replace:: If this limit was reached before the end of the specified range, then the :data:`*more` return of :func:`fdb_future_get_keyvalue_array()` will be set to a non-zero value.
+.. |range-limited-by| replace:: If this limit was reached before the end of the specified range, then the ``*more`` return of :func:`fdb_future_get_keyvalue_array()` will be set to a non-zero value.
 
 .. function:: FDBFuture* fdb_transaction_get_range(FDBTransaction* transaction, uint8_t const* begin_key_name, int begin_key_name_length, fdb_bool_t begin_or_equal, int begin_offset, uint8_t const* end_key_name, int end_key_name_length, fdb_bool_t end_or_equal, int end_offset, int limit, int target_bytes, FDBStreamingMode mode, int iteration, fdb_bool_t snapshot, fdb_bool_t reverse)
 
-   Reads all key-value pairs in the database snapshot represented by :data:`transaction` (potentially limited by :data:`limit`, :data:`target_bytes`, or :data:`mode`) which have a key lexicographically greater than or equal to the key resolved by the begin :ref:`key selector <key-selectors>` and lexicographically less than the key resolved by the end :ref:`key selector <key-selectors>`.
+   Reads all key-value pairs in the database snapshot represented by ``transaction`` (potentially limited by :data:`limit`, :data:`target_bytes`, or :data:`mode`) which have a key lexicographically greater than or equal to the key resolved by the begin :ref:`key selector <key-selectors>` and lexicographically less than the key resolved by the end :ref:`key selector <key-selectors>`.
 
    |future-return0| an :type:`FDBKeyValue` array. |future-return1| call :func:`fdb_future_get_keyvalue_array()` to extract the key-value array, |future-return2|
 
-   :data:`begin_key_name`, :data:`begin_key_name_length`, :data:`begin_or_equal`, :data:`begin_offset`
+   ``begin_key_name``, :data:`begin_key_name_length`, :data:`begin_or_equal`, :data:`begin_offset`
       The four components of a :ref:`key selector <key-selectors>` describing the beginning of the range.
 
-   :data:`end_key_name`, :data:`end_key_name_length`, :data:`end_or_equal`, :data:`end_offset`
+   ``end_key_name``, :data:`end_key_name_length`, :data:`end_or_equal`, :data:`end_offset`
       The four components of a :ref:`key selector <key-selectors>` describing the end of the range.
 
-   :data:`limit`
+   ``limit``
       If non-zero, indicates the maximum number of key-value pairs to return. |range-limited-by|
 
-   :data:`target_bytes`
+   ``target_bytes``
       If non-zero, indicates a (soft) cap on the combined number of bytes of keys and values to return. |range-limited-by|
 
-   :data:`mode`
+   ``mode``
       One of the :type:`FDBStreamingMode` values indicating how the caller would like the data in the range returned.
 
-   :data:`iteration`
-      If :data:`mode` is :data:`FDB_STREAMING_MODE_ITERATOR`, this parameter should start at 1 and be incremented by 1 for each successive call while reading this range. In all other cases it is ignored.
+   ``iteration``
+      If ``mode`` is :data:`FDB_STREAMING_MODE_ITERATOR`, this parameter should start at 1 and be incremented by 1 for each successive call while reading this range. In all other cases it is ignored.
 
-   :data:`snapshot`
+   ``snapshot``
       |snapshot|
 
-   :data:`reverse`
+   ``reverse``
 
       If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.
 
@@ -515,31 +531,31 @@ Applications must provide error handling and an appropriate retry loop around th
 
    An enumeration of available streaming modes to be passed to :func:`fdb_transaction_get_range()`.
 
-   :data:`FDB_STREAMING_MODE_ITERATOR`
+   ``FDB_STREAMING_MODE_ITERATOR``
 
-      The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the :data:`iteration` parameter to :func:`fdb_transaction_get_range()`.
+      The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
 
-   :data:`FDB_STREAMING_MODE_SMALL`
+   ``FDB_STREAMING_MODE_SMALL``
 
       Data is returned in small batches (not much more expensive than reading individual key-value pairs).
 
-   :data:`FDB_STREAMING_MODE_MEDIUM`
+   ``FDB_STREAMING_MODE_MEDIUM``
 
       Data is returned in batches between _SMALL and _LARGE.
 
-   :data:`FDB_STREAMING_MODE_LARGE`
+   ``FDB_STREAMING_MODE_LARGE``
 
       Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
 
-   :data:`FDB_STREAMING_MODE_SERIAL`
+   ``FDB_STREAMING_MODE_SERIAL``
 
       Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
 
-   :data:`FDB_STREAMING_MODE_WANT_ALL`
+   ``FDB_STREAMING_MODE_WANT_ALL``
 
       The caller intends to consume the entire range and would like it all transferred as early as possible.
 
-   :data:`FDB_STREAMING_MODE_EXACT`
+   ``FDB_STREAMING_MODE_EXACT``
 
       The caller has passed a specific row limit and wants that many rows delivered in a single batch.
 
@@ -549,17 +565,17 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |sets-and-clears2|
 
-   :data:`key_name`
+   ``key_name``
       A pointer to the name of the key to be inserted into the database. |no-null|
 
-   :data:`key_name_length`
-      |length-of| :data:`key_name`.
+   ``key_name_length``
+      |length-of| ``key_name``.
 
-   :data:`value`
+   ``value``
       A pointer to the value to be inserted into the database. |no-null|
 
-   :data:`value_length`
-      |length-of| :data:`value`.
+   ``value_length``
+      |length-of| ``value``.
 
 .. function:: void fdb_transaction_clear(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length)
 
@@ -567,11 +583,11 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |sets-and-clears2|
 
-   :data:`key_name`
+   ``key_name``
       A pointer to the name of the key to be removed from the database. |no-null|
 
-   :data:`key_name_length`
-      |length-of| :data:`key_name`.
+   ``key_name_length``
+      |length-of| ``key_name``.
 
 .. function:: void fdb_transaction_clear_range(FDBTransaction* transaction, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length)
 
@@ -579,17 +595,17 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |sets-and-clears2|
 
-   :data:`begin_key_name`
+   ``begin_key_name``
       A pointer to the name of the key specifying the beginning of the range to clear. |no-null|
 
-   :data:`begin_key_name_length`
-      |length-of| :data:`begin_key_name`.
+   ``begin_key_name_length``
+      |length-of| ``begin_key_name``.
 
-   :data:`end_key_name`
+   ``end_key_name``
       A pointer to the name of the key specifying the end of the range to clear. |no-null|
 
-   :data:`end_key_name_length`
-      |length-of| :data:`end_key_name_length`.
+   ``end_key_name_length``
+      |length-of| ``end_key_name_length``.
 
 .. function:: void fdb_transaction_atomic_op(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, uint8_t const* param, int param_length, FDBMutationType operationType)
 
@@ -605,64 +621,64 @@ Applications must provide error handling and an appropriate retry loop around th
 
     |sets-and-clears2|
 
-    :data:`key_name`
+    ``key_name``
         A pointer to the name of the key whose value is to be mutated.
 
-    :data:`key_name_length`
-        |length-of| :data:`key_name`.
+    ``key_name_length``
+        |length-of| ``key_name``.
 
-    :data:`param`
-        A pointer to the parameter with which the atomic operation will mutate the value associated with :data:`key_name`.
+    ``param``
+        A pointer to the parameter with which the atomic operation will mutate the value associated with ``key_name``.
 
-    :data:`param_length`
-        |length-of| :data:`param`.
+    ``param_length``
+        |length-of| ``param``.
 
-    :data:`operation_type`
+    ``operation_type``
         One of the :type:`FDBMutationType` values indicating which operation should be performed.
 
 .. type:: FDBMutationType
 
     An enumeration of available opcodes to be passed to :func:`fdb_transaction_atomic_op()`
 
-    :data:`FDB_MUTATION_TYPE_ADD`
+    ``FDB_MUTATION_TYPE_ADD``
 
     |atomic-add1|
 
     |atomic-add2|
 
-    :data:`FDB_MUTATION_TYPE_AND`
+    ``FDB_MUTATION_TYPE_AND``
 
     |atomic-and|
 
-    :data:`FDB_MUTATION_TYPE_OR`
+    ``FDB_MUTATION_TYPE_OR``
 
     |atomic-or|
 
-    :data:`FDB_MUTATION_TYPE_XOR`
+    ``FDB_MUTATION_TYPE_XOR``
 
     |atomic-xor|
 
-    :data:`FDB_MUTATION_TYPE_MAX`
+    ``FDB_MUTATION_TYPE_MAX``
 
     |atomic-max1|
 
     |atomic-max-min|
 
-    :data:`FDB_MUTATION_TYPE_BYTE_MAX`
+    ``FDB_MUTATION_TYPE_BYTE_MAX``
 
     |atomic-byte-max|
 
-    :data:`FDB_MUTATION_TYPE_MIN`
+    ``FDB_MUTATION_TYPE_MIN``
 
     |atomic-min1|
 
     |atomic-max-min|
 
-    :data:`FDB_MUTATION_TYPE_BYTE_MIN`
+    ``FDB_MUTATION_TYPE_BYTE_MIN``
 
     |atomic-byte-min|
 
-    :data:`FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY`
+    ``FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY``
 
     |atomic-set-versionstamped-key-1|
 
@@ -674,7 +690,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 
-    :data:`FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE`
+    ``FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE``
 
     |atomic-set-versionstamped-value|
 
@@ -686,7 +702,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_commit(FDBTransaction* transaction)
 
-   Attempts to commit the sets and clears previously applied to the database snapshot represented by :data:`transaction` to the actual database. The commit may or may not succeed -- in particular, if a conflicting transaction previously committed, then the commit must fail in order to preserve transactional isolation. If the commit does succeed, the transaction is durably committed to the database and all subsequently started transactions will observe its effects.
+   Attempts to commit the sets and clears previously applied to the database snapshot represented by ``transaction`` to the actual database. The commit may or may not succeed -- in particular, if a conflicting transaction previously committed, then the commit must fail in order to preserve transactional isolation. If the commit does succeed, the transaction is durably committed to the database and all subsequently started transactions will observe its effects.
 
    It is not necessary to commit a read-only transaction -- you can simply call :func:`fdb_transaction_destroy()`.
 
@@ -700,11 +716,17 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: fdb_error_t fdb_transaction_get_committed_version(FDBTransaction* transaction, int64_t* out_version)
 
-   Retrieves the database version number at which a given transaction was committed. :func:`fdb_transaction_commit()` must have been called on :data:`transaction` and the resulting future must be ready and not an error before this function is called, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.
+   Retrieves the database version number at which a given transaction was committed. :func:`fdb_transaction_commit()` must have been called on ``transaction`` and the resulting future must be ready and not an error before this function is called, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.
 
    Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling :func:`fdb_transaction_set_read_version()` on another subsequent transaction.
 
    Most applications will not call this function.
+
+.. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
+
+  |future-return0| the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+  This can be called multiple times before the transaction is committed.
 
 .. function:: FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* transaction)
 
@@ -726,11 +748,11 @@ Applications must provide error handling and an appropriate retry loop around th
 
     |transaction-watch-limit-blurb|
 
-    :data:`key_name`
+    ``key_name``
         A pointer to the name of the key to watch. |no-null|
 
-    :data:`key_name_length`
-        |length-of| :data:`key_name`.
+    ``key_name_length``
+        |length-of| ``key_name``.
 
 
 .. function:: FDBFuture* fdb_transaction_on_error(FDBTransaction* transaction, fdb_error_t error)
@@ -751,7 +773,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: void fdb_transaction_reset(FDBTransaction* transaction)
 
-   Reset :data:`transaction` to its initial state. This is similar to calling :func:`fdb_transaction_destroy()` followed by :func:`fdb_database_create_transaction()`. It is not necessary to call :func:`fdb_transaction_reset()` when handling an error with :func:`fdb_transaction_on_error()` since the transaction has already been reset.
+   Reset ``transaction`` to its initial state. This is similar to calling :func:`fdb_transaction_destroy()` followed by :func:`fdb_database_create_transaction()`. It is not necessary to call :func:`fdb_transaction_reset()` when handling an error with :func:`fdb_transaction_on_error()` since the transaction has already been reset.
 
 .. function:: void fdb_transaction_cancel(FDBTransaction* transaction)
 
@@ -769,30 +791,30 @@ Applications must provide error handling and an appropriate retry loop around th
 
     .. note:: |conflict-range-note|
 
-    :data:`begin_key_name`
+    ``begin_key_name``
         A pointer to the name of the key specifying the beginning of the conflict range. |no-null|
 
-    :data:`begin_key_name_length`
-        |length-of| :data:`begin_key_name`.
+    ``begin_key_name_length``
+        |length-of| ``begin_key_name``.
 
-    :data:`end_key_name`
+    ``end_key_name``
         A pointer to the name of the key specifying the end of the conflict range. |no-null|
 
-    :data:`end_key_name_length`
-        |length-of| :data:`end_key_name_length`.
+    ``end_key_name_length``
+        |length-of| ``end_key_name_length``.
 
-    :data:`type`
+    ``type``
         One of the :type:`FDBConflictRangeType` values indicating what type of conflict range is being set.
 
 .. type:: FDBConflictRangeType
 
     An enumeration of available conflict range types to be passed to :func:`fdb_transaction_add_conflict_range()`.
 
-    :data:`FDB_CONFLICT_RANGE_TYPE_READ`
+    ``FDB_CONFLICT_RANGE_TYPE_READ``
 
     |add-read-conflict-range-blurb|
 
-    :data:`FDB_CONFLICT_RANGE_TYPE_WRITE`
+    ``FDB_CONFLICT_RANGE_TYPE_WRITE``
 
     |add-write-conflict-range-blurb|
 

@@ -29,148 +29,148 @@ template <class Ar>
 void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy);
 extern void testReplicationPolicy(int nTests);
 
-
 struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
-		IReplicationPolicy() {}
-		virtual ~IReplicationPolicy() {}
-		virtual std::string name() const = 0;
-		virtual std::string info() const = 0;
-		virtual void addref() { ReferenceCounted<IReplicationPolicy>::addref(); }
-		virtual void delref() { ReferenceCounted<IReplicationPolicy>::delref(); }
-		virtual int maxResults() const = 0;
-		virtual int depth() const = 0;
-		virtual bool selectReplicas(
-			Reference<LocalitySet> &										fromServers,
-			std::vector<LocalityEntry> const&		alsoServers,
-			std::vector<LocalityEntry>	&				results ) = 0;
-	    virtual void traceLocalityRecords(Reference<LocalitySet> const& fromServers);
-	    virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, Reference<LocalitySet> const& fromServers);
-	    virtual bool validate(
-			std::vector<LocalityEntry>	const&	solutionSet,
-			Reference<LocalitySet> const&								fromServers ) const = 0;
+	IReplicationPolicy() {}
+	virtual ~IReplicationPolicy() {}
+	virtual std::string name() const = 0;
+	virtual std::string info() const = 0;
+	virtual void addref() { ReferenceCounted<IReplicationPolicy>::addref(); }
+	virtual void delref() { ReferenceCounted<IReplicationPolicy>::delref(); }
+	virtual int maxResults() const = 0;
+	virtual int depth() const = 0;
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	                            std::vector<LocalityEntry>& results) = 0;
+	virtual void traceLocalityRecords(Reference<LocalitySet> const& fromServers);
+	virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, Reference<LocalitySet> const& fromServers);
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
+	                      Reference<LocalitySet> const& fromServers) const = 0;
 
-		bool operator == ( const IReplicationPolicy& r ) const { return info() == r.info(); }
-		bool operator != ( const IReplicationPolicy& r ) const { return info() != r.info(); }
+	bool operator==(const IReplicationPolicy& r) const { return info() == r.info(); }
+	bool operator!=(const IReplicationPolicy& r) const { return info() != r.info(); }
 
-		template <class Ar>
-		void serialize(Ar& ar) {
-			Reference<IReplicationPolicy>	refThis(this);
-			serializeReplicationPolicy(ar, refThis);
-			refThis->delref_no_destroy();
-		}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
+		Reference<IReplicationPolicy> refThis(this);
+		serializeReplicationPolicy(ar, refThis);
+		refThis->delref_no_destroy();
+	}
+	virtual void deserializationDone() = 0;
 
-		// Utility functions
-		bool selectReplicas(
-			Reference<LocalitySet> &										fromServers,
-			std::vector<LocalityEntry>	&				results );
-		bool validate(
-			Reference<LocalitySet> const&								solutionSet ) const;
-		bool validateFull(
-			bool																solved,
-			std::vector<LocalityEntry>	const&	solutionSet,
-			std::vector<LocalityEntry> const&		alsoServers,
-			Reference<LocalitySet> const&								fromServers );
+	// Utility functions
+	bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry>& results);
+	bool validate(Reference<LocalitySet> const& solutionSet) const;
+	bool validateFull(bool solved, std::vector<LocalityEntry> const& solutionSet,
+	                  std::vector<LocalityEntry> const& alsoServers, Reference<LocalitySet> const& fromServers);
 
-		// Returns a set of the attributes that this policy uses in selection and validation.
-		std::set<std::string> attributeKeys() const
-		{ std::set<std::string> keys; this->attributeKeys(&keys); return keys; }
-		virtual void attributeKeys(std::set<std::string>*) const = 0;
+	// Returns a set of the attributes that this policy uses in selection and validation.
+	std::set<std::string> attributeKeys() const {
+		std::set<std::string> keys;
+		this->attributeKeys(&keys);
+		return keys;
+	}
+	virtual void attributeKeys(std::set<std::string>*) const = 0;
 };
 
 template <class Archive>
-inline void load( Archive& ar, Reference<IReplicationPolicy>& value ) {
+inline void load(Archive& ar, Reference<IReplicationPolicy>& value) {
 	bool present;
 	ar >> present;
 	if (present) {
 		serializeReplicationPolicy(ar, value);
-	}
-	else {
+	} else {
 		value.clear();
 	}
 }
 
 template <class Archive>
-inline void save( Archive& ar, const Reference<IReplicationPolicy>& value ) {
+inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 	bool present = (value.getPtr() != nullptr);
 	ar << present;
 	if (present) {
-		serializeReplicationPolicy(ar, (Reference<IReplicationPolicy>&) value);
+		serializeReplicationPolicy(ar, (Reference<IReplicationPolicy>&)value);
 	}
 }
 
 struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
-	PolicyOne() {};
-	virtual ~PolicyOne() {};
+	PolicyOne(){};
+	explicit PolicyOne(const PolicyOne& o) {}
+	virtual ~PolicyOne(){};
 	virtual std::string name() const { return "One"; }
 	virtual std::string info() const { return "1"; }
 	virtual int maxResults() const { return 1; }
 	virtual int depth() const { return 1; }
-	virtual bool validate(
-		std::vector<LocalityEntry>	const&	solutionSet,
-		Reference<LocalitySet> const&				fromServers ) const;
-	virtual bool selectReplicas(
-		Reference<LocalitySet>	&						fromServers,
-		std::vector<LocalityEntry> const&		alsoServers,
-		std::vector<LocalityEntry>	&				results );
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
+	                      Reference<LocalitySet> const& fromServers) const;
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	                            std::vector<LocalityEntry>& results);
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 	}
+	virtual void deserializationDone() {}
 	virtual void attributeKeys(std::set<std::string>* set) const override { return; }
 };
 
 struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> {
+	friend struct serializable_traits<PolicyAcross*>;
 	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
+	explicit PolicyAcross();
+	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
 	virtual ~PolicyAcross();
 	virtual std::string name() const { return "Across"; }
-	virtual std::string info() const
-	{ return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
+	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
 	virtual int maxResults() const { return _count * _policy->maxResults(); }
-	virtual int depth() const  { return 1 + _policy->depth(); }
-	virtual bool validate(
-		std::vector<LocalityEntry>	const&	solutionSet,
-		Reference<LocalitySet> const&				fromServers ) const;
-	virtual bool selectReplicas(
-		Reference<LocalitySet>	&						fromServers,
-		std::vector<LocalityEntry> const&		alsoServers,
-		std::vector<LocalityEntry>	&				results );
+	virtual int depth() const { return 1 + _policy->depth(); }
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const;
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	                            std::vector<LocalityEntry>& results);
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 		serializer(ar, _attribKey, _count);
 		serializeReplicationPolicy(ar, _policy);
 	}
 
-	static bool compareAddedResults(const std::pair<int, int>& rhs, const std::pair<int, int>& lhs)
-	{ return (rhs.first < lhs.first) || (!(lhs.first < rhs.first) && (rhs.second < lhs.second)); }
+	virtual void deserializationDone() {}
 
-	virtual void attributeKeys(std::set<std::string> *set) const override
-	{ set->insert(_attribKey); _policy->attributeKeys(set); }
+	static bool compareAddedResults(const std::pair<int, int>& rhs, const std::pair<int, int>& lhs) {
+		return (rhs.first < lhs.first) || (!(lhs.first < rhs.first) && (rhs.second < lhs.second));
+	}
+
+	virtual void attributeKeys(std::set<std::string>* set) const override {
+		set->insert(_attribKey);
+		_policy->attributeKeys(set);
+	}
 
 protected:
-	int																_count;
-	std::string												_attribKey;
-	Reference<IReplicationPolicy>								_policy;
+	int _count;
+	std::string _attribKey;
+	Reference<IReplicationPolicy> _policy;
 
 	// Cache temporary members
-	std::vector<AttribValue>					_usedValues;
-	std::vector<LocalityEntry>				_newResults;
-	Reference<LocalitySet>										_selected;
-	VectorRef<std::pair<int,int>>			_addedResults;
-	Arena															_arena;
+	std::vector<AttribValue> _usedValues;
+	std::vector<LocalityEntry> _newResults;
+	Reference<LocalitySet> _selected;
+	VectorRef<std::pair<int, int>> _addedResults;
+	Arena _arena;
 };
 
 struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
-	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies): _policies(policies), _sortedPolicies(policies)
-	{
+	friend struct serializable_traits<PolicyAnd*>;
+	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies) : _policies(policies), _sortedPolicies(policies) {
 		// Sort the policy array
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 	}
+	explicit PolicyAnd(const PolicyAnd& other) : _policies(other._policies), _sortedPolicies(other._sortedPolicies) {}
+	explicit PolicyAnd() {}
 	virtual ~PolicyAnd() {}
 	virtual std::string name() const { return "And"; }
 	virtual std::string info() const {
-		std::string	infoText;
+		std::string infoText;
 		for (auto& policy : _policies) {
-			infoText += ((infoText.length()) ? " & ("  : "(") + policy->info() + ")";
+			infoText += ((infoText.length()) ? " & (" : "(") + policy->info() + ")";
 		}
 		if (_policies.size()) infoText = "(" + infoText + ")";
 		return infoText;
@@ -192,91 +192,119 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 		}
 		return depthMax;
 	}
-	virtual bool validate(
-		std::vector<LocalityEntry>	const&	solutionSet,
-		Reference<LocalitySet> const&				fromServers ) const;
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
+	                      Reference<LocalitySet> const& fromServers) const;
 
-	virtual bool selectReplicas(
-		Reference<LocalitySet>	&						fromServers,
-		std::vector<LocalityEntry> const&		alsoServers,
-		std::vector<LocalityEntry>	&				results );
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+	                            std::vector<LocalityEntry>& results);
 
-	static bool comparePolicy(const Reference<IReplicationPolicy>& rhs, const Reference<IReplicationPolicy>& lhs)
-	{ return (lhs->maxResults() < rhs->maxResults()) || (!(rhs->maxResults() < lhs->maxResults()) && (lhs->depth() < rhs->depth())); }
+	static bool comparePolicy(const Reference<IReplicationPolicy>& rhs, const Reference<IReplicationPolicy>& lhs) {
+		return (lhs->maxResults() < rhs->maxResults()) ||
+		       (!(rhs->maxResults() < lhs->maxResults()) && (lhs->depth() < rhs->depth()));
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
 		int count = _policies.size();
 		serializer(ar, count);
 		_policies.resize(count);
-		for(int i = 0; i < count; i++) {
+		for (int i = 0; i < count; i++) {
 			serializeReplicationPolicy(ar, _policies[i]);
 		}
-		if(Ar::isDeserializing) {
+		if (Ar::isDeserializing) {
 			_sortedPolicies = _policies;
 			std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 		}
 	}
 
-	virtual void attributeKeys(std::set<std::string> *set) const override
-	{ for (const Reference<IReplicationPolicy>& r : _policies) { r->attributeKeys(set); } }
+	virtual void deserializationDone() {
+		_sortedPolicies = _policies;
+		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
+	}
+
+	virtual void attributeKeys(std::set<std::string>* set) const override {
+		for (const Reference<IReplicationPolicy>& r : _policies) {
+			r->attributeKeys(set);
+		}
+	}
 
 protected:
-	std::vector<Reference<IReplicationPolicy>>			_policies;
-	std::vector<Reference<IReplicationPolicy>>			_sortedPolicies;
+	std::vector<Reference<IReplicationPolicy>> _policies;
+	std::vector<Reference<IReplicationPolicy>> _sortedPolicies;
 };
-
-extern int testReplication();
-
 
 template <class Ar>
 void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
-	if(Ar::isDeserializing) {
+	if (Ar::isDeserializing) {
 		StringRef name;
 		serializer(ar, name);
 
-		if(name == LiteralStringRef("One")) {
+		if (name == LiteralStringRef("One")) {
 			PolicyOne* pointer = new PolicyOne();
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		}
-		else if(name == LiteralStringRef("Across")) {
+		} else if (name == LiteralStringRef("Across")) {
 			PolicyAcross* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		}
-		else if(name == LiteralStringRef("And")) {
-			PolicyAnd* pointer = new PolicyAnd({});
+		} else if (name == LiteralStringRef("And")) {
+			PolicyAnd* pointer = new PolicyAnd{};
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		}
-		else if(name == LiteralStringRef("None")) {
+		} else if (name == LiteralStringRef("None")) {
 			policy = Reference<IReplicationPolicy>();
+		} else {
+			TraceEvent(SevError, "SerializingInvalidPolicyType").detail("PolicyName", name);
 		}
-		else {
-			TraceEvent(SevError, "SerializingInvalidPolicyType")
-				.detailext("PolicyName", name);
-		}
-	}
-	else {
+	} else {
 		std::string name = policy ? policy->name() : "None";
 		Standalone<StringRef> nameRef = StringRef(name);
 		serializer(ar, nameRef);
-		if(name == "One") {
+		if (name == "One") {
 			((PolicyOne*)policy.getPtr())->serialize(ar);
-		}
-		else if(name == "Across") {
+		} else if (name == "Across") {
 			((PolicyAcross*)policy.getPtr())->serialize(ar);
-		}
-		else if(name == "And") {
+		} else if (name == "And") {
 			((PolicyAnd*)policy.getPtr())->serialize(ar);
-		}
-		else if(name == "None") {}
-		else {
-			TraceEvent(SevError, "SerializingInvalidPolicyType")
-				.detail("PolicyName", name);
+		} else if (name == "None") {
+		} else {
+			TraceEvent(SevError, "SerializingInvalidPolicyType").detail("PolicyName", name);
 		}
 	}
 }
+
+template <>
+struct dynamic_size_traits<Reference<IReplicationPolicy>> : std::true_type {
+private:
+	using T = Reference<IReplicationPolicy>;
+
+public:
+	template <class Context>
+	static size_t size(const T& value, Context& context) {
+		// size gets called multiple times. If this becomes a performance problem, we can perform the
+		// serialization once and cache the result as a mutable member of IReplicationPolicy
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		return writer.getLength();
+	}
+
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t* out, const T& value, Context& context) {
+		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
+		::save(writer, value);
+		memcpy(out, writer.getData(), writer.getLength());
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
+		StringRef str(buf, sz);
+		BinaryReader reader(str, AssumeVersion(context.protocolVersion()));
+		::load(reader, value);
+	}
+};
 
 #endif

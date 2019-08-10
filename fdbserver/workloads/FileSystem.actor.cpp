@@ -95,20 +95,19 @@ struct FileSystemWorkload : TestWorkload {
 	void initializeFile( Transaction *tr, FileSystemWorkload *self, uint64_t id ) {
 		Key key = self->keyForFileID( id );
 
-		int pathLen = self->pathMinChars + g_random->randomInt(0, self->pathCharRange);
+		int pathLen = self->pathMinChars + deterministicRandom()->randomInt(0, self->pathCharRange);
 		std::string path = "";
 		for(int i=0; i<pathLen; i+=4)
-			path += format( format( "%%0%dx", std::min( pathLen - i, 4 ) ).c_str(), g_random->randomInt( 0, 0xFFFF ) );
-		uint64_t userID = g_random->randomInt(0, self->userIDCount);
-		int serverID = g_random->randomInt(0, self->serverCount);
-		bool deleted = g_random->random01() < self->deletedFilesRatio;
-		UID uid = g_random->randomUniqueID();
+			path += format( format( "%%0%dx", std::min( pathLen - i, 4 ) ).c_str(), deterministicRandom()->randomInt( 0, 0xFFFF ) );
+		uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
+		int serverID = deterministicRandom()->randomInt(0, self->serverCount);
+		bool deleted = deterministicRandom()->random01() < self->deletedFilesRatio;
 		double time = now();
 
 		tr->set( key, path );
 		std::string keyStr(key.toString());
-		tr->set( keyStr + "/size", format( "%d", g_random->randomInt( 0, 2 << 30 ) ) );
-		tr->set( keyStr + "/server", format( "%d", g_random->randomInt( 0, self->serverCount ) ) );
+		tr->set( keyStr + "/size", format( "%d", deterministicRandom()->randomInt( 0, 2 << 30 ) ) );
+		tr->set( keyStr + "/server", format( "%d", deterministicRandom()->randomInt( 0, self->serverCount ) ) );
 		tr->set( keyStr + "/deleted", deleted ? LiteralStringRef("1") : LiteralStringRef("0") );
 		tr->set( keyStr + "/server", format( "%d", serverID ) );
 		tr->set( keyStr + "/created", doubleToTestKey( time ) );
@@ -148,7 +147,7 @@ struct FileSystemWorkload : TestWorkload {
 		state int startingNode = nodesToSetUp * self->clientId;
 		state int batchCount = 5;
 		for(int o=0; o<=nodesToSetUp / batchCount; o++) order.push_back(o*batchCount);
-		g_random->randomShuffle(order);
+		deterministicRandom()->randomShuffle(order);
 		for(i=0; i<order.size(); ) {
 			vector<Future<Void>> fs;
 			for(int j=0; j<100 && i<order.size(); j++) {
@@ -233,9 +232,9 @@ struct FileSystemWorkload : TestWorkload {
 	{
 		state double clientBegin = now();
 		loop {
-			state int fileID = g_random->randomInt(0, self->fileCount);
-			state bool isDeleting = g_random->random01() < 0.25;
-			state int size = isDeleting ? 0 : g_random->randomInt( 0, 2 << 30 );
+			state int fileID = deterministicRandom()->randomInt(0, self->fileCount);
+			state bool isDeleting = deterministicRandom()->random01() < 0.25;
+			state int size = isDeleting ? 0 : deterministicRandom()->randomInt( 0, 2 << 30 );
 			state std::string keyStr = self->keyForFileID( fileID ).toString();
 			state double tstart = now();
 			state Transaction tr(cx);
@@ -273,7 +272,7 @@ struct FileSystemWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Optional<Version>> modificationQuery( FileSystemWorkload *self, Transaction *tr ) {
-		state uint64_t userID = g_random->randomInt(0, self->userIDCount);
+		state uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
 		state std::string base = format("/files/user/%016llx", userID);
 		if( self->loggingQueries )
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
@@ -292,7 +291,7 @@ struct FileSystemWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Optional<Version>> deletionQuery( FileSystemWorkload *self, Transaction *tr ) {
-		state uint64_t serverID = g_random->randomInt(0, self->serverCount);
+		state uint64_t serverID = deterministicRandom()->randomInt(0, self->serverCount);
 		state std::string base = format("/files/server/%08x/deleted", serverID);
 		if( self->loggingQueries )
 			TraceEvent("DeletionQuery").detail("ServerID", serverID).detail("PathBase", base);

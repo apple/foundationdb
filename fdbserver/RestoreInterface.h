@@ -28,6 +28,7 @@
 #include "fdbrpc/Locality.h"
 
 struct RestoreInterface {
+	constexpr static FileIdentifier file_identifier = 13398189;
 	RequestStream< struct TestRequest > test;
 
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
@@ -36,7 +37,7 @@ struct RestoreInterface {
 	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
-		test.getEndpoint( TaskClusterController );
+		test.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
@@ -45,7 +46,21 @@ struct RestoreInterface {
 	}
 };
 
+struct TestReply {
+	constexpr static FileIdentifier file_identifier = 12075719;
+	int replyData;
+
+	TestReply() : replyData(0) {}
+	explicit TestReply(int replyData) : replyData(replyData) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, replyData);
+	}
+};
+
 struct TestRequest {
+	constexpr static FileIdentifier file_identifier = 14404487;
 	int testData;
 	ReplyPromise< struct TestReply > reply;
 
@@ -55,18 +70,6 @@ struct TestRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, testData, reply);
-	}
-};
-
-struct TestReply {
-	int replyData;
-
-	TestReply() : replyData(0) {}
-	explicit TestReply(int replyData) : replyData(replyData) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, replyData);
 	}
 };
 

@@ -26,7 +26,6 @@
 ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){
 	// when this actor is cancelled, the promises in the queue will send broken_promise
 	state Deque<ReplyPromise<Void>> queue;
-	state int limit = BUGGIFY ? SERVER_KNOBS->BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS : SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	loop {
 		ReplyPromise<Void> P = waitNext(waitFailure);
 		queue.push_back(P);
@@ -38,7 +37,7 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, int taskID){
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, TaskPriority taskID){
 	loop {
 		try {
 			state double start = now();
@@ -56,7 +55,17 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 	}
 }
 
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, int taskID){
+ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime, TaskPriority taskID){
+	loop {
+		wait(waitFailureClient(waitFailure, 0, 0, taskID));
+		wait(delay(failureReactionTime, taskID) || IFailureMonitor::failureMonitor().onStateEqual( waitFailure.getEndpoint(), FailureStatus(false)));
+		if(IFailureMonitor::failureMonitor().getState( waitFailure.getEndpoint() ).isFailed()) {
+			return Void();
+		}
+	}
+}
+
+ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, TaskPriority taskID){
 	loop {
 		try {	
 			failed->set( IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed() );

@@ -50,6 +50,7 @@
 #include <sys/time.h>
 #include <stdlib.h>
 
+#include <cinttypes>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -381,7 +382,7 @@ public:
 	Command() : argv(NULL) { }
 	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
-		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
+		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%" PRIu64, section.c_str(), id);
 		ssection = _ssection;
 
 		for ( auto p : pipes ) {
@@ -1277,8 +1278,6 @@ int main(int argc, char** argv) {
 	fd_set srfds;
 #endif
 
-	CSimpleIniA* ini = NULL;
-
 	if (daemonize) {
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #pragma GCC diagnostic push
@@ -1336,7 +1335,8 @@ int main(int argc, char** argv) {
 	/* write our pid to the lockfile for convenience */
 	char pid_buf[16];
 	snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());
-	ssize_t ign = write(lockfile_fd, pid_buf, strlen(pid_buf));
+	auto ign = write(lockfile_fd, pid_buf, strlen(pid_buf));
+	(void)ign;
 
 #ifdef __linux__
 	/* attempt to do clean shutdown and remove lockfile when killed */

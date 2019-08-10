@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 610}.<br><br>
+ *   {@code 620}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -104,10 +104,15 @@ public class FDB {
 	 * Called only once to create the FDB singleton.
 	 */
 	private FDB(int apiVersion) {
-		this.apiVersion = apiVersion;
+		this(apiVersion, true);
+	}
 
+	private FDB(int apiVersion, boolean controlRuntime) {
+		this.apiVersion = apiVersion;
 		options = new NetworkOptions(this::Network_setOption);
-		Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
+		if (controlRuntime) {
+			Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
+		}
 	}
 
 	/**
@@ -171,7 +176,14 @@ public class FDB {
 	 *
 	 * @return the FoundationDB API object
 	 */
-	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
+	public static FDB selectAPIVersion(final int version) throws FDBException {
+		return selectAPIVersion(version, true);
+	}
+
+	/**
+	   This function is called from C++ if the VM is controlled directly from FDB
+	 */
+	private static synchronized FDB selectAPIVersion(final int version, boolean controlRuntime) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.getAPIVersion()) {
 				throw new IllegalArgumentException(
@@ -181,11 +193,11 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 610)
-			throw new IllegalArgumentException("API version not supported (maximum 610)");
+		if(version > 620)
+			throw new IllegalArgumentException("API version not supported (maximum 620)");
 
 		Select_API_version(version);
-		FDB fdb = new FDB(version);
+		FDB fdb = new FDB(version, controlRuntime);
 
 		return singleton = fdb;
 	}

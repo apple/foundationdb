@@ -26,9 +26,11 @@ set(FDBRPC_SRCS
   ReplicationUtils.cpp
   sim2.actor.cpp
   sim_validation.cpp
+  TimedRequest.h
   TLSConnection.actor.cpp
-  TraceFileIO.cpp
-  # C files
+  TraceFileIO.cpp)
+
+set(FDBRPC_THIRD_PARTY_SRCS
   libcoroutine/Common.c
   libcoroutine/Coro.c
   zlib/adler32.c
@@ -46,7 +48,7 @@ set(FDBRPC_SRCS
   zlib/zutil.c)
 
 if(APPLE)
-  list(APPEND FDBRPC_SRCS libcoroutine/asm.S)
+  list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/asm.S)
 endif()
 if(NOT WIN32)
   if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -70,4 +72,5 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_WITHOUT_WAIT_WARNING ${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_link_libraries(fdbrpc PRIVATE thirdparty)
 target_link_libraries(fdbrpc PUBLIC flow)

@@ -27,8 +27,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-const int sampleSize = 10000;
-
 struct MemoryLifetime : KVWorkload {
 	double testDuration;
 	vector<Future<Void>> clients;
@@ -44,10 +42,10 @@ struct MemoryLifetime : KVWorkload {
 
 	virtual std::string description() { return "MemoryLifetime"; }
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
 
 	KeySelector getRandomKeySelector() {
-		return KeySelectorRef( getRandomKey(), g_random->random01() < 0.5, g_random->randomInt(-nodeCount, nodeCount) );
+		return KeySelectorRef( getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-nodeCount, nodeCount) );
 	}
 
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
@@ -81,14 +79,14 @@ struct MemoryLifetime : KVWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		loop {
 			try {
-				int op = g_random->randomInt(0,4);
+				int op = deterministicRandom()->randomInt(0,4);
 				if(op==0) {
-					state bool getRange_isReverse = g_random->random01() < 0.5;
+					state bool getRange_isReverse = deterministicRandom()->random01() < 0.5;
 					state Key getRange_startKey = self->getRandomKey();
 					state KeyRange getRange_queryRange = getRange_isReverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey)) : KeyRangeRef(getRange_startKey, normalKeys.end);
-					state bool getRange_randomStart = g_random->random01();
+					state bool getRange_randomStart = deterministicRandom()->random01();
 					state Value getRange_newValue = self->randomValue();
-					state bool getRange_isSnapshot = g_random->random01() < 0.5;
+					state bool getRange_isSnapshot = deterministicRandom()->random01() < 0.5;
 
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", getRange_isReverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", getRange_isSnapshot);
 					if(getRange_randomStart)
@@ -118,9 +116,9 @@ struct MemoryLifetime : KVWorkload {
 					}
 				} else if(op==1) {
 					state Key get_startKey = self->getRandomKey();
-					state bool get_randomStart = g_random->random01();
+					state bool get_randomStart = deterministicRandom()->random01();
 					state Value get_newValue = self->randomValue();
-					state bool get_isSnapshot = g_random->random01() < 0.5;
+					state bool get_isSnapshot = deterministicRandom()->random01() < 0.5;
 
 					if(get_randomStart)
 						tr.set(get_startKey, get_newValue);
@@ -133,9 +131,9 @@ struct MemoryLifetime : KVWorkload {
 					ASSERT(get_res1 == get_res2);
 				} else if(op==2) {
 					state KeySelector getKey_selector = self->getRandomKeySelector();
-					state bool getKey_randomStart = g_random->random01();
+					state bool getKey_randomStart = deterministicRandom()->random01();
 					state Value getKey_newValue = self->randomValue();
-					state bool getKey_isSnapshot = g_random->random01() < 0.5;
+					state bool getKey_isSnapshot = deterministicRandom()->random01() < 0.5;
 
 					if(getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);

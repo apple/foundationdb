@@ -1,4 +1,7 @@
 #ifndef NDEBUG
+#define NDEBUG
+#endif
+#ifndef NDEBUG
     #define SQLITE_DEBUG 1
 #endif
 #define SQLITE_THREADSAFE 0

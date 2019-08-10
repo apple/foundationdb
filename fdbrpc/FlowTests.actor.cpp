@@ -172,34 +172,36 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, int taskID) {
+	virtual Future<class Void> delay(double seconds, TaskPriority taskID) {
 		return nextTick.getFuture();
 	}
 
-	virtual Future<class Void> yield(int taskID) {
+	virtual Future<class Void> yield(TaskPriority taskID) {
 		if (check_yield(taskID))
 			return delay(0,taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(int taskID) {
+	virtual bool check_yield(TaskPriority taskID) {
 		if (nextYield > 0) --nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual int getCurrentTask() { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(int taskID) { baseNetwork->setCurrentTask(taskID); }
+	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
+	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, int taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN(*func) (void *), void *arg) { return baseNetwork->startThread(func,arg); }
 	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
 	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
+	virtual bool useObjectSerializer() const { return baseNetwork->useObjectSerializer(); }
 };
 
 struct NonserializableThing {};
@@ -641,7 +643,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 
 		ASSERT( numReady()==0 );
 
-		int expectYield = g_random->randomInt(0, 4);
+		int expectYield = deterministicRandom()->randomInt(0, 4);
 		int expectReady = expectYield;
 		yn->nextYield = 1 + expectYield;
 
@@ -649,7 +651,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 		ASSERT( u.isReady() && i.isReady() && j.isReady() && numReady()==expectReady );
 
 		while (numReady() != v.size()) {
-			expectYield = g_random->randomInt(0, 4);
+			expectYield = deterministicRandom()->randomInt(0, 4);
 			yn->nextYield = 1 + expectYield;
 			expectReady += 1 + expectYield;
 			yn->tick();
@@ -1032,11 +1034,11 @@ struct YAMRandom {
 	YAMRandom() : kmax(3) {}
 
 	void randomOp() {
-		if (g_random->random01() < 0.01)
+		if (deterministicRandom()->random01() < 0.01)
 			while (!check_yield());
 
-		int k = g_random->randomInt(0, kmax);
-		int op = g_random->randomInt(0, 7);
+		int k = deterministicRandom()->randomInt(0, kmax);
+		int op = deterministicRandom()->randomInt(0, 7);
 		//printf("%d",op);
 		if (op == 0) {
 			onchanges.push_back(yam.onChange(k));
@@ -1044,20 +1046,20 @@ struct YAMRandom {
 			onchanges.push_back( trigger([this](){ this->randomOp(); }, yam.onChange(k)) );
 		} else if (op == 2) {
 			if (onchanges.size()) {
-				int i = g_random->randomInt(0, onchanges.size());
+				int i = deterministicRandom()->randomInt(0, onchanges.size());
 				onchanges[i] = onchanges.back();
 				onchanges.pop_back();
 			}
 		} else if (op == 3) {
 			onchanges.clear();
 		} else if (op == 4) {
-			int v = g_random->randomInt(0, 3);
+			int v = deterministicRandom()->randomInt(0, 3);
 			yam.set(k, v);
 		} else if (op == 5) {
 			yam.trigger(k);
 		} else if (op == 6) {
-			int a = g_random->randomInt(0, kmax);
-			int b = g_random->randomInt(0, kmax);
+			int a = deterministicRandom()->randomInt(0, kmax);
+			int b = deterministicRandom()->randomInt(0, kmax);
 			yam.triggerRange(std::min(a,b), std::max(a,b)+1);
 		}
 	}

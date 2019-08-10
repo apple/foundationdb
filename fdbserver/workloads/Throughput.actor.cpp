@@ -61,13 +61,13 @@ struct RWTransactor : ITransactor {
 		uint8_t* data = mutateString( result );
 		memset(data, '.', keyBytes);
 
-		double d = double(g_random->randomInt(0, keyCount)) / keyCount;
+		double d = double(deterministicRandom()->randomInt(0, keyCount)) / keyCount;
 		emplaceIndex( data, 0, *(int64_t*)&d );
 
 		return result;
 	}
 
-	Value randomValue() { return StringRef( (const uint8_t*)valueString.c_str(), g_random->randomInt(minValueBytes, maxValueBytes+1) ); };
+	Value randomValue() { return StringRef( (const uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) ); };
 
 	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
 		return rwTransaction(db, Reference<RWTransactor>::addRef(this), stats );
@@ -132,7 +132,7 @@ struct ABTransactor : ITransactor {
 	}
 
 	virtual Future<Void> doTransaction(Database const& db, Stats* stats) {
-		return g_random->random01() >= alpha ? a->doTransaction(db,stats) : b->doTransaction(db,stats);
+		return deterministicRandom()->random01() >= alpha ? a->doTransaction(db,stats) : b->doTransaction(db,stats);
 	}
 };
 
@@ -158,7 +158,7 @@ struct SweepTransactor : ITransactor {
 		else if (n > startTime+duration) alpha = 1;
 		else alpha = (n-startTime) / duration;
 
-		return g_random->random01() >= alpha ? a->doTransaction(db,stats) : b->doTransaction(db,stats);
+		return deterministicRandom()->random01() >= alpha ? a->doTransaction(db,stats) : b->doTransaction(db,stats);
 	}
 };
 
@@ -374,13 +374,13 @@ struct ThroughputWorkload : TestWorkload {
 
 		double desiredSuccessors = 1 - (error*self->Pgain + ierror*self->Igain) / self->targetLatency;
 
-		//if (g_random->random01() < .001) TraceEvent("ThroughputControl").detail("Error", error).detail("IError", ierror).detail("DesiredSuccessors", desiredSuccessors).detail("ActiveActors", self->activeActors);
+		//if (deterministicRandom()->random01() < .001) TraceEvent("ThroughputControl").detail("Error", error).detail("IError", ierror).detail("DesiredSuccessors", desiredSuccessors).detail("ActiveActors", self->activeActors);
 
 		desiredSuccessors = std::min( desiredSuccessors, 2.0 );
 
 		// SOMEDAY: How can we prevent the number of actors on different clients from diverging?
 
-		int successors = g_random->random01() + desiredSuccessors;
+		int successors = deterministicRandom()->random01() + desiredSuccessors;
 		if (successors<1 && self->activeActors <= 1) successors = 1;
 		if (successors>1 && self->activeActors >= 200000) successors = 1;
 		for(int s=0; s<successors; s++)

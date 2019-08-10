@@ -31,7 +31,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Tree>
-Future<Void> deferredCleanupActor( std::vector<Tree> toFree, int taskID = 7000 ) {
+Future<Void> deferredCleanupActor( std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield ) {
 	state int freeCount = 0;
 	while (!toFree.empty()) {
 		Tree a = std::move( toFree.back() );

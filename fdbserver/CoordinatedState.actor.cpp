@@ -27,19 +27,19 @@
 
 ACTOR Future<GenerationRegReadReply> waitAndSendRead( RequestStream<GenerationRegReadRequest> to, GenerationRegReadRequest req ) {
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	state GenerationRegReadReply reply = wait( retryBrokenPromise( to, req ) );
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	return reply;
 }
 
 ACTOR Future<UniqueGeneration> waitAndSendWrite(RequestStream<GenerationRegWriteRequest> to, GenerationRegWriteRequest req) {
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	state UniqueGeneration reply = wait( retryBrokenPromise( to, req ) );
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )
-		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*g_random->random01() ) );
+		wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY*deterministicRandom()->random01() ) );
 	return reply;
 }
 
@@ -82,7 +82,7 @@ struct CoordinatedStateImpl {
 			self->stage = 1;
 			GenerationRegReadReply rep = wait( self->replicatedRead( self, GenerationRegReadRequest( self->coordinators.clusterKey, UniqueGeneration() ) ) );
 			self->conflictGen = std::max( self->conflictGen, std::max(rep.gen.generation, rep.rgen.generation) ) + 1;
-			self->gen = UniqueGeneration( self->conflictGen, g_random->randomUniqueID() );
+			self->gen = UniqueGeneration( self->conflictGen, deterministicRandom()->randomUniqueID() );
 		}
 
 		{
@@ -212,7 +212,7 @@ struct MovableValue {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A2000D0001LL );
+		ASSERT( ar.protocolVersion().hasMovableCoordinatedState() );
 		serializer(ar, value, mode, other);
 	}
 };
@@ -230,7 +230,7 @@ struct MovableCoordinatedStateImpl {
 		Value rawValue = wait( self->cs.read() );
 		if( rawValue.size() ) {
 			BinaryReader r( rawValue, IncludeVersion() );
-			if (r.protocolVersion() < 0x0FDB00A2000D0001LL) {
+			if (!r.protocolVersion().hasMovableCoordinatedState()) {
 				// Old coordinated state, not a MovableValue
 				moveState.value = rawValue;
 			} else

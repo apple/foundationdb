@@ -98,7 +98,7 @@ Data Operations
 
     When finished, the stack should be empty. Note that because the stack may be
     large, it may be necessary to commit the transaction every so often (e.g.
-    after every 100 sets) to avoid past_version errors.
+    after every 100 sets) to avoid transaction_too_old errors.
 
 FoundationDB Operations
 -----------------------
@@ -276,6 +276,12 @@ futures must apply the following rules to the result:
     Gets the committed version from the current transaction and stores it in the
     internal stack machine state as the last seen version. Pushes the byte
     string "GOT_COMMITTED_VERSION" onto the stack.
+
+#### GET_APPROXIMATE_SIZE
+
+    Calls get_approximate_size and pushes the byte string "GOT_APPROXIMATE_SIZE"
+    onto the stack. Note bindings may issue GET_RANGE calls with different
+    limits, so these bindings can obtain different sizes back.
 
 #### WAIT_FUTURE
 

@@ -24,12 +24,95 @@ static const auto trIdStartIndex = sampleTrInfoKey.toString().find('R');
 static const int trIdFormatSize = 16;
 
 
+namespace ClientLogEventsParser {
+
+	void parseEventGetVersion(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetVersion gv;
+		reader >> gv;
+		ASSERT(gv.latency < 10000);
+	}
+
+	void parseEventGetVersion_V2(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetVersion_V2 gv;
+		reader >> gv;
+		ASSERT(gv.latency < 10000);
+		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END);
+	}
+
+	void parseEventGet(BinaryReader &reader) {
+		FdbClientLogEvents::EventGet g;
+		reader >> g;
+		ASSERT(g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+	}
+
+	void parseEventGetRange(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetRange gr;
+		reader >> gr;
+		ASSERT(gr.latency < 10000 && gr.rangeSize < 1000000000 && gr.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+	}
+
+	void parseEventCommit(BinaryReader &reader) {
+		FdbClientLogEvents::EventCommit c;
+		reader >> c;
+		ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
+	}
+
+	void parseEventErrorGet(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetError ge;
+		reader >> ge;
+		ASSERT(ge.errCode < 10000 && ge.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+	}
+
+	void parseEventErrorGetRange(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetRangeError gre;
+		reader >> gre;
+		ASSERT(gre.errCode < 10000 && gre.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gre.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+	}
+
+	void parseEventErrorCommit(BinaryReader &reader) {
+			FdbClientLogEvents::EventCommitError ce;
+			reader >> ce;
+			ASSERT(ce.errCode < 10000);
+	}
+
+	struct ParserBase {
+		std::function<void (BinaryReader &)> parseGetVersion = parseEventGetVersion;
+		std::function<void (BinaryReader &)> parseGet = parseEventGet;
+		std::function<void (BinaryReader &)> parseGetRange = parseEventGetRange;
+		std::function<void (BinaryReader &)> parseCommit = parseEventCommit;
+		std::function<void (BinaryReader &)> parseErrorGet = parseEventErrorGet;
+		std::function<void (BinaryReader &)> parseErrorGetRange = parseEventErrorGetRange;
+		std::function<void (BinaryReader &)> parseErrorCommit = parseEventErrorCommit;
+		virtual ~ParserBase() = 0;
+	};
+	ParserBase::~ParserBase() {}
+
+	struct Parser_V1 : ParserBase {
+		virtual ~Parser_V1() override {}
+	};
+	struct Parser_V2 : ParserBase {
+		Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
+		virtual ~Parser_V2() override {}
+	};
+
+	struct ParserFactory {
+		static std::unique_ptr<ParserBase> getParser(ProtocolVersion version) {
+			if(version.version() >= (uint64_t) 0x0FDB00B062000001LL) {
+				return std::unique_ptr<ParserBase>(new Parser_V2());
+			} else {
+				return std::unique_ptr<ParserBase>(new Parser_V1());
+			}
+		}
+	};
+};
+
 // Checks TransactionInfo format
 bool checkTxInfoEntryFormat(BinaryReader &reader) {
 	// Check protocol version
-	uint64_t protocolVersion;
+	ProtocolVersion protocolVersion;
 	reader >> protocolVersion;
 	reader.setProtocolVersion(protocolVersion);
+	std::unique_ptr<ClientLogEventsParser::ParserBase> parser = ClientLogEventsParser::ParserFactory::getParser(protocolVersion);
 
 	while (!reader.empty()) {
 		// Get EventType and timestamp
@@ -40,54 +123,26 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		switch (event)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
-		{
-			FdbClientLogEvents::EventGetVersion gv;
-			reader >> gv;
-			ASSERT(gv.latency < 10000);
+			parser->parseGetVersion(reader);
 			break;
-		}
 		case FdbClientLogEvents::GET_LATENCY:
-		{
-			FdbClientLogEvents::EventGet g;
-			reader >> g;
-			ASSERT(g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			parser->parseGet(reader);
 			break;
-		}
 		case FdbClientLogEvents::GET_RANGE_LATENCY:
-		{
-			FdbClientLogEvents::EventGetRange gr;
-			reader >> gr;
-			ASSERT(gr.latency < 10000 && gr.rangeSize < 1000000000 && gr.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			parser->parseGetRange(reader);
 			break;
-		}
 		case FdbClientLogEvents::COMMIT_LATENCY:
-		{
-			FdbClientLogEvents::EventCommit c;
-			reader >> c;
-			ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
+			parser->parseCommit(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_GET:
-		{
-			FdbClientLogEvents::EventGetError ge;
-			reader >> ge;
-			ASSERT(ge.errCode < 10000 && ge.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			parser->parseErrorGet(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_GET_RANGE:
-		{
-			FdbClientLogEvents::EventGetRangeError gre;
-			reader >> gre;
-			ASSERT(gre.errCode < 10000 && gre.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gre.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			parser->parseErrorGetRange(reader);
 			break;
-		}
 		case FdbClientLogEvents::ERROR_COMMIT:
-		{
-			FdbClientLogEvents::EventCommitError ce;
-			reader >> ce;
-			ASSERT(ce.errCode < 10000);
+			parser->parseErrorCommit(reader);
 			break;
-		}
 		default:
 			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
 			return false;
@@ -104,11 +159,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
 	{
-		if (clientId == 0) {
-			samplingProbability = getOption(options, LiteralStringRef("samplingProbability"), g_random->random01() / 10); //rand range 0 - 0.1
-			trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"), g_random->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
-			TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("SamplingProbability", samplingProbability).detail("TrInfoSizeLimit", trInfoSizeLimit);
-		}
+		samplingProbability = getOption(options, LiteralStringRef("samplingProbability"), deterministicRandom()->random01() / 10); //rand range 0 - 0.1
+		trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"), deterministicRandom()->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
+		TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("ClientId", clientId).detail("SamplingProbability", samplingProbability).detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
 
 	virtual std::string description() { return "ClientTransactionProfileCorrectness"; }

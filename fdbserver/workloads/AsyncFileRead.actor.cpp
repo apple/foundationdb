@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <utility>
+#include <vector>
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
@@ -75,18 +77,18 @@ struct IOLog {
 	ProcessLog issueR, completionR, durationR;
 	ProcessLog issueW, completionW, durationW;
 
-	vector<pair<std::string, ProcessLog*> > logs;
+	std::vector<std::pair<std::string, ProcessLog*> > logs;
 
 	IOLog(){
-		logs.push_back(std::make_pair("issue", &issue));
-		logs.push_back(std::make_pair("completion", &completion));
-		logs.push_back(std::make_pair("duration", &duration));
-		logs.push_back(std::make_pair("issueR", &issueR));
-		logs.push_back(std::make_pair("completionR", &completionR));
-		logs.push_back(std::make_pair("durationR", &durationR));
-		logs.push_back(std::make_pair("issueW", &issueW));
-		logs.push_back(std::make_pair("completionW", &completionW));
-		logs.push_back(std::make_pair("durationW", &durationW));
+		logs.emplace_back("issue", &issue);
+		logs.emplace_back("completion", &completion);
+		logs.emplace_back("duration", &duration);
+		logs.emplace_back("issueR", &issueR);
+		logs.emplace_back("completionR", &completionR);
+		logs.emplace_back("durationR", &durationR);
+		logs.emplace_back("issueW", &issueW);
+		logs.emplace_back("completionW", &completionW);
+		logs.emplace_back("durationW", &durationW);
 
 		duration.logLatency = true;
 		durationR.logLatency = true;
@@ -138,10 +140,10 @@ struct IOLog {
 struct AsyncFileReadWorkload : public AsyncFileWorkload
 {
 	//Buffers used to store what is being read or written
-	vector<Reference<AsyncFileBuffer> > readBuffers;
+	std::vector<Reference<AsyncFileBuffer> > readBuffers;
 
 	//The futures for the asynchronous read operations
-	vector<Future<int> > readFutures;
+	std::vector<Future<int> > readFutures;
 
 	//Number of reads to perform in parallel.  Read tests are performed only if this is greater than zero
 	int numParallelReads;
@@ -243,14 +245,14 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 			if (fixedRate)
 				wait( poisson( &lastTime, 1.0 / fixedRate ) );
 
-			//state Future<Void> d = delay( 1/25. * (.75 + 0.5*g_random->random01()) );
+			//state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
 			if(self->unbufferedIO)
-				offset = (int64_t)(g_random->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
+				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
 			else
-				offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
+				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 
-			writeFlag = g_random->random01() < self->writeFraction;
+			writeFlag = deterministicRandom()->random01() < self->writeFraction;
 			if (writeFlag)
 				self->rbg.writeRandomBytesToBuffer((char*)self->readBuffers[bufferIndex]->buffer, self->readSize);
 
@@ -280,7 +282,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		if (self->unbatched) {
 			self->ioLog = new IOLog();
 
-			vector<Future<Void>> readers;
+			std::vector<Future<Void>> readers;
 
 			for(int i=0; i<self->numParallelReads; i++)
 				readers.push_back( readLoop(self, i, self->fixedRate / self->numParallelReads) );
@@ -305,9 +307,9 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 						offset = 0;
 				}
 				else if(self->unbufferedIO)
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) * AsyncFileWorkload::_PAGE_SIZE;
 				else
-					offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
+					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 
 				//Perform the read.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and don't allow
 				//objects that the read uses to be deleted
@@ -333,14 +335,12 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		}
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m)
-	{
-		if(enabled)
-		{
-			m.push_back(PerfMetric("Bytes read/sec", bytesRead.getValue() / testDuration, false));
-			m.push_back(PerfMetric("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false));
+	virtual void getMetrics(std::vector<PerfMetric>& m) {
+		if (enabled) {
+			m.emplace_back("Bytes read/sec", bytesRead.getValue() / testDuration, false);
+			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false);
 		}
 	}
- };
+};
 
 WorkloadFactory<AsyncFileReadWorkload> AsyncFileReadWorkloadFactory("AsyncFileRead");

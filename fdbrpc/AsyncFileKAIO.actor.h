@@ -108,13 +108,13 @@ public:
 			open_filename = filename + ".part";
 		}
 
-		int fd = ::open( open_filename.c_str(), openFlags(flags) | O_DIRECT, mode );
+		int fd = ::open( open_filename.c_str(), openFlags(flags), mode );
 		if (fd<0) {
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below
 			TraceEvent ev("AsyncFileKAIOOpenFailed");
 			ev.error(e).detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
+			  .detailf("OSFlags", "%x", openFlags(flags)).detailf("Mode", "0%o", mode).GetLastError();
 			if(ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
@@ -259,11 +259,13 @@ public:
 		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
 		bool completed = false;
+		double begin = timer_monotonic();
+
 		if( ctx.fallocateSupported && size >= lastFileSize ) {
 			result = fallocate( fd, 0, 0, size);
 			if (result != 0) {
 				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
+				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).detail("Size", size).GetLastError();
 				if ( fallocateErrCode == EOPNOTSUPP ) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
@@ -278,6 +280,12 @@ public:
 		if ( !completed )
 			result = ftruncate(fd, size);
 
+		double end = timer_monotonic();
+		if(nondeterministicRandom()->random01() < end-begin) {
+			TraceEvent("SlowKAIOTruncate")
+				.detail("TruncateTime", end - begin)
+				.detail("TruncateBytes", size - lastFileSize);
+		}
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if(result != 0) {
@@ -394,7 +402,7 @@ public:
 				ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
 				ctx.slowAioSubmitMetric->log();
 
-				if(g_nondeterministic_random->random01() < end-begin) {
+				if(nondeterministicRandom()->random01() < end-begin) {
 					TraceEvent("SlowKAIOLaunch")
 						.detail("IOSubmitTime", end-truncateComplete)
 						.detail("TruncateTime", truncateComplete-begin)
@@ -464,9 +472,9 @@ private:
 #endif
 		}
 
-		int getTask() const { return (prio>>32)+1; }
+		TaskPriority getTask() const { return static_cast<TaskPriority>((prio>>32)+1); }
 
-		ACTOR static void deliver( Promise<int> result, bool failed, int r, int task ) {
+		ACTOR static void deliver( Promise<int> result, bool failed, int r, TaskPriority task ) {
 			wait( delay(0, task) );
 			if (failed) result.sendError(io_timeout());
 			else if (r < 0) result.sendError(io_error());
@@ -627,7 +635,7 @@ private:
 	}
 
 	static int openFlags(int flags) {
-		int oflags = 0;
+		int oflags = O_DIRECT | O_CLOEXEC;
 		ASSERT( bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE) );  // readonly xor readwrite
 		if( flags & OPEN_EXCLUSIVE ) oflags |= O_EXCL;
 		if( flags & OPEN_CREATE )    oflags |= O_CREAT;
@@ -639,9 +647,9 @@ private:
 
 	ACTOR static void poll( Reference<IEventFD> ev ) {
 		loop {
-			int64_t evfd_count = wait( ev->read() );
+			wait(success(ev->read()));
 
-			wait(delay(0, TaskDiskIOComplete));
+			wait(delay(0, TaskPriority::DiskIOComplete));
 
 			linux_ioresult ev[FLOW_KNOBS->MAX_OUTSTANDING];
 			timespec tm; tm.tv_sec = 0; tm.tv_nsec = 0;
@@ -757,13 +765,13 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 
 	for(; iteration < numIterations; ++iteration) {
 		state std::vector<Future<Void>> futures;
-		state int numOps = g_random->randomInt(1, 20);
+		state int numOps = deterministicRandom()->randomInt(1, 20);
 		for(; numOps > 0; --numOps) {
-			if(g_random->coinflip()) {
-				futures.push_back(success(f->read(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096)));
+			if(deterministicRandom()->coinflip()) {
+				futures.push_back(success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096)));
 			}
 			else {
-				futures.push_back(f->write(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096));
+				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize)/4096*4096));
 			}
 		}
 		state int fIndex = 0;
@@ -794,10 +802,15 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 }
 
 TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
-	if(!g_network->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network->isSimulated()) {
+		state Reference<IAsyncFile> f;
 		try {
-			state Reference<IAsyncFile> f = wait(AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__", IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
-			state int fileSize = 2<<27; // ~100MB
+			Reference<IAsyncFile> f_ = wait(AsyncFileKAIO::open(
+			    "/tmp/__KAIO_TEST_FILE__",
+			    IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
+			f = f_;
+			state int fileSize = 2 << 27; // ~100MB
 			wait(f->truncate(fileSize));
 
 			// Test that the request list works as intended with default timeout
@@ -814,8 +827,7 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 			AsyncFileKAIO::setTimeout(0.0001);
 			wait(runTestOps(f, 10, fileSize, false));
 			ASSERT(((AsyncFileKAIO*)f.getPtr())->failed);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			state Error err = e;
 			if(f) {
 				wait(AsyncFileEIO::deleteFile(f->getFilename(), true));

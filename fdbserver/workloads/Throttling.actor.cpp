@@ -36,7 +36,7 @@ struct TokenBucket {
 	ACTOR static Future<Void> tokenAdder(TokenBucket* self) {
 		loop {
 			self->bucketSize = std::min(self->bucketSize + self->transactionRate * addTokensInterval, self->maxBurst);
-			if (g_random->randomInt(0, 100) == 0)
+			if (deterministicRandom()->randomInt(0, 100) == 0)
 				TraceEvent("AddingTokensx100")
 				    .detail("BucketSize", self->bucketSize)
 				    .detail("TransactionRate", self->transactionRate);
@@ -55,7 +55,7 @@ struct TokenBucket {
 				--self->bucketSize;
 				return Void();
 			}
-			if (g_random->randomInt(0, 100) == 0)
+			if (deterministicRandom()->randomInt(0, 100) == 0)
 				TraceEvent("ThrottlingTransactionx100").detail("SleepTime", sleepTime);
 			wait(delay(sleepTime));
 			sleepTime = std::min(sleepTime * 2, maxSleepTime);
@@ -155,7 +155,7 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%d", g_random->randomInt(0, 10e6))); }
+	static Value getRandomValue() { return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6))); }
 
 	ACTOR static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
@@ -172,7 +172,7 @@ struct ThrottlingWorkload : KVWorkload {
 					tr.set(self->getRandomKey(), getRandomValue());
 				}
 				wait(tr.commit());
-				if (g_random->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
+				if (deterministicRandom()->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
 				++self->transactionsCommitted;
 			} catch (Error& e) {
 				// ignore failing transactions

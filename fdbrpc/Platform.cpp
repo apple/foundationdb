@@ -148,4 +148,4 @@ bool isSse42Supported()
 std::string getDefaultClusterFilePath() {
 	return joinPath(platform::getDefaultConfigPath(), "fdb.cluster");
 }
-}; // namespace platform
+} // namespace platform

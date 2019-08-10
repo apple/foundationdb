@@ -32,11 +32,11 @@ extensions = [
     'sphinx.ext.ifconfig',
     'brokenrole',
     'relativelink',
-    'sphinxcontrib.rubydomain'
+    'rubydomain',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = [sys.prefix + '/_templates']
+templates_path = []
 
 # The suffix of source filenames.
 source_suffix = '.rst'
@@ -53,7 +53,7 @@ copyright = u'2013-2018 Apple, Inc and the FoundationDB project authors'
 
 # Load the version information from 'versions.target'
 import xml.etree.ElementTree as ET
-version_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'foundationdb', 'versions.target')
+version_path = os.path.join(os.path.dirname(__file__), '..', '..', 'versions.target')
 tree = ET.parse(version_path)
 root = tree.getroot()
 
@@ -143,7 +143,7 @@ html_title = 'FoundationDB ' + version
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = [sys.prefix + '/_static']
+html_static_path = []
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.

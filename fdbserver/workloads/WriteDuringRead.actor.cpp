@@ -57,15 +57,15 @@ struct WriteDuringReadWorkload : TestWorkload {
 		rarelyCommit = getOption( options, LiteralStringRef("rarelyCommit"), false );
 		maximumTotalData = getOption( options, LiteralStringRef("maximumTotalData"), 7e6);
 		minNode = getOption( options, LiteralStringRef("minNode"), 0);
-		useSystemKeys = getOption( options, LiteralStringRef("useSystemKeys"), g_random->random01() < 0.5);
-		adjacentKeys = g_random->random01() < 0.5;
-		initialKeyDensity = g_random->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
-		valueSizeRange = std::make_pair( 0, std::min<int>( g_random->randomInt(0, 4 << g_random->randomInt(0,16)), CLIENT_KNOBS->VALUE_SIZE_LIMIT * 1.2 ) );
+		useSystemKeys = getOption( options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
+		adjacentKeys = deterministicRandom()->random01() < 0.5;
+		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
+		valueSizeRange = std::make_pair( 0, std::min<int>( deterministicRandom()->randomInt(0, 4 << deterministicRandom()->randomInt(0,16)), CLIENT_KNOBS->VALUE_SIZE_LIMIT * 1.2 ) );
 		if( adjacentKeys ) {
-			nodes = std::min<int64_t>( g_random->randomInt(1, 4 << g_random->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
+			nodes = std::min<int64_t>( deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
 		}
 		else {
-			nodes = g_random->randomInt(1, 4 << g_random->randomInt(0,20));
+			nodes = deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,20));
 		}
 
 		int newNodes = std::min<int>(nodes, maximumTotalData / (getKeyForIndex(nodes).size() + valueSizeRange.second));
@@ -81,13 +81,13 @@ struct WriteDuringReadWorkload : TestWorkload {
 			useSystemKeys = false;
 		}
 
-		if(useSystemKeys && g_random->random01() < 0.5) {
+		if(useSystemKeys && deterministicRandom()->random01() < 0.5) {
 			keyPrefix = "\xff\x01";
 		} else {
 			keyPrefix = "\x02";
 		}
 
-		maxClearSize = 1<<g_random->randomInt(0, 20);
+		maxClearSize = 1<<deterministicRandom()->randomInt(0, 20);
 		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
 		if( clientId == 0 )
 			TraceEvent("RYWConfiguration").detail("Nodes", nodes).detail("InitialKeyDensity", initialKeyDensity).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
@@ -137,7 +137,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getKeyAndCompare( ReadYourWritesTransaction *tr, KeySelector key, bool snapshot, bool readYourWritesDisabled, bool snapshotRYWDisabled, WriteDuringReadWorkload* self, bool *doingCommit, int64_t* memLimit ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRGetKey", randomID);
 		try {
 			state Key memRes = self->memoryGetKey( readYourWritesDisabled || (snapshot && snapshotRYWDisabled) ? &self->lastCommittedDatabase : &self->memoryDatabase, key );
@@ -191,7 +191,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getRangeAndCompare( ReadYourWritesTransaction *tr, KeySelector begin, KeySelector end, GetRangeLimits limit, bool snapshot, bool reverse, bool readYourWritesDisabled, bool snapshotRYWDisabled, WriteDuringReadWorkload* self, bool* doingCommit, int64_t* memLimit ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		/*TraceEvent("WDRGetRange", randomID).detail("BeginKey", printable(begin.getKey())).detail("BeginOffset", begin.offset).detail("BeginOrEqual", begin.orEqual)
 			.detail("EndKey", printable(end.getKey())).detail("EndOffset", end.offset).detail("EndOrEqual", end.orEqual)
 			.detail("Limit", limit.rows).detail("Snapshot", snapshot).detail("Reverse", reverse).detail("ReadYourWritesDisabled", readYourWritesDisabled);*/
@@ -295,7 +295,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getAndCompare( ReadYourWritesTransaction *tr, Key key, bool snapshot, bool readYourWritesDisabled, bool snapshotRYWDisabled, WriteDuringReadWorkload* self, bool* doingCommit, int64_t* memLimit ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRGet", randomID);
 		try {
 			state Optional<Value> memRes = self->memoryGet( readYourWritesDisabled || (snapshot && snapshotRYWDisabled) ? &self->lastCommittedDatabase : &self->memoryDatabase, key );
@@ -319,7 +319,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> watchAndCompare( ReadYourWritesTransaction *tr, Key key, bool readYourWritesDisabled, WriteDuringReadWorkload* self, bool* doingCommit, int64_t* memLimit ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		//SOMEDAY: test setting a low outstanding watch limit
 		if( readYourWritesDisabled ) //Only tests RYW activated watches
 			return Void();
@@ -358,7 +358,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool useBatchPriority, bool* doingCommit, double* startTime, Key timebombStr ) {
-		state UID randomID = g_nondeterministic_random->randomUniqueID();
+		//state UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRCommit", randomID);
 		try {
 			if( !readYourWritesDisabled && !*cancelled ) {
@@ -434,7 +434,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	Value getRandomValue() {
-		return Value( std::string( g_random->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
+		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
 	ACTOR Future<Void> loadAndRun( Database cx, WriteDuringReadWorkload* self ) {
@@ -462,7 +462,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						self->memoryDatabase.erase( self->memoryDatabase.lower_bound( self->getKeyForIndex(i) ), self->memoryDatabase.lower_bound( self->getKeyForIndex(end) ) );
 
 						for( int j = i; j < end; j++ ) {
-							if ( g_random->random01() < self->initialKeyDensity ) {
+							if ( deterministicRandom()->random01() < self->initialKeyDensity ) {
 								Key key = self->getKeyForIndex( j );
 								if( key.size() <= (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
 									Value value = self->getRandomValue();
@@ -487,7 +487,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			loop {
 				wait(delay( now() - startTime > self->slowModeStart || (g_network->isSimulated() && g_simulator.speedUpSimulation) ? 1.0 : 0.1 ));
 				try {
-					wait( self->randomTransaction( ( self->useExtraDB && g_random->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
+					wait( self->randomTransaction( ( self->useExtraDB && deterministicRandom()->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
 						throw;
@@ -500,7 +500,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	Key getRandomKey() {
-		return getKeyForIndex( g_random->randomInt(0, nodes ) );
+		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
 	}
 
 	Key getKeyForIndex( int idx ) {
@@ -514,7 +514,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	Key versionStampKeyForIndex( int idx ) {
 		Key result = KeyRef( getKeyForIndex(idx).toString() + std::string(14,'\x00') );
-		int32_t pos = g_random->randomInt(0, result.size() - 13);
+		int32_t pos = deterministicRandom()->randomInt(0, result.size() - 13);
 		pos = littleEndian32(pos);
 		uint8_t* data = mutateString(result);
 		memcpy(data+result.size()-sizeof(int32_t), &pos, sizeof(int32_t));
@@ -522,25 +522,25 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	Key getRandomVersionStampKey() {
-		return versionStampKeyForIndex( g_random->randomInt(0, nodes ) );
+		return versionStampKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
 	}
 
 	KeySelector getRandomKeySelector() {
-		int scale = 1 << g_random->randomInt(0,14);
-		return KeySelectorRef( getRandomKey(), g_random->random01() < 0.5, g_random->randomInt(-scale, scale) );
+		int scale = 1 << deterministicRandom()->randomInt(0,14);
+		return KeySelectorRef( getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-scale, scale) );
 	}
 
 	GetRangeLimits getRandomLimits() {
-		int kind = g_random->randomInt(0,3);
+		int kind = deterministicRandom()->randomInt(0,3);
 		return GetRangeLimits(
-			(kind&1) ? GetRangeLimits::ROW_LIMIT_UNLIMITED : g_random->randomInt(0, 1<<g_random->randomInt(1, 10)),
-			(kind&2) ? GetRangeLimits::BYTE_LIMIT_UNLIMITED : g_random->randomInt(0, 1<<g_random->randomInt(1, 15)) );
+			(kind&1) ? GetRangeLimits::ROW_LIMIT_UNLIMITED : deterministicRandom()->randomInt(0, 1<<deterministicRandom()->randomInt(1, 10)),
+			(kind&2) ? GetRangeLimits::BYTE_LIMIT_UNLIMITED : deterministicRandom()->randomInt(0, 1<<deterministicRandom()->randomInt(1, 15)) );
 	}
 
 	KeyRange getRandomRange(int sizeLimit) {
-		int startLocation = g_random->randomInt(0, nodes);
-		int scale = g_random->randomInt(0, g_random->randomInt(2, 5) * g_random->randomInt(2, 5));
-		int endLocation = startLocation + g_random->randomInt(0, 1+std::min(sizeLimit, std::min(nodes-startLocation, 1<<scale)));
+		int startLocation = deterministicRandom()->randomInt(0, nodes);
+		int scale = deterministicRandom()->randomInt(0, deterministicRandom()->randomInt(2, 5) * deterministicRandom()->randomInt(2, 5));
+		int endLocation = startLocation + deterministicRandom()->randomInt(0, 1+std::min(sizeLimit, std::min(nodes-startLocation, 1<<scale)));
 
 		return KeyRangeRef( getKeyForIndex( startLocation ), getKeyForIndex( endLocation ) );
 	}
@@ -573,11 +573,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	ACTOR Future<Void> randomTransaction( Database cx, WriteDuringReadWorkload* self, double testStartTime ) { 
 		state ReadYourWritesTransaction tr(cx);
-		state bool readYourWritesDisabled = g_random->random01() < 0.5;
-		state bool readAheadDisabled = g_random->random01() < 0.5;
-		state bool snapshotRYWDisabled = g_random->random01() < 0.5;
-		state bool useBatchPriority = g_random->random01() < 0.5;
-		state int64_t timebomb = g_random->random01() < 0.01 ? g_random->randomInt64(1, 6000) : 0;
+		state bool readYourWritesDisabled = deterministicRandom()->random01() < 0.5;
+		state bool readAheadDisabled = deterministicRandom()->random01() < 0.5;
+		state bool snapshotRYWDisabled = deterministicRandom()->random01() < 0.5;
+		state bool useBatchPriority = deterministicRandom()->random01() < 0.5;
+		state int64_t timebomb = deterministicRandom()->random01() < 0.01 ? deterministicRandom()->randomInt64(1, 6000) : 0;
 		state std::vector<Future<Void>> operations;
 		state ActorCollection commits(false);
 		state std::vector<Future<Void>> watches;
@@ -625,33 +625,33 @@ struct WriteDuringReadWorkload : TestWorkload {
 			tr.addWriteConflictRange( self->conflictRange );
 			self->addedConflicts.insert( self->conflictRange, true );
 			try {
-				state int numWaits = g_random->randomInt( 1, 5 );
+				state int numWaits = deterministicRandom()->randomInt( 1, 5 );
 				state int i = 0;
 				for(; i < numWaits && memLimit > 0; i++ ) {
 					//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("ReadYourWritesDisabled",readYourWritesDisabled);
-					state int numOps = g_random->randomInt( 1, self->numOps );
+					state int numOps = deterministicRandom()->randomInt( 1, self->numOps );
 					state int j = 0;
 					for(; j < numOps && memLimit > 0; j++ ) {
 						if( commits.getResult().isError() )
 							throw commits.getResult().getError();
 						try {
-							state int operationType = g_random->randomInt(0, 21);
+							state int operationType = deterministicRandom()->randomInt(0, 21);
 							if( operationType == 0 && !disableGetKey ) {
-								operations.push_back( self->getKeyAndCompare( &tr, self->getRandomKeySelector(), g_random->random01() < 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
+								operations.push_back( self->getKeyAndCompare( &tr, self->getRandomKeySelector(), deterministicRandom()->random01() < 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 1 && !disableGetRange ) {
 								operations.push_back( self->getRangeAndCompare( &tr, 
 									self->getRandomKeySelector(),
 									self->getRandomKeySelector(),
 									self->getRandomLimits(), 
-									g_random->random01() < 0.5, 
-									g_random->random01() < 0.5, 
+									deterministicRandom()->random01() < 0.5, 
+									deterministicRandom()->random01() < 0.5, 
 									readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 2 && !disableGet ) {
 								operations.push_back( self->getAndCompare( &tr,
 									self->getRandomKey(),
-									g_random->random01() > 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
+									deterministicRandom()->random01() > 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 3 && !disableCommit ) {
-								if( !self->rarelyCommit || g_random->random01() < 1.0 / self->numOps ) {
+								if( !self->rarelyCommit || deterministicRandom()->random01() < 1.0 / self->numOps ) {
 									Future<Void> commit = self->commitAndUpdateMemory( &tr, self, &cancelled, readYourWritesDisabled, snapshotRYWDisabled, readAheadDisabled, useBatchPriority, &doingCommit, &startTime, timebombStr );
 									operations.push_back( commit );
 									commits.add( commit );
@@ -659,7 +659,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 							} else if( operationType == 4 && !disableClearRange ) {
 								KeyRange range = self->getRandomRange( self->maxClearSize );
 								self->changeCount.insert( range, changeNum++ );
-								bool noConflict = g_random->random01() < 0.5;
+								bool noConflict = deterministicRandom()->random01() < 0.5;
 								//TraceEvent("WDRClearRange").detail("Begin", printable(range)).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -673,7 +673,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 							}  else if( operationType == 5 && !disableClear ) {
 								Key key = self->getRandomKey();
 								self->changeCount.insert( key, changeNum++ );
-								bool noConflict = g_random->random01() < 0.5;
+								bool noConflict = deterministicRandom()->random01() < 0.5;
 								//TraceEvent("WDRClear").detail("Key", printable(key)).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -697,9 +697,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 								double maxTime = 6.0;
 								if( timebomb > 0 )
 									maxTime = startTime + timebomb / 1000.0 - now();
-								operations.push_back( delay( g_random->random01() * g_random->random01() * g_random->random01() * maxTime ) );
+								operations.push_back( delay( deterministicRandom()->random01() * deterministicRandom()->random01() * deterministicRandom()->random01() * maxTime ) );
 							} else if( operationType == 9 && !disableReset ) {
-								if( g_random->random01() < 0.001 ) {
+								if( deterministicRandom()->random01() < 0.001 ) {
 									//TraceEvent("WDRReset");
 									tr.reset();
 									self->memoryDatabase = self->lastCommittedDatabase;
@@ -721,7 +721,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								KeyRange range = self->getRandomRange( self->maxClearSize );
 								tr.addReadConflictRange( range );
 							} else if( operationType == 11 && !disableAtomicOp ) {
-								if(!self->useSystemKeys && g_random->random01() < 0.01) {
+								if(!self->useSystemKeys && deterministicRandom()->random01() < 0.01) {
 									Key versionStampKey = self->getRandomVersionStampKey();
 									Value value = self->getRandomValue();
 									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, normalKeys.end);
@@ -737,7 +737,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									Key key = self->getRandomKey();
 									Value value = self->getRandomValue();
 									MutationRef::Type opType;
-									switch( g_random->randomInt(0,8) ) {
+									switch( deterministicRandom()->randomInt(0,8) ) {
 										case 0:
 											opType = MutationRef::AddValue;
 											break;
@@ -764,7 +764,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 											break;
 									}
 									self->changeCount.insert( key, changeNum++ );
-									bool noConflict = g_random->random01() < 0.5;
+									bool noConflict = deterministicRandom()->random01() < 0.5;
 									//TraceEvent("WDRAtomicOp").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
 									if( noConflict )
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -779,7 +779,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								Key key = self->getRandomKey();
 								Value value = self->getRandomValue();
 								self->changeCount.insert( key, changeNum++ );
-								bool noConflict = g_random->random01() < 0.5;
+								bool noConflict = deterministicRandom()->random01() < 0.5;
 								//TraceEvent("WDRSet").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
@@ -799,7 +799,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 					}
 
 					if( waitLocation < operations.size() ) {
-						int waitOp = g_random->randomInt(waitLocation,operations.size());
+						int waitOp = deterministicRandom()->randomInt(waitLocation,operations.size());
 						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
 						wait( operations[waitOp] );
 						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits

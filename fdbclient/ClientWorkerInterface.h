@@ -25,11 +25,12 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/MasterProxyInterface.h"
 
 // Streams from WorkerInterface that are safe and useful to call from a client.
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
+	constexpr static FileIdentifier file_identifier = 12418152;
 	RequestStream< struct RebootRequest > reboot;
 	RequestStream< struct ProfilerRequest > profiler;
 
@@ -45,23 +46,28 @@ struct ClientWorkerInterface {
 };
 
 struct RebootRequest {
+	constexpr static FileIdentifier file_identifier = 11913957;
 	bool deleteData;
 	bool checkData;
+	uint32_t waitForDuration;
 
-	explicit RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
+	explicit RebootRequest(bool deleteData = false, bool checkData = false, uint32_t waitForDuration = 0)
+	  : deleteData(deleteData), checkData(checkData), waitForDuration(waitForDuration) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, deleteData, checkData);
+		serializer(ar, deleteData, checkData, waitForDuration);
 	}
 };
 
 struct ProfilerRequest {
+	constexpr static FileIdentifier file_identifier = 15437862;
 	ReplyPromise<Void> reply;
 
 	enum class Type : std::int8_t {
 		GPROF = 1,
-		FLOW = 2
+		FLOW = 2,
+		GPROF_HEAP = 3,
 	};
 
 	enum class Action : std::int8_t {
@@ -74,6 +80,9 @@ struct ProfilerRequest {
 	Action action;
 	int duration;
 	Standalone<StringRef> outputFile;
+
+	ProfilerRequest() = default;
+	explicit ProfilerRequest(Type t, Action a, int d) : type(t), action(a), duration(d) {}
 
 	template<class Ar>
 	void serialize( Ar& ar ) {

@@ -75,6 +75,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Whether to continuously perfom the consistency check
 	bool indefinite;
 
+	// Whether to suspendConsistencyCheck
+	AsyncVar<bool> suspendConsistencyCheck;
+
+	Future<Void> monitorConsistencyCheckSettingsActor;
+
 	ConsistencyCheckWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
 	{
@@ -86,6 +91,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		suspendConsistencyCheck.set(true);
 
 		success = true;
 
@@ -124,6 +130,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
+		self->monitorConsistencyCheckSettingsActor = self->monitorConsistencyCheckSettings(cx, self);
 		return Void();
 	}
 
@@ -156,14 +163,43 @@ struct ConsistencyCheckWorkload : TestWorkload
 		failEvent.detail("Reason", "Consistency check: " + message);
 	}
 
+	ACTOR Future<Void> monitorConsistencyCheckSettings(Database cx, ConsistencyCheckWorkload *self) {
+		loop {
+			state ReadYourWritesTransaction tr(cx);
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				state Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+				bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
+				self->suspendConsistencyCheck.set(ccSuspend);
+				state Future<Void> watchCCSuspendFuture = tr.watch(fdbShouldConsistencyCheckBeSuspended);
+				wait(tr.commit());
+				wait(watchCCSuspendFuture);
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload *self)
 	{
 		loop {
-			wait(self->runCheck(cx, self));
-			if(!self->indefinite)
-				break;
-			self->repetitions++;
-			wait(delay(5.0));
+			while(self->suspendConsistencyCheck.get()) {
+				TraceEvent("ConsistencyCheck_Suspended");
+				wait(self->suspendConsistencyCheck.onChange());
+			}
+			TraceEvent("ConsistencyCheck_StartingOrResuming");
+			choose {
+				when(wait(self->runCheck(cx, self))) { 
+					if(!self->indefinite)
+						break;
+					self->repetitions++;
+					wait(delay(5.0));
+				}
+				when(wait(self->suspendConsistencyCheck.onChange())) { }
+			}
 		}
 		return Void();
 	}
@@ -219,11 +255,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					//Check that nothing is in the TLog queues
-					int64_t maxTLogQueueSize = wait(getMaxTLogQueueSize(cx, self->dbInfo));
-					if(maxTLogQueueSize > 1e5)  // FIXME: Should be zero?
+					std::pair<int64_t,int64_t> maxTLogQueueInfo = wait(getTLogQueueInfo(cx, self->dbInfo));
+					if(maxTLogQueueInfo.first > 1e5)  // FIXME: Should be zero?
 					{
-						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueSize);
+						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueInfo.first);
 						self->testFailure("Non-zero tlog queue size");
+					}
+
+					if(maxTLogQueueInfo.second > 30e6)
+					{
+						TraceEvent("ConsistencyCheck_PoppedVersionLag").detail("PoppedVersionLag", maxTLogQueueInfo.second);
+						self->testFailure("large popped version lag");
 					}
 
 					//Check that nothing is in the storage server queues
@@ -250,8 +292,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							throw;
 					}
 
-					bool hasStorage = wait( self->checkForStorage(cx, configuration, self) );
-					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
+					wait(::success(self->checkForStorage(cx, configuration, self)));
+					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					//Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
@@ -268,11 +310,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 
 				//Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
-				state Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServerPromise;
+				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise));
 				if(keyServerResult)
 				{
-					state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
+					state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers = keyServerPromise.getFuture().get();
 
 					//Get the locations of all the shards in the database
 					state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
@@ -282,13 +324,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						//Check that each shard has the same data on all storage servers that it resides on
-						bool dataConsistencyResult = wait(self->checkDataConsistency(cx, keyLocations, configuration, self));
+						wait(::success(self->checkDataConsistency(cx, keyLocations, configuration, self)));
 					}
 				}
 			}
 			catch(Error &e)
 			{
-				if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
+				if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
+				    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_process_behind)
 					TraceEvent("ConsistencyCheck_Retry").error(e); // FIXME: consistency check does not retry in this case
 				else
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
@@ -322,9 +365,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Get a list of storage servers from the master and compares them with the TLogs.
 	//If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
 	//Returns false if there is a failure (in this case, keyServersPromise will never be set)
-	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<vector<pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
+	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
 	{
-		state vector<pair<KeyRange, vector<StorageServerInterface>>> keyServers;
+		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
 
 		//Try getting key server locations from the master proxies
 		state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
@@ -381,12 +424,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	//Retrieves the locations of all shards in the database
 	//Returns false if there is a failure (in this case, keyLocationPromise will never be set)
-	ACTOR Future<bool> getKeyLocations(Database cx, vector<pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
+	ACTOR Future<bool> getKeyLocations(Database cx, std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
 	{
 		state Standalone<VectorRef<KeyValueRef>> keyLocations;
 		state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
 		state Key endKey = allKeys.end.withPrefix(keyServersPrefix);
 		state int i = 0;
+		state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
 		for ( ; i < shards.size(); i++) {
@@ -416,7 +460,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					for (int j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> reply = keyValueFutures[j].get();
 
-						if (!reply.present()) {
+						if (!reply.present() || reply.get().error.present()) {
 							//If the storage server didn't reply in a quiescent database, then the check fails
 							if(self->performQuiescentChecks) {
 								TraceEvent("ConsistencyCheck_KeyServerUnavailable").detail("StorageServer", shards[i].second[j].id().toString().c_str());
@@ -466,11 +510,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 						keyLocations.push_back_deep(keyLocations.arena(), currentLocations.end()[-1]);
 				}
 				catch (Error& e) {
-					//If we failed because of a version problem, then retry
-					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
-					else
-						throw;
+					state Error err = e;
+					wait(onErrorTr.onError(err));
+					TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(err);
 				}
 			}
 		}
@@ -584,7 +626,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
-		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
@@ -706,6 +749,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int splitBytes = 0;
 				state int firstKeySampledBytes = 0;
 				state int sampledKeys = 0;
+				state int sampledKeysWithProb = 0;
 				state double shardVariance = 0;
 				state bool canSplit = false;
 				state Key lastSampleKey;
@@ -713,6 +757,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state int64_t totalReadAmount = 0;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
+				state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 				//Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop
@@ -750,7 +795,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 
 							//Compare the results with other storage servers
-							if(rangeResult.present())
+							if(rangeResult.present() && !rangeResult.get().error.present())
 							{
 								state GetKeyValuesReply current = rangeResult.get();
 								totalReadAmount += current.data.expectedSize();
@@ -905,6 +950,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 										firstKeySampledBytes += sampleInfo.sampledSize;
 
 									sampledKeys++;
+									if(itemProbability < 1) {
+										sampledKeysWithProb++;
+									}
 								}
 							}
 
@@ -914,7 +962,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
 						if(rateLimitForThisRound > 0)
 						{
-								wait(rateLimiter->getAllowance(totalReadAmount));
+							wait(rateLimiter->getAllowance(totalReadAmount));
+							// Set ratelimit to max allowed if current round has been going on for a while
+							if(now() - rateLimiterStartTime > 1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME && rateLimitForThisRound != self->rateLimitMax) {
+								rateLimitForThisRound = self->rateLimitMax;
+								rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, 1) );
+								rateLimiterStartTime = now();
+								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound").detail("RateLimit", rateLimitForThisRound);
+							}
 						}
 						bytesReadInRange += totalReadAmount;
 						bytesReadInthisRound += totalReadAmount;
@@ -933,11 +988,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 					catch(Error &e)
 					{
-						//If we failed because of a version problem, then retry
-						if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(e);
-						else
-							throw;
+						state Error err = e;
+						wait(onErrorTr.onError(err));
+						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
 				}
 
@@ -982,12 +1035,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				int estimateError = abs(shardBytes - sampledBytes);
 
 				//Only perform the check if there are sufficient keys to get a distribution that should resemble a normal distribution
-				if(sampledKeys > 30 && estimateError > failErrorNumStdDev * stdDev)
+				if(sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev)
 				{
 					double numStdDev = estimateError / sqrt(shardVariance);
 					TraceEvent("ConsistencyCheck_InaccurateShardEstimate").detail("Min", shardBounds.min.bytes).detail("Max", shardBounds.max.bytes).detail("Estimate", sampledBytes)
 						.detail("Actual", shardBytes).detail("NumStdDev", numStdDev).detail("Variance", shardVariance).detail("StdDev", stdDev)
-						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys);
+						.detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("NumKeys", shardKeys).detail("NumSampledKeys", sampledKeys)
+						.detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
 					self->testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev));
 				}

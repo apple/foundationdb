@@ -239,7 +239,7 @@ public:
 
 	// Return a random entry
 	LocalityEntry	const& random() const
-	{	return _entryArray[g_random->randomInt(0, _entryArray.size())];	}
+	{	return _entryArray[deterministicRandom()->randomInt(0, _entryArray.size())];	}
 
 	// Return a given number of random entries that are not within the
 	// specified exception array
@@ -250,7 +250,6 @@ public:
 	{
 		bool	bComplete = true;
 		int		nItemsLeft = _mutableEntryArray.size();
-		int		nExceptions = exceptionArray.size();
 
 		while (nRandomItems > 0)
 		{
@@ -260,7 +259,7 @@ public:
 			}
 			while (nItemsLeft > 0)
 			{
-				auto itemIndex = g_random->randomInt(0, nItemsLeft);
+				auto itemIndex = deterministicRandom()->randomInt(0, nItemsLeft);
 				auto item = _mutableEntryArray[itemIndex];
 
 				nItemsLeft --;
@@ -300,7 +299,7 @@ public:
 		Optional<AttribValue>	result;
 
 		while (checksLeft > 0) {
-			indexValue = g_random->randomInt(0, checksLeft);
+			indexValue = deterministicRandom()->randomInt(0, checksLeft);
 			valueValue = valueArray[indexValue];
 			validValue = true;
 			for (int usedLoop=0; usedLoop < usedValues; usedLoop ++) {
@@ -478,6 +477,8 @@ public:
 	virtual Reference<StringToIntMap> const&	getGroupKeyMap() const
 	{	return _localitygroup->getGroupKeyMap(); }
 
+	Reference<StringToIntMap> _keymap;
+
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()
 	{	return _localitygroup->getGroupValueMap(); }
@@ -492,7 +493,7 @@ protected:
 
 	std::vector<AttribKey>								_keyIndexArray;
 	std::vector<LocalityCacheRecord>			_cacheArray;
-	Reference<StringToIntMap>							_keymap;
+
 	LocalitySet*													_localitygroup;
 	long long unsigned int								_cachehits;
 	long long unsigned int								_cachemisses;

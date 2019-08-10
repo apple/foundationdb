@@ -62,8 +62,8 @@ struct RandomCloggingWorkload : TestWorkload {
 	}
 
 	void clogRandomPair( double t ) {
-		auto m1 = g_random->randomChoice( g_simulator.getAllProcesses() );
-		auto m2 = g_random->randomChoice( g_simulator.getAllProcesses() );
+		auto m1 = deterministicRandom()->randomChoice( g_simulator.getAllProcesses() );
+		auto m2 = deterministicRandom()->randomChoice( g_simulator.getAllProcesses() );
 		if( m1->address.ip != m2->address.ip )
 			g_simulator.clogPair( m1->address.ip, m2->address.ip, t );
 	}
@@ -73,12 +73,12 @@ struct RandomCloggingWorkload : TestWorkload {
 		state double workloadEnd = now() + self->testDuration;
 		loop {
 			wait( poisson( &lastTime, self->scale / self->clogginess ) );
-			auto machine = g_random->randomChoice( g_simulator.getAllProcesses() );
-			double t = self->scale * 10.0 * exp( -10.0 * g_random->random01() );
+			auto machine = deterministicRandom()->randomChoice( g_simulator.getAllProcesses() );
+			double t = self->scale * 10.0 * exp( -10.0 * deterministicRandom()->random01() );
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 			self->doClog(machine,t);
 
-			t = self->scale * 20.0 * exp( -10.0 * g_random->random01() );
+			t = self->scale * 20.0 * exp( -10.0 * deterministicRandom()->random01() );
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 			self->clogRandomPair(t);
 		}
@@ -89,7 +89,7 @@ struct RandomCloggingWorkload : TestWorkload {
 		state double workloadEnd = now() + self->testDuration;
 		loop {
 			wait( poisson( &lastTime, self->scale / self->clogginess ) );
-			double t = self->scale * 10.0 * exp( -10.0 * g_random->random01() );
+			double t = self->scale * 10.0 * exp( -10.0 * deterministicRandom()->random01() );
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 
 			// randomly choose half of the machines in the cluster to all clog up,
@@ -97,10 +97,10 @@ struct RandomCloggingWorkload : TestWorkload {
 			vector<ISimulator::ProcessInfo*> swizzled;
 			vector<double> starts, ends;
 			for (int m=0;m<g_simulator.getAllProcesses().size(); m++)
-				if (g_random->random01() < 0.5){
+				if (deterministicRandom()->random01() < 0.5){
 					swizzled.push_back(g_simulator.getAllProcesses()[m]);
-					starts.push_back(g_random->random01() * t / 2);
-					ends.push_back(g_random->random01() * t / 2 + t / 2);
+					starts.push_back(deterministicRandom()->random01() * t / 2);
+					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}
 			for(int i=0; i<10; i++)
 				self->clogRandomPair(t);

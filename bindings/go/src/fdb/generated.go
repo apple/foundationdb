@@ -30,16 +30,13 @@
 package fdb
 
 import (
-	"bytes"
 	"encoding/binary"
 )
 
-func int64ToBytes(i int64) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	if e := binary.Write(buf, binary.LittleEndian, i); e != nil {
-		return nil, e
-	}
-	return buf.Bytes(), nil
+func int64ToBytes(i int64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	return buf
 }
 
 // Deprecated
@@ -47,6 +44,13 @@ func int64ToBytes(i int64) ([]byte, error) {
 // Parameter: IP:PORT
 func (o NetworkOptions) SetLocalAddress(param string) error {
 	return o.setOpt(10, []byte(param))
+}
+
+// enable the object serializer for network communication
+//
+// Parameter: 0 is false, every other value is true
+func (o NetworkOptions) SetUseObjectSerializer(param int64) error {
+	return o.setOpt(11, int64ToBytes(param))
 }
 
 // Deprecated
@@ -67,22 +71,14 @@ func (o NetworkOptions) SetTraceEnable(param string) error {
 //
 // Parameter: max size of a single trace output file
 func (o NetworkOptions) SetTraceRollSize(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(31, b)
+	return o.setOpt(31, int64ToBytes(param))
 }
 
 // Sets the maximum size of all the trace output files put together. This value should be in the range ``[0, INT64_MAX]``. If the value is set to 0, there is no limit on the total size of the files. The default is a maximum size of 104,857,600 bytes. If the default roll size is used, this means that a maximum of 10 trace files will be written at a time.
 //
 // Parameter: max total size of trace files
 func (o NetworkOptions) SetTraceMaxLogsSize(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(32, b)
+	return o.setOpt(32, int64ToBytes(param))
 }
 
 // Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'.
@@ -162,22 +158,14 @@ func (o NetworkOptions) SetBuggifyDisable() error {
 //
 // Parameter: probability expressed as a percentage between 0 and 100
 func (o NetworkOptions) SetBuggifySectionActivatedProbability(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(50, b)
+	return o.setOpt(50, int64ToBytes(param))
 }
 
 // Set the probability of an active BUGGIFY section being fired
 //
 // Parameter: probability expressed as a percentage between 0 and 100
 func (o NetworkOptions) SetBuggifySectionFiredProbability(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(51, b)
+	return o.setOpt(51, int64ToBytes(param))
 }
 
 // Set the ca bundle
@@ -240,26 +228,42 @@ func (o NetworkOptions) SetEnableSlowTaskProfiling() error {
 	return o.setOpt(71, nil)
 }
 
+// Enable client buggify - will make requests randomly fail (intended for client testing)
+func (o NetworkOptions) SetClientBuggifyEnable() error {
+	return o.setOpt(80, nil)
+}
+
+// Disable client buggify
+func (o NetworkOptions) SetClientBuggifyDisable() error {
+	return o.setOpt(81, nil)
+}
+
+// Set the probability of a CLIENT_BUGGIFY section being active for the current execution.
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionActivatedProbability(param int64) error {
+	return o.setOpt(82, int64ToBytes(param))
+}
+
+// Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) error {
+	return o.setOpt(83, int64ToBytes(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
 func (o DatabaseOptions) SetLocationCacheSize(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(10, b)
+	return o.setOpt(10, int64ToBytes(param))
 }
 
 // Set the maximum number of watches allowed to be outstanding on a database connection. Increasing this number could result in increased resource usage. Reducing this number will not cancel any outstanding watches. Defaults to 10000 and cannot be larger than 1000000.
 //
 // Parameter: Max outstanding watches
 func (o DatabaseOptions) SetMaxWatches(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(20, b)
+	return o.setOpt(20, int64ToBytes(param))
 }
 
 // Specify the machine ID that was passed to fdbserver processes running on the same machine as this client, for better location-aware load balancing.
@@ -276,39 +280,6 @@ func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
-//
-// Parameter: value in milliseconds of timeout
-func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(500, b)
-}
-
-// Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
-//
-// Parameter: number of times to retry
-func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(501, b)
-}
-
-// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. This sets the ``max_retry_delay`` option of each transaction created by this database. See the transaction option description for more information.
-//
-// Parameter: value in milliseconds of maximum delay
-func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(502, b)
-}
-
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
 func (o DatabaseOptions) SetSnapshotRywEnable() error {
 	return o.setOpt(26, nil)
@@ -319,12 +290,52 @@ func (o DatabaseOptions) SetSnapshotRywDisable() error {
 	return o.setOpt(27, nil)
 }
 
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This sets the ``transaction_logging_max_field_length`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o DatabaseOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
+}
+
+// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
+//
+// Parameter: value in milliseconds of timeout
+func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
+	return o.setOpt(500, int64ToBytes(param))
+}
+
+// Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: number of times to retry
+func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
+	return o.setOpt(501, int64ToBytes(param))
+}
+
+// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. This sets the ``max_retry_delay`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: value in milliseconds of maximum delay
+func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
+	return o.setOpt(502, int64ToBytes(param))
+}
+
+// Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: value in bytes
+func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
+}
+
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
+func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
+	return o.setOpt(504, nil)
+}
+
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
 func (o TransactionOptions) SetCausalWriteRisky() error {
 	return o.setOpt(10, nil)
 }
 
-// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a fault or partition
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
 func (o TransactionOptions) SetCausalReadRisky() error {
 	return o.setOpt(20, nil)
 }
@@ -413,37 +424,39 @@ func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
 
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o TransactionOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
+}
+
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of timeout
 func (o TransactionOptions) SetTimeout(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(500, b)
+	return o.setOpt(500, int64ToBytes(param))
 }
 
 // Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Prior to API version 610, like all other transaction options, the retry limit must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the retry limit each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: number of times to retry
 func (o TransactionOptions) SetRetryLimit(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(501, b)
+	return o.setOpt(501, int64ToBytes(param))
 }
 
 // Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the maximum retry delay each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of maximum delay
 func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
-	b, e := int64ToBytes(param)
-	if e != nil {
-		return e
-	}
-	return o.setOpt(502, b)
+	return o.setOpt(502, int64ToBytes(param))
+}
+
+// Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.
+//
+// Parameter: value in bytes
+func (o TransactionOptions) SetSizeLimit(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
 }
 
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.

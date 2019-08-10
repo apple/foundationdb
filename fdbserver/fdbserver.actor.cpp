@@ -22,6 +22,7 @@
 // a macro that makes boost interprocess break on Windows.
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
@@ -54,6 +55,7 @@
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -61,6 +63,7 @@
 #endif
 
 #if defined(__linux__) || defined(__FreeBSD__)
+#include "fdbmonitor/SimpleIni.h"
 #include <execinfo.h>
 #include <signal.h>
 #ifdef ALLOC_INSTRUMENTATION
@@ -78,82 +81,92 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT };
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
+	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+};
 
 CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
-	{ OPT_CONNFILE,             "--cluster_file",              SO_REQ_SEP },
-	{ OPT_SEEDCONNFILE,         "--seed_cluster_file",         SO_REQ_SEP },
-	{ OPT_SEEDCONNSTRING,       "--seed_connection_string",    SO_REQ_SEP },
-	{ OPT_ROLE,                 "-r",                          SO_REQ_SEP },
-	{ OPT_ROLE,                 "--role",                      SO_REQ_SEP },
-	{ OPT_PUBLICADDR,           "-p",                          SO_REQ_SEP },
-	{ OPT_PUBLICADDR,           "--public_address",            SO_REQ_SEP },
-	{ OPT_LISTEN,               "-l",                          SO_REQ_SEP },
-	{ OPT_LISTEN,               "--listen_address",            SO_REQ_SEP },
+	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
+	{ OPT_CONNFILE,              "--cluster_file",              SO_REQ_SEP },
+	{ OPT_SEEDCONNFILE,          "--seed_cluster_file",         SO_REQ_SEP },
+	{ OPT_SEEDCONNSTRING,        "--seed_connection_string",    SO_REQ_SEP },
+	{ OPT_ROLE,                  "-r",                          SO_REQ_SEP },
+	{ OPT_ROLE,                  "--role",                      SO_REQ_SEP },
+	{ OPT_PUBLICADDR,            "-p",                          SO_REQ_SEP },
+	{ OPT_PUBLICADDR,            "--public_address",            SO_REQ_SEP },
+	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
+	{ OPT_LISTEN,                "--listen_address",            SO_REQ_SEP },
 #ifdef __linux__
 	{ OPT_FILESYSTEM,           "--data_filesystem",           SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
 #endif
-	{ OPT_DATAFOLDER,           "-d",                          SO_REQ_SEP },
-	{ OPT_DATAFOLDER,           "--datadir",                   SO_REQ_SEP },
-	{ OPT_LOGFOLDER,            "-L",                          SO_REQ_SEP },
-	{ OPT_LOGFOLDER,            "--logdir",                    SO_REQ_SEP },
-	{ OPT_ROLLSIZE,             "-Rs",                         SO_REQ_SEP },
-	{ OPT_ROLLSIZE,             "--logsize",                   SO_REQ_SEP },
-	{ OPT_MAXLOGS,              "--maxlogs",                   SO_REQ_SEP },
-	{ OPT_MAXLOGSSIZE,          "--maxlogssize",               SO_REQ_SEP },
-	{ OPT_LOGGROUP,             "--loggroup",                  SO_REQ_SEP },
+	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
+	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
+	{ OPT_LOGFOLDER,             "-L",                          SO_REQ_SEP },
+	{ OPT_LOGFOLDER,             "--logdir",                    SO_REQ_SEP },
+	{ OPT_ROLLSIZE,              "-Rs",                         SO_REQ_SEP },
+	{ OPT_ROLLSIZE,              "--logsize",                   SO_REQ_SEP },
+	{ OPT_MAXLOGS,               "--maxlogs",                   SO_REQ_SEP },
+	{ OPT_MAXLOGSSIZE,           "--maxlogssize",               SO_REQ_SEP },
+	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
+	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
 #ifdef _WIN32
-	{ OPT_PARENTPID,            "--parentpid",                 SO_REQ_SEP },
-	{ OPT_NEWCONSOLE,           "-n",                          SO_NONE },
-	{ OPT_NEWCONSOLE,           "--newconsole",                SO_NONE },
-	{ OPT_NOBOX,                "-q",                          SO_NONE },
-	{ OPT_NOBOX,                "--no_dialog",                 SO_NONE },
+	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
+	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
+	{ OPT_NOBOX,                 "-q",                          SO_NONE },
+	{ OPT_NOBOX,                 "--no_dialog",                 SO_NONE },
 #endif
-	{ OPT_KVFILE,               "--kvfile",                    SO_REQ_SEP },
-	{ OPT_TESTFILE,             "-f",                          SO_REQ_SEP },
-	{ OPT_TESTFILE,             "--testfile",                  SO_REQ_SEP },
-	{ OPT_RESTARTING,           "-R",                          SO_NONE },
-	{ OPT_RESTARTING,           "--restarting",                SO_NONE },
-	{ OPT_RANDOMSEED,           "-s",                          SO_REQ_SEP },
-	{ OPT_RANDOMSEED,           "--seed",                      SO_REQ_SEP },
-	{ OPT_KEY,                  "-k",                          SO_REQ_SEP },
-	{ OPT_KEY,                  "--key",                       SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "-m",                          SO_REQ_SEP },
-	{ OPT_MEMLIMIT,             "--memory",                    SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "-M",                          SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,      "--storage_memory",            SO_REQ_SEP },
-	{ OPT_MACHINEID,            "-i",                          SO_REQ_SEP },
-	{ OPT_MACHINEID,            "--machine_id",                SO_REQ_SEP },
-	{ OPT_DCID,                 "-a",                          SO_REQ_SEP },
-	{ OPT_DCID,                 "--datacenter_id",             SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "-c",                          SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,        "--class",                     SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "-b",                          SO_REQ_SEP },
-	{ OPT_BUGGIFY,              "--buggify",                   SO_REQ_SEP },
-	{ OPT_VERSION,              "-v",                          SO_NONE },
-	{ OPT_VERSION,              "--version",                   SO_NONE },
-	{ OPT_CRASHONERROR,         "--crash",                     SO_NONE },
-	{ OPT_NETWORKIMPL,          "-N",                          SO_REQ_SEP },
-	{ OPT_NETWORKIMPL,          "--network",                   SO_REQ_SEP },
-	{ OPT_NOBUFSTDOUT,          "--unbufferedout",             SO_NONE },
-	{ OPT_BUFSTDOUTERR,         "--bufferedout",               SO_NONE },
-	{ OPT_TRACECLOCK,           "--traceclock",                SO_REQ_SEP },
-	{ OPT_NUMTESTERS,           "--num_testers",               SO_REQ_SEP },
-	{ OPT_HELP,                 "-?",                          SO_NONE },
-	{ OPT_HELP,                 "-h",                          SO_NONE },
-	{ OPT_HELP,                 "--help",                      SO_NONE },
-	{ OPT_DEVHELP,              "--dev-help",                  SO_NONE },
-	{ OPT_KNOB,                 "--knob_",                     SO_REQ_SEP },
-	{ OPT_LOCALITY,             "--locality_",                 SO_REQ_SEP },
-	{ OPT_TESTSERVERS,          "--testservers",               SO_REQ_SEP },
-	{ OPT_TEST_ON_SERVERS,      "--testonservers",             SO_NONE },
-	{ OPT_METRICSCONNFILE,      "--metrics_cluster",           SO_REQ_SEP },
-	{ OPT_METRICSPREFIX,        "--metrics_prefix",            SO_REQ_SEP },
-	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
-	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,   "--trace_format",              SO_REQ_SEP },
+	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
+	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
+	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
+	{ OPT_RESTARTING,            "-R",                          SO_NONE },
+	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
+	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
+	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
+	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
+	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
+	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
+	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
+	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
+	{ OPT_DCID,                  "--datacenter_id",             SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "-c",                          SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
+	{ OPT_VERSION,               "-v",                          SO_NONE },
+	{ OPT_VERSION,               "--version",                   SO_NONE },
+	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
+	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
+	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
+	{ OPT_NOBUFSTDOUT,           "--unbufferedout",             SO_NONE },
+	{ OPT_BUFSTDOUTERR,          "--bufferedout",               SO_NONE },
+	{ OPT_TRACECLOCK,            "--traceclock",                SO_REQ_SEP },
+	{ OPT_NUMTESTERS,            "--num_testers",               SO_REQ_SEP },
+	{ OPT_HELP,                  "-?",                          SO_NONE },
+	{ OPT_HELP,                  "-h",                          SO_NONE },
+	{ OPT_HELP,                  "--help",                      SO_NONE },
+	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_KNOB,                  "--knob_",                     SO_REQ_SEP },
+	{ OPT_LOCALITY,              "--locality_",                 SO_REQ_SEP },
+	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
+	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
+	{ OPT_METRICSCONNFILE,       "--metrics_cluster",           SO_REQ_SEP },
+	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
+	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
+	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
+	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
+	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
+	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -174,7 +187,6 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 
 extern const char* getHGVersion();
 
-extern IRandom* trace_random;
 extern void flushTraceFileVoid();
 
 extern bool noUnseed;
@@ -203,9 +215,9 @@ StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", printable(mutation.param1)).detail("Value", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
 	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", printable(mutation.param1)).detail("KeyEnd", printable(mutation.param2));
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 	else
 		return false;
 	const char* type =
@@ -223,7 +235,7 @@ bool debugMutation( const char* context, Version version, MutationRef const& mut
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
 	if (keys.contains(debugKey) || keys.contains(debugKey2)) {
 		debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end) );
-		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", printable(keys.begin)).detail("KeyEnd", printable(keys.end));
+		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return true;
 	} else
 		return false;
@@ -326,7 +338,7 @@ UID getSharedMemoryMachineId() {
 		try {
 			// "0" is the default parameter "addr"
 			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
-			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
+			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
@@ -453,7 +465,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				state Arena arena;
 				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
 				Version ver = wait( tr.getReadVersion() );
-				fprintf(output, "<h3>Database version: %lld</h3>", ver);
+				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
 					Standalone<RangeResultRef> results = wait(
@@ -487,7 +499,7 @@ Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<Stri
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring( &systemMonitor, 5.0, TaskFlushTrace );
+	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
 }
 
 void testIndexedSet();
@@ -501,12 +513,21 @@ void parentWatcher(void *parentHandle) {
 		criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
 }
+#else
+void* parentWatcher(void *arg) {
+	int *parent_pid = (int*) arg;
+	while(1) {
+		sleep(1);
+		if(getppid() != *parent_pid)
+			criticalError( FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited" );
+	}
+}
 #endif
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", currentProtocolVersion);
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -555,17 +576,36 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-		   "                 to a random value shared by all fdbserver processes on this\n"
-		   "                 machine.\n");
+	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
+	       "                 Defaults to a random value shared by all fdbserver processes\n"
+	       "                 on this machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
+	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
+	       "                 LOCALITYVALUE is not.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
+	printf("  -M SIZE, --storage_memory SIZE\n"
+	       "                 Maximum amount of memory used for storage. The default\n"
+	       "                 value is 1GiB. When specified without a unit, MB is\n"
+	       "                 assumed.\n");
+	printf("  --cache_memory SIZE\n"
+	       "                 The amount of memory to use for caching disk pages.\n"
+	       "                 The default value is 2GiB. When specified without a unit,\n"
+	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
+	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
+		   "                 Use object serializer for sending messages. The object serializer\n"
+		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
+		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -591,14 +631,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -s SEED, --seed SEED\n"
 			   "                 Random seed.\n");
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  -m SIZE, --memory SIZE\n"
-			   "                 Memory limit. The default value is 8GiB. When specified\n"
-			   "                 without a unit, MiB is assumed.\n");
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -M SIZE, --storage_memory SIZE\n"
-			   "                 Maximum amount of memory used for storage. The default\n"
-			   "                 value is 1GiB. When specified without a unit, MB is\n"
-			   "                 assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -615,6 +648,12 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  --num_testers NUM\n");
 		printf("                 A multitester will wait for NUM testers before starting\n");
 		printf("                 (defaults to 1).\n");
+#ifdef __linux__
+		printf("  --rsssize SIZE\n"
+			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
+			   "                 the given threshold. fdbserver needs to be compiled with\n"
+			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
+#endif
 		printf("  --testservers ADDRESSES\n");
 		printf("                 The addresses of networktestservers\n");
 		printf("                 specified as ADDRESS:PORT,ADDRESS:PORT...\n");
@@ -629,8 +668,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("                 Must be specified if using a different database for metrics.\n");
 		printf("  --knob_KNOBNAME KNOBVALUE\n");
 		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --locality_LOCALITYKEY LOCALITYVALUE\n");
-		printf("                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
 		printf("  --io_trust_seconds SECONDS\n");
 		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
 		       "                 before timing out with an error. If an operation times out, all future\n"
@@ -841,6 +878,20 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
 }
 
+// moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
+void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
+	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
+	for (const auto & fileEntry: returnFiles) {
+		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
+			//rename files
+			TraceEvent("RenamingSnapFile")
+				.detail("Oldname", dirSrc + "/" + fileEntry)
+				.detail("Newname", dirToMove + "/" + fileEntry);
+			renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
+		}
+	}
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -891,11 +942,12 @@ int main(int argc, char* argv[]) {
 		const char *testFile = "tests/default.txt";
 		std::string kvFile;
 		std::string testServersStr;
+		std::string whitelistBinPaths;
 		std::vector<std::string> publicAddressStrs, listenAddressStrs;
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
-		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
+		bool buggifyEnabled = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
 		Optional<Standalone<StringRef>> dcId;
 		ProcessClass processClass = ProcessClass( ProcessClass::UnsetClass, ProcessClass::CommandLineSource );
@@ -916,6 +968,8 @@ int main(int argc, char* argv[]) {
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
+		uint64_t rsssize = -1;
+		bool useObjectSerializer = true;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -955,6 +1009,8 @@ int main(int argc, char* argv[]) {
 			}
 			const char *sRole;
 			Optional<uint64_t> ti;
+			std::string argStr;
+			std::vector<std::string> tmpStrings;
 
 			switch (args.OptionId()) {
 				case OPT_HELP:
@@ -1022,10 +1078,14 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				case OPT_PUBLICADDR:
-					publicAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_LISTEN:
-					listenAddressStrs.push_back(args.OptionArg());
+					argStr = args.OptionArg();
+					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
+					listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
@@ -1042,6 +1102,17 @@ int main(int argc, char* argv[]) {
 	#ifdef __linux__
 				case OPT_FILESYSTEM: {
 					fileSystemPath = args.OptionArg();
+					break;
+				}
+				case OPT_PROFILER_RSS_SIZE:{
+					const char *a = args.OptionArg();
+					char *end;
+					rsssize = strtoull(a, &end, 10);
+					if(*end) {
+						fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
 					break;
 				}
 	#endif
@@ -1140,6 +1211,14 @@ int main(int argc, char* argv[]) {
 				case OPT_NOBOX:
 					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 					break;
+	#else
+				case OPT_PARENTPID: {
+					auto pid_str = args.OptionArg();
+					int *parent_pid = new(int);
+					*parent_pid = atoi(pid_str);
+					startThread(&parentWatcher, parent_pid);
+					break;
+				}
 	#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
@@ -1150,7 +1229,7 @@ int main(int argc, char* argv[]) {
 				case OPT_RESTARTING:
 					restarting = true;
 					break;
-				case OPT_RANDOMSEED: {
+			    case OPT_RANDOMSEED: {
 					char* end;
 					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
 					if( *end ) {
@@ -1198,6 +1277,16 @@ int main(int argc, char* argv[]) {
 					}
 					storageMemLimit = ti.get();
 					break;
+				case OPT_CACHEMEMLIMIT:
+					ti = parse_with_suffix(args.OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
+					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
+					break;
 				case OPT_BUGGIFY:
 					if( !strcmp( args.OptionArg(), "on" ) )
 						buggifyEnabled = true;
@@ -1240,6 +1329,24 @@ int main(int argc, char* argv[]) {
 					if (!selectTraceFormatter(args.OptionArg())) {
 						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 					}
+					break;
+				case OPT_USE_OBJECT_SERIALIZER:
+				{
+					std::string s = args.OptionArg();
+					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+					if (s == "on" || s == "true" || s == "1") {
+						useObjectSerializer = true;
+					} else if (s == "off" || s == "false" || s == "0") {
+						useObjectSerializer = false;
+					}  else {
+						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					break;
+				}
+				case OPT_WHITELIST_BINPATH:
+					whitelistBinPaths = args.OptionArg();
 					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
@@ -1353,26 +1460,14 @@ int main(int argc, char* argv[]) {
 		if( zoneId.present() )
 			printf("ZoneId set to %s, dcId to %s\n", printable(zoneId).c_str(), printable(dcId).c_str());
 
-		g_random = new DeterministicRandom(randomSeed);
-		if (role == Simulation)
-			trace_random = new DeterministicRandom(1);
-		else
-			trace_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_nondeterministic_random = new DeterministicRandom(2);
-		else
-			g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
-		if (role == Simulation)
-			g_debug_random = new DeterministicRandom(3);
-		else
-			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
+		setThreadLocalDeterministicRandomSeed(randomSeed);
 
 		if(role==Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if(buggifyOverride.present())
 				buggifyEnabled = buggifyOverride.get();
 		}
-		enableBuggify( buggifyEnabled );
+		enableBuggify(buggifyEnabled, BuggifyType::General);
 
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
@@ -1394,18 +1489,22 @@ int main(int argc, char* argv[]) {
 					!clientKnobs->setKnob( k->first, k->second ) &&
 					!serverKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					flushAndExit(FDB_EXIT_ERROR);
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					flushAndExit(FDB_EXIT_ERROR);
+					fprintf(stderr, "WARNING: Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+				} else {
+					throw;
 				}
-				throw;
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+
+		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
+		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1462,11 +1561,11 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator();
+			startNewSimulator(useObjectSerializer);
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true);
-			FlowTransport::createInstance(1);
+			g_network = newNet2(useThreadPool, true, useObjectSerializer);
+			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
 			if (publicAddressStrs.empty()) {
@@ -1532,6 +1631,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
+			.setMaxEventLength(12000)
 			.detail("RandomSeed", randomSeed)
 			.detail("SourceVersion", getHGVersion())
 			.detail("Version", FDB_VT_VERSION )
@@ -1542,7 +1642,9 @@ int main(int argc, char* argv[]) {
 			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
 			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.setMaxFieldLength(10000)
 			.detail("CommandLine", commandLine)
+			.setMaxFieldLength(0)
 			.detail("BuggifyEnabled", buggifyEnabled)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");
@@ -1574,7 +1676,7 @@ int main(int argc, char* argv[]) {
 			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyMachineId))
-			localities.set(LocalityData::keyMachineId, machineId);
+			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
 			localities.set(LocalityData::keyDcId, dcId);
@@ -1591,7 +1693,8 @@ int main(int argc, char* argv[]) {
 
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
-				if( directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." && directories[i] != "backups") {
+				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
 					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
@@ -1608,12 +1711,98 @@ int main(int argc, char* argv[]) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
+			int isRestoring = 0;
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
-			}
+			} else {
+				CSimpleIni ini;
+				ini.SetUnicode();
+				std::string absDataFolder = abspath(dataFolder);
+				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
+				int backupFailed = true;
+				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
+				if (isRestoringStr) {
+					isRestoring = atoi(isRestoringStr);
+					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", NULL);
+					if (isRestoring && backupFailedStr) {
+						backupFailed = atoi(backupFailedStr);
+					}
+				}
+				if (isRestoring && !backupFailed) {
+					std::vector<std::string> returnList;
+					std::string ext = "";
+					returnList = platform::listDirectories(absDataFolder);
+					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
-			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
+					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
+					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
+
+					// delete all files (except fdb.cluster) in non-snap directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						if (dirEntry.find(snapStr) != std::string::npos) {
+							continue;
+						}
+
+						std::string childf = absDataFolder + "/" + dirEntry;
+						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+						for (const auto & fileEntry : returnFiles) {
+							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
+								TraceEvent("DeletingNonSnapfiles")
+									.detail("FileBeingDeleted", childf + "/" + fileEntry);
+								deleteFile(childf + "/" + fileEntry);
+							}
+						}
+					}
+					// cleanup unwanted and partial directories
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						// delete snap directories which are not part of restoreSnapUID
+						if (dirEntry.find(snapStr) == std::string::npos) {
+							if (dirEntry.find("snap") != std::string::npos) {
+								platform::eraseDirectoryRecursive(dirSrc);
+							}
+							continue;
+						}
+						// remove empty/partial snap directories
+						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
+						if (childrenList.size() == 0) {
+							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
+							platform::eraseDirectoryRecursive(dirSrc);
+							continue;
+						}
+					}
+					// move snapshotted files to appropriate locations
+					for (const auto & dirEntry : returnList) {
+						if (dirEntry == "." || dirEntry == "..") {
+							continue;
+						}
+						std::string dirSrc = absDataFolder + "/" + dirEntry;
+						std::string origDir = dirEntry.substr(0, 32);
+						std::string dirToMove = absDataFolder + "/" + origDir;
+						if ((dirEntry.find("snap") != std::string::npos) &&
+							(dirEntry.find("tlog") != std::string::npos)) {
+							// restore tlog files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "log");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("storage") != std::string::npos)) {
+							// restore storage files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "storage");
+						} else if ((dirEntry.find("snap") != std::string::npos) &&
+									(dirEntry.find("coord") != std::string::npos)) {
+							// restore coordinator files
+							restoreRoleFilesHelper(dirSrc, dirToMove, "coordination");
+						}
+					}
+				}
+			}
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, tlsOptions);
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1624,7 +1813,7 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
+			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );
@@ -1674,7 +1863,7 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
+		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime").detail("SimTime", now()-startNow).detail("RealTime", timer()-start)
 			.detail("RandomUnseed", unseed);
 

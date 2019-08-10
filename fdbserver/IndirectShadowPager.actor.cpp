@@ -23,12 +23,12 @@
 
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"
+#include "fdbrpc/crc32c.h"
 
 struct SumType {
-	bool operator==(const SumType &rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }
-	uint32_t part1;
-	uint32_t part2;
-	std::string toString() { return format("0x%08x%08x", part1, part2); }
+	bool operator==(const SumType &rhs) const { return crc == rhs.crc; }
+	uint32_t crc;
+	std::string toString() { return format("0x%08x", crc); }
 };
 
 bool checksum(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logical, PhysicalPageID physical, bool write) {
@@ -41,15 +41,17 @@ bool checksum(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logic
 	pageSize -= IndirectShadowPage::PAGE_OVERHEAD_BYTES;
 	SumType sum;
 	SumType *pSumInPage = (SumType *)(page + pageSize);
-
 	// Write sum directly to page or to sum variable based on mode
 	SumType *sumOut = write ? pSumInPage : &sum;
-	sumOut->part1 = physical;
-	sumOut->part2 = logical; 
-	hashlittle2(page, pageSize, &sumOut->part1, &sumOut->part2);
+	sumOut->crc = crc32c_append(logical, page, pageSize);
+	VALGRIND_MAKE_MEM_DEFINED(sumOut, sizeof(SumType));
 
 	debug_printf("checksum %s%s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n",
-		write ? "write" : "read", (!write && sum != *pSumInPage) ? " MISMATCH" : "", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, "" /*StringRef((uint8_t *)page, pageSize).toHexString().c_str()*/);
+		write ? "write" : "read",
+		(!write && sum != *pSumInPage) ? " MISMATCH" : "",
+		logical, physical, pageSize,
+		write ? "NA" : pSumInPage->toString().c_str(),
+		sumOut->toString().c_str(), page, "");
 
 	// Verify if not in write mode
 	if(!write && sum != *pSumInPage) {
@@ -75,10 +77,6 @@ inline void checksumWrite(IAsyncFile *file, uint8_t *page, int pageSize, Logical
 
 IndirectShadowPage::IndirectShadowPage() : fastAllocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
-#if VALGRIND
-	// Prevent valgrind errors caused by writing random unneeded bytes to disk.
-	memset(data, 0, size());
-#endif
 }
 
 IndirectShadowPage::~IndirectShadowPage() {
@@ -276,7 +274,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 ACTOR Future<Void> housekeeper(IndirectShadowPager *pager) {
 	wait(pager->recovery);
-
+	wait(Never());
 	loop {
 		state LogicalPageID pageID = 0;
 		for(; pageID < pager->pageTable.size(); ++pageID) {
@@ -444,7 +442,6 @@ ACTOR Future<Void> waitAndFreePhysicalPageID(IndirectShadowPager *pager, Physica
 // have been committed and so the physical page should still contain its previous data but it's been overwritten.
 void IndirectShadowPager::freePhysicalPageID(PhysicalPageID pageID) {
 	debug_printf("%s: Freeing physical %u\n", pageFileName.c_str(), pageID);
-	auto itr = busyPages.find(pageID);
 	pagerFile.freePage(pageID);
 }
 

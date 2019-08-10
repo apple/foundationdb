@@ -400,7 +400,7 @@ private:
 
 		bool ok = count < 1e6;
 		if( !ok ) {
-			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
+			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommitQueue", id)
 				.detail("Bytes", total)
 				.detail("Log", log)
 				.detail("Ops", count)
@@ -421,168 +421,174 @@ private:
 	}
 
 	ACTOR static Future<Void> recover( KeyValueStoreMemory* self, bool exactRecovery ) {
-		// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into permanent variables
-		// (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions over the uncommitted versions)
-		// the uncommitted and committed variables should be equal initially (to whatever makes sense if there are no committed transactions recovered)
-		state Key uncommittedNextKey = self->recoveredSnapshotKey;
-		state IDiskQueue::location uncommittedPrevSnapshotEnd = self->previousSnapshotEnd = self->log->getNextReadLocation();  // not really, but popping up to here does nothing
-		state IDiskQueue::location uncommittedSnapshotEnd = self->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
+		loop {
+			// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into permanent variables
+			// (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions over the uncommitted versions)
+			// the uncommitted and committed variables should be equal initially (to whatever makes sense if there are no committed transactions recovered)
+			state Key uncommittedNextKey = self->recoveredSnapshotKey;
+			state IDiskQueue::location uncommittedPrevSnapshotEnd = self->previousSnapshotEnd = self->log->getNextReadLocation();  // not really, but popping up to here does nothing
+			state IDiskQueue::location uncommittedSnapshotEnd = self->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
 
-		state int zeroFillSize = 0;
-		state int dbgSnapshotItemCount=0;
-		state int dbgSnapshotEndCount=0;
-		state int dbgMutationCount=0;
-		state int dbgCommitCount=0;
-		state double startt = now();
-		state UID dbgid = self->id;
+			state int zeroFillSize = 0;
+			state int dbgSnapshotItemCount=0;
+			state int dbgSnapshotEndCount=0;
+			state int dbgMutationCount=0;
+			state int dbgCommitCount=0;
+			state double startt = now();
+			state UID dbgid = self->id;
 
-		state Future<Void> loggingDelay = delay(1.0);
+			state Future<Void> loggingDelay = delay(1.0);
 
-		state OpQueue recoveryQueue;
-		state OpHeader h;
+			state OpQueue recoveryQueue;
+			state OpHeader h;
 
-		TraceEvent("KVSMemRecoveryStarted", self->id)
-			.detail("SnapshotEndLocation", uncommittedSnapshotEnd);
+			TraceEvent("KVSMemRecoveryStarted", self->id)
+				.detail("SnapshotEndLocation", uncommittedSnapshotEnd);
 
-		try {
-			loop {
-				{
-					Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
-					if (data.size() != sizeof(OpHeader)) {
-						if (data.size()) {
-							TEST(true);  // zero fill partial header in KeyValueStoreMemory
-							memset(&h, 0, sizeof(OpHeader));
-							memcpy(&h, data.begin(), data.size());
-							zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+			try {
+				loop {
+					{
+						Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
+						if (data.size() != sizeof(OpHeader)) {
+							if (data.size()) {
+								TEST(true);  // zero fill partial header in KeyValueStoreMemory
+								memset(&h, 0, sizeof(OpHeader));
+								memcpy(&h, data.begin(), data.size());
+								zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+							}
+							TraceEvent("KVSMemRecoveryComplete", self->id)
+								.detail("Reason", "Non-header sized data read")
+								.detail("DataSize", data.size())
+								.detail("ZeroFillSize", zeroFillSize)
+								.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+								.detail("NextReadLoc", self->log->getNextReadLocation());
+							break;
 						}
+						h = *(OpHeader*)data.begin();
+					}
+					Standalone<StringRef> data = wait( self->log->readNext( h.len1 + h.len2+1 ) );
+					if (data.size() != h.len1 + h.len2 + 1) {
+						zeroFillSize = h.len1 + h.len2 + 1 - data.size();
 						TraceEvent("KVSMemRecoveryComplete", self->id)
-							.detail("Reason", "Non-header sized data read")
+							.detail("Reason", "data specified by header does not exist")
 							.detail("DataSize", data.size())
 							.detail("ZeroFillSize", zeroFillSize)
 							.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+							.detail("OpCode", h.op)
 							.detail("NextReadLoc", self->log->getNextReadLocation());
 						break;
 					}
-					h = *(OpHeader*)data.begin();
+
+					if (data[data.size()-1]) {
+						StringRef p1 = data.substr(0, h.len1);
+						StringRef p2 = data.substr(h.len1, h.len2);
+
+						if (h.op == OpSnapshotItem) { // snapshot data item
+							/*if (p1 < uncommittedNextKey) {
+								TraceEvent(SevError, "RecSnapshotBack", self->id)
+									.detail("NextKey", uncommittedNextKey)
+									.detail("P1", p1)
+									.detail("Nextlocation", self->log->getNextReadLocation());
+							}
+							ASSERT( p1 >= uncommittedNextKey );*/
+							if( p1 >= uncommittedNextKey )
+								recoveryQueue.clear( KeyRangeRef(uncommittedNextKey, p1), &uncommittedNextKey.arena() ); //FIXME: Not sure what this line is for, is it necessary?
+							recoveryQueue.set( KeyValueRef(p1, p2), &data.arena() );
+							uncommittedNextKey = keyAfter(p1);
+							++dbgSnapshotItemCount;
+						} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
+							TraceEvent("RecSnapshotEnd", self->id)
+								.detail("NextKey", uncommittedNextKey)
+								.detail("Nextlocation", self->log->getNextReadLocation())
+								.detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
+
+							if(h.op == OpSnapshotEnd) {
+								uncommittedPrevSnapshotEnd = uncommittedSnapshotEnd;
+								uncommittedSnapshotEnd = self->log->getNextReadLocation();
+								recoveryQueue.clear_to_end( uncommittedNextKey, &uncommittedNextKey.arena() );
+							}
+
+							uncommittedNextKey = Key();
+							++dbgSnapshotEndCount;
+						} else if (h.op == OpSet) { // set mutation
+							recoveryQueue.set( KeyValueRef(p1,p2), &data.arena() );
+							++dbgMutationCount;
+						} else if (h.op == OpClear) { // clear mutation
+							recoveryQueue.clear( KeyRangeRef(p1,p2), &data.arena() );
+							++dbgMutationCount;
+						} else if (h.op == OpClearToEnd) { //clear all data from begin key to end
+							recoveryQueue.clear_to_end( p1, &data.arena() );
+						} else if (h.op == OpCommit) { // commit previous transaction
+							self->commit_queue(recoveryQueue, false);
+							++dbgCommitCount;
+							self->recoveredSnapshotKey = uncommittedNextKey;
+							self->previousSnapshotEnd = uncommittedPrevSnapshotEnd;
+							self->currentSnapshotEnd = uncommittedSnapshotEnd;
+						} else if (h.op == OpRollback) { // rollback previous transaction
+							recoveryQueue.rollback();
+							TraceEvent("KVSMemRecSnapshotRollback", self->id)
+								.detail("NextKey", uncommittedNextKey);
+							uncommittedNextKey = self->recoveredSnapshotKey;
+							uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
+							uncommittedSnapshotEnd = self->currentSnapshotEnd;
+						} else
+							ASSERT(false);
+					} else {
+						TraceEvent("KVSMemRecoverySkippedZeroFill", self->id)
+							.detail("PayloadSize", data.size())
+							.detail("ExpectedSize", h.len1 + h.len2 + 1)
+							.detail("OpCode", h.op)
+							.detail("EndsAt", self->log->getNextReadLocation());
+					}
+
+					if (loggingDelay.isReady()) {
+						TraceEvent("KVSMemRecoveryLogSnap", self->id)
+							.detail("SnapshotItems", dbgSnapshotItemCount)
+							.detail("SnapshotEnd", dbgSnapshotEndCount)
+							.detail("Mutations", dbgMutationCount)
+							.detail("Commits", dbgCommitCount)
+							.detail("EndsAt", self->log->getNextReadLocation());
+						loggingDelay = delay(1.0);
+					}
+
+					wait( yield() );
 				}
-				Standalone<StringRef> data = wait( self->log->readNext( h.len1 + h.len2+1 ) );
-				if (data.size() != h.len1 + h.len2 + 1) {
-					zeroFillSize = h.len1 + h.len2 + 1 - data.size();
-					TraceEvent("KVSMemRecoveryComplete", self->id)
-						.detail("Reason", "data specified by header does not exist")
-						.detail("DataSize", data.size())
-						.detail("ZeroFillSize", zeroFillSize)
-						.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
-						.detail("OpCode", h.op)
-						.detail("NextReadLoc", self->log->getNextReadLocation());
-					break;
-				}
 
-				if (data[data.size()-1]) {
-					StringRef p1 = data.substr(0, h.len1);
-					StringRef p2 = data.substr(h.len1, h.len2);
-
-					if (h.op == OpSnapshotItem) { // snapshot data item
-						/*if (p1 < uncommittedNextKey) {
-							TraceEvent(SevError, "RecSnapshotBack", self->id)
-								.detail("NextKey", printable(uncommittedNextKey))
-								.detail("P1", printable(p1))
-								.detail("Nextlocation", self->log->getNextReadLocation());
-						}
-						ASSERT( p1 >= uncommittedNextKey );*/
-						if( p1 >= uncommittedNextKey )
-							recoveryQueue.clear( KeyRangeRef(uncommittedNextKey, p1), &uncommittedNextKey.arena() ); //FIXME: Not sure what this line is for, is it necessary?
-						recoveryQueue.set( KeyValueRef(p1, p2), &data.arena() );
-						uncommittedNextKey = keyAfter(p1);
-						++dbgSnapshotItemCount;
-					} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
-						TraceEvent("RecSnapshotEnd", self->id)
-							.detail("NextKey", printable(uncommittedNextKey))
-							.detail("Nextlocation", self->log->getNextReadLocation())
-							.detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
-
-						if(h.op == OpSnapshotEnd) {
-							uncommittedPrevSnapshotEnd = uncommittedSnapshotEnd;
-							uncommittedSnapshotEnd = self->log->getNextReadLocation();
-							recoveryQueue.clear_to_end( uncommittedNextKey, &uncommittedNextKey.arena() );
-						}
-
-						uncommittedNextKey = Key();
-						++dbgSnapshotEndCount;
-					} else if (h.op == OpSet) { // set mutation
-						recoveryQueue.set( KeyValueRef(p1,p2), &data.arena() );
-						++dbgMutationCount;
-					} else if (h.op == OpClear) { // clear mutation
-						recoveryQueue.clear( KeyRangeRef(p1,p2), &data.arena() );
-						++dbgMutationCount;
-					} else if (h.op == OpClearToEnd) { //clear all data from begin key to end
-						recoveryQueue.clear_to_end( p1, &data.arena() );
-					} else if (h.op == OpCommit) { // commit previous transaction
-						self->commit_queue(recoveryQueue, false);
-						++dbgCommitCount;
-						self->recoveredSnapshotKey = uncommittedNextKey;
-						self->previousSnapshotEnd = uncommittedPrevSnapshotEnd;
-						self->currentSnapshotEnd = uncommittedSnapshotEnd;
-					} else if (h.op == OpRollback) { // rollback previous transaction
-						recoveryQueue.rollback();
-						TraceEvent("KVSMemRecSnapshotRollback", self->id)
-							.detail("NextKey", printable(uncommittedNextKey));
-						uncommittedNextKey = self->recoveredSnapshotKey;
-						uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
-						uncommittedSnapshotEnd = self->currentSnapshotEnd;
-					} else
+				if (zeroFillSize) {
+					if( exactRecovery ) {
+						TraceEvent(SevError, "KVSMemExpectedExact", self->id);
 						ASSERT(false);
-				} else {
-					TraceEvent("KVSMemRecoverySkippedZeroFill", self->id)
-						.detail("PayloadSize", data.size())
-						.detail("ExpectedSize", h.len1 + h.len2 + 1)
-						.detail("OpCode", h.op)
-						.detail("EndsAt", self->log->getNextReadLocation());
-				}
+					}
 
-				if (loggingDelay.isReady()) {
-					TraceEvent("KVSMemRecoveryLogSnap", self->id)
-						.detail("SnapshotItems", dbgSnapshotItemCount)
-						.detail("SnapshotEnd", dbgSnapshotEndCount)
-						.detail("Mutations", dbgMutationCount)
-						.detail("Commits", dbgCommitCount)
-						.detail("EndsAt", self->log->getNextReadLocation());
-					loggingDelay = delay(1.0);
+					TEST( true );  // Fixing a partial commit at the end of the KeyValueStoreMemory log
+					for(int i=0; i<zeroFillSize; i++)
+						self->log->push( StringRef((const uint8_t*)"",1) );
 				}
+				//self->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
+				//TraceEvent("KVSMemRecRollback", self->id).detail("QueueEmpty", data.size() == 0);
+				// make sure that before any new operations are added to the log that all uncommitted operations are "rolled back"
+				self->log_op( OpRollback, StringRef(), StringRef() );  // rollback previous transaction
 
-				wait( yield() );
+				self->committedDataSize = self->data.sumTo(self->data.end());
+
+				TraceEvent("KVSMemRecovered", self->id)
+					.detail("SnapshotItems", dbgSnapshotItemCount)
+					.detail("SnapshotEnd", dbgSnapshotEndCount)
+					.detail("Mutations", dbgMutationCount)
+					.detail("Commits", dbgCommitCount)
+					.detail("TimeTaken", now()-startt);
+
+				self->semiCommit();
+				return Void();
+			} catch( Error &e ) {
+				bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found || e.code() == error_code_disk_adapter_reset;
+				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
+				if(e.code() != error_code_disk_adapter_reset) {
+					throw e;
+				}
+				self->data.clear();
+				self->dataSets.clear();
 			}
-
-			if (zeroFillSize) {
-				if( exactRecovery ) {
-					TraceEvent(SevError, "KVSMemExpectedExact", self->id);
-					ASSERT(false);
-				}
-
-				TEST( true );  // Fixing a partial commit at the end of the KeyValueStoreMemory log
-				for(int i=0; i<zeroFillSize; i++)
-					self->log->push( StringRef((const uint8_t*)"",1) );
-			}
-			//self->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
-			//TraceEvent("KVSMemRecRollback", self->id).detail("QueueEmpty", data.size() == 0);
-			// make sure that before any new operations are added to the log that all uncommitted operations are "rolled back"
-			self->log_op( OpRollback, StringRef(), StringRef() );  // rollback previous transaction
-
-			self->committedDataSize = self->data.sumTo(self->data.end());
-
-			TraceEvent("KVSMemRecovered", self->id)
-				.detail("SnapshotItems", dbgSnapshotItemCount)
-				.detail("SnapshotEnd", dbgSnapshotEndCount)
-				.detail("Mutations", dbgMutationCount)
-				.detail("Commits", dbgCommitCount)
-				.detail("TimeTaken", now()-startt);
-
-			self->semiCommit();
-			return Void();
-		} catch( Error &e ) {
-			bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found;
-			TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
-			throw e;
 		}
 	}
 
@@ -620,7 +626,7 @@ private:
 		state int snapItems = 0;
 		state uint64_t snapshotBytes = 0;
 
-		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
+		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", nextKey);
 
 		loop {
 			wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
@@ -646,7 +652,7 @@ private:
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
 				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("LastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
+				//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
 				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
 				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
 				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
@@ -715,7 +721,7 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 
 IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
-	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V0 );
+	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V1 );
 	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
 }
 

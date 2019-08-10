@@ -36,6 +36,11 @@
 #include "fdbclient/ClientLogEvents.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
+// Unlike BUGGIFY, CLIENT_BUGGIFY can be enabled and disabled at runtime.
+#define CLIENT_BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
+#define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
+
 // Incomplete types that are reference counted
 class DatabaseContext;
 template <> void addref( DatabaseContext* ptr );
@@ -56,20 +61,21 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
+	bool useObjectSerializer;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false), useObjectSerializer(true) {}
 };
 
 class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
-	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
+	static Database createDatabase( std::string connFileName, int apiVersion, bool internal=true, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
@@ -83,6 +89,8 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+
+	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
 private:
 	Reference<DatabaseContext> db;
@@ -110,38 +118,13 @@ void runNetwork();
 // Throws network_not_setup if g_network has not been initalized
 void stopNetwork();
 
-/*
- * Starts and holds the monitorLeader and failureMonitorClient actors
- */
-class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
-public:
-	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
-
-	~Cluster();
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> getClusterInterface();
-	Reference<ClusterConnectionFile> getConnectionFile() { return connectionFile; }
-
-	Future<Void> onConnected();
-
-private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
-
-	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
-	Reference<ClusterConnectionFile> connectionFile;
-
-	Future<Void> leaderMon;
-	Future<Void> failMon;
-	Future<Void> connected;
-};
-
 struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
 	uint32_t getReadVersionFlags;
-	uint32_t customTransactionSizeLimit;
+	uint32_t sizeLimit;
+	int maxTransactionLoggingFieldLength;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
@@ -158,26 +141,27 @@ struct TransactionOptions {
 
 struct TransactionInfo {
 	Optional<UID> debugID;
-	int taskID;
+	TaskPriority taskID;
 	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
-	TransactionLogInfo() : logLocation(DONT_LOG) {}
-	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
-	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id) {}
+	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
+	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
+	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id), maxFieldLength(0) {}
 
 	void setIdentifier(std::string id) { identifier = id; }
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
+
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty())
-			event.logEvent(identifier);
+			event.logEvent(identifier, maxFieldLength);
 		}
 
 		if (flushed) {
@@ -195,6 +179,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	bool logsAdded{ false };
 	bool flushed{ false };
 	int logLocation;
+	int maxFieldLength;
 	std::string identifier;
 };
 
@@ -269,11 +254,12 @@ public:
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
+	uint32_t getSize();
 	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskDefaultEndpoint ) {}
+	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
 	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
@@ -322,6 +308,10 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
 std::string unprintable( const std::string& );
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
+
+// Takes a snapshot of the cluster, specifically the following persistent
+// states: coordinator, TLog and storage state
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif

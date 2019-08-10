@@ -89,8 +89,8 @@ struct Increment : TestWorkload {
 				state Transaction tr(cx);
 				while (true) {
 					try {
-						tr.atomicOp(intToTestKey(g_random->randomInt(0,self->nodeCount/2)), LiteralStringRef("\x01"), MutationRef::AddValue);
-						tr.atomicOp(intToTestKey(g_random->randomInt(self->nodeCount/2,self->nodeCount)), LiteralStringRef("\x01"), MutationRef::AddValue);
+						tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0,self->nodeCount/2)), LiteralStringRef("\x01"), MutationRef::AddValue);
+						tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(self->nodeCount/2,self->nodeCount)), LiteralStringRef("\x01"), MutationRef::AddValue);
 						wait( tr.commit() );
 						break;
 					} catch (Error& e) {

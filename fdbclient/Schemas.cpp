@@ -56,6 +56,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -84,7 +85,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "router"
                      ]
                   },
                   "data_version":12341234,
@@ -167,6 +169,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                }
             ],
             "fault_domain":"0ccb4e0fdbdb5583010f6b77d9d10ece",
+            "under_maintenance":true,
             "excluded":false,
             "address":"1.2.3.4:1234",
             "disk":{
@@ -205,7 +208,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+            "run_loop_busy":0.2
          }
       },
       "old_logs":[
@@ -228,8 +232,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -247,7 +251,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -266,7 +272,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -283,7 +291,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "incompatible_connections":[
 
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag": {
+         "seconds" : 1.0,
+         "versions" : 1000000
+      },
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,
@@ -303,15 +314,25 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default",
-                         "connected_coordinators":2
+                         "log_group":"default"
+                     }
+                 ],
+                 "max_protocol_clients":[
+                     {
+                         "address":"127.0.0.1:9898",
+                         "log_group":"default"
                      }
                  ],
                  "count" : 1,
+                 "max_protocol_count" : 1,
                  "protocol_version" : "fdb00a400050001",
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
          ]
+      },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
       },
       "messages":[
          {
@@ -342,7 +363,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled"
                ]
             },
             "issues":[
@@ -428,6 +451,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "counter":0,
                "roughness":0.0
             },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "conflicted":{
                "hz":0.0,
                "counter":0,
@@ -444,6 +482,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "protocol_version":"fdb00a400050001",
       "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
+      "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
+      "maintenance_seconds_remaining":1.0,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -455,7 +495,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
@@ -573,8 +614,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map":{
@@ -664,7 +704,8 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "triple",
         "three_datacenter",
         "three_datacenter_fallback",
-        "three_data_hall"
+        "three_data_hall",
+        "three_data_hall_fallback"
     ]},
     "regions":[{
         "datacenters":[{

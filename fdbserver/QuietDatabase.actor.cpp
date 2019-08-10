@@ -18,16 +18,20 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<WorkerDetails>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
@@ -95,8 +99,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
 		TraceEventFields md = wait( timeoutError(distributorWorker.eventLogRequest.getReply(
 			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
-		int64_t dataInFlight;
-		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
+		int64_t dataInFlight = boost::lexical_cast<int64_t>(md.getValue("TotalBytes"));
 		return dataInFlight;
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id()).error(e).detail("Reason", "Failed to extract DataInFlight");
@@ -118,14 +121,55 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %" SCNd64, &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %" SCNd64, &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
 
+//Computes the popped version lag for tlogs
+int64_t getPoppedVersionLag( const TraceEventFields& md ) {
+	int64_t persistentDataDurableVersion = boost::lexical_cast<int64_t>(md.getValue("PersistentDataDurableVersion"));
+	int64_t queuePoppedVersion = boost::lexical_cast<int64_t>(md.getValue("QueuePoppedVersion"));
+
+	return persistentDataDurableVersion - queuePoppedVersion;
+}
+
+ACTOR Future<vector<WorkerInterface>> getCoordWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	Optional<Value> coordinators = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(coordinatorsKey);
+						  }));
+	if (!coordinators.present()) {
+		throw operation_failed();
+	}
+	std::vector<NetworkAddress> coordinatorsAddr =
+		ClusterConnectionString(coordinators.get().toString()).coordinators();
+	std::set<NetworkAddress> coordinatorsAddrSet;
+	for (const auto & addr : coordinatorsAddr) {
+		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
+		coordinatorsAddrSet.insert(addr);
+	}
+
+	vector<WorkerInterface> result;
+	for(const auto & worker : workers) {
+		NetworkAddress primary = worker.interf.address();
+		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
+			|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+			result.push_back(worker.interf);
+		}
+	}
+	return result;
+}
+
 // This is not robust in the face of a TLog failure
-ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -150,17 +194,19 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
 	state int64_t maxQueueSize = 0;
+	state int64_t maxPoppedVersionLag = 0;
 	state int i = 0;
 	for(; i < messages.size(); i++) {
 		try {
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
+			maxPoppedVersionLag = std::max( maxPoppedVersionLag, getPoppedVersionLag( messages[i].get() ) );
 		} catch( Error &e ) {
 			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxTLogQueue").detail("Tlog", tlogs[i].id());
 			throw;
 		}
 	}
 
-	return maxQueueSize;
+	return std::make_pair( maxQueueSize, maxPoppedVersionLag );
 }
 
 ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, bool use_system_priority = false) {
@@ -182,6 +228,44 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			wait( tr.onError(e) );
 		}
 	}
+}
+
+ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool localOnly ) {
+	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
+	state std::map<NetworkAddress, WorkerInterface> workersMap;
+	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+
+	for(const auto & worker : workers) {
+		workersMap[worker.interf.address()] = worker.interf;
+	}
+	Optional<Value> regionsValue = wait(
+		runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+						  {
+							  tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							  tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							  return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+						  }));
+	int usableRegions = 1;
+	if (regionsValue.present()) {
+		usableRegions = atoi(regionsValue.get().toString().c_str());
+	}
+	auto masterDcId = dbInfo->get().master.locality.dcId();
+
+	vector<WorkerInterface> result;
+	for (const auto & server : servers) {
+		TraceEvent(SevDebug, "DcIdInfo")
+			.detail("ServerLocalityID", server.locality.dcId())
+			.detail("MasterDcID", masterDcId);
+		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
+			auto itr = workersMap.find(server.address());
+			if(itr == workersMap.end()) {
+				TraceEvent(SevWarn, "GetStorageWorkers").detail("Reason", "Could not find worker for storage server").detail("SS", server.id());
+				throw operation_failed();
+			}
+			result.push_back(itr->second);
+		}
+	}
+	return result;
 }
 
 //Gets the maximum size of all the storage server queues
@@ -238,12 +322,10 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
-		int64_t inQueue;
-		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
+		int64_t inQueue = boost::lexical_cast<int64_t>(movingDataMessage.getValue("InQueue"));
 
 		if(reportInFlight) {
-			int64_t inFlight;
-			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%lld", &inFlight);
+			int64_t inFlight = boost::lexical_cast<int64_t>(movingDataMessage.getValue("InFlight"));
 			inQueue += inFlight;
 		}
 
@@ -265,8 +347,16 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 // Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistributorWorker) {
 	state int attempts = 0;
+	state bool ret = false;
 	loop {
 		try {
+			if (!g_network->isSimulated() || 
+				(g_simulator.storagePolicy.isValid() &&
+			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos)) {
+				// Do not test DD team number for data_hall modes
+				return true;
+			}
+
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
@@ -274,48 +364,75 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-			int64_t currentTeamNumber;
-			int64_t desiredTeamNumber;
-			int64_t maxTeamNumber;
-			int64_t currentMachineTeamNumber;
-			int64_t healthyMachineTeamCount;
-			int64_t desiredMachineTeamNumber;
-			int64_t maxMachineTeamNumber;
-			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld",
-			       &currentMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld",
-			       &healthyMachineTeamCount);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld",
-			       &desiredMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
+			state int64_t currentTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentTeams"));
+			state int64_t desiredTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredTeams"));
+			state int64_t maxTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeams"));
+			state int64_t currentMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentMachineTeams"));
+			state int64_t healthyMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeams"));
+			state int64_t desiredMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("DesiredMachineTeams"));
+			state int64_t maxMachineTeams = boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeams"));
 
-			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
-			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
-				TraceEvent("GetTeamCollectionValid")
-				    .detail("KnobsTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER);
-				return true;
-			}
+			state int64_t minServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinTeamsOnServer"));
+			state int64_t maxServerTeamsOnServer =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxTeamsOnServer"));
+			state int64_t minMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MinMachineTeamsOnMachine"));
+			state int64_t maxMachineTeamsOnMachine =
+			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("MaxMachineTeamsOnMachine"));
 
-			// The if condition should be consistent with the condition in teamRemover() that decides
-			// if redundant teams exist.
-			if (healthyMachineTeamCount > desiredMachineTeamNumber) {
+			// The if condition should be consistent with the condition in serverTeamRemover() and
+			// machineTeamRemover() that decides if redundant teams exist.
+			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
+			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
+			// can host data on it.
+			//
+			// If the machineTeamRemover does not remove the machine team with the most machine teams,
+			// we may oscillate between building more server teams by teamBuilder() and removing those teams by
+			// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
+			// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
+			//
+			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0 team on a server
+			//(!SERVER_KNOBS->TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER &&
+			//  healthyMachineTeams > desiredMachineTeams) ||
+			// (!SERVER_KNOBS->TR_FLAG_DISABLE_SERVER_TEAM_REMOVER && currentTeams > desiredTeams) ||
+			if ((minMachineTeamsOnMachine <= 0 || minServerTeamsOnServer <= 0) &&
+			     SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS) {
+				ret = false;
+
+				if (attempts++ < 10) {
+					wait(delay(60));
+					continue; // We may not receive the most recent TeamCollectionInfo
+				}
+
+				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
+				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
+				// TODO: Remove the constraint SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3 to ensure that
+				// the minimun team number per server (and per machine) is always > 0 for any number of replicas
 				TraceEvent("GetTeamCollectionValid")
-				    .detail("CurrentTeamNumber", currentTeamNumber)
-				    .detail("DesiredTeamNumber", desiredTeamNumber)
-				    .detail("MaxTeamNumber", maxTeamNumber)
-				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
-				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
-				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
-				    .detail("MaxMachineTeams", maxMachineTeamNumber);
-				return false;
+				    .detail("CurrentTeams", currentTeams)
+				    .detail("DesiredTeams", desiredTeams)
+				    .detail("MaxTeams", maxTeams)
+				    .detail("CurrentHealthyMachineTeams", healthyMachineTeams)
+				    .detail("DesiredMachineTeams", desiredMachineTeams)
+				    .detail("CurrentMachineTeams", currentMachineTeams)
+				    .detail("MaxMachineTeams", maxMachineTeams)
+				    .detail("MinTeamsOnServer", minServerTeamsOnServer)
+				    .detail("MaxTeamsOnServer", maxServerTeamsOnServer)
+				    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+				    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
+				    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+				    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+				    .detail("RemoveMTWithMostTeams", SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS);
+				return ret;
 			} else {
 				return true;
 			}
 
 		} catch (Error& e) {
+			if(e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent("QuietDatabaseFailure", dataDistributorWorker.id())
 			    .detail("Reason", "Failed to extract GetTeamCollectionValid information");
 			attempts++;
@@ -375,7 +492,11 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
-		ASSERT(!primaryDead || !remoteDead);
+		//FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the datacenterDead function
+		if(primaryDead && remoteDead) {
+			TraceEvent(SevWarnAlways, "CannotDisableFearlessConfiguration");
+			return Void();
+		}
 		if(primaryDead || remoteDead) {
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate").detail("RemoteDead", remoteDead).detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
@@ -397,8 +518,8 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar
 }
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
-	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
-	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo, "QuietDatabase");
+	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6 ) {
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (deterministicRandom()->random01()*100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
@@ -417,26 +538,28 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID).detail("Locality", distributorWorker.locality.toString());
 
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, distributorWorker);
-			state Future<int64_t> tLogQueueSize = getMaxTLogQueueSize( cx, dbInfo );
+			state Future<std::pair<int64_t,int64_t>> tLogQueueInfo = getTLogQueueInfo( cx, dbInfo );
 			state Future<int64_t> dataDistributionQueueSize = getDataDistributionQueueSize( cx, distributorWorker, dataInFlightGate == 0);
 			state Future<bool> teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
 			state Future<int64_t> storageQueueSize = getMaxStorageServerQueueSize( cx, dbInfo );
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, distributorWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, distributorWorker, distributorUID );
 
-			wait(success(dataInFlight) && success(tLogQueueSize) && success(dataDistributionQueueSize) &&
+			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
 			     success(storageServersRecruiting));
-			TraceEvent(("QuietDatabase" + phase).c_str())
-			    .detail("DataInFlight", dataInFlight.get())
-			    .detail("MaxTLogQueueSize", tLogQueueSize.get())
-			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-			    .detail("TeamCollectionValid", teamCollectionValid.get())
-			    .detail("MaxStorageQueueSize", storageQueueSize.get())
-			    .detail("DataDistributionActive", dataDistributionActive.get())
-			    .detail("StorageServersRecruiting", storageServersRecruiting.get());
 
-			if (dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate ||
+			TraceEvent(("QuietDatabase" + phase).c_str())
+					.detail("DataInFlight", dataInFlight.get())
+					.detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
+					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
+					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+					.detail("TeamCollectionValid", teamCollectionValid.get())
+					.detail("MaxStorageQueueSize", storageQueueSize.get())
+					.detail("DataDistributionActive", dataDistributionActive.get())
+					.detail("StorageServersRecruiting", storageServersRecruiting.get());
+
+			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
 			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
 			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
@@ -469,6 +592,6 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 }
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string phase, int64_t dataInFlightGate,
-	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize ) {
-	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
+	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize, int64_t maxPoppedVersionLag ) {
+	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize, maxPoppedVersionLag);
 }

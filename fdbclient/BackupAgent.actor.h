@@ -809,7 +809,6 @@ public:
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		auto &copy = *this;
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
 		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
@@ -844,4 +843,6 @@ public:
 		return updateErrorInfo(cx, e, details);
 	}
 };
+
+#include "flow/unactorcompiler.h"
 #endif

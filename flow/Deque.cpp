@@ -42,7 +42,7 @@ TEST_CASE("/flow/Deque/queue") {
 	
 	int to_push = 0, to_pop = 0;
 	while (to_pop != 1000) {
-		if (to_push != 1000 && (q.empty() || g_random->random01() < 0.55)) {
+		if (to_push != 1000 && (q.empty() || deterministicRandom()->random01() < 0.55)) {
 			q.push(to_push++);
 		} else {
 			ASSERT(q.front() == to_pop++);
@@ -55,7 +55,6 @@ TEST_CASE("/flow/Deque/queue") {
 
 TEST_CASE("/flow/Deque/max_size") {
 	Deque<uint8_t> q;
-	double begin = timer();
 	for (int i = 0; i < 10; i++)
 		q.push_back(i);
 	q.pop_front();
@@ -79,6 +78,5 @@ TEST_CASE("/flow/Deque/max_size") {
 
 	return Void();
 }
-
 
 void forceLinkDequeTests() {}

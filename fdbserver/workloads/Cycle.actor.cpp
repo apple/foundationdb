@@ -28,6 +28,7 @@ struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 	Key		keyPrefix;
+	bool checkOnly;
 
 	vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
@@ -42,8 +43,9 @@ struct CycleWorkload : TestWorkload {
 		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
 		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef(""));
+		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
+		checkOnly = getOption(options, LiteralStringRef("checkOnly"), false);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }
@@ -51,6 +53,7 @@ struct CycleWorkload : TestWorkload {
 		return bulkSetup( cx, this, nodeCount, Promise<double>() );
 	}
 	virtual Future<Void> start( Database const& cx ) {
+		if (checkOnly) return Void();
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(
@@ -96,19 +99,19 @@ struct CycleWorkload : TestWorkload {
 				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
-				state int r = g_random->randomInt(0, self->nodeCount);
+				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
 				while (true) {
 					try {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait( tr.get( self->key(r) ) );
-						if (!v.present()) self->badRead("r", r, tr);
+						if (!v.present()) self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait( tr.get( self->key(r2) ) );
-						if (!v2.present()) self->badRead("r2", r2, tr);
+						if (!v2.present()) self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
 						Optional<Value> v3 = wait( tr.get( self->key(r3) ) );
-						if (!v3.present()) self->badRead("r3", r3, tr);
+						if (!v3.present()) self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
 						tr.clear( self->key(r) );	//< Shouldn't have an effect, but will break with wrong ordering

@@ -30,9 +30,10 @@ logdir = ${CMAKE_BINARY_DIR}/sandbox/logs
 # class =
 # memory = 8GiB
 # storage_memory = 1GiB
+# cache_memory = 2GiB
 # metrics_cluster =
 # metrics_prefix =
 
-## An individual fdbserver process with id 4500
+## An individual fdbserver process with id 4000
 ## Parameters set here override defaults from the [fdbserver] section
 [fdbserver.4000]

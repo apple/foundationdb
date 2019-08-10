@@ -70,7 +70,7 @@ buildsphinx:
 		cd $(BUILDDIR); \
 		curl -OL $(VENV_URL); \
 		tar zxvf $(VENV_VERSION).tar.gz; \
-		./$(VENV_VERSION)/virtualenv.py venv; \
+		python2 ./$(VENV_VERSION)/virtualenv.py venv; \
 	fi
 	. $(VENVDIR)/bin/activate && \
 	cp .pip.conf $(VENVDIR)/pip.conf && \
@@ -87,7 +87,7 @@ cleanvirtualenv:
 	rm -rf $(VENVDIR)
 
 html: buildsphinx cleanhtml
-	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
+	$(SPHINXBUILD) -W -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
 

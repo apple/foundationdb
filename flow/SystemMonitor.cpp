@@ -45,7 +45,7 @@ SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	return getSystemStatistics(
-		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState);
+		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
@@ -54,13 +54,12 @@ SystemStatistics getSystemStatistics() {
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
-	                                                    &ipAddr, &statState->systemState);
+	                                                    &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
 		{
-			TraceEvent e(eventName.c_str());
-			e
+			TraceEvent(eventName.c_str())
 				.detail("Elapsed", currentStats.elapsed)
 				.detail("CPUSeconds", currentStats.processCPUSeconds)
 				.detail("MainThreadCPUSeconds", currentStats.mainThreadCPUSeconds)
@@ -89,8 +88,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("CachePageReadsMerged", netData.countFileCachePageReadsMerged - statState->networkState.countFileCachePageReadsMerged)
 				.detail("CacheWrites", netData.countFileCacheWrites - statState->networkState.countFileCacheWrites)
 				.detail("CacheReads", netData.countFileCacheReads - statState->networkState.countFileCacheReads)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("CacheHits", netData.countFilePageCacheHits - statState->networkState.countFilePageCacheHits)
+				.detail("CacheMisses", netData.countFilePageCacheMisses - statState->networkState.countFilePageCacheMisses)
+				.detail("CacheEvictions", netData.countFilePageCacheEvictions - statState->networkState.countFilePageCacheEvictions)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 				.detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 				.detail("AIOSubmitLag", (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
@@ -105,6 +107,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(16)
 				.DETAILALLOCATORMEMUSAGE(32)
 				.DETAILALLOCATORMEMUSAGE(64)
+				.DETAILALLOCATORMEMUSAGE(96)
 				.DETAILALLOCATORMEMUSAGE(128)
 				.DETAILALLOCATORMEMUSAGE(256)
 				.DETAILALLOCATORMEMUSAGE(512)
@@ -112,10 +115,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(2048)
 				.DETAILALLOCATORMEMUSAGE(4096)
 				.DETAILALLOCATORMEMUSAGE(8192)
-				.detail("HugeArenaMemory", g_hugeArenaMemory);
+				.detail("HugeArenaMemory", g_hugeArenaMemory.load());
 
 			TraceEvent n("NetworkMetrics");
 			n
+				.detail("Elapsed", currentStats.elapsed)
 				.detail("CantSleep", netData.countCantSleep - statState->networkState.countCantSleep)
 				.detail("WontSleep", netData.countWontSleep - statState->networkState.countWontSleep)
 				.detail("Yields", netData.countYields - statState->networkState.countYields)
@@ -135,12 +139,27 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
 				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
 
-			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
-				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i])
+			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++) {
+				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {
 					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
-			for (int i = 0; i<NetworkMetrics::PRIORITY_BINS; i++)
-				if (double x = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i])
-					n.detail(format("S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
+				}
+			}
+
+			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
+				if(g_network->networkMetrics.priorityBlocked[i]) {
+					double lastSegment = std::min(currentStats.elapsed, now() - g_network->networkMetrics.priorityTimer[i]);
+					g_network->networkMetrics.priorityBlockedDuration[i] += lastSegment;
+					g_network->networkMetrics.secSquaredPriorityBlocked[i] += lastSegment * lastSegment;
+					g_network->networkMetrics.priorityTimer[i] = now();
+				}
+
+				double blocked = g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i];
+				double s2Blocked = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i];
+				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), blocked);
+				n.detail(format("SumOfSquaredPriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), s2Blocked);
+			}
+
+			n.trackLatest("NetworkMetrics");
 		}
 
 		if(machineMetrics) {
@@ -153,8 +172,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("TotalMemory", currentStats.machineTotalRAM)
 				.detail("CommittedMemory", currentStats.machineCommittedRAM)
 				.detail("AvailableMemory", currentStats.machineAvailableRAM)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.trackLatest("MachineMetrics");
 		}
 	}
@@ -256,6 +275,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			TRACEALLOCATOR(16);
 			TRACEALLOCATOR(32);
 			TRACEALLOCATOR(64);
+			TRACEALLOCATOR(96);
 			TRACEALLOCATOR(128);
 			TRACEALLOCATOR(256);
 			TRACEALLOCATOR(512);

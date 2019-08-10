@@ -26,6 +26,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus {
 	BandwidthStatusLow,
 	BandwidthStatusNormal,
@@ -140,11 +141,11 @@ ACTOR Future<Void> trackShardBytes(
 		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize,
 		bool addToSizeEstimate = true)
 {
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardBytesStarting")
 		.detail("TrackerID", trackerID)
-		.detail("Keys", printable(keys))
+		.detail("Keys", keys)
 		.detail("TrackedBytesInitiallyPresent", shardSize->get().present())
 		.detail("StartingSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 		.detail("StartingMerges", shardSize->get().present() ? shardSize->get().get().merges : 0);*/
@@ -190,7 +191,7 @@ ACTOR Future<Void> trackShardBytes(
 			StorageMetrics metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT ) );
 
 			/*TraceEvent("ShardSizeUpdate")
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
 				.detail("BandwithStatus", getBandwidthStatus(metrics))
@@ -199,7 +200,7 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("BandwidthLower", bounds.min.bytesPerKSecond)
 				.detail("BandwidthUpper", bounds.max.bytesPerKSecond)
 				.detail("ShardSizePresent", shardSize->get().present())
-				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0 )
+				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 				.detail("TrackerID", trackerID);*/
 
 			if( shardSize->get().present() && addToSizeEstimate )
@@ -260,7 +261,7 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys,
 	}
 
 	wait( waitForAll( sizes ) );
-	wait( yield(TaskDataDistribution) );
+	wait( yield(TaskPriority::DataDistribution) );
 
 	int64_t newShardsStartingSize = 0;
 	for ( int i = 0; i < sizes.size(); i++ )
@@ -281,7 +282,7 @@ struct HasBeenTrueFor : NonCopyable {
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, TaskDataDistribution - 1 ) || cleared.getFuture();
+			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -327,10 +328,10 @@ ACTOR Future<Void> shardSplitter(
 	//}
 	int numShards = splitKeys.size() - 1;
 
-	if( g_random->random01() < 0.01 ) {
+	if( deterministicRandom()->random01() < 0.01 ) {
 		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
-			.detail("Begin", printable(keys.begin))
-			.detail("End", printable(keys.end))
+			.detail("Begin", keys.begin)
+			.detail("End", keys.end)
 			.detail("MaxBytes", shardBounds.max.bytes)
 			.detail("MetricsBytes", metrics.bytes)
 			.detail("Bandwidth", bandwidthStatus == BandwidthStatusHigh ? "High" : bandwidthStatus == BandwidthStatusNormal ? "Normal" : "Low")
@@ -339,7 +340,7 @@ ACTOR Future<Void> shardSplitter(
 	}
 
 	if( numShards > 1 ) {
-		int skipRange = g_random->randomInt(0, numShards);
+		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
 		for( int i = 0; i < skipRange; i++ )
@@ -361,7 +362,7 @@ ACTOR Future<Void> shardSplitter(
 
 		self->sizeChanges.add( changeSizes( self, keys, shardSize->get().get().bytes ) );
 	} else {
-		wait( delay(1.0, TaskDataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
+		wait( delay(1.0, TaskPriority::DataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
 	}
 	return Void();
 }
@@ -427,7 +428,7 @@ Future<Void> shardMerger(
 		if( endingStats.bytes >= shardBounds.min.bytes ||
 				getBandwidthStatus( endingStats ) != BandwidthStatusLow ||
 				shardsMerged >= SERVER_KNOBS->DD_MERGE_LIMIT ) {
-			// The merged range is larger than the min bounds se we cannot continue merging in this direction.
+			// The merged range is larger than the min bounds so we cannot continue merging in this direction.
 			//  This means that:
 			//  1. If we were going forwards (the starting direction), we roll back the last speculative merge.
 			//      In this direction we do not want to go above this boundary since we will merge at least one in
@@ -450,8 +451,8 @@ Future<Void> shardMerger(
 	KeyRange mergeRange = merged;
 
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
-		.detail("OldKeys", printable(keys))
-		.detail("NewKeys", printable(mergeRange))
+		.detail("OldKeys", keys)
+		.detail("NewKeys", mergeRange)
 		.detail("EndingSize", endingStats.bytes)
 		.detail("BatchedMerges", shardsMerged);
 
@@ -529,11 +530,11 @@ ACTOR Future<Void> shardTracker(
 		wait( yieldedFuture(self->maxShardSize->onChange()) );
 
 	// Since maxShardSize will become present for all shards at once, avoid slow tasks with a short delay
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("ShardTracker", self->distributorId)
-		.detail("Begin", printable(keys.begin))
-		.detail("End", printable(keys.end))
+		.detail("Begin", keys.begin)
+		.detail("End", keys.end)
 		.detail("TrackerID", trackerID)
 		.detail("MaxBytes", self->maxShardSize->get().get())
 		.detail("ShardSize", shardSize->get().get().bytes)
@@ -546,7 +547,7 @@ ACTOR Future<Void> shardTracker(
 
 			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
 			// delay(0) mitigates the resulting SlowTask
-			wait( delay(0, TaskDataDistribution) );
+			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
@@ -572,7 +573,7 @@ void restartShardTrackers( DataDistributionTracker* self, KeyRangeRef keys, Opti
 		if( startingSize.present() ) {
 			ASSERT( ranges.size() == 1 );
 			/*TraceEvent("ShardTrackerSizePreset", self->distributorId)
-				.detail("Keys", printable(keys))
+				.detail("Keys", keys)
 				.detail("Size", startingSize.get().metrics.bytes)
 				.detail("Merges", startingSize.get().merges);*/
 			TEST( true ); // shardTracker started with trackedBytes already set
@@ -593,12 +594,12 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self, Reference<I
 
 	//This line reduces the priority of shard initialization to prevent interference with failure monitoring.
 	//SOMEDAY: Figure out what this priority should actually be
-	wait( delay( 0.0, TaskDataDistribution ) );
+	wait( delay( 0.0, TaskPriority::DataDistribution ) );
 
 	state int s;
 	for(s=0; s<initData->shards.size()-1; s++) {
 		restartShardTrackers( self, KeyRangeRef( initData->shards[s].key, initData->shards[s+1].key ) );
-		wait( yield( TaskDataDistribution ) );
+		wait( yield( TaskPriority::DataDistribution ) );
 	}
 
 	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, allKeys.end), 0 );
@@ -736,9 +737,9 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	uniquify(prevTeams);
 
 	/*TraceEvent("ShardsAffectedByTeamFailureDefine")
-		.detail("KeyBegin", printable(keys.begin))
-		.detail("KeyEnd", printable(keys.end))
-		.detail("TeamCount", teams.size()); */
+		.detail("KeyBegin", keys.begin)
+		.detail("KeyEnd", keys.end)
+		.detail("TeamCount", teams.size());*/
 
 	auto affectedRanges = shard_teams.getAffectedRangesAfterInsertion(keys);
 	shard_teams.insert( keys, std::make_pair(teams, prevTeams) );
@@ -752,10 +753,11 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	check();
 }
 
+// Move keys to destinationTeams by updating shard_teams
 void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team> destinationTeams ) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
-		.detail("KeyBegin", printable(keys.begin))
-		.detail("KeyEnd", printable(keys.end))
+		.detail("KeyBegin", keys.begin)
+		.detail("KeyEnd", keys.end)
 		.detail("NewTeamSize", destinationTeam.size())
 		.detail("NewTeam", describe(destinationTeam));*/
 
@@ -828,8 +830,8 @@ void ShardsAffectedByTeamFailure::check() {
 					for(auto x = team_shards.lower_bound( std::make_pair( *t, KeyRangeRef() ) ); x != team_shards.end() && x->first == *t; ++x)
 						shards += printable(x->second.begin) + "-" + printable(x->second.end) + ",";
 					TraceEvent(SevError,"SATFInvariantError2")
-						.detail("KB", printable(i->begin()))
-						.detail("KE", printable(i->end()))
+						.detail("KB", i->begin())
+						.detail("KE", i->end())
 						.detail("Team", teamDesc)
 						.detail("Shards", shards);
 					ASSERT(false);

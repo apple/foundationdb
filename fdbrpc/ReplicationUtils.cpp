@@ -629,12 +629,12 @@ Reference<IReplicationPolicy> const randomAcrossPolicy(LocalitySet const&	server
 	Reference<IReplicationPolicy>							policy(new PolicyOne());
 
 	// Determine the number of keys to used within the policy
-	usedKeyTotal = g_random->randomInt(1, keyArray.size()+1);
-	maxKeyTotal = g_random->randomInt(1, 4);
-	if ((usedKeyTotal > maxKeyTotal) && (g_random->random01() > .1)) {
+	usedKeyTotal = deterministicRandom()->randomInt(1, keyArray.size()+1);
+	maxKeyTotal = deterministicRandom()->randomInt(1, 4);
+	if ((usedKeyTotal > maxKeyTotal) && (deterministicRandom()->random01() > .1)) {
 		usedKeyTotal = maxKeyTotal;
 	}
-	maxValueTotal = g_random->randomInt(1, 10);
+	maxValueTotal = deterministicRandom()->randomInt(1, 10);
 	keysUsed = skips = 0;
 
 	if (g_replicationdebug > 6) {
@@ -647,17 +647,17 @@ Reference<IReplicationPolicy> const randomAcrossPolicy(LocalitySet const&	server
 
 	if (g_replicationdebug > 2) printf("Policy using%3d of%3lu keys  Max values:%3d\n", usedKeyTotal, keyArray.size(), maxValueTotal);
 	while (keysUsed < usedKeyTotal) {
-		keyIndex = g_random->randomInt(0, keyArray.size()-keysUsed);
+		keyIndex = deterministicRandom()->randomInt(0, keyArray.size()-keysUsed);
 		keyText = keyArray[keyIndex];
 		lastKeyIndex = keyArray.size() - 1 - keysUsed;
 
 		// Do not allow az and sz within a policy, 90% of the time
-		if ((!keyText.compare("az")) && (g_random->random01() > .1)												&&
+		if ((!keyText.compare("az")) && (deterministicRandom()->random01() > .1)												&&
 				(std::find(keyArray.begin()+lastKeyIndex+1, keyArray.end(), "sz") != keyArray.end()))
 		{
 			skips ++;
 		}
-		else if ((!keyText.compare("sz")) && (g_random->random01() > .1)								&&
+		else if ((!keyText.compare("sz")) && (deterministicRandom()->random01() > .1)								&&
 				(std::find(keyArray.begin()+lastKeyIndex+1, keyArray.end(), "az") != keyArray.end()))
 		{
 			skips ++;
@@ -677,8 +677,8 @@ Reference<IReplicationPolicy> const randomAcrossPolicy(LocalitySet const&	server
 					valueSet.insert(serverSet.valueText(keyValue.get()));
 				}
 			}
-			valueTotal = g_random->randomInt(1, valueSet.size()+2);
-			if ((valueTotal > maxValueTotal) && (g_random->random01() > .25)) valueTotal = maxValueTotal;
+			valueTotal = deterministicRandom()->randomInt(1, valueSet.size()+2);
+			if ((valueTotal > maxValueTotal) && (deterministicRandom()->random01() > .25)) valueTotal = maxValueTotal;
 			policy = Reference<IReplicationPolicy>( new PolicyAcross(valueTotal, keyText, policy) );
 			if (g_replicationdebug > 1) {
 				printf("  item%3d: (%3d =>%3d) %-10s  =>%4d\n", keysUsed+1, keyIndex, indexKey._id, keyText.c_str(), valueTotal);
@@ -717,7 +717,6 @@ int testReplication()
 	const char*							reportCacheEnv = getenv("REPLICATION_REPORTCACHE");
 	const char*							stopOnErrorEnv = getenv("REPLICATION_STOPONERROR");
 	const char*							skipTotalEnv = getenv("REPLICATION_SKIPTOTAL");
-	const char*							debugEntryEnv = getenv("REPLICATION_DEBUGENTRY");
 	const char*							validateEnv = getenv("REPLICATION_VALIDATE");
 	const char*							findBestEnv = getenv("REPLICATION_FINDBEST");
 	const char*							rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
@@ -743,8 +742,8 @@ int testReplication()
 	if (debugLevelEnv) g_replicationdebug = atoi(debugLevelEnv);
 	debugBackup = g_replicationdebug;
 
-	testServers = createTestLocalityMap(serverIndexes, g_random->randomInt(1, 5), g_random->randomInt(1, 6), g_random->randomInt(1, 10), g_random->randomInt(1, 10), g_random->randomInt(0, 4), g_random->randomInt(1, 5));
-	maxAlsoSize = testServers->size() / g_random->randomInt(2, 20);
+	testServers = createTestLocalityMap(serverIndexes, deterministicRandom()->randomInt(1, 5), deterministicRandom()->randomInt(1, 6), deterministicRandom()->randomInt(1, 10), deterministicRandom()->randomInt(1, 10), deterministicRandom()->randomInt(0, 4), deterministicRandom()->randomInt(1, 5));
+	maxAlsoSize = testServers->size() / deterministicRandom()->randomInt(2, 20);
 
 	if (g_replicationdebug >= 0) printf("Running %d Replication test\n", totalTests);
 
@@ -772,8 +771,8 @@ int testReplication()
 			g_replicationdebug = debugBackup;
 			skipTotal = 0;
 		}
-		alsoSize = g_random->randomInt(0, testServers->size()+1);
-		if ((alsoSize > maxAlsoSize) && (g_random->random01() > .2)) {
+		alsoSize = deterministicRandom()->randomInt(0, testServers->size()+1);
+		if ((alsoSize > maxAlsoSize) && (deterministicRandom()->random01() > .2)) {
 			alsoSize = maxAlsoSize;
 		}
 
@@ -782,19 +781,19 @@ int testReplication()
 		}
 		else {
 			alsoServers = testServers->getEntries();
-			g_random->randomShuffle(alsoServers);
+			deterministicRandom()->randomShuffle(alsoServers);
 			if (alsoSize < testServers->size()) {
 				alsoServers.resize(alsoSize);
 			}
 		}
 
-		policyIndex = (policyIndexStatic>=0) ? policyIndexStatic : g_random->randomInt(0, policies.size());
+		policyIndex = (policyIndexStatic>=0) ? policyIndexStatic : deterministicRandom()->randomInt(0, policies.size());
 
 		if (g_replicationdebug > 0) printf(" #%7d: (%3d) ", testCounter, policyIndex);
 
 		if (findBest)
 		{
-			auto bSucceeded = findBestPolicySet(bestSet, testServers, policies[policyIndex], policyMin, rateSample, policySample);
+			findBestPolicySet(bestSet, testServers, policies[policyIndex], policyMin, rateSample, policySample);
 
 			if (g_replicationdebug > 1) {
 				printf("BestSet:%4lu entries\n", bestSet.size());
@@ -836,7 +835,6 @@ void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityD
 
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, std::vector<LocalityData>* vld) {
 	if (!policy) return;
-	std::set<std::string> keys = policy->attributeKeys();
 	for (LocalityData& ld : *vld) {
 		filterLocalityDataForPolicy(policy, &ld);
 	}
