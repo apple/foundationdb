@@ -535,7 +535,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
 			WorkerInterface distributorWorker = wait( getDataDistributorWorker( cx, dbInfo ) );
-			UID distributorUID = dbInfo->get().distributor.get().id();
+			state UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID).detail("Locality", distributorWorker.locality.toString());
 
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, distributorWorker);
@@ -546,9 +546,25 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, distributorWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, distributorWorker, distributorUID );
 
-			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
-			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
-			     success(storageServersRecruiting));
+			state bool distributorChanged = false;
+			loop choose {
+				when(wait(dbInfo->onChange())) {
+					if (!dbInfo->get().distributor.present() ||
+					    dbInfo->get().distributor.get().id() != distributorUID) {
+						TraceEvent("QuietDatabaseDataDistributorChanged");
+						distributorChanged = true;
+						break;
+					}
+				}
+				when(wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
+				          success(teamCollectionValid) && success(storageQueueSize) &&
+				          success(dataDistributionActive) && success(storageServersRecruiting))) {
+					break;
+				}
+			}
+			if (distributorChanged) {
+				continue;
+			}
 
 			TraceEvent(("QuietDatabase" + phase).c_str())
 			    .detail("DataInFlight", dataInFlight.get())
