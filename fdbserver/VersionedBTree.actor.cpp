@@ -408,8 +408,12 @@ public:
 		return entry.item;
 	}
 
-	void clear() {
+	// Clears the cache and calls destroy() on each ObjectType
+	void destroy() {
 		evictionOrder.clear();
+		for(auto &entry : cache) {
+			entry.second.item.destroy();
+		}
 		cache.clear();
 	}
 
@@ -426,6 +430,19 @@ private:
 	std::unordered_map<IndexType, Entry> cache;
 };
 
+ACTOR template<class T> Future<T> forwardError(Future<T> f, Promise<Void> target) {
+	try {
+		T x = wait(f);
+		return x;
+	}
+	catch(Error &e) {
+		if(e.code() != error_code_actor_cancelled && target.canBeSet()) {
+			target.sendError(e);
+		}
+
+		throw e;
+	}
+}
 
 class COWPager : public IPager2 {
 public:
@@ -435,7 +452,7 @@ public:
 	// If the file already exists, pageSize might be different than desiredPageSize
 	COWPager(int desiredPageSize, std::string filename, int cachedPageLimit) : desiredPageSize(desiredPageSize), filename(filename), pageCache(cachedPageLimit), pHeader(nullptr) {
 		commitFuture = Void();
-		recoverFuture = recover(this);
+		recoverFuture = forwardError(recover(this), errorPromise);
 	}
 
 	void setPageSize(int size) {
@@ -538,12 +555,14 @@ public:
 			return ++pHeader->pageCount;
 		}
 
-		return map(nextPageID, [=](Optional<LogicalPageID> nextPageID) {
+		Future<LogicalPageID> f = map(nextPageID, [=](Optional<LogicalPageID> nextPageID) {
 			if(nextPageID.present()) {
 				return nextPageID.get();
 			}
 			return (LogicalPageID)++(pHeader->pageCount);
 		});
+
+		return forwardError(f, errorPromise);
 	};
 
 	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<IPage> page) {
@@ -580,18 +599,19 @@ public:
 			}
 		}
 
-		writes.add(cacheEntry.writeFuture);
+		writes.add(forwardError(cacheEntry.writeFuture, errorPromise));
 
 		// Always update the page contents immediately regardless of what happened above.
 		cacheEntry.page = data;
 	}
 
 	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data) {
-		freePage(pageID);
-		return map(newPageID(), [=](LogicalPageID newPageID) {
+		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
 			updatePage(newPageID, data);
 			return newPageID;
 		});
+
+		return forwardError(f, errorPromise);
 	}
 
 	// Free pageID to be used again after the next commit
@@ -601,19 +621,10 @@ public:
 
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(COWPager *self, PhysicalPageID pageID) {
 		state Reference<IPage> page = self->newPageBuffer();
-
-		try {
-			int readBytes = wait(self->pageFile->read(page->mutate(), self->physicalPageSize, (int64_t)pageID * self->physicalPageSize));
-			debug_printf("op=read_complete id=%u bytes=%d\n", pageID, readBytes);
-			ASSERT(readBytes == self->physicalPageSize);
-			ASSERT(((Page *)page.getPtr())->verifyChecksum(pageID));
-		} catch(Error &e) {
-			if(e.code() != error_code_actor_cancelled) {
-				self->errorPromise.sendError(e);
-			}
-			throw;
-		}
-
+		int readBytes = wait(self->pageFile->read(page->mutate(), self->physicalPageSize, (int64_t)pageID * self->physicalPageSize));
+		debug_printf("op=read_complete id=%u bytes=%d\n", pageID, readBytes);
+		ASSERT(readBytes == self->physicalPageSize);
+		ASSERT(((Page *)page.getPtr())->verifyChecksum(pageID));
 		return page;
 	}
 
@@ -626,7 +637,7 @@ public:
 			cacheEntry.page = readPhysicalPage(this, (PhysicalPageID)pageID);
 		}
 
-		return cacheEntry.page;
+		return forwardError(cacheEntry.page, errorPromise);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -671,7 +682,7 @@ public:
 	Future<Void> commit() {
 		// Can't have more than one commit outstanding.
 		ASSERT(commitFuture.isReady());
-		commitFuture = commit_impl(this);
+		commitFuture = forwardError(commit_impl(this), errorPromise);
 		return commitFuture;
 	}
 
@@ -690,15 +701,15 @@ public:
 	
 	ACTOR void shutdown(COWPager *self, bool dispose) {
 		self->recoverFuture.cancel();
+		self->commitFuture.cancel();
 
 		if(self->errorPromise.canBeSet())
 			self->errorPromise.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
 
-		// Cancel all reads.  Any in-progress writes will be holding references to their required pages
-		self->pageCache.clear();
+		// Destroy the cache, cancelling reads and writes in progress
+		self->pageCache.destroy();
 
 		wait(ready(self->writes.signal()));
-		wait(ready(self->commitFuture));
 
 		self->pageFile.clear();
 
@@ -720,10 +731,6 @@ public:
 	
 	Future<Void> onClosed() {
 		return closedPromise.getFuture();
-	}
-
-	Future<Void> onError() {
-		return errorPromise.getFuture();
 	}
 
 	Future<Void> onClose() {
@@ -793,6 +800,11 @@ private:
 		bool evictable() const {
 			// Don't evict if a page is still being read or written
 			return page.isReady() && !writing();
+		}
+
+		void destroy() {
+			page.cancel();
+			writeFuture.cancel();
 		}
 	};
 
