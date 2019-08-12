@@ -544,6 +544,7 @@ namespace actorcompiler
                     actor.attributes.Add("[[nodiscard]]");
                 }
             }
+            actor.attributes = actor.attributes.Where(a => !a.StartsWith("[[flow_")).ToList();
         }
 
         LoopStatement ParseLoopStatement(TokenRange toks)
