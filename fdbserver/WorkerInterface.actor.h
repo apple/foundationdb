@@ -33,6 +33,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadProxyInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
@@ -52,6 +53,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
+	RequestStream< struct InitializeReadProxyRequest > readProxy;
 
 	RequestStream< struct LoadedPingRequest > debugPing;
 	RequestStream< struct CoordinationPingMessage > coordinationPing;
@@ -73,7 +75,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, readProxy, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
 	}
 };
 
@@ -229,6 +231,27 @@ struct InitializeStorageRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
+	}
+};
+
+struct InitializeReadProxyRequest {
+	constexpr static FileIdentifier file_identifier = 6416817; // FIXME: Choose something
+	ReplyPromise<ReadProxyInterface> reply;
+
+	InitializeReadProxyRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct InitializeReadProxyReply {
+	constexpr static FileIdentifier file_identifier = 10390646; // FIXME: Choose something.
+	ReadProxyInterface interf;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf);
 	}
 };
 
@@ -389,6 +412,7 @@ struct Role {
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
 	static const Role COORDINATOR;
+	static const Role READ_PROXY;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -454,6 +478,8 @@ ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest re
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> readProxyServer(ReadProxyInterface proxy, InitializeReadProxyRequest req,
+                                   Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

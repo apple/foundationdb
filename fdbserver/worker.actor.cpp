@@ -811,6 +811,7 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.masterProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
+		DUMPTOKEN(recruited.readProxy);
 		DUMPTOKEN(recruited.debugPing);
 		DUMPTOKEN(recruited.coordinationPing);
 		DUMPTOKEN(recruited.waitFailure);
@@ -1117,6 +1118,18 @@ ACTOR Future<Void> workerServer(
 				//printf("Recruited as masterProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
 						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				req.reply.send(recruited);
+			}
+			when( InitializeReadProxyRequest req = waitNext(interf.readProxy.getFuture()) ) {
+				ReadProxyInterface recruited;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole( Role::READ_PROXY, recruited.id(), interf.id(), details );
+				DUMPTOKEN(recruited.getKey);
+
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::READ_PROXY, recruited.id(),
+				                                                     readProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1448,3 +1461,4 @@ const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::COORDINATOR("Coordinator", "CD");
+const Role Role::READ_PROXY("ReadProxy", "RP");

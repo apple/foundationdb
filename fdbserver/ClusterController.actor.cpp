@@ -1773,6 +1773,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		clientInfo.proxies = req.proxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
+		clientInfo.readProxies = db->clientInfo->get().readProxies;
 		db->clientInfo->set( clientInfo );
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -2536,6 +2537,25 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 					self->db.setRatekeeper(interf.get());
 				}
 				checkOutstandingRequests(self);
+
+				// TODO: Recruit ReadProxy here for now.
+				{
+                    InitializeReadProxyRequest req;
+                    ErrorOr<ReadProxyInterface> interf = wait(worker.interf.readProxy.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
+					if (interf.present()) {
+                        TraceEvent("ReadProxyServerStarted").detail("ProxyId", interf.get().id());
+						auto clientDbInfo = self->db.clientInfo->get();
+						std::vector<ReadProxyInterface> readProxies {interf.get()};
+						clientDbInfo.readProxies = readProxies;
+						TraceEvent("ReadProxy_NumProxies").detail("Size", readProxies.size());
+						clientDbInfo.id = deterministicRandom()->randomUniqueID();
+						self->db.clientInfo->set(clientDbInfo);
+					} else {
+                        TraceEvent("ReadProxyServerStartFailed");
+					}
+				}
+				// Done.
+
 				return Void();
 			}
 		}

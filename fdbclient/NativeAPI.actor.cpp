@@ -1062,6 +1062,12 @@ void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
 		bytes = std::max( 0, bytes - (int)data.expectedSize() - (8-(int)sizeof(KeyValueRef))*data.size() );
 }
 
+Reference<ReadProxyInfo> DatabaseContext::getReadProxies() {
+	// TODO (Vishesh): Rename masterProxiesLastChange to clientInfoLastChange
+	// TODO (Vishesh): Checkout implementation for MasterProxy and refactor it.
+	return Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies));
+}
+
 void GetRangeLimits::decrement( KeyValueRef const& data ) {
 	minRows = std::max(0, minRows - 1);
 	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED )
@@ -1383,6 +1389,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
+	TraceEvent("GetKey");
 
 	loop {
 		if (k.getKey() == allKeys.end) {
@@ -1393,40 +1400,60 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			return Key();
 		}
 
-		Key locationKey(k.getKey(), k.arena());
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()) );
+		++cx->transactionPhysicalReads;
 
-		try {
-			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
-			++cx->transactionPhysicalReads;
-			state GetKeyReply reply;
-			choose {
-				when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-				when(GetKeyReply _reply =
+
+		Key locationKey(k.getKey(), k.arena());
+		if (CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && !info.useProvisionalProxies) {
+			TraceEvent("ReadProxy_NativeAPI_Used");
+			try {
+				GetKeyReply reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKey, GetKeyRequest(k, version.get()),
+													 TaskDefaultPromiseEndpoint, false, NULL));
+				k = reply.sel;
+				if (!k.offset && k.orEqual) {
+					return k.getKey();
+				}
+			} catch (Error& e) {
+				TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
+				throw e;
+			}
+		} else {
+			state pair<KeyRange, Reference<LocationInfo>> ssi =
+			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()));
+
+			try {
+				if (info.debugID.present())
+					g_traceBatch.addEvent(
+					    "TransactionDebug", info.debugID.get().first(),
+					    "NativeAPI.getKey.Before"); //.detail("StartKey",
+					                                //k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+				GetKeyReply reply;
+				choose {
+					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(GetKeyReply _reply =
 				         wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()),
 				                          TaskPriority::DefaultPromiseEndpoint, false,
 				                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
-					reply = _reply;
+						reply = _reply;
+					}
 				}
-			}
-			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
-			k = reply.sel;
-			if (!k.offset && k.orEqual) {
-				return k.getKey();
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				cx->invalidateCache(k.getKey(), k.isBackward());
+				if (info.debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(),
+					                      "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset",
+					                                                 //reply.sel.offset).detail("OrEqual", k.orEqual);
+				k = reply.sel;
+				if (!k.offset && k.orEqual) {
+					return k.getKey();
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+					cx->invalidateCache(k.getKey(), k.isBackward());
 
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
-			} else {
-				TraceEvent(SevInfo, "GetKeyError")
-					.error(e)
-					.detail("AtKey", k.getKey())
-					.detail("Offset", k.offset);
-				throw e;
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+				} else {
+					TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
+					throw e;
+				}
 			}
 		}
 	}

@@ -42,6 +42,7 @@
     <ActorCompiler Include="KeyValueStoreSQLite.actor.cpp" />
     <ActorCompiler Include="LeaderElection.actor.cpp" />
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
+    <ActorCompiler Include="ReadProxyServer.actor.cpp" />
     <ActorCompiler Include="DiskQueue.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
     <ActorCompiler Include="SimulatedCluster.actor.cpp" />

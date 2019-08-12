@@ -44,6 +44,7 @@ private:
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+typedef MultiInterface<ReadProxyInterface> ReadProxyInfo;
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -70,6 +71,9 @@ public:
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
+
+	Reference<ReadProxyInfo> getReadProxies();
+
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database

@@ -46,6 +46,7 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  ReadProxyInterface.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RunTransaction.actor.h

@@ -60,6 +60,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
+  ReadProxyServer.actor.cpp
   RecoveryState.h
   Restore.actor.cpp
   RestoreInterface.h

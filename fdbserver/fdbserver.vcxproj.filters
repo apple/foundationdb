@@ -79,6 +79,7 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
+    <ActorCompiler Include="ReadProxyServer.actor.cpp" />
     <ActorCompiler Include="Status.actor.cpp" />
     <ActorCompiler Include="workloads\ConflictRange.actor.cpp">
       <Filter>workloads</Filter>

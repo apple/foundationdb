@@ -78,6 +78,7 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="Notified.h" />
+    <ClInclude Include="ReadProxyInterface.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
