@@ -544,6 +544,13 @@ namespace actorcompiler
                     actor.attributes.Add("[[nodiscard]]");
                 }
             }
+            HashSet<string> knownFlowAttributes = new HashSet<string>();
+            knownFlowAttributes.Add("[[flow_allow_discard]]");
+            foreach (var flowAttribute in actor.attributes.Where(a => a.StartsWith("[[flow_"))) {
+                if (!knownFlowAttributes.Contains(flowAttribute)) {
+                    throw new Error(actor.SourceLine, "Unknown flow attribute {0}", flowAttribute);
+                }
+            }
             actor.attributes = actor.attributes.Where(a => !a.StartsWith("[[flow_")).ToList();
         }
 
