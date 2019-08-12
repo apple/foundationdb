@@ -591,7 +591,9 @@ struct Traceable<RangeResultRef> : std::true_type {
 
 struct KeyValueStoreType {
 	constexpr static FileIdentifier file_identifier = 6560359;
-	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	// These enumerated values are stored in the database configuration, so should NEVER be changed.
+	// Only add new ones just before END.
+	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
 		SSD_BTREE_V1,
 		MEMORY,

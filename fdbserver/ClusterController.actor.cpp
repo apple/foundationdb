@@ -1362,7 +1362,10 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				    .detail("OutstandingReq", i)
+				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment)
+				    .error(e);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
@@ -1655,7 +1658,9 @@ void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest r
 	} catch ( Error& e ) {
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.push_back( std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT) );
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
+			    .error(e);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 			throw;  // Any other error will bring down the cluster controller

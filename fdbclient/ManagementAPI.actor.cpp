@@ -484,13 +484,20 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
+				// Debug purpose
+				TraceEvent("ChangeConfigAPI").detail("Param1", i->first).detail("Param2", i->second);
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
 
 			wait( tr.commit() );
+			// Debug purpose
+			TraceEvent("ChangeConfigAPI")
+			    .detail("NewConfig", newConfig.toString())
+			    .detail("OldConfig", oldConfig.toString());
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
@@ -1610,6 +1617,11 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 			state std::vector<Future<Void>> watchFutures;
 			for(int i = 0; i < config.regions.size(); i++) {
 				if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+					TraceEvent("WaitForFullReplication")
+					    .detail("DecodedReplicas", replicasFutures[i].get().present()
+					                                   ? decodeDatacenterReplicasValue(replicasFutures[i].get().get())
+					                                   : -1)
+					    .detail("ConfigReplicas", config.storageTeamSize);
 					watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
 				}
 			}
