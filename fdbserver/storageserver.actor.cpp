@@ -76,24 +76,6 @@ inline bool canReplyWith(Error e) {
 }
 
 struct StorageServer;
-class ValueOrClearToRef {
-public:
-	static ValueOrClearToRef value(ValueRef const& v) { return ValueOrClearToRef(v, false); }
-	static ValueOrClearToRef clearTo(KeyRef const& k) { return ValueOrClearToRef(k, true); }
-
-	bool isValue() const { return !isClear; };
-	bool isClearTo() const { return isClear; }
-
-	ValueRef const& getValue() const { ASSERT( isValue() ); return item; };
-	KeyRef const&  getEndKey() const { ASSERT(isClearTo()); return item; };
-
-private:
-	ValueOrClearToRef( StringRef item, bool isClear ) : item(item), isClear(isClear) {}
-
-	StringRef item;
-	bool isClear;
-};
-
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient;			// holds FetchKeys() actor
@@ -3831,6 +3813,117 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 #pragma endregion
 
 /*
+
+ACTOR Future<GetKeyValuesReply> readRangeVersioned(VersionedMap<KeyRef, ValueRef> const &data, Version version, KeyRange range, int limit,
+												   int* pLimitBytes, bool fastPath) {
+	state GetKeyValuesReply result;
+	state StorageServer::VersionedData::ViewAtVersion view = data.at(version);
+	state StorageServer::VersionedData::iterator vStart = view.end();
+	state StorageServer::VersionedData::iterator vEnd = view.end();
+	state KeyRef readBegin;
+	state KeyRef readEnd;
+	state Key readBeginTemp;
+	state int vCount;
+	// state UID rrid = deterministicRandom()->randomUniqueID();
+	// state int originalLimit = limit;
+	// state int originalLimitBytes = *pLimitBytes;
+	// state bool track = rrid.first() == 0x1bc134c2f752187cLL;
+
+	// FIXME: Review pLimitBytes behavior
+	// if (limit >= 0) we are reading forward, else backward
+
+	// We might care about a clear beginning before start that
+	//  runs into range
+	vStart = view.lastLessOrEqual(range.begin);
+	if (vStart && vStart->isClearTo() && vStart->getEndKey() > range.begin)
+		readBegin = vStart->getEndKey();
+	else
+		readBegin = range.begin;
+
+	vStart = view.lower_bound(readBegin);
+
+
+	if (fastPath) {
+     	ASSERT(!vStart || vStart.key() >= readBegin);
+     	if (vStart) {
+     		auto b = vStart;
+     		--b;
+     		ASSERT(!b || b.key() < readBegin);
+     	}
+
+     	int accumulatedBytes = 0;
+		while (vStart && vStart.key() < range.end && limit>0 && accumulatedBytes < *pLimitBytes) {
+			if (!vEnd->isClearTo()) {
+				result.data.push_back_deep(result.arena, KeyValueRef(vStart.key(), vStart->getValue()));
+				accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+				--limit;
+			}
+			++vStart;
+		}
+
+     	*pLimitBytes -= accumulatedBytes;
+		ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+	    result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+	    result.version = version;
+	    return result;
+	}
+
+	// Break the readRange into multiple readRange calls based on clear ranges
+	while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
+		// ASSERT( vStart == view.lower_bound(readBegin) );
+		ASSERT(!vStart || vStart.key() >= readBegin);
+		if (vStart) {
+			auto b = vStart;
+			--b;
+			ASSERT(!b || b.key() < readBegin);
+		}
+
+		// Read up to limit items from the view, stopping at the next clear (or the end of the range)
+		vEnd = vStart;
+		vCount = 0;
+		int vSize = 0;
+		while (vEnd && vEnd.key() < range.end && !vEnd->isClearTo() && vCount < limit && vSize < *pLimitBytes) {
+			vSize += sizeof(KeyValueRef) + vEnd->getValue().expectedSize() + vEnd.key().expectedSize();
+			++vCount;
+			++vEnd;
+		}
+
+		// Read the data on disk up to vEnd (or the end of the range)
+		readEnd = vEnd ? std::min(vEnd.key(), range.end) : range.end;
+
+
+		//int prevSize = result.data.size();
+		int accumulatedBytes = 0;
+		while (vStart!=vEnd && --limit>=0 && accumulatedBytes < *pLimitBytes) {
+			result.data.push_back_deep(result.arena, KeyValueRef(vStart.key(), vStart->getValue()) );
+			accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+			++vStart;
+		}
+		//limit -= result.data.size() - prevSize;
+
+		//for (auto i = &result.data[prevSize]; i != result.data.end(); i++)
+		//	*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
+     	*pLimitBytes -= accumulatedBytes;
+
+		// Setup for the next iteration
+		if (vStart && vStart->isClearTo()) { // if vStart is a clear, skip it.
+			// if (track) printf("skip clear\n");
+			readBegin = vStart->getEndKey(); // next disk read should start at the end of the clear
+			++vStart;
+		} else { // Otherwise, continue at readEnd
+			// if (track) printf("continue\n");
+			readBegin = readEnd;
+		}
+	}
+		// all but the last item are less than *pLimitBytes
+		ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+	    result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+	    result.version = version;
+	    return result;
+}
+*/
+
+/*
 4 Reference count
 4 priority
 24 pointers
@@ -3868,10 +3961,65 @@ Possibilities:
   -12 Compress pointers (using special allocator)
   -4 Modular lastUpdateVersion (make sure no node survives 4 billion updates)
 */
-
-void versionedMapTest() {
+void versionedMapTestSimple() {
 	VersionedMap<int,int> vm;
 
+	// Insert A, B, C, D, G, H at version 100
+	vm.createNewVersion(100);
+	vm.insert(10, 1);
+	std::cout << "Insert 10" << std::endl << std::endl;
+	vm.printDetail();
+	vm.insert(20, 2);
+	std::cout << "Insert 20" << std::endl << std::endl;
+	vm.printDetail();
+	vm.insert(30, 3);
+	std::cout << "Insert 30" << std::endl << std::endl;
+	vm.printDetail();
+	//vm.insert(40, 4);
+	vm.insert(60, 6);
+	std::cout << "Insert 60" << std::endl << std::endl;
+	vm.printDetail();
+	//vm.insert(80, 8);
+
+	// Insert E at version 200
+	vm.createNewVersion(200);
+	vm.insert(40, 4);
+	std::cout << "Insert 40" << std::endl << std::endl;
+	vm.printDetail();
+
+	// Insert G at version 300
+	vm.createNewVersion(300);
+	vm.insert(50, 5);
+	std::cout << "Insert 50" << std::endl << std::endl;
+	vm.printDetail();
+	//vm.insert(90, 9);
+
+	// print tree detail
+	//printf("Printing tree after the inserts.\n");
+	//vm.printDetail();
+
+	// clear range E-G at version 400
+	vm.createNewVersion(400);
+	vm.erase(30, 50);
+	std::cout << "Erase 30-50" << std::endl << std::endl;
+
+	// print tree detail
+	printf("\nPrinting tree after clear range 5-8.\n");
+	vm.printDetail();
+	vm.insert(30, 50);
+	std::cout << "Insert special market 30, 50" << std::endl << std::endl;
+	vm.printDetail();
+
+	// compact tree below 300
+	//vm.compact(300);
+	//vm.printDetail();
+	//printf("\nPrinting tree after clear range 5-8 at previous version.\n");
+	//vm.printTree(300);
+
+	//printf("\nPrinting tree after clear range 5-8 at latest version.\n");
+	//vm.printTree(400);
+
+    if (0) {
 	printf("SS Ptree node is %zu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
 
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
@@ -3881,24 +4029,463 @@ void versionedMapTest() {
 
 	for(int v=1; v<=1000; ++v) {
 		vm.createNewVersion(v);
-		for(int i=0; i<1000; i++) {
+		for (int i = 0; i < 1000; i++) {
 			int k = deterministicRandom()->randomInt(0, 2000000);
 			/*for(int k2=k-5; k2<k+5; k2++)
 				if (vm.atLatest().find(k2) != vm.atLatest().end())
-					vm.erase(k2);*/
-			vm.erase( k-5, k+5 );
-			vm.insert( k, v );
+				    vm.erase(k2);*/
+			vm.erase(k - 5, k + 5);
+			vm.insert(k, v);
 		}
 	}
 
-	auto after = FastAllocator< ASIZE >::getTotalMemory();
+	//int someKey = deterministicRandom()->randomInt(0, 2000000);
+	//int begin = someKey-10;
+	//int end = someKey+10;
+	//int rowLimit = 1<<30;
+	//int byteLimit = 1<<30;
+
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	//GetKeyValuesReply result = vm.readRangeVersioned(vm.latestVersion,
+	//										         KeyRangeRef(KeyRef((const uint8_t *)&begin, sizeof(begin)),
+	//															 KeyRef((const uint8_t *)&end, sizeof(end))), rowLimit, &byteLimit, 1);
+	//VersionedMap<int, int>::GetRangeReply result = vm.readRangeVersioned(vm.latestVersion, begin, end, rowLimit, &byteLimit, 1);
+	std::chrono::steady_clock::time_point endTime = std::chrono::steady_clock::now();
+    std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::endl;
+
+	//printf("Size of read range result set: %d\n", result.data.size());
+	auto after = FastAllocator<ASIZE>::getTotalMemory();
 
 	int count = 0;
-	for(auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)
-		++count;
+	for (auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i) ++count;
 
 	printf("PTree node is %d bytes, allocated as %d bytes\n", NSIZE, ASIZE);
-	printf("%d distinct after %d insertions\n", count, 1000*1000);
-	printf("Memory used: %f MB\n",
-		 (after - before)/ 1e6);
+	printf("%d distinct after %d insertions\n", count, 1000 * 1000);
+	printf("Memory used: %f MB\n", (after - before) / 1e6);
+	}
+}
+
+StringRef randString(Arena &arena, int len, char firstChar = 'a', char lastChar = 'z') {
+	++lastChar;
+	StringRef s = makeString(len, arena);
+	for(int i = 0; i < len; ++i) {
+		*(uint8_t *)(s.begin() + i) = (uint8_t)deterministicRandom()->randomInt(firstChar, lastChar);
+	}
+	return s;
+}
+
+int randSize(int max) {
+	int n = pow(deterministicRandom()->random01(), 3) * max;
+	return n;
+}
+
+KeyValueRef randKV(Arena &arena, int maxKeySize = 10, int maxValueSize = 5) {
+	int kLen = randSize(1 + maxKeySize);
+	int vLen = maxValueSize > 0 ? randSize(maxValueSize) : 0;
+
+	KeyValueRef kv;
+
+	kv.key = randString(arena, kLen, 'a', 'm');
+	for(int i = 0; i < kLen; ++i)
+		mutateString(kv.key)[i] = (uint8_t)deterministicRandom()->randomInt('a', 'm');
+
+	if(vLen > 0) {
+		kv.value = randString(arena, vLen, 'n', 'z');
+		for(int i = 0; i < vLen; ++i)
+			mutateString(kv.value)[i] = (uint8_t)deterministicRandom()->randomInt('o', 'z');
+	}
+
+	return kv;
+}
+
+void versionedMapTestClearRange(VersionedMap<KeyRef, ValueOrClearToRef>& vm, Arena& arena, std::set<KeyRef>& keys,
+								std::chrono::duration<double>& elapsed) {
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	KeyRef start = randKV(arena, 10, 5).key;
+	KeyRef end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randKV(arena, 10, 5).key;
+
+	// Sometimes replace start and/or end with a close actual (previously used) value
+	if(deterministicRandom()->random01() < .10) {
+		auto i = keys.upper_bound(start);
+		if(i != keys.end())
+			start = *i;
+	}
+	if(deterministicRandom()->random01() < .10) {
+		auto i = keys.upper_bound(end);
+		if(i != keys.end())
+			end = *i;
+	}
+
+	if(end == start)
+		end = keyAfter(start);
+	if(end < start) {
+		std::swap(end, start);
+	}
+
+	//printf("      Mutation:  Clear '%s' to '%s' @%" PRId64 "\n", start.toString().c_str(), end.toString().c_str(), version);
+	beginTime = std::chrono::steady_clock::now();
+	vm.clearRange(start, end);
+	endTime = std::chrono::steady_clock::now();
+	elapsed += (endTime-beginTime);
+}
+
+void versionedMapTestSet(VersionedMap<KeyRef, ValueOrClearToRef>& vm, Arena& arena, std::set<KeyRef>& keys,
+						 int& keyBytesInserted, int& valueBytesInserted, std::chrono::duration<double>& elapsed) {
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	// Set a key
+	KeyValueRef kv = randKV(arena, 10, 5);
+	// Sometimes change key to a close previously used key
+	if(deterministicRandom()->random01() < .01) {
+		auto i = keys.upper_bound(kv.key);
+		if(i != keys.end())
+			kv.key = StringRef(arena, *i);
+	}
+
+	//printf("      Mutation:  Set '%s' -> '%s' @%" PRId64 "\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+
+	keyBytesInserted += kv.key.size();
+	valueBytesInserted += kv.value.size();
+	beginTime = std::chrono::steady_clock::now();
+	vm.setValue(arena, kv.key, kv.value);
+	endTime = std::chrono::steady_clock::now();
+	elapsed += (endTime-beginTime);
+	keys.insert(kv.key);
+}
+
+void versionedMapTestReadRange(VersionedMap<KeyRef, ValueOrClearToRef>& vm, std::set<KeyRef>& keys)
+{
+	Arena arena;
+	KeyRef startRange;
+	KeyRef endRange;
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	std::chrono::duration<double> elapsedFast = endTime - beginTime;
+	std::chrono::duration<double> elapsedSlow = endTime - beginTime;
+	std::chrono::duration<double> elapsedBuffered = endTime - beginTime;
+	VersionedMap<KeyRef, ValueOrClearToRef>::GetRangeReply result;
+	int rowLimit = 1 << 30;
+	int byteLimit = 1 << 30;
+	int totalResultSizeFast = 0;
+	int totalResultSizeSlow = 0;
+	int totalResultSizeBuffered = 0;
+	for( auto rr=0; rr<100000000; rr++)
+	{
+		startRange = randKV(arena, 10, 5).key;
+		endRange = (deterministicRandom()->random01() < .01) ? keyAfter(startRange) : randKV(arena, 10, 5).key;
+
+		// Sometimes replace start and/or end with a close actual (previously used) value
+
+		if (deterministicRandom()->random01() < .10) {
+			auto i = keys.upper_bound(startRange);
+			if (i != keys.end()) startRange = *i;
+		}
+		if (deterministicRandom()->random01() < .10) {
+			auto i = keys.upper_bound(endRange);
+			if (i != keys.end()) endRange = *i;
+		}
+
+		if (endRange == startRange)
+			endRange = keyAfter(startRange);
+		if (endRange < startRange)
+			std::swap(endRange, startRange);
+
+
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		result = vm.readRangeVersionedFast(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::ast += (endTime-beginTime);
+		elapsedFast += (endTime-beginTime);
+		auto size=result.data.size();
+		totalResultSizeFast += size;
+		//printf("Size of read range result set: %d\n", size);
+		//for (auto i=0; i<size; i++) {
+			//printf ("%s, ", result.data.front().key.toString().c_str());
+		//	result.data.pop_front(1);
+		//}
+
+		// Now try toe slow path (i.e. split readRange into multiple ones based on the presence of clearRanges)
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		result = vm.readRangeVersionedSlow(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::endl;
+		elapsedSlow += (endTime-beginTime);
+
+		size=result.data.size();
+		totalResultSizeSlow += size;
+		//printf("Size of read range result set: %d\n", size);
+		//for (auto i=0; i<size; i++) {
+			//printf ("%s, ", result.data.front().key.toString().c_str());
+		//	result.data.pop_front(1);
+		//}
+
+		// Now try the slow path with bufferred results
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		result = vm.readRangeVersionedBuffered(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::endl;
+		elapsedBuffered += (endTime-beginTime);
+
+		size=result.data.size();
+		totalResultSizeBuffered += size;
+		//printf("Size of read range result set: %d\n", size);
+		//for (auto i=0; i<size; i++) {
+			//printf ("%s, ", result.data.front().key.toString().c_str());
+		//	result.data.pop_front(1);
+		//}
+	}
+	std::cout << "totalResultSizeFast = " << totalResultSizeFast << std::endl;
+	std::cout << "Time to perform fast readRange = " << elapsedFast.count() << std::endl;
+	std::cout << "totalResultSizeSlow = " << totalResultSizeSlow << std::endl;
+	std::cout << "Time to perform slow readRange = " << elapsedSlow.count() << std::endl;
+	std::cout << "totalResultSizeBuffered = " << totalResultSizeBuffered << std::endl;
+	std::cout << "Time to perform buffered readRange = " << elapsedBuffered.count() << std::endl;
+}
+
+void versionedMapTestVersionSingle()
+//TEST_CASE("!/versionedmap/microbench/unit/versionSingle") {
+{
+	VersionedMap<KeyRef, ValueOrClearToRef> vm;
+	double clearChance = deterministicRandom()->random01() * .1;
+	std::set<KeyRef> keys;
+	Arena arena;
+	int sets = 0;
+	int rangeClears = 0;
+	int keyBytesInserted = 0;
+	int valueBytesInserted = 0;
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	std::chrono::duration<double> elapsed = endTime - beginTime;
+
+	vm.createNewVersion(1);
+
+	for (int v = 1; v <= 100000000; ++v) {
+		// Sometimes do a clear range
+		if(deterministicRandom()->random01() < clearChance) {
+			versionedMapTestClearRange(vm, arena, keys, elapsed);
+			++rangeClears;
+		}
+		else {
+			// Set a key
+			versionedMapTestSet(vm, arena, keys, keyBytesInserted, valueBytesInserted, elapsed);
+			++sets;
+		}
+	}
+
+	std::cout << "keyBytesInserted: " << keyBytesInserted << ", valueBytesInserted: " << valueBytesInserted << std::endl;
+	std::cout << "rangeClears: " << rangeClears << ", sets: " << sets << ", totalMutationTime: " << elapsed.count() << std::endl;
+	// Perform the read range test on the populated versioned map
+	std::cout << "readRange results for single versioned storage queue" << std::endl;
+	versionedMapTestReadRange(vm, keys);
+}
+
+void versionedMapTestVersionsExtreme()
+//TEST_CASE("!/versionedmap/microbench/unit/versionsExtreme") {
+{	VersionedMap<KeyRef, ValueOrClearToRef> vm;
+	Version version = 1;
+	double clearChance = deterministicRandom()->random01() * .1;
+	std::set<KeyRef> keys;
+	Arena arena;
+	int sets = 0;
+	int rangeClears = 0;
+	int keyBytesInserted = 0;
+	int valueBytesInserted = 0;
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	std::chrono::duration<double> elapsed = endTime - beginTime;
+
+
+	for (int v = 1; v <= 100000000; ++v) {
+		// Always create a new version for every mutation
+		vm.createNewVersion(version);
+		++version;
+
+		// Sometimes do a clear range
+		if(deterministicRandom()->random01() < clearChance) {
+			versionedMapTestClearRange(vm, arena, keys, elapsed);
+			++rangeClears;
+		}
+		else {
+			// Set a key
+			versionedMapTestSet(vm, arena, keys, keyBytesInserted, valueBytesInserted, elapsed);
+			++sets;
+		}
+	}
+
+	std::cout << "keyBytesInserted: " << keyBytesInserted << ", valueBytesInserted: " << valueBytesInserted << std::endl;
+	std::cout << "rangeClears: " << rangeClears << ", sets: " << sets << ", totalMutationTime: " << elapsed.count() << std::endl;
+
+	// Perform the read range test on the populated versioned map
+	std::cout << "readRange results for extreme versioned storage queue" << std::endl;
+	versionedMapTestReadRange(vm, keys);
+}
+
+void versionedMapTest() {
+	// Perform single version storage queue test
+	versionedMapTestVersionSingle();
+	// Perform extreme version storage queue test
+	//versionedMapTestVersionsExtreme();
+}
+
+void versionedMapTestMix() {
+
+	//VersionedMap<KeyRef,ValueRef> vm;
+	VersionedMap<KeyRef, ValueOrClearToRef> vm;
+	Version version = 1;
+	double clearChance = deterministicRandom()->random01() * .1;
+	std::set<KeyRef> keys;
+	Arena arena;
+	int sets;
+	int rangeClears;
+	int keyBytesInserted;
+	int valueBytesInserted;
+
+	KeyRef startRange;
+	KeyRef endRange;
+	std::chrono::steady_clock::time_point beginTime = std::chrono::steady_clock::now();
+	std::chrono::steady_clock::time_point endTime = beginTime;
+	std::chrono::duration<double> elapsedFast = endTime - beginTime;
+	std::chrono::duration<double> elapsedSlow = endTime - beginTime;
+	std::chrono::duration<double> elapsedBuffered = endTime - beginTime;
+	VersionedMap<KeyRef, ValueOrClearToRef>::GetRangeReply result;
+	int rowLimit = 1 << 30;
+	int byteLimit = 1 << 30;
+
+	for (int v = 1; v <= 10000000; ++v) {
+		// Sometimes advance the version
+		if (deterministicRandom()->random01() < 0.10) {
+			++version;
+			vm.createNewVersion(version);
+		}
+
+		// Sometimes do a clear range
+		if(deterministicRandom()->random01() < clearChance) {
+			KeyRef start = randKV(arena, 10, 5).key;
+			KeyRef end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randKV(arena, 10, 5).key;
+
+			// Sometimes replace start and/or end with a close actual (previously used) value
+			if(deterministicRandom()->random01() < .10) {
+				auto i = keys.upper_bound(start);
+				if(i != keys.end())
+					start = *i;
+			}
+			if(deterministicRandom()->random01() < .10) {
+				auto i = keys.upper_bound(end);
+				if(i != keys.end())
+					end = *i;
+			}
+
+			if(end == start)
+				end = keyAfter(start);
+			if(end < start) {
+				std::swap(end, start);
+			}
+
+			//printf("      Mutation:  Clear '%s' to '%s' @%" PRId64 "\n", start.toString().c_str(), end.toString().c_str(), version);
+			vm.clearRange(start, end);
+			++rangeClears;
+		}
+		else {
+			// Set a key
+			KeyValueRef kv = randKV(arena, 10, 5);
+			// Sometimes change key to a close previously used key
+			if(deterministicRandom()->random01() < .01) {
+				auto i = keys.upper_bound(kv.key);
+				if(i != keys.end())
+					kv.key = StringRef(arena, *i);
+			}
+
+			//printf("      Mutation:  Set '%s' -> '%s' @%" PRId64 "\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+
+			keyBytesInserted += kv.key.size();
+			valueBytesInserted += kv.value.size();
+			vm.setValue(arena, kv.key, kv.value);
+			++sets;
+			keys.insert(kv.key);
+		}
+	}
+
+	// Do a range read
+
+	for( auto rr=0; rr<1000000; rr++)
+	{
+		startRange = randKV(arena, 10, 5).key;
+		endRange = (deterministicRandom()->random01() < .01) ? keyAfter(startRange) : randKV(arena, 10, 5).key;
+
+		// Sometimes replace start and/or end with a close actual (previously used) value
+
+		if (deterministicRandom()->random01() < .10) {
+			auto i = keys.upper_bound(startRange);
+			if (i != keys.end()) startRange = *i;
+		}
+		if (deterministicRandom()->random01() < .10) {
+			auto i = keys.upper_bound(endRange);
+			if (i != keys.end()) endRange = *i;
+		}
+
+		if (endRange == startRange)
+			endRange = keyAfter(startRange);
+		if (endRange < startRange)
+			std::swap(endRange, startRange);
+
+
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		result = vm.readRangeVersionedFast(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::ast += (endTime-beginTime);
+		elapsedFast += (endTime-beginTime);
+		auto size=result.data.size();
+		//printf("Size of read range result set: %d\n", size);
+		for (auto i=0; i<size; i++) {
+		//	printf ("%s, ", result.data.front().key.toString().c_str());
+			result.data.pop_front(1);
+		}
+
+		// Now try toe slow path (i.e. split readRange into multiple ones based on the presence of clearRanges)
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		//GetKeyValuesReply result = vm.readRangeVersioned(vm.latestVersion,
+		//										         KeyRangeRef(KeyRef((const uint8_t *)&begin, sizeof(begin)),
+		//															 KeyRef((const uint8_t *)&end, sizeof(end))), rowLimit, &byteLimit, 1);
+		result = vm.readRangeVersionedSlow(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::endl;
+		elapsedSlow += (endTime-beginTime);
+
+		size=result.data.size();
+		//printf("Size of read range result set: %d\n", size);
+		for (auto i=0; i<size; i++) {
+		//	printf ("%s, ", result.data.front().key.toString().c_str());
+			result.data.pop_front(1);
+		}
+
+		// Now try the slow path with bufferred results
+		byteLimit = 1<<30;
+
+		beginTime = std::chrono::steady_clock::now();
+		result = vm.readRangeVersionedBuffered(vm.latestVersion, startRange, endRange, rowLimit, &byteLimit);
+		endTime = std::chrono::steady_clock::now();
+		//std::cout << "Time difference (sec) = " << (std::chrono::duration_cast<std::chrono::microseconds>(endTime - beginTime).count()) /1000000.0 <<std::endl;
+		elapsedBuffered += (endTime-beginTime);
+
+		size=result.data.size();
+		//printf("Size of read range result set: %d\n", size);
+		for (auto i=0; i<size; i++) {
+		//	printf ("%s, ", result.data.front().key.toString().c_str());
+			result.data.pop_front(1);
+		}
+	}
+	std::cout << "Time to perform fast readRange = " << elapsedFast.count() << std::endl;
+	std::cout << "Time to perform slow readRange = " << elapsedSlow.count() << std::endl;
+	std::cout << "Time to perform buffered readRange = " << elapsedBuffered.count() << std::endl;
 }

@@ -25,6 +25,7 @@
 #include "flow/flow.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
 #include "fdbclient/VersionedMap.actor.h"
 
@@ -414,16 +415,17 @@ namespace PTreeImpl {
 		if (p->left(at)) printTree(p->left(at), at, depth+1);
 		for (int i=0;i<depth;i++)
 			printf("  ");
-		printf(":%s\n", describe(p->data).c_str());
+		printf(":%s\n", describe(p->data.value.first).c_str());
 		if (p->right(at)) printTree(p->right(at), at, depth+1);
 	}
 
 	template <class T>
 	void printTreeDetails(const Reference<PTree<T>>& p, int depth = 0) {
-		printf("Node %p (depth %d): %s\n", p.getPtr(), depth, describe(p->data).c_str());
+		printf("Node %p (depth %d): %s, priority: %u\n",
+			   p.getPtr(), depth, describe(p->data.value.first).c_str(), p->priority);
 		printf("  Left: %p\n", p->pointer[0].getPtr());
 		printf("  Right: %p\n", p->pointer[1].getPtr());
-		if (p->pointer[2])
+		if (p->updated)
 			printf("  Version %lld %s: %p\n", p->lastUpdateVersion, p->replacedPointer ? "Right" : "Left", p->pointer[2].getPtr());
 		for(int i=0; i<3; i++)
 			if (p->pointer[i]) printTreeDetails(p->pointer[i], depth+1);
@@ -462,7 +464,53 @@ namespace PTreeImpl {
 		}
 	}
 
+// Remove pointers to any child nodes that have been updated at or before the given version
+// This essentially gets rid of node versions that will never be read (beyond 5s worth of versions)
+template <class T>
+void compact(Reference<PTree<T>>& p, Version newOldestVersion){
+	if (!p) {
+		return;
+	}
+	if (p->updated && p->lastUpdateVersion <= newOldestVersion) {
+		/* If the node has been updated, figure out which pointer was repalced. And delete that pointer */
+		auto which = p->replacedPointer;
+		p->pointer[which] = p->pointer[2];
+		p->updated = false;
+		p->pointer[2] = Reference<PTree<T>>();
+		//p->pointer[which] = Reference<PTree<T>>();
+	}
+	Reference<PTree<T>> left = p->left(newOldestVersion);
+	Reference<PTree<T>> right = p->right(newOldestVersion);
+	compact(left, newOldestVersion);
+	compact(right, newOldestVersion);
 }
+
+}
+
+
+	class ValueOrClearToRef {
+	public:
+		static ValueOrClearToRef value(ValueRef const& v) { return ValueOrClearToRef(v, false); }
+		static ValueOrClearToRef clearTo(KeyRef const& k) { return ValueOrClearToRef(k, true); }
+
+		bool isValue() const { return !isClear; };
+		bool isClearTo() const { return isClear; }
+
+		ValueRef const& getValue() const {
+			ASSERT(isValue());
+			return item;
+		};
+		KeyRef const& getEndKey() const {
+			ASSERT(isClearTo());
+			return item;
+		};
+
+	private:
+		ValueOrClearToRef(StringRef item, bool isClear) : item(item), isClear(isClear) {}
+
+		StringRef item;
+		bool isClear;
+	};
 
 // VersionedMap provides an interface to a partially persistent tree, allowing you to read the values at a particular version,
 // create new versions, modify the current version of the tree, and forget versions prior to a specific version.
@@ -474,11 +522,25 @@ public:
 	typedef Reference< PTreeT > Tree;
 
 	Version oldestVersion, latestVersion;
-	std::map<Version, Tree> roots;
+	//std::map<Version, Tree> roots;
+	std::deque<std::pair<Version, Tree>> roots;
 	Tree *latestRoot;
 
+	struct compare {
+		bool operator()(const std::pair<Version, Tree>& value, const Version& key)
+		{
+			return (value.first < key);
+		}
+		bool operator()(const Version& key, const std::pair<Version, Tree>& value)
+		{
+			return (key < value.first);
+		}
+	};
+
+	// TODO: NEELAM: why is it implemented like this? Why not roots[v]?
 	Tree const& getRoot( Version v ) const {
-		auto r = roots.upper_bound(v);
+		//auto r = roots.upper_bound(v);
+		auto r = upper_bound(roots.begin(), roots.end(), v, compare());
 		--r;
 		return r->second;
 	}
@@ -488,36 +550,51 @@ public:
 	struct iterator;
 
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
-		latestRoot = &roots[0];
+		//latestRoot = &roots[0];
+		latestRoot = &(roots.emplace_back(0, Tree()).second);
 	}
 	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
-		latestRoot = &roots[latestVersion];
+		//latestRoot = &roots[latestVersion];
+		latestRoot = &(roots.back()->second);
 	}
 	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);
-		latestRoot = &roots[latestVersion];
+		//latestRoot = &roots[latestVersion];
+		latestRoot = &(roots.back()->second);
 	}
 
 	Version getLatestVersion() const { return latestVersion; }
 	Version getOldestVersion() const { return oldestVersion; }
-	Version getNextOldestVersion() const { return roots.upper_bound(oldestVersion)->first; }
+	//Version getNextOldestVersion() const { return roots.upper_bound(oldestVersion)->first; }
+	//front element should be the oldest version in the deque, hence the net oldest should be at index 1
+	Version getNextOldestVersion() const { return roots[1]->first; }
 
 	void forgetVersionsBefore(Version newOldestVersion) {
 		ASSERT( newOldestVersion <= latestVersion );
-		roots[newOldestVersion] = getRoot(newOldestVersion);
-		roots.erase(roots.begin(), roots.lower_bound(newOldestVersion));
+		// since the specified newOldestVersion might not exist, we copy the root from next lower version to newOldestVersion position
+		//roots[newOldestVersion] = getRoot(newOldestVersion);
+		//roots.erase(roots.begin(), roots.lower_bound(newOldestVersion));
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		r--;
+		roots.insert(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), *r);
+		roots.erase(roots.begin(), lower_bound(roots.begin(), roots.end(), newOldestVersion, compare()));
 		oldestVersion = newOldestVersion;
 	}
 
 	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
-		roots[newOldestVersion] = getRoot(newOldestVersion);
+		// since the specified newOldestVersion might not exist, we copy the root from next lower version to newOldestVersion position
+		//roots[newOldestVersion] = getRoot(newOldestVersion);
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		r--;
+		roots.insert(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), *r);
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
-		auto newBegin = roots.lower_bound(newOldestVersion);
+		//auto newBegin = roots.lower_bound(newOldestVersion);
+		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		Tree *lastRoot = nullptr;
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second) {
@@ -541,7 +618,8 @@ public:
 		if (version > latestVersion) {
 			latestVersion = version;
 			Tree r = getRoot(version);
-			latestRoot = &roots[version];
+			//latestRoot = &roots[version];
+			latestRoot = &(roots.emplace_back(version, Tree()).second);
 			*latestRoot = r;
 		} else ASSERT( version == latestVersion );
 	}
@@ -565,6 +643,30 @@ public:
 		K key = item.key();
 		erase(key);
 	}
+	void printDetail() {
+		PTreeImpl::printTreeDetails(*latestRoot, 0);
+		//for(auto root = roots.begin(); root != roots.end(); ++root) {
+		//	if(root->second) {
+		//		printf("\nPrinting the tree rooted at version %d.\n", root->first);
+		//		PTreeImpl::printTreeDetails(root->second, 0);
+		//	}
+		//}
+	}
+	void printTree(Version at) {
+		PTreeImpl::printTree(*latestRoot, at, 0);
+	}
+
+	void compact(Version newOldestVersion) {
+		auto newBegin = roots.lower_bound(newOldestVersion);
+		//auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		for(auto root = roots.begin(); root != newBegin; ++root) {
+			if(root->second)
+				PTreeImpl::compact(root->second, newOldestVersion);
+		}
+		printf("\nPrinting the tree at latest version after compaction.\n");
+		PTreeImpl::printTreeDetails(*latestRoot, 0);
+	}
+
 
 	// for(auto i = vm.at(version).lower_bound(range.begin); i < range.end; ++i)
 	struct iterator{
@@ -655,8 +757,217 @@ public:
 	ViewAtVersion at( Version v ) const { return ViewAtVersion(getRoot(v), v); }
 	ViewAtVersion atLatest() const { return ViewAtVersion(*latestRoot, latestVersion); }
 
-	// TODO: getHistory?
+	struct KVRef{
+		KeyRef key;
+		ValueRef val;
+		KVRef(KeyRef key, ValueRef val) : key(key), val(val) {}
+	};
 
+	void setValue (Arena &arena, const KeyRef& key, const ValueRef& value) {
+		auto prev = atLatest().lastLessOrEqual(key);
+		if (prev && prev->isClearTo() && prev->getEndKey() > key) {
+			ASSERT( prev.key() <= key );
+			KeyRef end = prev->getEndKey();
+			//printf("Found a clear range. prev_key: '%s', prev_endkey: '%s', key: '%s', end: '%s'\n",
+			//	   prev.key().toString().c_str(), prev->getEndKey().toString().c_str(),
+			//	   key.toString().c_str(), end.toString().c_str());
+			// the insert version of the previous clear is preserved for the "left half", because in changeDurableVersion() the previous clear is still responsible for removing it
+			// insert() invalidates prev, so prev.key() is not safe to pass to it by reference
+			insert( KeyRef(prev.key()), ValueOrClearToRef::clearTo( key ), prev.insertVersion() );  // overwritten by below insert if empty
+			KeyRef nextKey = keyAfter(key, arena);
+			//printf("nextKey: '%s', prev_endKey: '%s', end: '%s'\n", nextKey.toString().c_str(),
+			//	   prev->getEndKey().toString().c_str(), end.toString().c_str());
+			if ( end != nextKey ) {
+				ASSERT( end > nextKey );
+				// the insert version of the "right half" is not preserved, because in changeDurableVersion() this set is responsible for removing it
+				// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of keyAfter is a waste, but not asymptotic)
+				insert( nextKey, ValueOrClearToRef::clearTo( KeyRef(arena, end) ) );
+			}
+		}
+		insert( key, ValueOrClearToRef::value(value) );
+	}
+	void clearRange(KeyRef& begin, KeyRef& end ) {
+		erase( begin, end );
+		if (end <= begin)
+			printf("clearRange: begin: '%s', end: '%s'\n", begin.toString().c_str(), end.toString().c_str());
+		ASSERT( end > begin );
+		//ASSERT( !isClearContaining( atLatest(), begin ) );
+		insert( begin, ValueOrClearToRef::clearTo(end) );
+	}
+
+	struct GetRangeReply{
+	  constexpr static FileIdentifier file_identifier = 1783066;
+	  Arena arena;
+		//VectorRef<KVRef> data;
+	  VectorRef<KeyValueRef> data;
+	  Version version; // useful when latestVersion was requested
+	  bool more;
+
+	  GetRangeReply() : version(invalidVersion), more(false) {}
+	};
+
+	GetRangeReply readRangeVersionedFast(Version version, KeyRef rangeBegin, KeyRef rangeEnd, int limit,
+									     int* pLimitBytes) {
+		GetRangeReply result;
+		ViewAtVersion view = at(version);
+		iterator vStart = view.end();
+		KeyRef readBegin;
+		KeyRef readEnd;
+
+		// We might care about a clear beginning before start that
+		//  runs into range
+		vStart = view.lastLessOrEqual(rangeBegin);
+		if (vStart && vStart->isClearTo() && vStart->getEndKey() > rangeBegin)
+			readBegin = vStart->getEndKey();
+		else
+			readBegin = rangeBegin;
+
+		vStart = view.lower_bound(readBegin);
+		ASSERT(!vStart || vStart.key() >= readBegin);
+		if (vStart) {
+			auto b = vStart;
+			--b;
+			ASSERT(!b || b.key() < readBegin);
+		}
+
+		int accumulatedBytes = 0;
+		while (vStart && vStart.key() < rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
+			if (!vStart->isClearTo()) {
+				// TODO: the calculation of size and need to create a new ref class that encompasses key and value?
+				result.data.push_back_deep(result.arena, KeyValueRef(vStart.key(), vStart->getValue()));
+				accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+				--limit;
+			}
+			++vStart;
+		}
+
+		*pLimitBytes -= accumulatedBytes;
+		ASSERT(result.data.size() == 0 ||
+			   *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+		result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+		result.version = version;
+		return result;
+	}
+
+	GetRangeReply readRangeVersionedSlow(Version version, KeyRef rangeBegin, KeyRef rangeEnd, int limit,
+									     int* pLimitBytes) {
+		GetRangeReply result;
+		ViewAtVersion view = at(version);
+		iterator vStart = view.end();
+		iterator vEnd = view.end();
+		KeyRef readBegin;
+		KeyRef readEnd;
+		int vCount;
+
+		// We might care about a clear beginning before start that
+		//  runs into range
+		vStart = view.lastLessOrEqual(rangeBegin);
+		if (vStart && vStart->isClearTo() && vStart->getEndKey() > rangeBegin)
+			readBegin = vStart->getEndKey();
+		else
+			readBegin = rangeBegin;
+
+		vStart = view.lower_bound(readBegin);
+
+        // Break the readRange into multiple readRange calls based on clear ranges
+		while (limit > 0 && *pLimitBytes > 0 && vStart && vStart.key() < rangeEnd) {
+
+			// Read up to limit items from the view, stopping at the next clear (or the end of the range)
+			vEnd = vStart;
+			vCount = 0;
+			int vSize = 0;
+			//while (vEnd && vEnd.key() < rangeEnd && !vEnd->isClearTo() && vCount < limit && vSize < *pLimitBytes) {
+			while (vEnd && vEnd.key() < rangeEnd && !vEnd->isClearTo() && --limit>= 0 && vSize < *pLimitBytes) {
+				vSize += sizeof(KeyValueRef) + vEnd->getValue().expectedSize() + vEnd.key().expectedSize();
+				++vCount;
+				++vEnd;
+			}
+
+			// int prevSize = result.data.size();
+			//int accumulatedBytes = 0;
+			//while (vStart != vEnd) {// && --vCount >= 0 && accumulatedBytes < *pLimitBytes) {
+			while (--vCount>=0) {
+				result.data.push_back_deep(result.arena, KeyValueRef(vStart.key(), vStart->getValue()));
+				//accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+				++vStart;
+			}
+
+			//*pLimitBytes -= accumulatedBytes;
+			*pLimitBytes -= vSize;
+
+			// Setup for the next iteration
+			if (vStart && vStart->isClearTo()) { // if vStart is a clear, skip it.
+				++vStart;
+			}
+		}
+		// all but the last item are less than *pLimitBytes
+		ASSERT(result.data.size() == 0 ||
+			   *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+		result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+		result.version = version;
+		return result;
+	}
+
+	GetRangeReply readRangeVersionedBuffered(Version version, KeyRef rangeBegin, KeyRef rangeEnd, int limit,
+									         int* pLimitBytes) {
+		GetRangeReply result;
+		GetRangeReply resultInMem;
+		ViewAtVersion view = at(version);
+		iterator vStart = view.end();
+		KeyRef readBegin;
+		KeyRef readEnd;
+		int vCount;
+		int pos = 0;
+
+		// We might care about a clear beginning before start that
+		//  runs into range
+		vStart = view.lastLessOrEqual(rangeBegin);
+		if (vStart && vStart->isClearTo() && vStart->getEndKey() > rangeBegin)
+			readBegin = vStart->getEndKey();
+		else
+			readBegin = rangeBegin;
+
+		vStart = view.lower_bound(readBegin);
+
+		// Break the readRange into multiple readRange calls based on clear ranges
+		while (limit > 0 && *pLimitBytes > 0 && vStart && vStart.key() < rangeEnd) {
+			// ASSERT( vStart == view.lower_bound(readBegin) );
+			//ASSERT(!vStart || vStart.key() >= readBegin);
+			//if (vStart) {
+			//	auto b = vStart;
+			//	--b;
+			//	ASSERT(!b || b.key() < readBegin);
+			//}
+
+			// Read up to limit items from the view, stopping at the next clear (or the end of the range)
+			vCount = 0;
+			int vSize = 0;
+			while (vStart && vStart.key() < rangeEnd && !vStart->isClearTo() && --limit >= 0 && vSize < *pLimitBytes) {
+				//resultInMem.data.push_back_deep(resultInMem.arena, KeyValueRef(vStart.key(), vStart->getValue()));
+				resultInMem.data.push_back(resultInMem.arena, KeyValueRef(vStart.key(), vStart->getValue()));
+				//vSize += sizeof(KeyValueRef) + vStart->getValue().expectedSize() + vStart.key().expectedSize();
+				vSize += sizeof(KeyValueRef) + resultInMem.data.end()[-1].expectedSize();
+				++vCount;
+				++vStart;
+			}
+			*pLimitBytes -= vSize;
+
+			while (--vCount >= 0)
+				result.data.push_back_deep(result.arena, resultInMem.data[pos++]);
+
+			// Setup for the next iteration
+			if (vStart && vStart->isClearTo()) { // if vStart is a clear, skip it.
+				++vStart;
+			}
+		}
+		// all but the last item are less than *pLimitBytes
+		ASSERT(result.data.size() == 0 ||
+			   *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+		result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+		result.version = version;
+		return result;
+	}
+	// TODO: getHistory?
 };
 
 #endif
