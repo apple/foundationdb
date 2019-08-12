@@ -155,12 +155,15 @@ else()
         add_link_options(-lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
+    if (OPEN_FOR_IDE)
+      add_compile_options(
+        -Wno-unknown-attributes)
+    endif()
     add_compile_options(
       -Wno-unknown-warning-option
       -Wno-dangling-else
       -Wno-sign-compare
       -Wno-comment
-      -Wno-unknown-attributes
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
