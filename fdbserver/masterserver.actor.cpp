@@ -474,7 +474,7 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 		wait( trigger );
 		wait( delay( .001 ) );  // Coalesce multiple changes
 
-		trigger =  self->registrationTrigger.onTrigger();
+		trigger = self->registrationTrigger.onTrigger();
 
 		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
 
@@ -1332,6 +1332,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("WorkerID", worker.id())
 		    .detail("Epoch", epoch)
+		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(worker.backup.getReplyUnlessFailedFor(
@@ -1372,6 +1373,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	}
 	self->logSystem->setBackupWorkers(backupWorkers);
 	TraceEvent("BackupRecruitmentDone", self->dbgid);
+	self->registrationTrigger.trigger();
 	return Void();
 }
 

@@ -186,13 +186,12 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch r
                                 BackupData* self) {
 	loop {
 		bool isDisplaced =
-		    (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
-		    (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED);
-		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasBackupWorker(self->myId);
+		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
 		if (isDisplaced) {
 			TraceEvent("BackupWorkerDisplaced", self->myId)
 			    .detail("RecoveryCount", recoveryCount)
 			    .detail("SavedVersion", self->savedVersion)
+			    .detail("BackupWorkers", describe(db->get().logSystemConfig.tLogs))
 			    .detail("DBRecoveryCount", db->get().recoveryCount)
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
