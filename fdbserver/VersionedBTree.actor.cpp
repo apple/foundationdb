@@ -643,20 +643,6 @@ public:
 	// Get snapshot as of the most recent committed version of the pager
 	Reference<IPagerSnapshot> getReadSnapshot();
 
-	void snapshotDestroyed(Version v) {
-		auto i = snapshotsInUse.find(v);
-		ASSERT(i != snapshotsInUse.end());
-		ASSERT(i->second > 0);
-		--i->second;
-		bool first = i == snapshotsInUse.begin();
-		if(i->second == 0) {
-			snapshotsInUse.erase(i);
-			if(first) {
-				leastSnapshotVersionChanged.trigger();
-			}
-		}
-	}
-
 	ACTOR static Future<Void> commit_impl(COWPager *self) {
 		// Flush the free list queue to the pager
 		wait(store(self->pHeader->freeList, self->freeList.flush()));
@@ -847,7 +833,6 @@ public:
 	COWPagerSnapshot(COWPager *pager, Key meta, Version version) : pager(pager), metaKey(meta), version(version) {
 	}
 	virtual ~COWPagerSnapshot() {
-		pager->snapshotDestroyed(version);
 	}
 
 	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) {
