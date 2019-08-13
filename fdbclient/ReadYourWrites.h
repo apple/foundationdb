@@ -82,7 +82,7 @@ public:
 			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limits, snapshot, reverse );
 	}
 
-	Future< Standalone<VectorRef<const char*>> > getAddressesForKey(const Key& key);
+	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void addReadConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
@@ -99,7 +99,7 @@ public:
 	[[nodiscard]] Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
 	int64_t getApproximateSize() { return approximateSize; }
-	Future<Standalone<StringRef>> getVersionstamp();
+	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 

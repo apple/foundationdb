@@ -231,7 +231,7 @@ public:
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
 	}
 
-	Future< Standalone<VectorRef< const char*>>> getAddressesForKey (const Key& key );
+	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void enableCheckWrites();
 	void addReadConflictRange( KeyRangeRef const& keys );
@@ -254,7 +254,8 @@ public:
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
 	Version getCommittedVersion() { return committedVersion; }   // May be called only after commit() returns success
-	Future<Standalone<StringRef>> getVersionstamp(); // Will be fulfilled only after commit() returns success
+	[[nodiscard]] Future<Standalone<StringRef>>
+	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 

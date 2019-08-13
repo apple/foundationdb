@@ -429,6 +429,7 @@ In this example, the `PromiseStream `is actually a way for the actor to return d
 operation that it ongoing.
 
 By default it is a compiler error to discard the result of a cancellable actor. If you don't think this is appropriate for your actor you can use the `[[flow_allow_discard]]` attribute.
+This does not apply to UNCANCELLABLE actors.
 
 ## “gotchas”
 
