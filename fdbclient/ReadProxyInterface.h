@@ -32,23 +32,24 @@ struct ReadProxyInterface {
 	RequestStream<ReplyPromise<Version>> getVersion;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
+	RequestStream<ReplyPromise<Void>> waitFailure;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, getValue, getKey);
+		serializer(ar, getVersion, getValue, getKey, waitFailure);
 	}
 
 	void initEndpoints() {
-		getVersion.getEndpoint( TaskLoadBalancedEndpoint );
-		getValue.getEndpoint( TaskLoadBalancedEndpoint );
-		getKey.getEndpoint( TaskLoadBalancedEndpoint );
+		getVersion.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 
-	UID id() const { return getKey.getEndpoint().token; }
+	UID id() const { return getValue.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == (ReadProxyInterface const& r) const { return id() == r.id(); }
 	bool operator != (ReadProxyInterface const& r) const { return id() != r.id(); }
-	NetworkAddress address() const { return getKey.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 };
 
 #endif // FDBCLIENT_READPROXYINTERFACE_H

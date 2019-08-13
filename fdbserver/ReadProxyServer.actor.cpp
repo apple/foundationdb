@@ -23,6 +23,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/flow.h"

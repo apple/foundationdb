@@ -1126,7 +1126,7 @@ ACTOR Future<Void> workerServer(
 
 				std::map<std::string, std::string> details;
 				startRole( Role::READ_PROXY, recruited.id(), interf.id(), details );
-				DUMPTOKEN(recruited.getKey);
+				DUMPTOKEN(recruited.getValue);
 
 				errorForwarders.add(zombie(recruited, forwardError(errors, Role::READ_PROXY, recruited.id(),
 				                                                   readProxyServer(recruited, req, dbInfo))));

@@ -418,6 +418,14 @@ Future<Void> waitProxyFailure( vector<MasterProxyInterface> const& proxies ) {
 	return tagError<Void>(quorum( failed, 1 ), master_proxy_failed());
 }
 
+Future<Void> waitReadProxyFailure( vector<ReadProxyInterface> const& proxies ) {
+	vector<Future<Void>> failed;
+	for(int i=0; i<proxies.size(); i++)
+		failed.push_back( waitFailureClient( proxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+	ASSERT( failed.size() >= 1 );
+	return tagError<Void>(quorum( failed, 1 ), master_read_proxy_failed());
+}
+
 Future<Void> waitResolverFailure( vector<ResolverInterface> const& resolvers ) {
 	vector<Future<Void>> failed;
 	for(int i=0; i<resolvers.size(); i++)
@@ -1109,6 +1117,7 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert( error_code_tlog_stopped );
 		s.insert( error_code_master_tlog_failed );
 		s.insert( error_code_master_proxy_failed );
+		s.insert( error_code_master_read_proxy_failed );
 		s.insert( error_code_master_resolver_failed );
 		s.insert( error_code_recruitment_failed );
 		s.insert( error_code_no_more_servers );
@@ -1388,6 +1397,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( self->logSystem->onError() );
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
 	self->addActor.send( waitProxyFailure( self->proxies ) );
+	self->addActor.send( waitReadProxyFailure( self->readProxies ) );
 	self->addActor.send( provideVersions(self) );
 	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
@@ -1497,6 +1507,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 			
 		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
 		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
+		TEST(err.code() == error_code_master_read_proxy_failed);  // Master: terminated because of a read proxy failure
 		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
 
 		if (normalMasterErrors().count(err.code()))

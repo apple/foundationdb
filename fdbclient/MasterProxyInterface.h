@@ -29,7 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/ReadProxyInterface.h""
+#include "fdbclient/ReadProxyInterface.h"
 
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -96,7 +96,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
+		serializer(ar, proxies, readProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
 	}
 };
 
