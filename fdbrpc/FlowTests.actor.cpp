@@ -70,7 +70,7 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 ACTOR static void emptyVoidActor() {
 }
 
-ACTOR static Future<Void> emptyActor() {
+ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
 	return Void();
 }
 
