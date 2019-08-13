@@ -3137,9 +3137,6 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				TraceEvent("FailedServerDataRemoved")
-					.detail("CanRemove", canRemove)
-					.detail("NumShards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 				// Current implementation of server erasure is sort of a hack that sets # shards to 0
 				// Defensive check for negative values instead of just 0
 				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) <= 0) {
@@ -3323,9 +3320,9 @@ ACTOR Future<Void> storageServerTracker(
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 				if (self->failedServers.find(addr) != self->failedServers.end() || self->failedServers.find(ipaddr) != self->failedServers.end()) {
-					TraceEvent("FailedServerRemoveKeys")
-						.detail("Address", addr.toString())
-						.detail("ServerID", server->id);
+					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
+					    .detail("Address", addr.toString())
+					    .detail("ServerID", server->id);
 					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
 					self->shardsAffectedByTeamFailure->eraseServer(server->id);
 				}

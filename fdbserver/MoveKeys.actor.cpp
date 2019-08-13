@@ -923,55 +923,55 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 }
 
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock) {
-	state Transaction tr( cx );
-	loop {
-		try {
-			tr.info.taskID = TaskPriority::MoveKeys;
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait( checkMoveKeysLock(&tr, lock) );
-			TraceEvent("RemoveKeysFromFailedServerLocked").detail("ServerID", serverID).detail("Version", tr.getReadVersion().get());
-			// Get all values of keyServers and remove serverID from every occurrence
-			// FIXME: Very inefficient going over every entry in keyServers, concern in violating 5s transaction limit
-			// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
-			state Standalone<RangeResultRef> keyServers = wait( krmGetRanges(&tr, keyServersPrefix, allKeys) );
-			state KeyValueRef* it = keyServers.begin();
-			for ( ; it != keyServers.end() ; ++it) {
-				state vector<UID> src;
-				state vector<UID> dest;
-				decodeKeyServersValue(it->value, src, dest);
-				TraceEvent("FailedServerCheckpoint1.0")
-					.detail("Key", keyServersKey(it->key))
-					.detail("SrcSize", src.size())
-					.detail("Src", describe(src))
-					.detail("DestSize", dest.size())
-					.detail("Dest", describe(dest));
+	state Key begin = allKeys.begin;
+	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
+	while (begin < allKeys.end) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.info.taskID = TaskPriority::MoveKeys;
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(checkMoveKeysLock(&tr, lock));
+				TraceEvent("RemoveKeysFromFailedServerLocked")
+				    .detail("ServerID", serverID)
+				    .detail("Version", tr.getReadVersion().get())
+				    .detail("Begin", begin);
+				// Get all values of keyServers and remove serverID from every occurrence
+				// Very inefficient going over every entry in keyServers
+				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
+				state Standalone<RangeResultRef> keyServers =
+				    wait(krmGetRanges(&tr, keyServersPrefix, KeyRangeRef(begin, allKeys.end),
+				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				for (auto it : keyServers) {
+					vector<UID> src;
+					vector<UID> dest;
+					decodeKeyServersValue(it.value, src, dest);
 
-				// // The failed server is not present
-				// if (std::find(src.begin(), src.end(), serverID) == src.end() && std::find(dest.begin(), dest.end(), serverID) == dest.end() ) {
-				// 	continue;
-				// }
+					// The failed server is not present
+					if (std::find(src.begin(), src.end(), serverID) == src.end() &&
+					    std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+						continue;
+					}
 
-				// Update the vectors to remove failed server then set the value again
-				// Dest is usually empty, but keep this in case there is parallel data movement
-				src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
-				dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
-				TraceEvent("FailedServerCheckpoint1.1")
-					.detail("Key", keyServersKey(it->key))
-					.detail("SrcSize", src.size())
-					.detail("Src", describe(src))
-					.detail("DestSize", dest.size())
-					.detail("Dest", describe(dest));;
-				tr.set(keyServersKey(it->key), keyServersValue(src, dest));
+					// Update the vectors to remove failed server then set the value again
+					// Dest is usually empty, but keep this in case there is parallel data movement
+					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
+					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+					tr.set(keyServersKey(it.key), keyServersValue(src, dest));
+				}
+
+				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
+				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), allKeys, allKeys, serverKeysFalse));
+				wait(tr.commit());
+				// Update beginning of next iteration's range
+				begin = keyServers.end()[-1].key;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-
-			// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
-			wait( krmSetRangeCoalescing( &tr, serverKeysPrefixFor(serverID), allKeys, allKeys, serverKeysFalse) );
-			wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			wait( tr.onError(e) );
 		}
 	}
+	return Void();
 }
 
 ACTOR Future<Void> moveKeys(
