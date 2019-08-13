@@ -539,7 +539,7 @@ namespace actorcompiler
                 }
             }
             if (errorMessagePolicy.ActorsNoDiscardByDefault() && !actor.attributes.Contains("[[flow_allow_discard]]")) {
-                if (actor.IsCancellable() && actor.returnType != null)
+                if (actor.IsCancellable())
                 {
                     actor.attributes.Add("[[nodiscard]]");
                 }
