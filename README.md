@@ -53,7 +53,7 @@ Mac OS - for Windows see below):
 CMake will try to find its dependencies. However, for LibreSSL this can be often
 problematic (especially if OpenSSL is installed as well). For that we recommend
 passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
-LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
+LibreSSL is installed under `/usr/local/libressl-2.8.3`, you should call cmake like
 this:
 
 ```
