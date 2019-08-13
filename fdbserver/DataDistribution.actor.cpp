@@ -59,21 +59,22 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
-	AsyncVar<bool> wrongStoreTypeRemoved; // wrongStoreTypeRemoved
-	int toRemove; // Debug purpose: 0: not remove, >0: to remove due to wrongStoreType
+	AsyncVar<bool> wrongStoreTypeToRemove;
 	// A storage server's StoreType does not change. 
-	//To change storeType for an ip:port, we destroy the old one and create a new one.
+	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet)
 	  : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0),
 	    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC),
-	    storeType(KeyValueStoreType::END), toRemove(0) {
+	    storeType(KeyValueStoreType::END) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
 	}
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) {
+		// A new storage server's store type may not be set immediately.
+		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
 };
@@ -1275,8 +1276,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("ServerTeamOwned", server.second->teams.size())
 			    .detail("MachineID", server.second->machine->machineID.contents().toString())
 			    .detail("StoreType", server.second->storeType.toString())
-			    .detail("InDesiredDC", server.second->inDesiredDC)
-			    .detail("ToRemove", server.second->toRemove);
+			    .detail("InDesiredDC", server.second->inDesiredDC);
 		}
 		for (auto& server : server_info) {
 			const UID& uid = server.first;
@@ -2564,19 +2564,14 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			    .detail("Addr", addr.toString())
 			    .detail("StoreType", server.second->storeType)
 			    .detail("IsCorrectStoreType",
-			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType))
-			    .detail("ToRemove", server.second->toRemove);
+			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType));
 			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				// Only remove a server if there exist at least a healthy team that do not include the server,
 				// so that the server's data can be moved away
 				serversToRemove.push_back(server.second);
-				server.second->toRemove++;
-				server.second->wrongStoreTypeRemoved.set(true);
+				server.second->wrongStoreTypeToRemove.set(true);
 				break; // Remove a server will change teams' healthyness
-			} else {
-				// In case the configuration.storeType is changed back to the server's type
-				server.second->toRemove = 0;
 			}
 		}
 	}
@@ -3241,9 +3236,6 @@ ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo
 		    brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
 		        TaskPriority::DataDistribution)));
 		server->storeType = type;
-		if (server->storeType == self->configuration.storageServerStoreType) {
-			server->toRemove = 0; // In case sys config is changed back to the server's storeType
-		}
 	} catch (Error& e) {
 		// Failed server should be removed by storageServerTracker
 		wait(Future<Void>(Never()));
@@ -3415,11 +3407,7 @@ ACTOR Future<Void> storageServerTracker(
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
 					// ASSERT(i.first == i.second->id); //MX: TO enable the assert
-					// When a wrongStoreType server colocate with a correct StoreType server, we should not mark the
-					// correct one as unhealthy
-					// TODO: We should not need i.second->toRemove == 0  because this loop should be triggered after
-					// failureTracker returns
-					if (!self->server_status.get(i.second->id).isUnhealthy()) { //&& i.second->toRemove == 0
+					if (!self->server_status.get(i.second->id).isUnhealthy()) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
 							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
@@ -3464,7 +3452,7 @@ ACTOR Future<Void> storageServerTracker(
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
-			if (server->wrongStoreTypeRemoved.get()) { // TODO: merge with the above if (hasWrongDC)
+			if (server->wrongStoreTypeToRemove.get()) { // TODO: merge with the above if (hasWrongDC)
 				TraceEvent(SevWarn, "WrongStoreTypeToRemove", self->distributorId)
 				    .detail("Server", server->id)
 				    .detail("StoreType", "?");
@@ -3487,7 +3475,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
 			//We need to recruit new storage servers if the key value store type has changed
-			if (hasWrongDC || server->wrongStoreTypeRemoved.get()) self->restartRecruiting.trigger();
+			if (hasWrongDC || server->wrongStoreTypeToRemove.get()) self->restartRecruiting.trigger();
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
 			    ( server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
@@ -3631,12 +3619,12 @@ ACTOR Future<Void> storageServerTracker(
 				when( wait( otherChanges.empty() ? Never() : quorum( otherChanges, 1 ) ) ) {
 					TraceEvent("SameAddressChangedStatus", self->distributorId).detail("ServerID", server->id);
 				}
-				when(wait(server->wrongStoreTypeRemoved.onChange())) {
+				when(wait(server->wrongStoreTypeToRemove.onChange())) {
 					TraceEvent(SevWarn, "UndesiredStorageServerTriggered", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("StoreType", server->storeType)
 					    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
-						.detail("WrongStoreTypeRemoved", server->wrongStoreTypeRemoved.get());
+						.detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 				}
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
