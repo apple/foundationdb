@@ -614,9 +614,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> checkTeamDelay;
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
-	Future<Void> wrongStoreTypeRemover;
-	Future<Void> redundantMachineTeamRemover;
-	Future<Void> redundantServerTeamRemover;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -2172,10 +2169,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("DoBuildTeams", self->doBuildTeams)
 				    .trackLatest("TeamCollectionInfo");
 			}
-		} else {
-			// Recruit more servers in the hope that we will get enough machines
-			TraceEvent("BuildTeam").detail("RestartRecruiting", "Because not enough machines");
-			self->restartRecruiting.trigger();
 		}
 
 		self->evaluateTeamQuality();
@@ -2573,7 +2566,8 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			    .detail("IsCorrectStoreType",
 			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType))
 			    .detail("ToRemove", server.second->toRemove);
-			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
+			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
+			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				// Only remove a server if there exist at least a healthy team that do not include the server,
 				// so that the server's data can be moved away
 				serversToRemove.push_back(server.second);
@@ -2897,11 +2891,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
 							.detail("SignallingTeam", team->getDesc())
 							.detail("Primary", self->primary);
-						self->traceAllInfo(true);
+						// self->traceAllInfo(true);
 						// Create a new team for safe
 						// self->restartRecruiting.trigger();
-						self->doBuildTeams = true;
-						self->restartTeamBuilder.trigger();
+						// self->doBuildTeams = true;
+						// self->restartTeamBuilder.trigger();
 					}
 
 					if(logTeamEvents) {
@@ -3361,11 +3355,10 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
-				// if (status->isFailed) {
-				// 	self->restartRecruiting.trigger();
-				// }
-				// self->server_status.set( interf.id(), *status ); // Update the global server status, so that
-				// storageRecruiter can use the updated info for recruiting
+				if (status->isFailed) {
+					self->restartRecruiting.trigger();
+					self->server_status.set( interf.id(), *status ); // Update the global server status, so that storageRecruiter can use the updated info for recruiting
+				}
 
 				TraceEvent("StatusMapChange", self->distributorId)
 				    .detail("ServerID", interf.id())
@@ -3845,7 +3838,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					    .detail("State", "Restart recruiting");
 				}
 			}
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) ); //Q: What if restartRecruiting is trigger while recruiter is waiting on the delay?
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				TraceEvent("StorageRecruiterMXExit", self->distributorId)

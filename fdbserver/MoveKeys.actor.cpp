@@ -836,14 +836,14 @@ ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 	}
 
 	// DEBUG purpose
-	if (!(keys[0].value == serverKeysFalse && keys[1].key == allKeys.end)) {
-		Standalone<RangeResultRef> allKeys =
-		    wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("CanNOTRemove").detail("KeysNum", allKeys.size());
-		for (auto& k : allKeys) {
-			TraceEvent("CanNOTRemove").detail("Key", k.key).detail("Value", k.value);
-		}
-	}
+	// if (!(keys[0].value == serverKeysFalse && keys[1].key == allKeys.end)) {
+	// 	Standalone<RangeResultRef> allKeys =
+	// 	    wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, CLIENT_KNOBS->TOO_MANY));
+	// 	TraceEvent("CanNOTRemove").detail("KeysNum", allKeys.size());
+	// 	for (auto& k : allKeys) {
+	// 		TraceEvent("CanNOTRemove").detail("Key", k.key).detail("Value", k.value);
+	// 	}
+	// }
 
 	//Return true if the entire range is false.  Since these values are coalesced, we can return false if there is more than one result
 	return keys[0].value == serverKeysFalse && keys[1].key == allKeys.end;
