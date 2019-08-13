@@ -151,8 +151,9 @@ struct InitializeLogRouterRequest {
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
-	LogEpoch recruitedEpoch;
-	LogEpoch backupEpoch;
+	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
+	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
+	                      // to some previous epoch with unfinished work.
 	Tag routerTag;
 	Version startVersion;
 	Optional<Version> endVersion;

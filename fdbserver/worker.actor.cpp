@@ -1116,7 +1116,7 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
-				BackupInterface recruited(locality, req.reqId);
+				BackupInterface recruited(locality, req.reqId, req.backupEpoch);
 				recruited.initEndpoints();
 
 				startRole(Role::BACKUP, recruited.id(), interf.id());

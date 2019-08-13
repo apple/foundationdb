@@ -1354,9 +1354,27 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return epochEndVersion;
 	}
 
+	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const {
+		for (const auto& old : oldLogData) {
+			if (epoch == old.epoch) return old.tLogs[0];
+		}
+		return Reference<LogSet>(nullptr);
+	}
+
 	void setBackupWorkers(std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers) override {
 		ASSERT(tLogs.size() > 0);
-		tLogs[0]->backupWorkers = backupWorkers;
+
+		Reference<LogSet> logset = tLogs[0];  // Master recruits this epoch's worker first.
+		LogEpoch logsetEpoch = this->epoch;
+		for (const auto& worker : backupWorkers) {
+			if (worker->get().interf().backupEpoch != logsetEpoch) {
+				// find the logset from oldLogData
+				logsetEpoch = worker->get().interf().backupEpoch;
+				logset = getEpochLogSet(logsetEpoch);
+				ASSERT(logset.isValid());
+			}
+			logset->backupWorkers.push_back(worker);
+		}
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {

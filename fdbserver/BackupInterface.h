@@ -31,10 +31,12 @@ struct BackupInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBackupRequest> haltBackup;
 	struct LocalityData locality;
+	LogEpoch backupEpoch;
 	UID myId;
 
 	BackupInterface() = default;
-	explicit BackupInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
+	explicit BackupInterface(const struct LocalityData& l, UID id, LogEpoch epoch)
+	  : locality(l), myId(id), backupEpoch(epoch) {}
 
 	void initEndpoints() {}
 	UID id() const { return myId; }
@@ -49,7 +51,7 @@ struct BackupInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltBackup, locality, myId);
+		serializer(ar, waitFailure, haltBackup, locality, backupEpoch, myId);
 	}
 };
 

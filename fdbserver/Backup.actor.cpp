@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/LogSystem.h"
@@ -41,7 +40,6 @@ struct BackupData {
 	Database cx;
 	std::vector<TagsAndMessage> messages;
 	std::vector<Version> versions;  // one for each of the "messages"
-	NotifiedVersion version;
 	AsyncTrigger backupDone;
 
 	CounterCollection cc;
@@ -51,8 +49,7 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), startVersion(req.startVersion),
 	    endVersion(req.endVersion.present() ? req.endVersion.get() : std::numeric_limits<Version>::max()),
 	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(invalidVersion), lastSeenVersion(invalidVersion), version(req.startVersion - 1),
-	    cc("BackupWorker", id.toString()) {
+	    savedVersion(invalidVersion), lastSeenVersion(invalidVersion), cc("BackupWorker", id.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -133,7 +130,8 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = 0;
+	state Version tagAt = self->startVersion;
+	state Version lastVersion = 0;
 
 	loop {
 		loop choose {
@@ -154,7 +152,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// TODO: avoid peeking uncommitted messages
 		// Should we wait until knownCommittedVersion == startVersion - 1 ? In this way, we know previous
 		// epoch has finished and then starting for this epoch.
-		Version lastVersion = 0;
 		while (r->hasMessage()) {
 			lastVersion = r->version().version;
 			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
@@ -165,7 +162,12 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		tagAt = std::max(r->version().version, lastVersion);
 		self->lastSeenVersion = std::max(tagAt, self->lastSeenVersion);
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
-		if (tagAt > self->endVersion) return Void();
+		if (tagAt > self->endVersion) {
+			TraceEvent("BackupWorkerFinishPull", self->myId)
+			    .detail("VersionGot", tagAt)
+			    .detail("EndVersion", self->endVersion);
+			return Void();
+		}
 		wait(yield());
 	}
 }
