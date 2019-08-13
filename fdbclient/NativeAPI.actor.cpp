@@ -1310,22 +1310,18 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	cx->validateVersion(ver);
 
 	loop {
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, key, &StorageServerInterface::getValue, info) );
+		state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && FlowTransport::transport().isClient();
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
+
 		try {
-			//GetValueReply r = wait( deterministicRandom()->randomChoice( ssi->get() ).getValue.getReply( GetValueRequest(key,ver) ) );
-			//return r.value;
-			if( info.debugID.present() ) {
+			if (info.debugID.present()) {
 				getValueID = nondeterministicRandom()->randomUniqueID();
 
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
-				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
-				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
-					.detail("Key", key)
-					.detail("ReqVersion", ver)
-					.detail("Servers", describe(ssi.second->get()));*/
+				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(),
+				                      "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 
 			++cx->getValueSubmitted;
@@ -1337,14 +1333,32 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				throw deterministicRandom()->randomChoice(
 					std::vector<Error>{ transaction_too_old(), future_version() });
 			}
+
 			state GetValueReply reply;
-			choose {
-				when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-				when(GetValueReply _reply =
-				         wait(loadBalance(ssi.second, &StorageServerInterface::getValue,
-				                          GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint, false,
-				                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
-					reply = _reply;
+			if (useReadProxies && !info.useProvisionalProxies) {
+				choose {
+					when(GetValueReply _reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getValue,
+					                      GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint,
+					                      false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
+						reply = _reply;
+					}
+					when(wait(cx->onMasterProxiesChanged())) {
+						// TODO (Vishesh): Use onReadProxiesChanged()
+						continue;
+					}
+					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
+				}
+			} else {
+				pair<KeyRange, Reference<LocationInfo>> ssi =
+				    wait(getKeyLocation(cx, key, &StorageServerInterface::getValue, info));
+				choose {
+					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(GetValueReply _reply = wait(
+					         loadBalance(ssi.second, &StorageServerInterface::getValue,
+					                     GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint,
+					                     false, cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+						reply = _reply;
+					}
 				}
 			}
 
@@ -1393,7 +1407,6 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
-	TraceEvent("GetKey");
 
 	loop {
 		if (k.getKey() == allKeys.end) {
@@ -1408,11 +1421,11 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 
 		Key locationKey(k.getKey(), k.arena());
-		if (CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && !info.useProvisionalProxies) {
-			TraceEvent("ReadProxy_NativeAPI_Used");
+		if (false && CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
+		    !info.useProvisionalProxies) {
 			try {
 				GetKeyReply reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKey, GetKeyRequest(k, version.get()),
-													 TaskDefaultPromiseEndpoint, false, NULL));
+													 TaskPriority::DefaultPromiseEndpoint, false, NULL));
 				k = reply.sel;
 				if (!k.offset && k.orEqual) {
 					return k.getKey();
@@ -1431,7 +1444,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 					    "TransactionDebug", info.debugID.get().first(),
 					    "NativeAPI.getKey.Before"); //.detail("StartKey",
 					                                //k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
-				GetKeyReply reply;
+				state GetKeyReply reply;
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply =
