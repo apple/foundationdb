@@ -1310,7 +1310,8 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	cx->validateVersion(ver);
 
 	loop {
-		state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && FlowTransport::transport().isClient();
+		state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
+		                            FlowTransport::transport().isClient();
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
@@ -1335,7 +1336,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			}
 
 			state GetValueReply reply;
-			if (useReadProxies && !info.useProvisionalProxies) {
+			if (useReadProxies) {
 				choose {
 					when(GetValueReply _reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getValue,
 					                      GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint,
@@ -1421,11 +1422,18 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 
 		Key locationKey(k.getKey(), k.arena());
-		if (false && CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
-		    !info.useProvisionalProxies) {
+		if (CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && FlowTransport::transport().isClient()) {
 			try {
-				GetKeyReply reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKey, GetKeyRequest(k, version.get()),
-													 TaskPriority::DefaultPromiseEndpoint, false, NULL));
+				GetKeyReply reply ;
+				choose {
+					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(GetKeyReply _reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKey,
+					                                           GetKeyRequest(k, version.get()),
+					                                           TaskPriority::DefaultPromiseEndpoint, false, NULL))) {
+						reply = _reply;
+					}
+					when(wait(cx->onMasterProxiesChanged())) { continue; }
+				}
 				k = reply.sel;
 				if (!k.offset && k.orEqual) {
 					return k.getKey();
