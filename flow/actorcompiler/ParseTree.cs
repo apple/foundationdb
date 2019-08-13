@@ -237,7 +237,7 @@ namespace actorcompiler
         public bool isForwardDeclaration = false;
         public bool isTestCase = false;
 
-        public bool IsCancellable() { return returnType == null || !isUncancellable; }
+        public bool IsCancellable() { return returnType != null && !isUncancellable; }
         public void SetUncancellable() { isUncancellable = true; }
     };
 
