@@ -560,6 +560,7 @@ Future<Void> storageServerTracker(
 Future<Void> teamTracker(struct DDTeamCollection* const& self, Reference<TCTeamInfo> const& team, bool const& badTeam, bool const& redundantTeam);
 
 struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
+	// clang-format off
 	enum { REQUESTING_WORKER = 0, GETTING_WORKER = 1, GETTING_STORAGE = 2 };
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
@@ -599,6 +600,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<int> recruitingStream;
 	Debouncer restartRecruiting;
 
+	AsyncVar<bool> doRemoveWrongStoreType; // true if DD should check if there exist SS with wrong store type to be removed
+
 	int healthyTeamCount;
 	Reference<AsyncVar<bool>> zeroHealthyTeams;
 
@@ -622,6 +625,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+	// clang-format on
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -664,6 +668,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
+		doRemoveWrongStoreType(true),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    processingUnhealthy(processingUnhealthy) {
@@ -2545,16 +2550,16 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	state int numServersRemoved = 0;
-	state vector<Reference<TCServerInfo>> serversToRemove;
 	state int i = 0;
 
 	loop {
-		wait(delay(1.0));
+		if (self->doRemoveWrongStoreType.get() == false) {
+			wait(self->doRemoveWrongStoreType.onChange());
+		}
 		TraceEvent("WrongStoreTypeRemoverStartLoop", self->distributorId)
 		    .detail("Primary", self->primary)
 		    .detail("ServerInfoSize", self->server_info.size())
 		    .detail("SysRestoreType", self->configuration.storageServerStoreType);
-		serversToRemove.clear();
 		for (auto& server : self->server_info) {
 			NetworkAddress a = server.second->lastKnownInterface.address();
 			AddressExclusion addr(a.ip, a.port);
@@ -2566,14 +2571,14 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			    .detail("IsCorrectStoreType",
 			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType));
 			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
-			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				// Only remove a server if there exist at least a healthy team that do not include the server,
 				// so that the server's data can be moved away
-				serversToRemove.push_back(server.second);
+			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				server.second->wrongStoreTypeToRemove.set(true);
-				break; // Remove a server will change teams' healthyness
+				break;
 			}
 		}
+		self->doRemoveWrongStoreType.set(false);
 	}
 }
 
@@ -3347,10 +3352,10 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
-				if (status->isFailed) {
-					self->restartRecruiting.trigger();
-					self->server_status.set( interf.id(), *status ); // Update the global server status, so that storageRecruiter can use the updated info for recruiting
-				}
+				// if (status->isFailed) {
+				// 	self->restartRecruiting.trigger();
+				// 	self->server_status.set( interf.id(), *status ); // Update the global server status, so that storageRecruiter can use the updated info for recruiting
+				// }
 
 				TraceEvent("StatusMapChange", self->distributorId)
 				    .detail("ServerID", interf.id())
@@ -3501,6 +3506,9 @@ ACTOR Future<Void> storageServerTracker(
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
 					server->removed.send( Void() );
 					self->removedServers.send( server->id );
+					if (server->wrongStoreTypeToRemove.get()) {
+						self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
+					}
 					return Void();
 				}
 				when( std::pair<StorageServerInterface, ProcessClass> newInterface = wait( interfaceChanged ) ) {
