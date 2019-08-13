@@ -931,7 +931,7 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 				JsonBuilderObject cli;
 				cli["address"] = client.first.toString();
 				cli["log_group"] = client.second.toString();
-				clients.push_back(cli);
+				maxClients.push_back(cli);
 			}
 			ver["max_protocol_count"] = iter->second.count;
 			ver["max_protocol_clients"] = maxClients;

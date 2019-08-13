@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.0
+6.2.2
 =====
 
 Performance
@@ -53,6 +53,7 @@ Status
 * ``fdbcli`` status now reports the configured zone count. The fault tolerance is now reported in terms of the number of zones unless machine IDs are being used as zone IDs. `(PR #1924) <https://github.com/apple/foundationdb/pull/1924>`_.
 * ``connected_clients`` is now only a sample of the connected clients, rather than a complete list. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
 * Added ``max_protocol_clients`` to the ``supported_versions`` section, which provides a sample of connected clients which cannot connect to any higher protocol version. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
+* Clients which connect without specifying their supported versions are tracked as an ``Unknown`` version in the ``supported_versions`` section. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
 
 Bindings
 --------
@@ -90,6 +91,7 @@ Fixes only impacting 6.2.0+
 
 * Clients could crash when closing connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 * Do not close idle network connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+* In status, ``max_protocol_clients`` were incorrectly added to the ``connected_clients`` list. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
 
 Earlier release notes
 ---------------------
