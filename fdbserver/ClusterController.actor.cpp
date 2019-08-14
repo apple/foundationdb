@@ -1362,7 +1362,7 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).suppressFor(1.0).error(e);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
