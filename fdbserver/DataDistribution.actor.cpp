@@ -2467,6 +2467,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// Note that since we do not rebuildMachineLocalityMap() here, the machineLocalityMap can be stale.
 		// This is ok as long as we do not arbitrarily validate if machine team satisfies replication policy.
 
+		if (server_info[removedServer]->wrongStoreTypeToRemove.get()) {
+			self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
+		}
+
 		// Step: Remove removedServer from server's global data
 		for (int s = 0; s < allServers.size(); s++) {
 			if (allServers[s] == removedServer) {
@@ -2549,8 +2553,8 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 }
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
-	state int numServersRemoved = 0;
-	state int i = 0;
+	// Wait for storage servers to initialize its storeType
+	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
 
 	loop {
 		if (self->doRemoveWrongStoreType.get() == false) {
@@ -2560,6 +2564,7 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 		    .detail("Primary", self->primary)
 		    .detail("ServerInfoSize", self->server_info.size())
 		    .detail("SysRestoreType", self->configuration.storageServerStoreType);
+		vector<Future<KeyValueStoreType>> initializingServers;
 		for (auto& server : self->server_info) {
 			NetworkAddress a = server.second->lastKnownInterface.address();
 			AddressExclusion addr(a.ip, a.port);
@@ -2571,14 +2576,13 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			    .detail("IsCorrectStoreType",
 			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType));
 			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
-				// Only remove a server if there exist at least a healthy team that do not include the server,
-				// so that the server's data can be moved away
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				server.second->wrongStoreTypeToRemove.set(true);
 				break;
 			}
 		}
 		self->doRemoveWrongStoreType.set(false);
+		wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
 	}
 }
 
@@ -3246,6 +3250,7 @@ ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo
 		wait(Future<Void>(Never()));
 	}
 
+	self->doRemoveWrongStoreType.set(true);
 	return Void();
 }
 
@@ -3506,9 +3511,9 @@ ACTOR Future<Void> storageServerTracker(
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
 					server->removed.send( Void() );
 					self->removedServers.send( server->id );
-					if (server->wrongStoreTypeToRemove.get()) {
-						self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
-					}
+					// if (server->wrongStoreTypeToRemove.get()) {
+					// 	self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
+					// }
 					return Void();
 				}
 				when( std::pair<StorageServerInterface, ProcessClass> newInterface = wait( interfaceChanged ) ) {
@@ -3620,6 +3625,7 @@ ACTOR Future<Void> storageServerTracker(
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongDC = !inCorrectDC(self, server);
 					self->restartTeamBuilder.trigger();
+					self->doRemoveWrongStoreType.set(true);
 
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
