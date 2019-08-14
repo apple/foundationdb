@@ -421,7 +421,7 @@ private:
 template<class IndexType, class ObjectType>
 class ObjectCache {
 public:
-	ObjectCache(int sizeLimit) : sizeLimit(sizeLimit) {
+	ObjectCache(int sizeLimit = 0) : sizeLimit(sizeLimit) {
 	}
 
 	// Get the object for i or create a new one.
@@ -496,7 +496,11 @@ public:
 	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
-	COWPager(int desiredPageSize, std::string filename, int cachedPageLimit) : desiredPageSize(desiredPageSize), filename(filename), pageCache(cachedPageLimit), pHeader(nullptr) {
+	// Use pageCacheSizeBytes == 0 for default
+	COWPager(int desiredPageSize, std::string filename, int pageCacheSizeBytes) : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes) {
+		if(pageCacheBytes == 0) {
+			pageCacheBytes = g_network->isSimulated() ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K) : FLOW_KNOBS->PAGE_CACHE_4K;
+		}
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
 	}
@@ -579,6 +583,7 @@ public:
 			wait(self->commit());
 		}
 
+		self->pageCache = PageCacheT(self->pageCacheBytes / self->physicalPageSize);
 		self->lastCommittedVersion = self->pHeader->committedVersion;
 		self->lastCommittedMeta = self->pHeader->getMetaKey();
 
@@ -868,6 +873,8 @@ private:
 	int physicalPageSize;
 	int logicalPageSize;  // In simulation testing it can be useful to use a small logical page size
 
+	int64_t pageCacheBytes;
+
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
 	Reference<IPage> headerPage;
 	Header *pHeader;
@@ -879,7 +886,8 @@ private:
 
 	std::string filename;
 
-	ObjectCache<LogicalPageID, PageCacheEntry> pageCache;
+	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
+	PageCacheT pageCache;
 
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise; 
@@ -3718,8 +3726,7 @@ class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
 		// TODO: This constructor should really just take an IVersionedStore
-		int pageSize = 4096;
-		IPager2 *pager = new COWPager(4096, filePrefix, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
+		IPager2 *pager = new COWPager(4096, filePrefix, 0);
 		m_tree = new VersionedBTree(pager, filePrefix, true);
 		m_init = catchError(init_impl(this));
 	}
@@ -4697,7 +4704,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	state double startTime = timer();
-	pager = new COWPager(pageSize, pagerFile, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
+	pager = new COWPager(pageSize, pagerFile, 0);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, singleVersion);
 	wait(btree->init());
 
@@ -4869,7 +4876,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 				wait(closedFuture);
 
 				debug_printf("Reopening btree\n");
-				IPager2 *pager = new COWPager(pageSize, pagerFile, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
+				IPager2 *pager = new COWPager(pageSize, pagerFile, 0);
 				btree = new VersionedBTree(pager, pagerFile, singleVersion);
 				wait(btree->init());
 
@@ -4932,7 +4939,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 	deleteFile(pagerFile);
 
 	int pageSize = 4096;
-	state IPager2 *pager = new COWPager(pageSize, pagerFile, FLOW_KNOBS->PAGE_CACHE_4K / pageSize);
+	state IPager2 *pager = new COWPager(pageSize, pagerFile, 0);
 
 	wait(success(pager->getLatestVersion()));
 	state LogicalPageID id = wait(pager->newPageID());
