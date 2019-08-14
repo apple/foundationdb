@@ -593,12 +593,13 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				if(++numSuccesses == 3) {
 					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
 					break;
+				} else {
+					wait(delay(2.0));
 				}
-				else
-					wait(delay( 2.0 ) );
 			}
 		} catch (Error& e) {
-			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
+			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);
 
 			//Client invalid operation occurs if we don't get back a message from one of the servers, often corrected by retrying

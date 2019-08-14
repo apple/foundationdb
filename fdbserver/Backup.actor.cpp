@@ -57,10 +57,16 @@ struct BackupData {
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 	}
+
+	void pop() {
+		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
+		logSystem.get()->pop(savedVersion, popTag);
+	}
 };
 
 ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	state Transaction tr(self->cx);
+	state Key key = backupProgressKeyFor(self->myId);
 
 	loop {
 		try {
@@ -69,7 +75,8 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag);
-			tr.set(backupProgressKeyFor(self->myId), backupProgressValue(status));
+			tr.set(key, backupProgressValue(status));
+			tr.addReadConflictRange(singleKeyRange(key));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -88,6 +95,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			self->backupDone.trigger();
 			return Void();
 		}
+
+		// TODO: knobify the delay of 20s. This delay is sensitive, as it is the
+		// lag TLog might have.
+		state Future<Void> uploadDelay = delay(20);
 
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
@@ -108,9 +119,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		if (popVersion > self->savedVersion) {
 			savedProgress = saveProgress(self, popVersion);
 		}
-		// TODO: knobify the delay of 20s. This delay is sensitive, as it is the
-		// lag TLog might have.
-		state Future<Void> uploadDelay = delay(20);
 
 		loop choose {
 			when(wait(uploadDelay)) {
@@ -120,6 +128,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			when(wait(savedProgress)) {
 				TraceEvent("BackupWorkerSavedProgress", self->myId).detail("Version", popVersion);
 				self->savedVersion = std::max(popVersion, self->savedVersion);
+				self->pop();
 				savedProgress = Never();  // Still wait until uploadDelay expires
 			}
 		}
@@ -172,18 +181,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
-// We need to pop data faster than the upload interval to avoid accumulate
-// mutations in TLogs.
-ACTOR Future<Void> popData(BackupData* self) {
-	loop {
-		if (self->logSystem.get()) {
-			const Tag popTag = self->logSystem.get()->getPseudoPopTag(self->tag, ProcessClass::BackupClass);
-			self->logSystem.get()->pop(self->savedVersion, popTag);
-		}
-		wait(delay(2.0));  // TODO: knobify this delay
-	}
-}
-
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount,
                                 BackupData* self) {
 	loop {
@@ -219,7 +216,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	try {
 		addActor.send(pullAsyncData(&self));
 		addActor.send(uploadData(&self));
-		addActor.send(popData(&self));
+		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
 		loop choose {
@@ -228,6 +225,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
 				if (ls && ls->hasPseudoLocality(tagLocalityBackup)) {
 					self.logSystem.set(ls);
+					self.pop();
 					TraceEvent("BackupWorkerLogSystem", interf.id())
 					    .detail("HasBackupLocality", true)
 					    .detail("Tag", self.tag.toString());
@@ -237,12 +235,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 					    .detail("Tag", self.tag.toString());
 				}
 			}
-			when(HaltBackupRequest req = waitNext(interf.haltBackup.getFuture())) {
-				req.reply.send(Void());
-				TraceEvent("BackupWorkerHalted", interf.id()).detail("ReqID", req.requesterID);
-				break;
-			}
-			when(wait(checkRemoved(db, req.recruitedEpoch, &self))) {}
 			when(wait(onDone)) {
 				// TODO: when backup is done, we don't exit because master would think
 				// this worker failed and start recovery. Should fix the protocol between

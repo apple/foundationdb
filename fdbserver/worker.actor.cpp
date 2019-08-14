@@ -1121,7 +1121,6 @@ ACTOR Future<Void> workerServer(
 
 				startRole(Role::BACKUP, recruited.id(), interf.id());
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.haltBackup);
 
 				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
 				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));

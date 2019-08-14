@@ -26,6 +26,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
@@ -995,7 +996,6 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	}
 	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);
-	TraceEvent("TLogPop0", logData->logId).detail("Tag", tag.toString()).detail("To", to).detail("UpTo", upTo).detail("Popped", tagData ? tagData->popped : -1);
 	if (!tagData) {
 		tagData = logData->createTagData(tag, upTo, true, true, false);
 	} else if (upTo > tagData->popped) {

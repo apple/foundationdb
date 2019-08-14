@@ -1267,7 +1267,6 @@ ACTOR Future<std::map<LogEpoch, std::map<Tag, Version>>> getBackupProgress(Refer
 				    .detail("Version", status.version)
 				    .detail("Tag", status.tag.toString());
 			}
-			wait(tr.commit());
 			return progress;
 		} catch (Error& e) {
 			wait(tr.onError(e));

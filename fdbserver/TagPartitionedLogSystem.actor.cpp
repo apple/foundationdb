@@ -190,6 +190,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	AsyncVar<bool> recoveryCompleteWrittenToCoreState;
 	bool remoteLogsWrittenToCoreState;
 	bool hasRemoteServers;
+	AsyncTrigger backupWorkerChanged;
 
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
@@ -258,7 +259,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			break;
 
-		default:
+		default: // This should be an error at caller site.
 			break;
 		}
 		return tag;
@@ -465,6 +466,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 
 			changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
+			changes.push_back(self->backupWorkerChanged.onTrigger());
 
 			ASSERT( failed.size() >= 1 );
 			wait( quorum(changes, 1) || tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) );
@@ -1375,6 +1377,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			logset->backupWorkers.push_back(worker);
 		}
+		backupWorkerChanged.trigger();
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
