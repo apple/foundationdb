@@ -212,7 +212,7 @@ public:
 
 		// Read and moved past the next item if it is < upperBound
 		Future<Optional<T>> moveNext(const Optional<T> &upperBound = {}) {
-			// If loading is not valid then this page cannot be loaded now so return nothing
+			// If loading is not valid then either the cursor is not initialized or it points to a page not yet durable.
 			if(!loading.isValid()) {
 				return Optional<T>();
 			}
@@ -536,12 +536,36 @@ public:
 		}
 
 		debug_printf("COWPager(%s) recover exists=%d fileSize=%" PRId64 "\n", self->filename.c_str(), exists, fileSize);
+		// TODO:  If the file exists but appears to never have been successfully committed is this an error or
+		// should recovery proceed with a new pager instance?
 
-		if(exists && fileSize >= self->smallestPhysicalBlock) {
+		// If there are at least 2 pages then try to recover the existing file
+		if(exists && fileSize >= (self->smallestPhysicalBlock * 2)) {
 			debug_printf("COWPager(%s) recovering using existing file\n");
 
-			// Read physical page 0 directly
-			wait(store(self->headerPage, self->readPhysicalPage(self, 0)));
+			state bool recoveredHeader = false;
+
+			// Read physical page 0 directly, checksum not required
+			wait(store(self->headerPage, self->readPhysicalPage(self, 0, false)));
+
+			// If the checksum fails for the header page, try to recover it from page 1
+			if(!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+				TraceEvent(SevWarn, "COWPagerRecoveringHeader").detail("Filename", self->filename);
+	
+				wait(store(self->headerPage, self->readPhysicalPage(self, 1, false)));
+
+				if(!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+					if(g_network->isSimulated()) {
+						// TODO: Detect if process is being restarted and only throw injected if so?
+						throw io_error().asInjectedFault();
+					}
+
+					TraceEvent(SevError, "COWPagerRecoveryFailed").detail("Filename", self->filename);
+					throw io_error();
+				}
+				recoveredHeader = true;
+			}
+
 			self->pHeader = (Header *)self->headerPage->begin();
 			self->setPageSize(self->pHeader->pageSize);
 
@@ -553,6 +577,19 @@ public:
 			}
 
 			self->freeList.recover(self, self->pHeader->freeList, "FreeListRecovered");
+
+			// If the header was recovered from Page 1 then write and sync it to Page 0 before continuing.
+			if(recoveredHeader) {
+				// Write the header to page 0
+				wait(self->writePhysicalPage(0, self->headerPage));
+
+				// Wait for all outstanding writes to complete
+				wait(self->writes.signalAndCollapse());
+
+				// Sync header
+				wait(self->pageFile->sync());
+				debug_printf("COWPager(%s) Header recovery complete.\n", self->filename.c_str());
+			}
 		}
 		else {
 			debug_printf("COWPager(%s) creating new pager\n");
@@ -569,13 +606,13 @@ public:
 			// No meta key until a user sets one and commits
 			self->pHeader->setMetaKey(Key());
 
-			// There will be 2 page IDs in use
-			//   Page 0 will be the header
-			//   Page 1 will be the empty free list queue, which won't actually be written to the file as the page has no content
+			// There are 2 reserved pages:
+			//   Page 0 - header
+			//   Page 1 - header write-ahead "log"
 			self->pHeader->pageCount = 2;
 
-			// Create a new free list at page 1
-			self->freeList.create(self, 1, "FreeListNew");
+			// Create a new free list
+			self->freeList.create(self, self->newPageID().get(), "FreeListNew");
 
 			// Clear remaining bytes of header
 			memset(self->headerPage->mutate() + self->pHeader->size(), 0, self->headerPage->size() - self->pHeader->size());
@@ -677,13 +714,13 @@ public:
 		freeList.push(pageID);
 	};
 
-	ACTOR static Future<Reference<IPage>> readPhysicalPage(COWPager *self, PhysicalPageID pageID) {
+	ACTOR static Future<Reference<IPage>> readPhysicalPage(COWPager *self, PhysicalPageID pageID, bool verifyChecksum = true) {
 		state Reference<IPage> page = self->newPageBuffer();
 		int readBytes = wait(self->pageFile->read(page->mutate(), self->physicalPageSize, (int64_t)pageID * self->physicalPageSize));
 		debug_printf("COWPager(%s) op=read_complete id=%u bytes=%d\n", self->filename.c_str(), pageID, readBytes);
 		ASSERT(readBytes == self->physicalPageSize);
 		Page *p = (Page *)page.getPtr();
-		if(!p->verifyChecksum(pageID)) {
+		if(verifyChecksum && !p->verifyChecksum(pageID)) {
 			Error e = checksum_failed();
 			TraceEvent(SevError, "COWPagerChecksumFailed")
 				.detail("Filename", self->filename.c_str())
@@ -716,6 +753,9 @@ public:
 	ACTOR static Future<Void> commit_impl(COWPager *self) {
 		// Flush the free list queue to the pager
 		wait(store(self->pHeader->freeList, self->freeList.flush()));
+
+		// Write the header write-ahead "log" at Page 1
+		wait(self->writePhysicalPage(1, self->headerPage));
 
 		// Wait for all outstanding writes to complete
 		wait(self->writes.signalAndCollapse());
