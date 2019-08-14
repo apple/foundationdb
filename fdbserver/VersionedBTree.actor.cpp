@@ -549,12 +549,12 @@ public:
 			wait(store(self->headerPage, self->readPhysicalPage(self, 0, false)));
 
 			// If the checksum fails for the header page, try to recover it from page 1
-			if(!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+			if(BUGGIFY || !self->headerPage.castTo<Page>()->verifyChecksum(0)) {
 				TraceEvent(SevWarn, "COWPagerRecoveringHeader").detail("Filename", self->filename);
 	
 				wait(store(self->headerPage, self->readPhysicalPage(self, 1, false)));
 
-				if(!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+				if(!self->headerPage.castTo<Page>()->verifyChecksum(1)) {
 					if(g_network->isSimulated()) {
 						// TODO: Detect if process is being restarted and only throw injected if so?
 						throw io_error().asInjectedFault();
@@ -662,7 +662,7 @@ public:
 
 	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<IPage> page) {
 		((Page *)page.getPtr())->updateChecksum(pageID);
-		int physicalSize = (pageID == 0) ? smallestPhysicalBlock : physicalPageSize;
+		int physicalSize = (pageID == 0 || pageID == 1) ? smallestPhysicalBlock : physicalPageSize;
 		return holdWhile(page, pageFile->write(page->begin(), physicalSize, (int64_t)pageID * physicalSize));
 	}
 
