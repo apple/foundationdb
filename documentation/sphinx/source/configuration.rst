@@ -199,14 +199,12 @@ The ``foundationdb.conf`` file contains several sections, detailed below. Note t
     ## foundationdb.conf 
     ##
     ## Configuration file for FoundationDB server processes 
-    ## Full documentation is available in the FoundationDB Administration document.
 
     [fdbmonitor]
-    restart_delay = 60
     user = foundationdb
     group = foundationdb
 
-Contains basic configuration parameters of the ``fdbmonitor`` process. ``restart_delay`` specifies the number of seconds that ``fdbmonitor`` waits before restarting a failed process. ``user`` and ``group`` are used on Linux systems to control the privilege level of child processes.
+Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` and ``group`` are used on Linux systems to control the privilege level of child processes.
 
 ``[general]`` section
 -----------------------
@@ -215,8 +213,25 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``restart
 
     [general]
     cluster_file = /etc/foundationdb/fdb.cluster
+    restart_delay = 60
+    ## by default, restart_backoff = restart_delay_reset_interval = restart_delay
+    # initial_restart_delay = 0
+    # restart_backoff = 60.0
+    # restart_delay_reset_interval = 60
+    # delete_envvars =
+    # kill_on_configuration_change = true
+    # disable_lifecycle_logging = false
 
-Contains settings applicable to all processes (e.g. fdbserver, backup_agent). The main setting of interest is ``cluster_file``, which specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the [fdbmonitor] section).
+Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
+
+* ``cluster_file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
+* ``restart_delay``: The restart delay parameters control how long ``fdbmonitor`` waits to restart a process when it dies. ``fdbmonitor`` uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all repeatedly starting simultaneously. The ``restart_delay`` is the maximum value in seconds for the delay, and by default is also the value used for ``restart_backoff`` and ``restart_delay_reset_interval``. This means that if other backoff parameters are not set, the second and subsequent restarts will all take ``restart_delay`` seconds, and the backoff will reset after a process has been running for ``restart_delay`` seconds.
+* ``initial_restart_delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
+* ``restart_backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
+* ``restart_delay_reset_interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
+* ``delete_envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
+* ``kill_on_configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
+* ``disable_lifecycle_logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
 .. _foundationdb-conf-fdbserver:
 
