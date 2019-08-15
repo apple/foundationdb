@@ -3686,58 +3686,76 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	}
 }
 
-ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageReply candidateWorker ) {
+int numExistingSSOnAddr(DDTeamCollection* self, const AddressExclusion& addr) {
+	int numExistingSS = 0;
+	for (auto& server : self->server_info) {
+		const NetworkAddress& netAddr = server.second->lastKnownInterface.address();
+		AddressExclusion usedAddr(netAddr.ip, netAddr.port);
+		if (usedAddr == addr) {
+			++numExistingSS;
+		}
+	}
+
+	return numExistingSS;
+}
+
+ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply candidateWorker) {
 	// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 	self->recruitingStream.set(self->recruitingStream.get()+1);
 
-	state UID interfaceId = deterministicRandom()->randomUniqueID();
-	InitializeStorageRequest isr;
-	isr.storeType = self->configuration.storageServerStoreType;
-	isr.seedTag = invalidTag;
-	isr.reqId = deterministicRandom()->randomUniqueID();
-	isr.interfaceId = interfaceId;
+	const NetworkAddress& netAddr = candidateWorker.worker.address();
+	AddressExclusion workerAddr(netAddr.ip, netAddr.port); 
+	if (numExistingSSOnAddr(self,workerAddr) <= 2) {
+		// Only allow at most 2 storage servers on an address, because
+		// too many storage server on the same address (i.e., process) can cause OOM
+		state UID interfaceId = deterministicRandom()->randomUniqueID();
+		InitializeStorageRequest isr;
+		isr.storeType = self->configuration.storageServerStoreType;
+		isr.seedTag = invalidTag;
+		isr.reqId = deterministicRandom()->randomUniqueID();
+		isr.interfaceId = interfaceId;
 
-	TraceEvent("DDRecruiting")
-	    .detail("Primary", self->primary)
-	    .detail("State", "Sending request to worker")
-	    .detail("WorkerID", candidateWorker.worker.id())
-	    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
-	    .detail("Interf", interfaceId)
-	    .detail("Addr", candidateWorker.worker.address())
-	    .detail("RecruitingStream", self->recruitingStream.get());
+		TraceEvent("DDRecruiting")
+			.detail("Primary", self->primary)
+			.detail("State", "Sending request to worker")
+			.detail("WorkerID", candidateWorker.worker.id())
+			.detail("WorkerLocality", candidateWorker.worker.locality.toString())
+			.detail("Interf", interfaceId)
+			.detail("Addr", candidateWorker.worker.address())
+			.detail("RecruitingStream", self->recruitingStream.get());
 
-	self->recruitingIds.insert(interfaceId);
-	self->recruitingLocalities.insert(candidateWorker.worker.address());
-	state ErrorOr<InitializeStorageReply> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskPriority::DataDistribution ) );
-	if(newServer.isError()) {
-		TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
-		if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
-			throw newServer.getError();
-		wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution) );
+		self->recruitingIds.insert(interfaceId);
+		self->recruitingLocalities.insert(candidateWorker.worker.address());
+		state ErrorOr<InitializeStorageReply> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskPriority::DataDistribution ) );
+		if(newServer.isError()) {
+			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
+			if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
+				throw newServer.getError();
+			wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution) );
+		}
+		self->recruitingIds.erase(interfaceId);
+		self->recruitingLocalities.erase(candidateWorker.worker.address());
+
+		TraceEvent("DDRecruiting")
+			.detail("Primary", self->primary)
+			.detail("State", "Finished request")
+			.detail("WorkerID", candidateWorker.worker.id())
+			.detail("WorkerLocality", candidateWorker.worker.locality.toString())
+			.detail("Interf", interfaceId)
+			.detail("Addr", candidateWorker.worker.address())
+			.detail("RecruitingStream", self->recruitingStream.get());
+
+		if( newServer.present() ) {
+			if( !self->server_info.count( newServer.get().interf.id() ) )
+				self->addServer( newServer.get().interf, candidateWorker.processClass, self->serverTrackerErrorOut, newServer.get().addedVersion );
+			else
+				TraceEvent(SevWarn, "DDRecruitmentError").detail("Reason", "Server ID already recruited");
+
+			self->doBuildTeams = true;
+		}
 	}
-	self->recruitingIds.erase(interfaceId);
-	self->recruitingLocalities.erase(candidateWorker.worker.address());
 
 	self->recruitingStream.set(self->recruitingStream.get()-1);
-
-	TraceEvent("DDRecruiting")
-	    .detail("Primary", self->primary)
-	    .detail("State", "Finished request")
-	    .detail("WorkerID", candidateWorker.worker.id())
-	    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
-	    .detail("Interf", interfaceId)
-	    .detail("Addr", candidateWorker.worker.address())
-	    .detail("RecruitingStream", self->recruitingStream.get());
-
-	if( newServer.present() ) {
-		if( !self->server_info.count( newServer.get().interf.id() ) )
-			self->addServer( newServer.get().interf, candidateWorker.processClass, self->serverTrackerErrorOut, newServer.get().addedVersion );
-		else
-			TraceEvent(SevWarn, "DDRecruitmentError").detail("Reason", "Server ID already recruited");
-
-		self->doBuildTeams = true;
-	}
-
 	self->restartRecruiting.trigger();
 
 	return Void();
