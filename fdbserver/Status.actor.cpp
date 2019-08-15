@@ -1613,6 +1613,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
 			(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
 			(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
+			(*qos).setKeyRawNumber("worst_durability_lag_storage_server", ratekeeper.getValue("WorstStorageServerDurabilityLag"));
+			(*qos).setKeyRawNumber("limiting_durability_lag_storage_server", ratekeeper.getValue("LimitingStorageServerDurabilityLag"));
 		}
 
 		if(tlogCount > 0) {

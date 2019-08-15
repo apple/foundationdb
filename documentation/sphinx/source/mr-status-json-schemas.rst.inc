@@ -264,7 +264,9 @@
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0
+         "worst_version_lag_storage_server":0,
+         "limiting_durability_lag_storage_server":0,
+         "worst_durability_lag_storage_server":0
       },
       "incompatible_connections":[
       ],
