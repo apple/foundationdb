@@ -444,7 +444,8 @@ public:
 			// If the cache is too big, try to evict the first Entry in the eviction order
 			if(cache.size() > sizeLimit) {
 				Entry &toEvict = evictionOrder.front();
-				if(toEvict.item.evictable()) {
+				// Don't evict the entry that was just added as then we can't return a reference to it.
+				if(toEvict.index != index && toEvict.item.evictable()) {
 					evictionOrder.pop_front();
 					cache.erase(toEvict.index);
 				}
