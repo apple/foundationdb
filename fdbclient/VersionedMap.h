@@ -538,11 +538,13 @@ public:
 
 	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
-		// since the specified newOldestVersion might not exist, we copy the root from next lower version to newOldestVersion position
 		//roots[newOldestVersion] = getRoot(newOldestVersion);
-		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
-		r--;
-		roots.insert(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), *r);
+		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
+		if (!binary_search(roots.begin(), roots.end(), newOldestVersion, compare())) {
+			//auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+			//r--;
+			roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
+		}
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
@@ -572,7 +574,7 @@ public:
 			latestVersion = version;
 			Tree r = getRoot(version);
 			//latestRoot = &roots[version];
-			roots.emplace_back(version, Tree());
+			roots.emplace_back(version, r);
 			//latestRoot = &(roots.emplace_back(version, Tree()).second);
 			//*latestRoot = r;
 		} else ASSERT( version == latestVersion );
