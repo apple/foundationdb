@@ -144,7 +144,7 @@ public:
 		}
 
 		Future<Void> loadPage() {
-			debug_printf("queue(%p, %s) loading page %u index %d\n", this, queue->name.c_str(), pageID, index);
+			debug_printf("queue(%p, %s) loading page id=%u index=%d\n", this, queue->name.c_str(), pageID, index);
 			return map(queue->pager->readPage(pageID), [=](Reference<IPage> p) {
 				page = p;
 				return Void();
@@ -153,8 +153,8 @@ public:
 
 		Future<Void> newPage() {
 			ASSERT(page);
-			debug_printf("queue(%p, %s) new page\n", this, queue->name.c_str());
 			return map(queue->pager->newPageID(), [=](LogicalPageID newPageID) {
+			debug_printf("queue(%p, %s) new page id=%u\n", this, queue->name.c_str(), newPageID);
 				auto p = raw();
 				p->next = newPageID;
 				writePage();
@@ -177,6 +177,7 @@ public:
 			// Pages are never written after being read, so if the write cursor is not
 			// ready then it is getting a new page ID which must be written to the next
 			// page ID of the page behind it.
+			debug_printf("queue(%p, %s) write page id=%u\n", this, queue->name.c_str(), pageID);
 			ASSERT(loading.isReady());
 			queue->pager->updatePage(pageID, page);
 		}
@@ -662,6 +663,7 @@ public:
 	};
 
 	Future<Void> writePhysicalPage(PhysicalPageID pageID, Reference<IPage> page) {
+		debug_printf("COWPager(%s) op=write id=%u\n", filename.c_str(), pageID);
 		((Page *)page.getPtr())->updateChecksum(pageID);
 		int physicalSize = (pageID == 0 || pageID == 1) ? smallestPhysicalBlock : physicalPageSize;
 		return holdWhile(page, pageFile->write(page->begin(), physicalSize, (int64_t)pageID * physicalSize));
@@ -722,6 +724,7 @@ public:
 		ASSERT(readBytes == self->physicalPageSize);
 		Page *p = (Page *)page.getPtr();
 		if(verifyChecksum && !p->verifyChecksum(pageID)) {
+			debug_printf("COWPager(%s) checksum failed id=%u\n", self->filename.c_str(), pageID);
 			Error e = checksum_failed();
 			TraceEvent(SevError, "COWPagerChecksumFailed")
 				.detail("Filename", self->filename.c_str())
@@ -2159,7 +2162,7 @@ public:
 		state Key meta = self->m_pager->getMetaKey();
 		if(meta.size() == 0) {
 			LogicalPageID newRoot = wait(self->m_pager->newPageID());
-			debug_printf("new root page %u\n", newRoot);
+			debug_printf("new root page id=%u\n", newRoot);
 			self->m_header.root = newRoot;
 			++latest;
 			Reference<IPage> page = self->m_pager->newPageBuffer();
@@ -2168,7 +2171,7 @@ public:
 			self->m_pager->setVersion(latest);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
-			debug_printf("new lazy delete queue page %u\n", newQueuePage);
+			debug_printf("new lazy delete queue page id=%u\n", newQueuePage);
 			self->m_lazyDeleteQueue.create(self->m_pager, newQueuePage, "LazyDeleteQueueNew");
 			self->m_header.lazyDeleteQueue = self->m_lazyDeleteQueue.getState();
 			self->m_pager->setMetaKey(self->m_header.asKeyRef());
