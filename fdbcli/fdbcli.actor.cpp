@@ -2146,7 +2146,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		wait( makeInterruptable(excludeServers(db,addresses,permanentlyFailed)) );
 
-		if (waitForAllExcluded && !permanentlyFailed) {
+		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
 			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
 		}

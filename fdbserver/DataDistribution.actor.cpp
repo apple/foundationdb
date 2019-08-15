@@ -4288,7 +4288,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
-	for (auto ssi : ssis) {
+	for (const auto &ssi : ssis) {
 		for (AddressExclusion excl : req.exclusions) {
 			if (excl.excludes(ssi.address())) {
 				excludeServerIDs.push_back(ssi.id());
@@ -4297,7 +4297,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		}
 	}
 	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
-	for (auto team : self->teams) {
+	for (const auto &team : self->teams) {
 		vector<UID> teamServerIDs = team->getServerIDs();
 		std::sort(teamServerIDs.begin(), teamServerIDs.end());
 		TraceEvent("DDExclusionSafetyCheck")

@@ -3433,8 +3433,7 @@ ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 	return Void();
 }
 
-ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
+Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
 	ExclusionSafetyCheckRequest req(exclusions);
-	bool safe = wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID));
-	return safe;
+	return loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID);
 }
