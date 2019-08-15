@@ -54,6 +54,7 @@ Status
 * ``connected_clients`` is now only a sample of the connected clients, rather than a complete list. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
 * Added ``max_protocol_clients`` to the ``supported_versions`` section, which provides a sample of connected clients which cannot connect to any higher protocol version. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
 * Clients which connect without specifying their supported versions are tracked as an ``Unknown`` version in the ``supported_versions`` section. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
+* Add ``coordinator`` to the list of roles that can be reported for a process. [6.2.3] `(PR #2006) <https://github.com/apple/foundationdb/pull/2006>`_.
 
 Bindings
 --------
