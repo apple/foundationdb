@@ -1628,10 +1628,10 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 				}
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
-				if (self->logSystem->removeBackupWorker(req)) {
+				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
 					self->registrationTrigger.trigger();
+					req.reply.send(Void());
 				}
-				req.reply.send(Void());
 			}
 			when (wait(collection) ) { ASSERT(false); throw internal_error(); }
 		}
