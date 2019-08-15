@@ -67,7 +67,7 @@
                         "data_distributor",
                         "ratekeeper",
                         "router",
-						"coordinator"
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,
