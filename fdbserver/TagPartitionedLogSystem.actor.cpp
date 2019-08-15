@@ -179,6 +179,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool stopped;
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
+	LogEpoch oldestBackupEpoch;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -205,9 +206,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	TagPartitionedLogSystem(UID dbgid, LocalityData locality, LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), epoch(e), recoveryCompleteWrittenToCoreState(false), locality(locality),
-	    remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false), addActor(addActor),
-	    popActors(false) {}
+	    repopulateRegionAntiQuorum(0), epoch(e), oldestBackupEpoch(e), recoveryCompleteWrittenToCoreState(false),
+	    locality(locality), remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false),
+	    addActor(addActor), popActors(false) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -1230,7 +1231,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return newEpoch( Reference<TagPartitionedLogSystem>::addRef(this), recr, fRemoteWorkers, config, recoveryCount, primaryLocality, remoteLocality, allTags, recruitmentStalled );
 	}
 
-	virtual LogSystemConfig getLogSystemConfig() {
+	LogSystemConfig getLogSystemConfig() override {
 		LogSystemConfig logSystemConfig(epoch);
 		logSystemConfig.logSystemType = logSystemType;
 		logSystemConfig.expectedLogSets = expectedLogSets;
@@ -1240,6 +1241,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.stopped = stopped;
 		logSystemConfig.recoveredAt = recoveredAt;
 		logSystemConfig.pseudoLocalities = pseudoLocalities;
+		logSystemConfig.oldestBackupEpoch = oldestBackupEpoch;
 		for (const Reference<LogSet>& logSet : tLogs) {
 			if (logSet->isLocal || remoteLogsWrittenToCoreState) {
 				logSystemConfig.tLogs.emplace_back(*logSet);
@@ -1249,9 +1251,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(!recoveryCompleteWrittenToCoreState.get()) {
 			for (const auto& oldData : oldLogData) {
 				logSystemConfig.oldTLogs.emplace_back(oldData);
-				//TraceEvent("BWGetLSConf")
-				//    .detail("Epoch", logSystemConfig.oldTLogs.back().epoch)
-				//    .detail("Version", logSystemConfig.oldTLogs.back().epochEnd);
 			}
 		}
 		return logSystemConfig;
@@ -1363,15 +1362,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<LogSet>(nullptr);
 	}
 
-	void setBackupWorkers(std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers) override {
+	void setBackupWorkers(
+	    const std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>>& backupWorkers) override {
 		ASSERT(tLogs.size() > 0);
 
 		Reference<LogSet> logset = tLogs[0];  // Master recruits this epoch's worker first.
 		LogEpoch logsetEpoch = this->epoch;
+		oldestBackupEpoch = this->epoch;
 		for (const auto& worker : backupWorkers) {
 			if (worker->get().interf().backupEpoch != logsetEpoch) {
 				// find the logset from oldLogData
 				logsetEpoch = worker->get().interf().backupEpoch;
+				oldestBackupEpoch = std::min(oldestBackupEpoch, logsetEpoch);
 				logset = getEpochLogSet(logsetEpoch);
 				ASSERT(logset.isValid());
 			}
@@ -1379,6 +1381,40 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		backupWorkerChanged.trigger();
 	}
+
+	bool removeBackupWorker(const BackupWorkerDoneRequest& req) override {
+		bool removed = false;
+		Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);
+		std::string msg("BackupWorkerNotFound");
+		if (logset.isValid()) {
+			for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
+				if (it->getPtr()->get().interf().id() == req.workerUID) {
+					msg = "BackupWorkerRemoved";
+					logset->backupWorkers.erase(it);
+					removed = true;
+					break;
+				}
+			}
+		}
+
+		if (removed) {
+			oldestBackupEpoch = epoch;
+			for (const auto& old : oldLogData) {
+				if (old.epoch < oldestBackupEpoch && old.tLogs[0]->backupWorkers.size() > 0) {
+					oldestBackupEpoch = old.epoch;
+				}
+			}
+			backupWorkerChanged.trigger();
+		}
+
+		TraceEvent(msg.c_str(), dbgid)
+		    .detail("BackupEpoch", req.backupEpoch)
+		    .detail("WorkerID", req.workerUID)
+		    .detail("OldestBackupEpoch", oldestBackupEpoch);
+		return removed;
+	}
+
+	LogEpoch getOldestBackupEpoch() const override { return oldestBackupEpoch; }
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
 		state Future<Void> waitFailure;

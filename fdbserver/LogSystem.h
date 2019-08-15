@@ -763,7 +763,13 @@ struct ILogSystem {
 	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
 	virtual void setBackupWorkers(
-	    std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers) = 0;
+	    const std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>>& backupWorkers) = 0;
+
+	// Removes a finished backup worker from log system and returns true. Returns false
+	// if the worker is not found.
+	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
+
+	virtual LogEpoch getOldestBackupEpoch() const = 0;
 };
 
 struct LengthPrefixedStringRef {

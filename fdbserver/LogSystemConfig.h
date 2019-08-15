@@ -230,9 +230,11 @@ struct LogSystemConfig {
 	Optional<Version> recoveredAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
+	LogEpoch oldestBackupEpoch;
 
 	LogSystemConfig(LogEpoch e = 0)
-	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e) {}
+	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
+	    oldestBackupEpoch(e) {}
 
 	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
@@ -371,9 +373,9 @@ struct LogSystemConfig {
 
 	bool isEqual(LogSystemConfig const& r) const {
 		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs &&
-		       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags &&
-		       txsTags == r.txsTags && recruitmentID == r.recruitmentID && stopped == r.stopped &&
-		       recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities && epoch == r.epoch;
+		       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
+		       recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt &&
+		       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -462,7 +464,7 @@ struct LogSystemConfig {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped,
-		           recoveredAt, pseudoLocalities, txsTags, epoch);
+		           recoveredAt, pseudoLocalities, txsTags, epoch, oldestBackupEpoch);
 	}
 };
 

@@ -59,6 +59,16 @@ struct BackupData {
 	}
 
 	void pop() {
+		const LogEpoch oldest = logSystem.get()->getOldestBackupEpoch();
+		if (backupEpoch > oldest) {
+			// Defer pop if old epoch hasn't finished popping yet.
+			TraceEvent("BackupWorkerPopDeferred", myId)
+			    .suppressFor(1.0)
+			    .detail("BackupEpoch", backupEpoch)
+			    .detail("OldestEpoch", oldest)
+			    .detail("Version", savedVersion);
+			return;
+		}
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
@@ -223,24 +233,22 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
-				if (ls && ls->hasPseudoLocality(tagLocalityBackup)) {
+				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
+				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
 					self.pop();
-					TraceEvent("BackupWorkerLogSystem", interf.id())
-					    .detail("HasBackupLocality", true)
-					    .detail("Tag", self.tag.toString());
-				} else {
-					TraceEvent("BackupWorkerLogSystem", interf.id())
-					    .detail("HasBackupLocality", false)
-					    .detail("Tag", self.tag.toString());
 				}
+				TraceEvent("BackupWorkerLogSystem", interf.id())
+				    .detail("HasBackupLocality", hasPseudoLocality)
+				    .detail("Tag", self.tag.toString());
 			}
 			when(wait(onDone)) {
-				// TODO: when backup is done, we don't exit because master would think
-				// this worker failed and start recovery. Should fix the protocol between
-				// this worker and master so that done/exit here doesn't trigger recovery.
-				TraceEvent("BackupWorkerDone", interf.id());
-				onDone = Never();
+				TraceEvent("BackupWorkerDone", interf.id()).detail("BackupEpoch", self.backupEpoch);
+				// Notify master so that this worker can be removed from log system, then this
+				// worker (for an old epoch's unfinished work) can safely exit.
+				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
+				    BackupWorkerDoneRequest(self.myId, self.endVersion))));
+				break;
 			}
 			when(wait(error)) {}
 		}

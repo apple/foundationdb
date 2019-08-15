@@ -29,6 +29,7 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
 #include <iterator>
+#include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
@@ -1625,6 +1626,12 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 					if (BUGGIFY) wait( delay(5) );
 					throw worker_removed();
 				}
+			}
+			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
+				if (self->logSystem->removeBackupWorker(req)) {
+					self->registrationTrigger.trigger();
+				}
+				req.reply.send(Void());
 			}
 			when (wait(collection) ) { ASSERT(false); throw internal_error(); }
 		}
