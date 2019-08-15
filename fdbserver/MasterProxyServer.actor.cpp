@@ -1106,7 +1106,7 @@ struct TransactionRateInfo {
 
 	void reset(double elapsed) {
 		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
-		limit = std::min(limit, rate * std::min(elapsed, SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX)); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
+		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
 		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
 
