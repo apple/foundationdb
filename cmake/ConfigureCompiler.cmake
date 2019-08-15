@@ -1,5 +1,6 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
+set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} CACHE BOOL "Use valgrind for ctest")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
