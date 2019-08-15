@@ -184,6 +184,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 			} else {
 				// Return error for bath_priority GRV requests
 				if (batchRateInfo->limit <= 1) {
+					TEST(true);
 					TraceEvent(SevInfo, "RejectedBatchGRV").detail("CurrentBatchRateLimit", batchRateInfo->limit);
 					req.reply.sendError(batch_transaction_throttled());
 					continue;
