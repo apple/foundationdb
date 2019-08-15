@@ -86,7 +86,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "router"
+                        "router",
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,

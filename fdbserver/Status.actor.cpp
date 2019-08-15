@@ -551,6 +551,11 @@ struct RolesInfo {
 	JsonBuilderObject& addRole(std::string const& role, InterfaceType& iface) {
 		return addRole(iface.address(), role, iface.id());
 	}
+	JsonBuilderObject& addCoordinatorRole(NetworkAddress addr) {
+		JsonBuilderObject obj;
+		obj["role"] = "coordinator";
+		return roles.insert(std::make_pair(addr, obj))->second;
+	}
 	JsonBuilderArray getStatusForAddress( NetworkAddress a ) {
 		JsonBuilderArray v;
 		auto it = roles.lower_bound(a);
@@ -565,10 +570,11 @@ struct RolesInfo {
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Reference<AsyncVar<struct ServerDBInfo>> db, std::vector<WorkerDetails> workers, WorkerEvents pMetrics,
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
-	WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
+    WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    Database cx, Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
+    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration, 
+    Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 
@@ -647,6 +653,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				}
 			}
 		}
+	}
+
+	for(auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+		roles.addCoordinatorRole(coordinator);
 	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
@@ -2293,8 +2303,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies, cx,
-		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
+		                                                            processIssues, storageServers, tLogs, proxies, 
+		                                                            coordinators, cx, configuration, 
+		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
