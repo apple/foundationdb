@@ -388,6 +388,13 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 	return machineMap;
 }
 
+JsonBuilderObject getLagObject(int64_t versions) {
+	JsonBuilderObject lag;
+	lag["versions"] = versions;
+	lag["seconds"] = versions / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+	return lag;
+}
+
 struct MachineMemoryInfo {
 	double memoryUsage;
 	double numProcesses;
@@ -474,17 +481,8 @@ struct RolesInfo {
 				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyMetrics);
 			}
 
-			JsonBuilderObject dataLag;
-			dataLag["versions"] = versionLag;
-			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-			dataLag["seconds"] = dataLagSeconds;
-
-			JsonBuilderObject durabilityLag;
-			durabilityLag["versions"] = version - durableVersion;
-			durabilityLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-
-			obj["data_lag"] = dataLag;
-			obj["durability_lag"] = durabilityLag;
+			obj["data_lag"] = getLagObject(versionLag);
+			obj["durability_lag"] = getLagObject(version - durableVersion);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
@@ -1611,10 +1609,15 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
 			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
 			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
+
+			// TODO: These can be removed in the next release after 6.2
 			(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
 			(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
-			(*qos).setKeyRawNumber("worst_durability_lag_storage_server", ratekeeper.getValue("WorstStorageServerDurabilityLag"));
-			(*qos).setKeyRawNumber("limiting_durability_lag_storage_server", ratekeeper.getValue("LimitingStorageServerDurabilityLag"));
+
+			(*qos)["worst_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerVersionLag"));
+			(*qos)["limiting_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerVersionLag"));
+			(*qos)["worst_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerDurabilityLag"));
+			(*qos)["limiting_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerDurabilityLag"));
 		}
 
 		if(tlogCount > 0) {
@@ -2306,11 +2309,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-
-		StatusObject datacenterLag;
-		datacenterLag["versions"] = datacenterVersionDifference;
-		datacenterLag["seconds"] = datacenterVersionDifference / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-		statusObj["datacenter_lag"] = datacenterLag;
+		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int totalDegraded = 0;
 		for(auto& it : workers) {
