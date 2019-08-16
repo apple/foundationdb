@@ -2556,9 +2556,12 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
 
+	// TODO: How to reduce the amount of work when all SS have correct store type in most type? Maybe refer to badTeams remover approach
 	loop {
 		if (self->doRemoveWrongStoreType.get() == false) {
-			wait(self->doRemoveWrongStoreType.onChange());
+			// Once the wrong storeType SS picked to be removed is removed, doRemoveWrongStoreType will be set to true;
+			// In case the SS fails in between, we should time out and check for the next SS.
+			wait(self->doRemoveWrongStoreType.onChange() || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT));
 		}
 		TraceEvent("WrongStoreTypeRemoverStartLoop", self->distributorId)
 		    .detail("Primary", self->primary)
