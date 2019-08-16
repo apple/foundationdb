@@ -1537,23 +1537,18 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 		return Void();
 	}
 	state bool safe = false;
-	loop {
-		try {
-			state Future<ErrorOr<bool>> safeFuture = db->get().distributor.get().distributorExclCheckReq.tryGetReply(
-			    DistributorExclusionSafetyCheckRequest(req.exclusions));
-			bool _safe = wait(throwErrorOr(safeFuture));
-			safe = _safe;
-			break;
-		} catch (Error& e) {
-			TraceEvent("SafetyCheckMasterProxy.DDSafetyCheckResponseError").error(e);
-			if (e.code() == error_code_request_maybe_delivered) {
-				// continue
-			} else if (e.code() != error_code_operation_cancelled) {
-				req.reply.sendError(e);
-				return Void();
-			} else {
-				throw e;
-			}
+	try {
+		state Future<ErrorOr<bool>> safeFuture = db->get().distributor.get().distributorExclCheckReq.tryGetReply(
+			DistributorExclusionSafetyCheckRequest(req.exclusions));
+		bool _safe = wait(throwErrorOr(safeFuture));
+		safe = _safe;
+	} catch (Error& e) {
+		TraceEvent("SafetyCheckMasterProxy.DDSafetyCheckResponseError").error(e);
+		if (e.code() != error_code_operation_cancelled) {
+			req.reply.sendError(e);
+			return Void();
+		} else {
+			throw e;
 		}
 	}
 	req.reply.send(safe);
