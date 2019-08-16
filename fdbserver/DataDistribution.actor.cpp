@@ -715,7 +715,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	ACTOR static Future<Void> interruptableBuildTeams( DDTeamCollection* self ) {
-		TraceEvent("DDInterruptableBuildTeamsStart", self->distributorId);
 		if(!self->addSubsetComplete.isSet()) {
 			wait( addSubsetOfEmergencyTeams(self) );
 			self->addSubsetComplete.send(Void());
@@ -732,7 +731,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	ACTOR static Future<Void> checkBuildTeams( DDTeamCollection* self ) {
-		TraceEvent("DDCheckBuildTeamsStart", self->distributorId);
 		wait( self->checkTeamDelay );
 		while( !self->teamBuilder.isReady() )
 			wait( self->teamBuilder );
@@ -758,7 +756,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			//   shardsAffectedByTeamFailure or we could be dropping a shard on the floor (since team
 			//   tracking is "edge triggered")
 			// SOMEDAY: Account for capacity, load (when shardMetrics load is high)
-			// Q: How do we enforce the above statement?
 
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
@@ -2204,7 +2201,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			.detail("CurrentTeamCount", teams.size())
 			.detail("ServerCount", server_info.size())
 			.detail("NonFailedServerCount", desiredServerSet.size());
-		traceAllInfo(true);
 	}
 
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
@@ -2216,11 +2212,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	void addServer( StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut, Version addedVersion ) {
 		if (!shouldHandleServer(newServer)) {
-			TraceEvent("AddedStorageServer", distributorId)
-			    .detail("ServerID", newServer.id())
-			    .detail("ShouldHandleServer", 0)
-			    .detail("ServerDCId", newServer.locality.dcId())
-			    .detail("IncludedDCSize", includedDCs.size());
 			return;
 		}
 		allServers.push_back( newServer.id() );
@@ -2445,7 +2436,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent(SevInfo, "NoTeamsRemovedWhenServerRemoved")
 			    .detail("Primary", primary)
 			    .detail("Debug", "ThisShouldRarelyHappen_CheckInfoBelow");
-			traceAllInfo(true);
 		}
 
 		// Step: Remove machine info related to removedServer
@@ -2562,44 +2552,39 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
-	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
+	wait( delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY) );
+	state bool foundSSToRemove = false;
 
-	// TODO: How to reduce the amount of work when all SS have correct store type in most type? Maybe refer to badTeams remover approach
 	loop {
+		 foundSSToRemove = false;
 		if (self->doRemoveWrongStoreType.get() == false) {
 			// Once the wrong storeType SS picked to be removed is removed, doRemoveWrongStoreType will be set to true;
 			// In case the SS fails in between, we should time out and check for the next SS.
-			wait(self->doRemoveWrongStoreType.onChange() || delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_TIMEOUT));
+			wait(self->doRemoveWrongStoreType.onChange() || delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_TIMEOUT));
 		}
-		TraceEvent("WrongStoreTypeRemoverStartLoop", self->distributorId)
-		    .detail("Primary", self->primary)
-		    .detail("ServerInfoSize", self->server_info.size())
-		    .detail("SysRestoreType", self->configuration.storageServerStoreType);
 		vector<Future<KeyValueStoreType>> initializingServers;
 		for (auto& server : self->server_info) {
 			NetworkAddress a = server.second->lastKnownInterface.address();
 			AddressExclusion addr(a.ip, a.port);
 			TraceEvent("WrongStoreTypeRemover", self->distributorId)
-			    .detail("DDID", self->distributorId)
 			    .detail("Server", server.first)
 			    .detail("Addr", addr.toString())
 			    .detail("StoreType", server.second->storeType)
-			    .detail("IsCorrectStoreType",
-			            server.second->isCorrectStoreType(self->configuration.storageServerStoreType));
+				.detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
 			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
 				server.second->wrongStoreTypeToRemove.set(true);
+				foundSSToRemove = true;
 				break;
 			}
 		}
 		self->doRemoveWrongStoreType.set(false);
-		// if (g_network->isSimulated()) {
-		// 	// Speed up removing wrong storeType server in simulation to avoid false positive test failure in consistency check
-		// 	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY / 10) );
-		// } else {
-		// 	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
-		// }
+		if (!foundSSToRemove) {
+			break;
+		}
 	}
+
+	return Void();
 }
 
 ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
