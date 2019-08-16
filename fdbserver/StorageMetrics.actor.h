@@ -350,10 +350,10 @@ struct StorageServerMetrics {
 
 		if (sb.free < 1e9 && deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
-				.detail("Free", sb.free)
-				.detail("Total", sb.total)
-				.detail("Available", sb.available)
-				.detail("Load", rep.load.bytes);
+			    .detail("Free", sb.free)
+			    .detail("Total", sb.total)
+			    .detail("Available", sb.available)
+			    .detail("Load", rep.load.bytes);
 		}
 
 		rep.free.bytes = sb.free;

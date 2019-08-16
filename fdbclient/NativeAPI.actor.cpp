@@ -3080,9 +3080,9 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	++cx->transactionReadVersions;
 	flags |= options.getReadVersionFlags;
 
-	auto& batcher = cx->versionBatcher[ flags ];
+	auto& batcher = cx->versionBatcher[flags];
 	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
+		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), flags);
 	}
 	if (!readVersion.isValid()) {
 		Promise<GetReadVersionReply> p;

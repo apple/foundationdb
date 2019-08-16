@@ -552,7 +552,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 			}
 		}
 		StringRef maxProtocol;
-		for(auto& it : ci.second.versions) {
+		for (auto& it : ci.second.versions) {
 			maxProtocol = std::max(maxProtocol, it.protocolVersion);
 			auto& entry = versionMap[it];
 			entry.count++;
@@ -562,7 +562,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 		}
 		auto& maxEntry = maxProtocolMap[maxProtocol];
 		maxEntry.count++;
-		if(maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+		if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
 			maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 		}
 	}

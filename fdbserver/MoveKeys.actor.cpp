@@ -260,8 +260,8 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 
 // keyServer: map from keys to destination servers
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
-// complete(already has), ""() MXQ: What does serverKeys[dest][keys] mean? It seems having the same meaning with
-// serverKeys[servers][keys]?
+// complete(already has), ""() 
+// MXQ: What does serverKeys[dest][keys] mean? It seems having the same meaning with serverKeys[servers][keys]? (I think so.)
 
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
@@ -313,9 +313,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 
 					for(int s=0; s<serverListValues.size(); s++) {
 						if (!serverListValues[s].present()) {
-							// MXQ: Maybe a bug exists somewhere, causing this to happen
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
+							// FIXME: Answer why this can happen?
 							TEST(true); //start move keys moving to a removed server
 							throw move_to_removed_server();
 						}
@@ -329,9 +329,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					state Key endKey = old.end()[-1].key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
-					TraceEvent("StartMoveKeysBatch", relocationIntervalId)
-					    .detail("KeyBegin", currentKeys.begin.toString())
-					    .detail("KeyEnd", currentKeys.end.toString());
+					// TraceEvent("StartMoveKeysBatch", relocationIntervalId)
+					//     .detail("KeyBegin", currentKeys.begin.toString())
+					//     .detail("KeyEnd", currentKeys.end.toString());
 
 					// printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(),
 					// keys.end.toString().c_str(), old.size(), servers.size()); for(int i=0; i<old.size(); i++)
@@ -347,12 +347,12 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						vector<UID> dest;
 						decodeKeyServersValue( old[i].value, src, dest );
 
-						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-						    .detail("KeyBegin", rangeIntersectKeys.begin.toString())
-						    .detail("KeyEnd", rangeIntersectKeys.end.toString())
-						    .detail("OldSrc", describe(src))
-						    .detail("OldDest", describe(dest))
-						    .detail("ReadVersion", tr.getReadVersion().get());
+						// TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
+						//     .detail("KeyBegin", rangeIntersectKeys.begin.toString())
+						//     .detail("KeyEnd", rangeIntersectKeys.end.toString())
+						//     .detail("OldSrc", describe(src))
+						//     .detail("OldDest", describe(dest))
+						//     .detail("ReadVersion", tr.getReadVersion().get());
 
 						for(auto& uid : addAsSource[i]) {
 							src.push_back(uid);
@@ -365,13 +365,13 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						//Track old destination servers.  They may be removed from serverKeys soon, since they are about to be overwritten in keyServers
 						for(auto s = dest.begin(); s != dest.end(); ++s) {
 							oldDests.insert(*s);
-							TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
+							// TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
 						}
 
 						//Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 						for(auto& uid : src) {
 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-							TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
+							// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
 						}
 					}
 
@@ -834,16 +834,6 @@ ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
 		TraceEvent("ServerKeysCoalescingError", serverID).detail("Key1", keys[0].key).detail("Key2", keys[1].key).detail("Value", keys[0].value);
 		ASSERT(false);
 	}
-
-	// DEBUG purpose
-	// if (!(keys[0].value == serverKeysFalse && keys[1].key == allKeys.end)) {
-	// 	Standalone<RangeResultRef> allKeys =
-	// 	    wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, CLIENT_KNOBS->TOO_MANY));
-	// 	TraceEvent("CanNOTRemove").detail("KeysNum", allKeys.size());
-	// 	for (auto& k : allKeys) {
-	// 		TraceEvent("CanNOTRemove").detail("Key", k.key).detail("Value", k.value);
-	// 	}
-	// }
 
 	//Return true if the entire range is false.  Since these values are coalesced, we can return false if there is more than one result
 	return keys[0].value == serverKeysFalse && keys[1].key == allKeys.end;
