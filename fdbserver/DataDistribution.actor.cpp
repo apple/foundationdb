@@ -42,6 +42,8 @@ class TCTeamInfo;
 struct TCMachineInfo;
 class TCMachineTeamInfo;
 
+ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self);
+
 struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	UID id;
 	StorageServerInterface lastKnownInterface;
@@ -3728,9 +3730,11 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply
 
 	const NetworkAddress& netAddr = candidateWorker.worker.address();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port); 
-	if (numExistingSSOnAddr(self,workerAddr) <= 2) {
+	if (numExistingSSOnAddr(self,workerAddr) <= 2 &&
+		self->recruitingLocalities.find(candidateWorker.worker.address()) == self->recruitingLocalities.end()) {
 		// Only allow at most 2 storage servers on an address, because
-		// too many storage server on the same address (i.e., process) can cause OOM
+		// too many storage server on the same address (i.e., process) can cause OOM.
+		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 		InitializeStorageRequest isr;
 		isr.storeType = self->configuration.storageServerStoreType;
