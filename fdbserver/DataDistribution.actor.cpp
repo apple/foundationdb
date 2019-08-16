@@ -2585,12 +2585,12 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 			}
 		}
 		self->doRemoveWrongStoreType.set(false);
-		if (g_network->isSimulated()) {
-			// Speed up removing wrong storeType server in simulation to avoid false positive test failure in consistency check
-			wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY / 10) );
-		} else {
-			wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
-		}
+		// if (g_network->isSimulated()) {
+		// 	// Speed up removing wrong storeType server in simulation to avoid false positive test failure in consistency check
+		// 	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY / 10) );
+		// } else {
+		// 	wait( delay(SERVER_KNOBS->STR_REMOVE_STORE_ENGINE_DELAY) );
+		// }
 	}
 }
 
