@@ -34,7 +34,7 @@ namespace actorcompiler
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  actorcompiler <input> <output> [--disable-actor-without-wait-warning]");
+                Console.WriteLine("  actorcompiler <input> <output> [--disable-diagnostics] [--generate-probes]");
                 return 100;
             }
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
@@ -42,8 +42,8 @@ namespace actorcompiler
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
             foreach (var arg in args) {
                 if (arg.StartsWith("--")) {
-                    if (arg.Equals("--disable-actor-without-wait-warning")) {
-                        errorMessagePolicy.DisableActorWithoutWaitWarning = true;
+                    if (arg.Equals("--disable-diagnostics")) {
+                        errorMessagePolicy.DisableDiagnostics = true;
                     } else if (arg.Equals("--generate-probes")) {
                         generateProbes = true;
                     }
