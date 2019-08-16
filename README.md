@@ -39,7 +39,7 @@ To build with CMake, generally the following is required (works on Linux and
 Mac OS - for Windows see below):
 
 1. Check out this repository.
-1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
 1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/). 
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/).
