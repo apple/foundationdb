@@ -3433,7 +3433,40 @@ ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 	return Void();
 }
 
-Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
+ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
 	ExclusionSafetyCheckRequest req(exclusions);
-	return loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID);
+	state bool ddCheck =
+	    wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID));
+	state ClientCoordinators coordinatorList(cx->getConnectionFile());
+	state vector<Future<Optional<LeaderInfo>>> leaderServers;
+	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
+		leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
+		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
+		                                           TaskPriority::CoordinationReply));
+	}
+	wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0));
+	int attemptCoordinatorExclude = 0;
+	int coordinatorsUnavailable = 0;
+	for (int i = 0; i < leaderServers.size(); i++) {
+		NetworkAddress leaderAddress =
+		    coordinatorList.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
+		if (leaderServers[i].isReady()) {
+			if ((std::count(exclusions.begin(), exclusions.end(),
+			                AddressExclusion(leaderAddress.ip, leaderAddress.port)) ||
+			     std::count(exclusions.begin(), exclusions.end(), AddressExclusion(leaderAddress.ip)))) {
+				attemptCoordinatorExclude++;
+			}
+		} else {
+			coordinatorsUnavailable++;
+		}
+	}
+	int faultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
+	TraceEvent("ExclusionSafetyCheck")
+	    .detail("CoordinatorListSize", leaderServers.size())
+	    .detail("NumExclusions", exclusions.size())
+	    .detail("FaultTolerance", faultTolerance)
+	    .detail("AttemptCoordinatorExclude", attemptCoordinatorExclude);
+
+	bool coordinatorCheck = (attemptCoordinatorExclude <= faultTolerance);
+	return (ddCheck && coordinatorCheck);
 }

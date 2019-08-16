@@ -2053,7 +2053,8 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 				if (!safe) {
 					std::string errorStr =
 					    "ERROR: It is unsafe to exclude the specified servers at this time.\n"
-					    "Please try the exclude again in 30 seconds.\n"
+					    "Please check that this exclusion does not bring down an entire server team.\n"
+					    "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
 					    "Type `exclude FORCE permanent <ADDRESS>*' to exclude without performing safety checks.\n";
 					printf("%s", errorStr.c_str());
 					return true;

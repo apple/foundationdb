@@ -708,8 +708,11 @@ std::pair<vector<ShardsAffectedByTeamFailure::Team>,vector<ShardsAffectedByTeamF
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
 	if(team_shards.erase( std::pair<Team,KeyRange>(team, range) ) > 0) {
-		for(auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
-			storageServerShards[*uid]--;
+		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid) {
+			if (storageServerShards[*uid] > 0) {
+				storageServerShards[*uid]--;
+			}
+		}
 	}
 }
 

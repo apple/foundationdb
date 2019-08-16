@@ -939,10 +939,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKey
 				// Get all values of keyServers and remove serverID from every occurrence
 				// Very inefficient going over every entry in keyServers
 				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
-				state KeyRange currentKeys = KeyRangeRef(begin, allKeys.end);
 				state Standalone<RangeResultRef> keyServers =
-				    wait(krmGetRanges(&tr, keyServersPrefix, currentKeys,
+				    wait(krmGetRanges(&tr, keyServersPrefix, KeyRangeRef(begin, allKeys.end),
 				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
 				for (auto it : keyServers) {
 					vector<UID> src;
 					vector<UID> dest;
@@ -965,7 +965,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKey
 				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
 				wait(tr.commit());
 				// Update beginning of next iteration's range
-				begin = keyServers.end()[-1].key;
+				begin = currentKeys.end;
 				break;
 			} catch (Error& e) {
 				TraceEvent("FailedServerError").error(e);

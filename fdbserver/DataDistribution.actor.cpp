@@ -3137,9 +3137,8 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				// Current implementation of server erasure is sort of a hack that sets # shards to 0
-				// Defensive check for negative values instead of just 0
-				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) <= 0) {
+				ASSERT(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) >= 0);
+				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 					return Void();
 				}
 			}
@@ -4283,7 +4282,12 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 	return Void();
 }
 
-ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req, Reference<DDTeamCollection> self, Database cx) {
+ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req, Reference<DDTeamCollection> tc,
+                                          Database cx) {
+	if (!tc.isValid()) {
+		req.reply.send(false);
+		return Void();
+	}
 	state bool safe = true;
 	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
 	vector<UID> excludeServerIDs;
@@ -4297,7 +4301,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		}
 	}
 	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
-	for (const auto &team : self->teams) {
+	for (const auto &team : tc->teams) {
 		vector<UID> teamServerIDs = team->getServerIDs();
 		std::sort(teamServerIDs.begin(), teamServerIDs.end());
 		TraceEvent("DDExclusionSafetyCheck")

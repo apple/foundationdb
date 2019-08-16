@@ -405,8 +405,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
-		if (toKillArray.size()) {
-			toKillMarkFailedArray.push_back(deterministicRandom()->randomChoice(toKillArray));
+
+		loop {
+			auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size() / 2 + 2));
+			toKillMarkFailedArray.resize(failSet.size());
+			std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Safety Check")
+			    .detail("Exclusions", describe(toKillMarkFailedArray));
+			bool safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray));
+			if (safe) break;
 		}
 
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
