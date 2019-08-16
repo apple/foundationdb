@@ -2553,31 +2553,54 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait( delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY) );
+
 	state bool foundSSToRemove = false;
+	state Reference<TCServerInfo> secondPreferedSSToRemove;
 
 	loop {
 		 foundSSToRemove = false;
+		 secondPreferedSSToRemove = Reference<TCServerInfo>();
 		if (self->doRemoveWrongStoreType.get() == false) {
 			// Once the wrong storeType SS picked to be removed is removed, doRemoveWrongStoreType will be set to true;
 			// In case the SS fails in between, we should time out and check for the next SS.
 			wait(self->doRemoveWrongStoreType.onChange() || delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_TIMEOUT));
 		}
-		vector<Future<KeyValueStoreType>> initializingServers;
+		
 		for (auto& server : self->server_info) {
-			NetworkAddress a = server.second->lastKnownInterface.address();
-			AddressExclusion addr(a.ip, a.port);
-			TraceEvent("WrongStoreTypeRemover", self->distributorId)
-			    .detail("Server", server.first)
-			    .detail("Addr", addr.toString())
-			    .detail("StoreType", server.second->storeType)
-				.detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-			//if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) && existOtherHealthyTeams(self, server.first)) {
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
-				server.second->wrongStoreTypeToRemove.set(true);
-				foundSSToRemove = true;
-				break;
+				if (existOtherHealthyTeams(self, server.first)) {
+					// Prefer to remove a SS which does not cause zero healthy teams.
+					server.second->wrongStoreTypeToRemove.set(true);
+					foundSSToRemove = true;
+					NetworkAddress a = server.second->lastKnownInterface.address();
+					AddressExclusion addr(a.ip, a.port);
+					TraceEvent("WrongStoreTypeRemover", self->distributorId)
+						.detail("Server", server.first)
+						.detail("Addr", addr.toString())
+						.detail("StoreType", server.second->storeType)
+						.detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
+					break;
+				} else if (!secondPreferedSSToRemove.isValid()){
+					secondPreferedSSToRemove = server.second;
+				}
 			}
 		}
+
+		if (!foundSSToRemove && secondPreferedSSToRemove.isValid()) {
+			// To ensure all wrong storeType SS to be removed, we have to face the fact that health team number will drop to 0;
+			// This may create more than one SS on a worker, which cause performance issue.
+			// In a correct operation configuration, this should not happen.
+			secondPreferedSSToRemove->wrongStoreTypeToRemove.set(true);
+			foundSSToRemove = true;
+			NetworkAddress a = secondPreferedSSToRemove->lastKnownInterface.address();
+			AddressExclusion addr(a.ip, a.port);
+			TraceEvent(SevWarnAlways, "WrongStoreTypeRemover", self->distributorId)
+				.detail("Server", secondPreferedSSToRemove->id)
+				.detail("Addr", addr.toString())
+				.detail("StoreType", secondPreferedSSToRemove->storeType)
+				.detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
+		}
+		
 		self->doRemoveWrongStoreType.set(false);
 		if (!foundSSToRemove) {
 			break;
