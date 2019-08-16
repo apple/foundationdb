@@ -558,7 +558,7 @@ public:
 			wait(store(self->headerPage, self->readHeaderPage(self, 0)));
 
 			// If the checksum fails for the header page, try to recover committed header backup from page 1
-			if(BUGGIFY || !self->headerPage.castTo<Page>()->verifyChecksum(0)) {
+			if(!self->headerPage.castTo<Page>()->verifyChecksum(0)) {
 				TraceEvent(SevWarn, "COWPagerRecoveringHeader").detail("Filename", self->filename);
 	
 				wait(store(self->headerPage, self->readHeaderPage(self, 1)));
@@ -650,7 +650,7 @@ public:
 
 		self->pageCache = PageCacheT(self->pageCacheBytes / self->physicalPageSize);
 
-		debug_printf("COWPager(%s) recovered.  LogicalPageSize=%d PhysicalPageSize=%d\n", self->filename.c_str(), self->logicalPageSize, self->physicalPageSize);
+		debug_printf("COWPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n", self->filename.c_str(), self->pHeader->committedVersion, self->logicalPageSize, self->physicalPageSize);
 		return Void();
 	}
 
@@ -796,7 +796,7 @@ public:
 
 	ACTOR static Future<Void> commit_impl(COWPager *self) {
 		// Write old committed header to Page 1
-		self->writes.add(forwardError(self->writeHeaderPage(1, self->lastCommittedHeaderPage), self->errorPromise));
+		self->writes.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
 
 		// Flush the free list queue to the pager and get the new queue state into the header
 		wait(store(self->pHeader->freeList, self->freeList.flush()));
@@ -806,12 +806,12 @@ public:
 
 		// Sync everything except the header
 		wait(self->pageFile->sync());
-		debug_printf("COWPager(%s) commit sync 1\n", self->filename.c_str());
+		debug_printf("COWPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(), self->pHeader->committedVersion);
 
 		// Update header on disk and sync again.
 		wait(self->writeHeaderPage(0, self->headerPage));
 		wait(self->pageFile->sync());
-		debug_printf("COWPager(%s) commit sync 2\n", self->filename.c_str());
+		debug_printf("COWPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(), self->pHeader->committedVersion);
 
 		// Update the last committed header for use in the next commit.
 		self->updateCommittedHeader();
