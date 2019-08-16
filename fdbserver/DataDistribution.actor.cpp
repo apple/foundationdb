@@ -619,6 +619,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 
+	Future<Void> wrongStoreTypeRemover;
+
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
 
@@ -660,7 +662,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
-	    teamBuilder(Void()), badTeamRemover(Void()), configuration(configuration), readyToStart(readyToStart),
+	    teamBuilder(Void()), badTeamRemover(Void()), wrongStoreTypeRemover(Void()), configuration(configuration), readyToStart(readyToStart),
 	    clearHealthyZoneFuture(true),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
@@ -2469,6 +2471,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		if (server_info[removedServer]->wrongStoreTypeToRemove.get()) {
 			self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
+			if (self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = removeWrongStoreType(self);
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
 		}
 
 		// Step: Remove removedServer from server's global data
@@ -3259,6 +3265,10 @@ ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo
 	}
 
 	self->doRemoveWrongStoreType.set(true);
+	if (self->wrongStoreTypeRemover.isReady()) {
+		self->wrongStoreTypeRemover = removeWrongStoreType(self);
+		self->addActor.send(self->wrongStoreTypeRemover);
+	}
 	return Void();
 }
 
@@ -3633,7 +3643,12 @@ ACTOR Future<Void> storageServerTracker(
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongDC = !inCorrectDC(self, server);
 					self->restartTeamBuilder.trigger();
+					// TODO: remove this doRemoveWrongStoreType
 					self->doRemoveWrongStoreType.set(true);
+					if (self->wrongStoreTypeRemover.isReady()) {
+						self->wrongStoreTypeRemover = removeWrongStoreType(self);
+						self->addActor.send(self->wrongStoreTypeRemover);
+					}
 
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
@@ -3978,7 +3993,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 
 		self->addActor.send(machineTeamRemover(self));
 		self->addActor.send(serverTeamRemover(self));
-		self->addActor.send(removeWrongStoreType(self));
+
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
 
 		self->traceTeamCollectionInfo();
 
