@@ -701,6 +701,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 			tagLocality = tagLocalityLogRouter;
 		} else {
 			TraceEvent("TLogPopNoLogSystem", self->dbgid).detail("Locality", tagLocality).detail("Version", upTo);
+			return Void();
 		}
 	}
 	state Tag tag(tagLocality, inputTag.id);

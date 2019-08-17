@@ -248,7 +248,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) override {
 		switch (type) {
 		case ProcessClass::LogRouterClass:
-			if (tag.locality == tagLocalityLogRouter && pseudoLocalities.count(tagLocalityLogRouterMapped) > 0) {
+			if (tag.locality == tagLocalityLogRouter) {
+				ASSERT(pseudoLocalities.count(tagLocalityLogRouterMapped) > 0);
 				tag.locality = tagLocalityLogRouterMapped;
 			}
 			break;
