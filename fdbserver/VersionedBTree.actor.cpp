@@ -854,6 +854,10 @@ public:
 
 		self->pageFile.clear();
 
+		if(dispose) {
+			wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+		}
+
 		self->closedPromise.send(Void());
 		delete self;
 	}
