@@ -498,6 +498,10 @@ void initHelp() {
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
 	helpMap["waitopen"] = CommandHelp();
+	helpMap["sleep"] = CommandHelp(
+		"sleep <SECONDS>",
+		"sleep for a period of time",
+		"");
 	helpMap["get"] = CommandHelp(
 		"get <KEY>",
 		"fetch the value for a given key",
@@ -2733,6 +2737,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if( tokencmp(tokens[0], "waitopen")) {
 					wait(success( getTransaction(db,tr,options,intrans)->getReadVersion() ));
+					continue;
+				}
+
+				if( tokencmp(tokens[0], "sleep")) {
+					if(tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						double v;
+						int n=0;
+						if (sscanf(tokens[1].toString().c_str(), "%lf%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(delay(v));
+						}
+					}
 					continue;
 				}
 
