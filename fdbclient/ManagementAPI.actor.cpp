@@ -1341,13 +1341,17 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 
 ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnly) {
 	state Transaction tr(cx);
+	state Future<Void> timeoutDelay = printWarningOnly ? delay(2.0) : Never();
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
 			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
 			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
-			wait(success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF));
+			wait(timeoutDelay || (success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF)));
+			if(timeoutDelay.isReady()) {
+				return Void();
+			}
 			if (overallSwitchF.get().present()) {
 				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
 				int currentMode;
