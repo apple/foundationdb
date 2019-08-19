@@ -272,6 +272,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA,       0.1 );
 	init( START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL,        0.001 );
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
+	init( START_TRANSACTION_MAX_BUDGET_DEFICIT_SECONDS,          5.0 ); if( randomize && BUGGIFY ) START_TRANSACTION_MAX_BUDGET_DEFICIT_SECONDS = deterministicRandom()->random01() * 60 + 0.1;
+	// If the budget deficit exceeds the max budget deficit, the excess will decay by this fraction per second
+	init( START_TRANSACTION_EXCESS_BUDGET_DEFICIT_DECAY,         0.2 ); if( randomize && BUGGIFY ) START_TRANSACTION_EXCESS_BUDGET_DEFICIT_DECAY = deterministicRandom()->random01();
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;

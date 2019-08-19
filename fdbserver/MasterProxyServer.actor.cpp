@@ -1108,6 +1108,11 @@ struct TransactionRateInfo {
 		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
 		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
 		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
+
+		double minBudget = -rate * SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_DEFICIT_SECONDS;
+		if(limit < minBudget) {
+			limit += (minBudget - limit) * pow(1.0-SERVER_KNOBS->START_TRANSACTION_EXCESS_BUDGET_DEFICIT_DECAY, elapsed);
+		}
 	}
 
 	bool canStart(int64_t numAlreadyStarted) {
@@ -1115,7 +1120,10 @@ struct TransactionRateInfo {
 	}
 
 	void updateBudget(int64_t numStarted) {
-		limit -= numStarted;
+		double minBudget = -rate * SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_DEFICIT_SECONDS;
+		if(limit >= minBudget) {
+			limit = std::max(limit - numStarted, minBudget);
+		}
 	}
 };
 
