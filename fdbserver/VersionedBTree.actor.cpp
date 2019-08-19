@@ -80,7 +80,7 @@ public:
 		// Cursor will not read this page or anything beyond it.
 		LogicalPageID endPageID;
 
-		Cursor() : queue(nullptr) {
+		Cursor() : queue(nullptr), pageID(0), endPageID(0) {
 		}
 
 		void setEnd(Cursor &end) {
@@ -94,6 +94,7 @@ public:
 			queue = q;
 			pageID = newPageID;
 			initNewPageBuffer();
+			loading = Void();
 		}
 
 		// Point cursor to a page to read from.  Begin loading the page if beginLoad is set.
@@ -115,7 +116,6 @@ public:
 			auto p = raw();
 			p->next = 0;
 			p->count = 0;
-			loading = Void();
 		}
 
 		Cursor(Cursor &) = delete;
@@ -125,8 +125,8 @@ public:
 			loading.cancel();
 		}
 
-		Future<Void> ready() {
-			return loading;
+		Future<Void> notLoading() {
+			return loading.isValid() ? loading : Void();
 		}
 
 #pragma pack(push, 1)
@@ -192,6 +192,7 @@ public:
 		Future<Void> writeNext(const T &item) {
 			// If the cursor is loaded already, write the item and move to the next slot
 			if(loading.isReady()) {
+				debug_printf("FIFOQueue(%s): write next to %u:%d\n", queue->name.c_str(), pageID, index);
 				auto p = raw();
 				p->at(index) = item;
 				++p->count;
@@ -214,9 +215,18 @@ public:
 
 		// Read and moved past the next item if it is < upperBound
 		Future<Optional<T>> moveNext(const Optional<T> &upperBound = {}) {
-			// If loading is not valid then either the cursor is not initialized or it points to a page not yet durable.
+			// If loading is not valid then either the cursor is not initialized.
+			// It may have at one time pointed to a page not yet committed.
 			if(!loading.isValid()) {
-				return Optional<T>();
+				// If the pageID isn't the endPageID then start loading the page
+				if(pageID != endPageID) {
+					debug_printf("FIFOQueue(%s) starting load of page id=%u which is no longer the end page id=%u\n", queue->name.c_str(), pageID, endPageID);
+					loading = loadPage();
+				}
+				else {
+					// Otherwise we can't read anymore so return nothing
+					return Optional<T>();
+				}
 			}
 
 			// If loading is ready, read an item and move forward
@@ -231,7 +241,6 @@ public:
 				T result = p->at(index);
 				--queue->numEntries;
 				++index;
-				debug_printf("FIFOQueue(%s) read cursor popped from page id=%u index=%d count=%d\n", queue->name.c_str(), pageID, index, p->count);
 
 				// If this page is out of items, start reading the next one
 				if(index == p->count) {
@@ -245,9 +254,6 @@ public:
 					// freePage() must be called after setting the loading future because freePage() might pop from this
 					// queue recursively if the pager's free list is being stored in this queue.
 					queue->pager->freePage(oldPageID);
-				}
-				else {
-					debug_printf("FIFOQueue(%s) index and count are not the same %d %u\n", queue->name.c_str(), index, p->count);
 				}
 
 				return Optional<T>(result);
@@ -322,8 +328,13 @@ public:
 			}
 		}
 
-		// Wait for tail to be ready to write to a page
-		wait(self->tail.ready());
+		// Wait for the head cursor to be done loading because it might free a page, which would add to the
+		// free list queue, which might be this queue.
+		wait(self->head.notLoading());
+
+		// Wait for the final write to the queue to be finished, it may be waiting for a new pageID after
+		// filling a page to capacity.
+		wait(self->tail.notLoading());
 
 		// If tail page is not empty, link it to a new unwritten/empty page
 		if(!self->tail.empty()) {
