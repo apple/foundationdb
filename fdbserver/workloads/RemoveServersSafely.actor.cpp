@@ -296,13 +296,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		TraceEvent("RemoveAndKill").detail("Step", "exclude list first").detail("ToKill", describe(toKill1)).detail("KillTotal", toKill1.size()).detail("ClusterAvailable", g_simulator.isAvailable());
 		self->excludeAddresses(toKill1);
 
-		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL), self->kill1Timeout ) );
+		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL, false), self->kill1Timeout ) );
 
 		bClearedFirst = result.present();
-
+		// killProcArray is always empty here so why are we tracing it? is it meant to be something else or is a step missing somewhere?
 		TraceEvent("RemoveAndKill").detail("Step", "excluded list first").detail("Excluderesult", bClearedFirst ? "succeeded" : "failed").detail("KillTotal", toKill1.size()).detail("Processes", killProcArray.size()).detail("ToKill1", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 
-		bClearedFirst=false;
+		// this is never unset after this, is this line supposed to be here? below conditionals could all just be hard-coded instead if intentional
+		// bClearedFirst=false;
 		// Include the servers, if unable to exclude
 		if (!bClearedFirst) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
@@ -325,17 +326,17 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// so we expect to succeed after a finite amount of time
 		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("ToKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
 			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
+		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL, true), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
 
-		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 
 		// Reinclude all of the machine, if buggified
 		if (BUGGIFY) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
-			TraceEvent("RemoveAndKill").detail("Step", "include all second").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+			TraceEvent("RemoveAndKill").detail("Step", "include all second").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 			self->includeAddresses(toKill2);
-			TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+			TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
 
 		return Void();
@@ -386,7 +387,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killProcArray;
 	}
 
-	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs)
+	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs, bool safeKillSet)
 	{
 		state UID functionId = nondeterministicRandom()->randomUniqueID();
 
@@ -405,20 +406,23 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
-
-		loop {
-			auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size() / 2 + 2));
-			toKillMarkFailedArray.resize(failSet.size());
-			std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
-			TraceEvent("RemoveAndKill", functionId)
-			    .detail("Step", "Safety Check")
-			    .detail("Exclusions", describe(toKillMarkFailedArray));
-			bool safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray));
-			if (safe) break;
+		if (safeKillSet) {
+			loop {
+				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size() / 2 + 2));
+				toKillMarkFailedArray.resize(failSet.size());
+				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
+				TraceEvent("RemoveAndKill", functionId)
+					.detail("Step", "Safety Check")
+					.detail("Exclusions", describe(toKillMarkFailedArray));
+				bool safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray));
+				if (safe) break;
+			}
 		}
 
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
-		wait( excludeServers( cx, toKillMarkFailedArray, true ) );
+		if (safeKillSet) {
+			wait( excludeServers( cx, toKillMarkFailedArray, true ) );
+		}
 		wait( excludeServers( cx, toKillArray ) );
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough servers left
