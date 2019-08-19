@@ -20,6 +20,7 @@ def actorCommand(cmd: str, build:str, src: str):
     if m1 is None:
         return cmd
     cmd1 = r1.sub('\\1actor.cpp', cmd)
+    cmd1 += " -Wno-unknown-attributes" # Make IDEs not warn on our custom [[flow_*]] attributes
     return rreplace(cmd1, build, src)
 
 

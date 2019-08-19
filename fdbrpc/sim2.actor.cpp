@@ -980,16 +980,10 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> _run(Sim2 *self) {
-		Future<Void> loopFuture = self->runLoop(self);
-		self->net2->run();
-		wait( loopFuture );
-		return Void();
-	}
-
 	// Implement ISimulator interface
 	virtual void run() {
-		_run(this);
+		Future<Void> loopFuture = runLoop(this);
+		net2->run();
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,

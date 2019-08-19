@@ -1,5 +1,6 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
+set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} CACHE BOOL "Use valgrind for ctest")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
@@ -154,6 +155,10 @@ else()
         add_link_options(-lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
+    if (OPEN_FOR_IDE)
+      add_compile_options(
+        -Wno-unknown-attributes)
+    endif()
     add_compile_options(
       -Wno-unknown-warning-option
       -Wno-dangling-else
@@ -162,7 +167,6 @@ else()
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
-      -Wno-unused-value
       -Wno-tautological-pointer-compare
       -Wno-format)
   endif()

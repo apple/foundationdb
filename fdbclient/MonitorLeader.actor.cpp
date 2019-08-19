@@ -541,6 +541,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 	std::map<StringRef, ClientStatusStats> issueMap;
 	std::map<ClientVersionRef, ClientStatusStats> versionMap;
 	std::map<StringRef, ClientStatusStats> maxProtocolMap;
+	int clientCount = 0;
 
 	//SOMEDAY: add a yield in this loop
 	for(auto& ci : clientStatusInfoMap) {
@@ -551,19 +552,28 @@ OpenDatabaseRequest ClientData::getRequest() {
 				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 			}
 		}
-		StringRef maxProtocol;
-		for (auto& it : ci.second.versions) {
-			maxProtocol = std::max(maxProtocol, it.protocolVersion);
-			auto& entry = versionMap[it];
+		if(ci.second.versions.size()) {
+			clientCount++;
+			StringRef maxProtocol;
+			for(auto& it : ci.second.versions) {
+				maxProtocol = std::max(maxProtocol, it.protocolVersion);
+				auto& entry = versionMap[it];
+				entry.count++;
+				if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+					entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				}
+			}
+			auto& maxEntry = maxProtocolMap[maxProtocol];
+			maxEntry.count++;
+			if(maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+				maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+			}
+		} else {
+			auto& entry = versionMap[ClientVersionRef()];
 			entry.count++;
 			if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
 				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 			}
-		}
-		auto& maxEntry = maxProtocolMap[maxProtocol];
-		maxEntry.count++;
-		if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-			maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 		}
 	}
 
@@ -579,7 +589,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 	for(auto& it : maxProtocolMap) {
 		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
 	}
-	req.clientCount = clientStatusInfoMap.size();
+	req.clientCount = clientCount;
 
 	return req;
 }

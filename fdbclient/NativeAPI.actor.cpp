@@ -3077,14 +3077,15 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
-	++cx->transactionReadVersions;
-	flags |= options.getReadVersionFlags;
-
-	auto& batcher = cx->versionBatcher[flags];
-	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), flags);
-	}
 	if (!readVersion.isValid()) {
+		++cx->transactionReadVersions;
+		flags |= options.getReadVersionFlags;
+
+		auto& batcher = cx->versionBatcher[ flags ];
+		if (!batcher.actor.isValid()) {
+			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
+		}
+
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();
