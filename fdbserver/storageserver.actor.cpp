@@ -3452,7 +3452,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 		double elapsedTime = loopTopTime - lastLoopTopTime;
 		if( elapsedTime > 0.050 ) {
 			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).detail("Elapsed", elapsedTime);
+				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).suppressFor(30.0).detail("Elapsed", elapsedTime);
 		}
 		lastLoopTopTime = loopTopTime;
 
