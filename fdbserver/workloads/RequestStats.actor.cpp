@@ -52,7 +52,7 @@ struct RequestStatsWorkload : KVWorkload {
 
 	ACTOR static Future<Void> _setup(Database cx, RequestStatsWorkload* self) {
 		state int keyStart = 0;
-		state int key;
+		state int key = keyStart;
 		state Transaction tr(cx);
 
 		while (key < self->keysPopulated) {
@@ -118,14 +118,20 @@ struct RequestStatsWorkload : KVWorkload {
 	ACTOR static Future<Void> _start(Database cx, RequestStatsWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
 
-		state int i;
-		for (i = 0; i < self->readTransactions; ++i) {
+		state int i = 0;
+		for (; i < self->readTransactions; ++i) {
 			loop {
 				try {
 					tr.reset();
-					tr.setOption(FDBTransactionOptions::TRACK_REQUEST_STATS);
-					state int j;
-					for (j = 0; j < self->pointReadsPerTransaction; ++j) {
+					try {
+						tr.setOption(FDBTransactionOptions::TRACK_REQUEST_STATS);
+					} catch(Error &e) {
+						if (e.code() != error_code_client_invalid_operation) {
+							throw e;
+						}
+					}
+					state int j = 0;
+					for (; j < self->pointReadsPerTransaction; ++j) {
 						Optional<Value> v =
 						    wait(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->keysPopulated))));
 						ASSERT(v.present());

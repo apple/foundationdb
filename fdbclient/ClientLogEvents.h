@@ -34,9 +34,9 @@ struct RequestStats {
 		ReadStats(int readId, int bytesFetched, int keysFetched, Key beginKey, Key endKey, NetworkAddress storageContacted, double latency) :
 			readId(readId), bytesFetched(bytesFetched), keysFetched(keysFetched), beginKey(beginKey), endKey(endKey), storageContacted(storageContacted), latency(latency) {}
 
-		int readId;
-		int bytesFetched;
-		int keysFetched;
+		uint64_t readId;
+		uint64_t bytesFetched;
+		uint64_t keysFetched;
 		Key beginKey;
 		Key endKey;
 		NetworkAddress storageContacted;
@@ -56,12 +56,12 @@ struct RequestStats {
 		json_spirit::Array readStatsList;
 		for (const auto &r : reads) {
 			json_spirit::Object readStats;
-			readStats.push_back(json_spirit::Pair("readId", json_spirit::Value(static_cast<uint64_t>(r.readId))));
+			readStats.push_back(json_spirit::Pair("readId", json_spirit::Value(r.readId)));
 			readStats.push_back(json_spirit::Pair("beginKey", json_spirit::Value(r.beginKey.toString())));
 			readStats.push_back(json_spirit::Pair("endKey", json_spirit::Value(r.endKey.toString())));
 			readStats.push_back(json_spirit::Pair("storageContacted", json_spirit::Value(r.storageContacted.toString())));
-			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(static_cast<uint64_t>(r.keysFetched))));
-			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(static_cast<uint64_t>(r.bytesFetched))));
+			readStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(r.keysFetched)));
+			readStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(r.bytesFetched)));
 			readStats.push_back(json_spirit::Pair("latency", json_spirit::Value(r.latency)));
 			readStatsList.push_back(readStats);
 		}

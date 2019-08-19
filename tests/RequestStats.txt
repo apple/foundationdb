@@ -7,5 +7,5 @@ keysPopulated=1000
 pointReadsPerTransaction=10
 rangeReadsPerTransaction=1
 rangeReadSize=10
-samplingProbability=0.01
-readTransactions=10
+samplingProbability=0.1
+readTransactions=1000
