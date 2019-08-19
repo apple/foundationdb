@@ -146,7 +146,7 @@ struct RatekeeperLimits {
 		logTargetBytes(logTargetBytes),
 		logSpringBytes(logSpringBytes),
 		maxVersionDifference(maxVersionDifference),
-		durabilityLagTargetVersions(durabilityLagTargetVersions),
+		durabilityLagTargetVersions(durabilityLagTargetVersions + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not be durable on the storage servers
 		durabilityLagLimit(std::numeric_limits<double>::infinity()),
 		lastDurabilityLag(0),
 		context(context)

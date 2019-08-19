@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.2
+6.2.3
 =====
 
 Performance
@@ -94,6 +94,7 @@ Fixes only impacting 6.2.0+
 * Clients could crash when closing connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 * Do not close idle network connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 * In status, ``max_protocol_clients`` were incorrectly added to the ``connected_clients`` list. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
+* Ratekeeper ignores the (default 5 second) MVCC window when controlling on durability lag. [6.2.3] `(PR #2012) <https://github.com/apple/foundationdb/pull/2012>`_.
 
 Earlier release notes
 ---------------------
