@@ -40,7 +40,6 @@ struct BackupData {
 	Database cx;
 	std::vector<TagsAndMessage> messages;
 	std::vector<Version> versions;  // one for each of the "messages"
-	AsyncTrigger backupDone;
 
 	CounterCollection cc;
 	Future<Void> logger;
@@ -102,7 +101,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	loop {
 		ASSERT(self->messages.size() == self->versions.size());
 		if (self->savedVersion >= self->endVersion) {
-			self->backupDone.trigger();
 			return Void();
 		}
 
@@ -215,7 +213,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
-	state Future<Void> onDone = self.backupDone.onTrigger();
 
 	TraceEvent("BackupWorkerStart", interf.id())
 	    .detail("Tag", req.routerTag.toString())
@@ -225,9 +222,10 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	    .detail("BackupEpoch", req.backupEpoch);
 	try {
 		addActor.send(pullAsyncData(&self));
-		addActor.send(uploadData(&self));
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+
+		state Future<Void> done = uploadData(&self);
 
 		loop choose {
 			when(wait(dbInfoChange)) {
@@ -242,7 +240,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				    .detail("HasBackupLocality", hasPseudoLocality)
 				    .detail("Tag", self.tag.toString());
 			}
-			when(wait(onDone)) {
+			when(wait(done)) {
 				TraceEvent("BackupWorkerDone", interf.id()).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
