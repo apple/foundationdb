@@ -353,10 +353,23 @@ public:
 				tLocalities.push_back(object->interf.locality);
 			}
 
-			TraceEvent(SevWarn, "GetTLogTeamFailed").detail("Policy", policy->info()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size()).detail("FitnessGroups", fitness_workers.size())
-				.detail("TLogZones", ::describeZones(tLocalities)).detail("TLogDataHalls", ::describeDataHalls(tLocalities)).detail("MissingZones", ::describeZones(unavailableLocals))
-				.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals)).detail("Required", required).detail("DesiredLogs", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-				.detail("CheckStable", checkStable).detail("NumExclusionWorkers", exclusionWorkerIds.size()).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+			TraceEvent(SevWarn, "GetTLogTeamFailed")
+			    .suppressFor(1.0)
+			    .detail("Policy", policy->info())
+			    .detail("Processes", logServerSet->size())
+			    .detail("Workers", id_worker.size())
+			    .detail("FitnessGroups", fitness_workers.size())
+			    .detail("TLogZones", ::describeZones(tLocalities))
+			    .detail("TLogDataHalls", ::describeDataHalls(tLocalities))
+			    .detail("MissingZones", ::describeZones(unavailableLocals))
+			    .detail("MissingDataHalls", ::describeDataHalls(unavailableLocals))
+			    .detail("Required", required)
+			    .detail("DesiredLogs", desired)
+			    .detail("RatingTests", SERVER_KNOBS->POLICY_RATING_TESTS)
+			    .detail("CheckStable", checkStable)
+			    .detail("NumExclusionWorkers", exclusionWorkerIds.size())
+			    .detail("PolicyGenerations", SERVER_KNOBS->POLICY_GENERATIONS)
+			    .backtrace();
 
 			logServerSet->clear();
 			logServerSet.clear();
@@ -1362,7 +1375,10 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).suppressFor(1.0).error(e);
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+					.suppressFor(1.0)
+				    .detail("OutstandingStorageRequests", self->outstandingStorageRequests.size())
+				    .error(e);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
@@ -1655,7 +1671,10 @@ void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest r
 	} catch ( Error& e ) {
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.push_back( std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT) );
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				.suppressFor(1.0)
+			    .detail("OutstandingStorageRequests", self->outstandingStorageRequests.size())
+			    .error(e);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 			throw;  // Any other error will bring down the cluster controller
