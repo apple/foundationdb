@@ -2856,18 +2856,18 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
-			TraceEvent("TeamHealthChangeDetected", self->distributorId)
-			    .detail("Team", team->getDesc())
-			    .detail("ServersLeft", serversLeft)
-			    .detail("LastServersLeft", lastServersLeft)
-			    .detail("AnyUndesired", anyUndesired)
-			    .detail("LastAnyUndesired", lastAnyUndesired)
-			    .detail("AnyWrongConfiguration", anyWrongConfiguration)
-			    .detail("LastWrongConfiguration", lastWrongConfiguration)
-			    .detail("Recheck", recheck)
-			    .detail("BadTeam", badTeam)
-			    .detail("LastZeroHealthy", lastZeroHealthy)
-			    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+			// TraceEvent("TeamHealthChangeDetected", self->distributorId)
+			//     .detail("Team", team->getDesc())
+			//     .detail("ServersLeft", serversLeft)
+			//     .detail("LastServersLeft", lastServersLeft)
+			//     .detail("AnyUndesired", anyUndesired)
+			//     .detail("LastAnyUndesired", lastAnyUndesired)
+			//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
+			//     .detail("LastWrongConfiguration", lastWrongConfiguration)
+			//     .detail("Recheck", recheck)
+			//     .detail("BadTeam", badTeam)
+			//     .detail("LastZeroHealthy", lastZeroHealthy)
+			//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 			lastReady = self->initialFailureReactionDelay.isReady();
 			lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -2918,11 +2918,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
 							.detail("SignallingTeam", team->getDesc())
 							.detail("Primary", self->primary);
-						// self->traceAllInfo(true);
-						// Create a new team for safe
-						// self->restartRecruiting.trigger();
-						// self->doBuildTeams = true;
-						// self->restartTeamBuilder.trigger();
 					}
 
 					if(logTeamEvents) {
@@ -3057,7 +3052,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			if( self->healthyTeamCount == 0 ) {
 				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
-				self->restartRecruiting.trigger();
 			}
 		}
 		if (lastOptimal) {
@@ -3143,9 +3137,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	return results;
 }
 
-// Q: Why do we need this actor?
-// The serverList system keyspace keeps the StorageServerInterface for each serverID. If a storage server process
-// crashes and restarted at a different machine, will we reuse the StorageServerInterface? A: Storage server's storeType
+// The serverList system keyspace keeps the StorageServerInterface for each serverID. Storage server's storeType
 // and serverID are decided by the server's filename. By parsing storage server file's filename on each disk, process on
 // each machine creates the TCServer with the correct serverID and StorageServerInterface.
 ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
@@ -3291,10 +3283,10 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				TraceEvent("WaitForAllDataRemoved")
-				    .detail("Server", serverID)
-				    .detail("CanRemove", canRemove)
-				    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+				// TraceEvent("WaitForAllDataRemoved")
+				//     .detail("Server", serverID)
+				//     .detail("CanRemove", canRemove)
+				//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 					return Void();
 				}
@@ -3344,17 +3336,8 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 		}
 
 		self->server_status.set( interf.id(), *status );
-		TraceEvent("MXTEST")
-		    .detail("DDID", self->distributorId)
-		    .detail("Server", interf.id())
-		    .detail("Unhealthy", status->isUnhealthy())
-		    .detail("Status", status->toString());
 		if (status->isFailed) {
 			self->restartRecruiting.trigger();
-			TraceEvent("MXTESTTriggerRestartRecruiting")
-			    .detail("DDID", self->distributorId)
-			    .detail("Server", interf.id());
-			wait(delay(0.1));
 		}
 
 		Future<Void> healthChanged = Never();
@@ -3385,11 +3368,11 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self, TCServerI
 					}
 				}
 
-				TraceEvent("StatusMapChange", self->distributorId)
-				    .detail("ServerID", interf.id())
-				    .detail("Status", status->toString())
-				    .detail("Available",
-				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+				// TraceEvent("StatusMapChange", self->distributorId)
+				//     .detail("ServerID", interf.id())
+				//     .detail("Status", status->toString())
+				//     .detail("Available",
+				//             IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 			when ( wait( self->healthyZone.onChange() ) ) {}
@@ -3439,7 +3422,6 @@ ACTOR Future<Void> storageServerTracker(
 						.detail("OtherHealthy", !self->server_status.get( i.second->id ).isUnhealthy());
 					// wait for the server's ip to be changed
 					otherChanges.push_back(self->server_status.onChange(i.second->id));
-					// ASSERT(i.first == i.second->id); //MX: TO enable the assert
 					if (!self->server_status.get(i.second->id).isUnhealthy()) {
 						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
@@ -3534,9 +3516,6 @@ ACTOR Future<Void> storageServerTracker(
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
 					server->removed.send( Void() );
 					self->removedServers.send( server->id );
-					// if (server->wrongStoreTypeToRemove.get()) {
-					// 	self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
-					// }
 					return Void();
 				}
 				when( std::pair<StorageServerInterface, ProcessClass> newInterface = wait( interfaceChanged ) ) {
@@ -3636,10 +3615,8 @@ ACTOR Future<Void> storageServerTracker(
 					}
 
 					interfaceChanged = server->onInterfaceChanged;
-					// We rely on the old failureTracker being actorCancelled since the old actor now has a pointer to
-					// an invalid location ?
-					// Q: Why does the old failureTracker has a pointer to an invalid location?
-					// Q: Will the status's isFailed and isUndesired field be reset at the beginning of loop?!
+					// Old failureTracker for the old interface will be actorCancelled since the handler of the old
+					// actor now points to the new failure monitor actor.
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
 
 					// self->traceTeamCollectionInfo();
@@ -3793,7 +3770,6 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 	state Future<RecruitStorageReply> fCandidateWorker;
 	state RecruitStorageRequest lastRequest;
 	state bool hasHealthyTeam;
-	state int numRecuitSSPending = 0;
 	state std::map<AddressExclusion, int> numSSPerAddr;
 	loop {
 		try {
@@ -3844,18 +3820,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			}
 
 			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
-				TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting")
-				    .detail("Primary", self->primary)
-				    .detail("State", "Sending rsr request to CC");
 				lastRequest = rsr;
 				fCandidateWorker = brokenPromiseToNever( db->get().clusterInterface.recruitStorage.getReply( rsr, TaskPriority::DataDistribution ) );
 			}
-
-			TraceEvent("StorageRecruiterMX", self->distributorId)
-			    .detail("Primary", self->primary)
-			    .detail("HasHealthyTeam", hasHealthyTeam)
-			    .detail("SysStoreType", self->configuration.storageServerStoreType);
-			self->traceAllInfo(true);
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
@@ -3863,14 +3830,8 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					                                 candidateWorker.worker.address().port);
 					int numExistingSS = numSSPerAddr[candidateSSAddr];
 					if (numExistingSS >= 2) {
-						TraceEvent(SevWarnAlways, "StorageRecruiterTooManySSOnSameAddrMX", self->distributorId)
+						TraceEvent(SevWarnAlways, "StorageRecruiterTooManySSOnSameAddr", self->distributorId)
 						    .detail("Primary", self->primary)
-						    .detail("Addr", candidateSSAddr.toString())
-						    .detail("NumExistingSS", numExistingSS);
-					} else {
-						TraceEvent("DDRecruiting", self->distributorId)
-						    .detail("Primary", self->primary)
-						    .detail("State", "Got worker for SS")
 						    .detail("Addr", candidateSSAddr.toString())
 						    .detail("NumExistingSS", numExistingSS);
 					}
@@ -3879,18 +3840,11 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				when( wait( db->onChange() ) ) { // SOMEDAY: only if clusterInterface changes?
 					fCandidateWorker = Future<RecruitStorageReply>();
 				}
-				when(wait(self->restartRecruiting.onTrigger())) {
-					TraceEvent("DDRecruiting", self->distributorId)
-					    .detail("Primary", self->primary)
-					    .detail("State", "Restart recruiting");
-				}
+				when(wait(self->restartRecruiting.onTrigger())) {}
 			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
-				TraceEvent("StorageRecruiterMXExit", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("Error", e.what());
 				throw;
 			}
 			TEST(true); //Storage recruitment timed out
@@ -4006,9 +3960,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->traceTeamCollectionInfo();
 
 		if(self->includedDCs.size()) {
-			for (int i = 0; i < self->includedDCs.size(); ++i) {
-				TraceEvent("DDTeamCollectionMXTEST").detail("IncludedDC", i).detail("DC", self->includedDCs[i]);
-			}
 			//start this actor before any potential recruitments can happen
 			self->addActor.send(updateReplicasKey(self, self->includedDCs[0]));
 		}

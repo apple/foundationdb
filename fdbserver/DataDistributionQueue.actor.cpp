@@ -796,7 +796,6 @@ struct DDQueueData {
 				continue;
 			}
 
-			// MXQ: What does the if mean in the following comment?
 			// Because the busyness of a server is decreased when a superseding relocation is issued, we
 			//  need to consider what the busyness of a server WOULD be if
 			auto containedRanges = inFlight.containedRanges( rd.keys );
@@ -807,7 +806,6 @@ struct DDQueueData {
 				}
 			}
 
-			// MXQ: I don't understand the SOMEDAY and FIXME statement
 			// Data movement avoids overloading source servers in moving data.
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 			// queue

@@ -1363,7 +1363,7 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
 				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-					.suppressFor(1.0)
+				    .suppressFor(1.0)
 				    .detail("OutstandingReq", i)
 				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment)
 				    .error(e);
