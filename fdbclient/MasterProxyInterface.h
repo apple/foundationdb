@@ -31,6 +31,7 @@
 #include "fdbclient/CommitTransaction.h"
 
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;

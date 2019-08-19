@@ -28,7 +28,7 @@
 
 template <class Interface>
 struct OptionalInterface {
-	friend class serializable_traits<OptionalInterface<Interface>>;
+	friend struct serializable_traits<OptionalInterface<Interface>>;
 	// Represents an interface with a known id() and possibly known actual endpoints.
 	// For example, an OptionalInterface<TLogInterface> represents a particular tlog by id, which you might or might not presently know how to communicate with
 
@@ -158,7 +158,7 @@ struct OldTLogConf {
 	Version epochEnd;
 	int32_t logRouterTags;
 	int32_t txsTags;
-	std::set<int8_t> pseudoLocalities;
+	std::set<int8_t> pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
 
 	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 	explicit OldTLogConf(const OldLogData&);
@@ -189,8 +189,11 @@ struct OldTLogConf {
 	}
 };
 
+// LogSystemType is always 2 (tagPartitioned). There is no other tag partitioned system.
+// This type is supposed to be removed. However, because the serialized value of the type is stored in coordinators,
+// removing it is complex in order to support forward and backward compatibility.
 enum class LogSystemType {
-	empty = 0,
+	empty = 0, // Never used.
 	tagPartitioned = 2,
 };
 BINARY_SERIALIZABLE(LogSystemType);

@@ -74,7 +74,7 @@ Example: A Server Interface
 
 Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a ``choose`` statement with a ``when`` for each request type. Each ``when`` uses ``waitNext()`` to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a ``Promise<int>`` instead of just an ``int`` to facilitate sending back the return message.
 
-To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance.:
+To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance:
 
 .. code-block:: c
 

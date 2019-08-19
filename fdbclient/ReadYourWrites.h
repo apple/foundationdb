@@ -82,7 +82,7 @@ public:
 			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limits, snapshot, reverse );
 	}
 
-	Future< Standalone<VectorRef<const char*>> > getAddressesForKey(const Key& key);
+	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void addReadConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
@@ -92,18 +92,18 @@ public:
 	void clear( const KeyRangeRef& range );
 	void clear( const KeyRef& key );
 
-	Future<Void> watch(const Key& key);
+	[[nodiscard]] Future<Void> watch(const Key& key);
 
 	void addWriteConflictRange( KeyRangeRef const& keys );
 
-	Future<Void> commit();
+	[[nodiscard]] Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
 	int64_t getApproximateSize() { return approximateSize; }
-	Future<Standalone<StringRef>> getVersionstamp();
+	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
-	Future<Void> onError( Error const& e );
+	[[nodiscard]] Future<Void> onError(Error const& e);
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}

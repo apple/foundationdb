@@ -70,7 +70,7 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 ACTOR static void emptyVoidActor() {
 }
 
-ACTOR static Future<Void> emptyActor() {
+ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
 	return Void();
 }
 
@@ -201,7 +201,6 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
-	virtual bool useObjectSerializer() const { return baseNetwork->useObjectSerializer(); }
 };
 
 struct NonserializableThing {};

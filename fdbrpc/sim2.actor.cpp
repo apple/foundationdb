@@ -980,16 +980,10 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> _run(Sim2 *self) {
-		Future<Void> loopFuture = self->runLoop(self);
-		self->net2->run();
-		wait( loopFuture );
-		return Void();
-	}
-
 	// Implement ISimulator interface
 	virtual void run() {
-		_run(this);
+		Future<Void> loopFuture = runLoop(this);
+		net2->run();
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -1090,10 +1084,6 @@ public:
 		}
 
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
-	}
-
-	virtual bool useObjectSerializer() const {
-		return net2->useObjectSerializer();
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
@@ -1588,10 +1578,10 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2(bool objSerializer) : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
-		g_network = net2 = newNet2(false, true, objSerializer);
+		g_network = net2 = newNet2(false, true);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
 	}
@@ -1699,9 +1689,9 @@ public:
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
 
-void startNewSimulator(bool objSerializer) {
+void startNewSimulator() {
 	ASSERT( !g_network );
-	g_network = g_pSimulator = new Sim2(objSerializer);
+	g_network = g_pSimulator = new Sim2();
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 

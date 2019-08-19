@@ -36,6 +36,7 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
+// The set of tLog servers and logRouters for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
@@ -661,6 +662,8 @@ struct ILogSystem {
 
 	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped ) = 0;
 		// Same contract as peek(), but only for peeking the txsLocality. It allows specifying a preferred peek locality.
+
+	virtual Future<Version> getTxsPoppedVersion() = 0;
 
 	virtual Version getKnownCommittedVersion() = 0;
 

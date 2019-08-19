@@ -305,6 +305,7 @@ struct NetworkMetrics {
 
 	double oldestAlternativesFailure;
 	double newestAlternativesFailure;
+	double lastAlternativesFailureSkipDelay;
 	double lastSync;
 
 	double secSquaredSubmit;
@@ -372,7 +373,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, bool useObjectSerializer = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
@@ -446,9 +447,6 @@ public:
 
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
-
-	virtual bool useObjectSerializer() const = 0;
-	// Whether or not the object serializer should be used when sending packets
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

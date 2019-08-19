@@ -69,7 +69,7 @@ struct RequestStatsWorkload : KVWorkload {
 					keyStart = key;
 					break;
 				} catch (Error& e) {
-					tr.onError(e);
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -142,7 +142,7 @@ struct RequestStatsWorkload : KVWorkload {
 						self->testFailed = self->testFailed || !self->checkRequestStats(reqStats.get());
 					break;
 				} catch (Error& e) {
-					tr.onError(e);
+					wait(tr.onError(e));
 				}
 			}
 		}

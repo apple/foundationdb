@@ -44,7 +44,7 @@ ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Ve
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
-	int32_t txsTags;
+	int32_t txsTags; // The number of txsTags, which may change across generations.
 	Version epochEnd;
 	std::set<int8_t> pseudoLocalities;
 
@@ -167,7 +167,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
-	std::set<int8_t> pseudoLocalities;
+	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	std::map<int8_t, Version> pseudoLocalityPopVersion;
 
 	// new members
@@ -1056,6 +1056,65 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	ACTOR static Future<Version> getPoppedFromTLog( Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag ) {
+		loop {
+			choose {
+				when( TLogPeekReply rep = wait( log->get().present() ? brokenPromiseToNever(log->get().interf().peekMessages.getReply(TLogPeekRequest(-1, tag, false, false))) : Never() ) ) {
+					ASSERT(rep.popped.present());
+					return rep.popped.get();
+				}
+				when( wait( log->onChange() ) ) {}
+			}
+		}
+	}
+
+	ACTOR static Future<Version> getPoppedTxs(TagPartitionedLogSystem* self) {
+		state std::vector<std::vector<Future<Version>>> poppedFutures;
+		state std::vector<Future<Void>> poppedReady;
+		if(self->tLogs.size()) {
+			poppedFutures.push_back( std::vector<Future<Version>>() );
+			for(auto& it : self->tLogs) {
+				for(auto& log : it->logServers) {
+					poppedFutures.back().push_back(getPoppedFromTLog(log, self->tLogs[0]->tLogVersion < TLogVersion::V4 ? txsTag : Tag(tagLocalityTxs, 0)));
+				}
+			}
+			poppedReady.push_back(waitForAny(poppedFutures.back()));
+		}
+
+		for(auto& old : self->oldLogData) {
+			if(old.tLogs.size()) {
+				poppedFutures.push_back( std::vector<Future<Version>>() );
+				for(auto& it : old.tLogs) {
+					for(auto& log : it->logServers) {
+						poppedFutures.back().push_back(getPoppedFromTLog(log, old.tLogs[0]->tLogVersion < TLogVersion::V4 ? txsTag : Tag(tagLocalityTxs, 0)));
+					}
+				}
+				poppedReady.push_back(waitForAny(poppedFutures.back()));
+			}
+		}
+
+		state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
+		wait( waitForAll(poppedReady) || maxGetPoppedDuration );
+
+		if(maxGetPoppedDuration.isReady()) {
+			TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+		}
+		
+		Version maxPopped = 1;
+		for(auto &it : poppedFutures) {
+			for(auto &v : it) {
+				if(v.isReady()) {
+					maxPopped = std::max(maxPopped, v.get());
+				}
+			}
+		}
+		return maxPopped;
+	}
+
+	virtual Future<Version> getTxsPoppedVersion() {
+		return getPoppedTxs(this);
+	}
+
 	ACTOR static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID) {
 		state vector<Future<Void>> alive;
 		int numPresent = 0;
@@ -1868,12 +1927,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
-				if(nonShardedTxs) {
-					localTags.push_back(txsTag);
-				} else {
-					for(int i = 0; i < self->txsTags; i++) {
-						localTags.push_back(Tag(tagLocalityTxs, i));
-					}
+			}
+		}
+
+		if(oldLogSystem->tLogs.size()) {
+			if(nonShardedTxs) {
+				localTags.push_back(txsTag);
+			} else {
+				for(int i = 0; i < self->txsTags; i++) {
+					localTags.push_back(Tag(tagLocalityTxs, i));
 				}
 			}
 		}

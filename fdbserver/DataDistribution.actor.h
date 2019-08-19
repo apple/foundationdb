@@ -131,7 +131,7 @@ struct TeamCollectionInterface {
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
 public:
 	ShardsAffectedByTeamFailure() {}
-	
+
 	struct Team {
 		vector<UID> servers;  // sorted
 		bool primary;
@@ -141,7 +141,7 @@ public:
 
 		bool operator < ( const Team& r ) const {
 			if( servers == r.servers ) return primary < r.primary;
-			return servers < r.servers; 
+			return servers < r.servers;
 		}
 		bool operator == ( const Team& r ) const {
 			return servers == r.servers && primary == r.primary;
@@ -209,6 +209,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<vector<UID>> primaryTeams;
 	std::set<vector<UID>> remoteTeams;
 	vector<DDShardInfo> shards;
+	Optional<Key> initHealthyZoneValue;
 };
 
 Future<Void> dataDistributionTracker(

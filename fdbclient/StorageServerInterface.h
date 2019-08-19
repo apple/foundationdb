@@ -28,6 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
@@ -119,7 +120,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
 	}
 };
 
@@ -167,7 +168,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
 	}
 };
 
@@ -198,7 +199,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, *(LoadBalancedReply*)this, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
 	}
 };
 

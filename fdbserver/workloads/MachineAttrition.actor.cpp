@@ -35,6 +35,27 @@ static std::set<int> const& normalAttritionErrors() {
 	return s;
 }
 
+ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
+	// duration doesn't matter since this won't timeout
+	TraceEvent("IgnoreSSFailureStart");
+	bool _ = wait(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)); 
+	TraceEvent("IgnoreSSFailureWait");
+	wait(delay(duration));
+	TraceEvent("IgnoreSSFailureClear");
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(healthyZoneKey);
+			wait(tr.commit());
+			TraceEvent("IgnoreSSFailureComplete");
+			return true;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
 	int machinesToKill, machinesToLeave;
@@ -45,6 +66,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool replacement;
 	bool waitForVersion;
 	bool allowFaultInjection;
+	Future<bool> ignoreSSFailures;
 
 	// This is set in setup from the list of workers when the cluster is started
 	std::vector<LocalityData> machines;
@@ -62,6 +84,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
 		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
+		ignoreSSFailures = true;
 	}
 
 	static vector<ISimulator::ProcessInfo*> getServers() {
@@ -105,7 +128,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			throw please_reboot();
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	virtual Future<bool> check( Database const& cx ) { return ignoreSSFailures; }
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 	}
 
@@ -169,10 +192,14 @@ struct MachineAttritionWorkload : TestWorkload {
 
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
-
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
-					wait( setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01()*20 ) );
+					bool _ =
+					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
+					// }
+				} else if (BUGGIFY_WITH_PROB(0.005)) {
+					TEST(true); // Disable DD for all storage server failures
+					self->ignoreSSFailures = ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5);
 				}
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
@@ -203,7 +230,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				if(!self->replacement)
 					self->machines.pop_back();
 
-				wait( delay( meanDelay - delayBeforeKill ) );
+				wait(delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
+
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}
