@@ -172,6 +172,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
+	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          2 );
+	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
 }
 
 static std::string toLower( std::string const& name ) {
