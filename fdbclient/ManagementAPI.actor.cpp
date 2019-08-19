@@ -423,11 +423,11 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						for(auto& it : newConfig.regions) {
 							newDcIds.insert(it.dcId);
 						}
-						std::set<Key> missingDcIds;
+						std::set<Optional<Key>> missingDcIds;
 						for(auto& s : serverList) {
 							auto ssi = decodeServerListValue( s.value );
 							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
-								missingDcIds.insert(ssi.locality.dcId().get());
+								missingDcIds.insert(ssi.locality.dcId());
 							}
 						}
 						if(missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
