@@ -2549,60 +2549,63 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 	return false;
 }
 
+ACTOR Future<Void> checkWrongStoreTypeServerRemoved(DDTeamCollection* self, UID removeServerID) {
+	loop {
+		wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_TIMEOUT));
+		bool exist = self->server_info.find(removeServerID) != self->server_info.end();
+		// The server with wrong store type can either be removed or replaced with a correct storeType interface
+		// Q: How to swap a SS interface? Change a new storage filename to use the old SS id?
+		if (!exist ||
+		    self->server_info[removeServerID]->isCorrectStoreType(self->configuration.storageServerStoreType)) {
+			break;
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY));
 
-	state bool foundSSToRemove = false;
-	state Reference<TCServerInfo> secondPreferedSSToRemove;
+	state UID removeServerID;
+	state Future<Void> fisServerRemoved = Never();
 
+	TraceEvent("WrongStoreTypeRemoverStart", self->distributorId).detail("Servers", self->server_info.size());
 	loop {
-		foundSSToRemove = false;
-		secondPreferedSSToRemove = Reference<TCServerInfo>();
-		if (self->doRemoveWrongStoreType.get() == false) {
+		// Removing a server here when DD is not healthy may lead to rare failure scenarios, for example,
+		// the server with wrong storeType is shutting down while this actor marks it as to-be-removed.
+		// In addition, removing servers cause extra data movement, which should be done while a cluster is healthy
+		wait(waitUntilHealthy(self));
+		while (self->doRemoveWrongStoreType.get() == false) {
 			// Once the wrong storeType SS picked to be removed is removed, doRemoveWrongStoreType will be set to true;
 			// In case the SS fails in between, we should time out and check for the next SS.
-			wait(self->doRemoveWrongStoreType.onChange() || delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_TIMEOUT));
+			wait(self->doRemoveWrongStoreType.onChange() || fisServerRemoved);
+			wait(waitUntilHealthy(self)); // In case the healthyness changes
 		}
+
+		bool foundSSToRemove = false;
 
 		for (auto& server : self->server_info) {
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
-				if (existOtherHealthyTeams(self, server.first)) {
-					// Prefer to remove a SS which does not cause zero healthy teams.
-					server.second->wrongStoreTypeToRemove.set(true);
-					foundSSToRemove = true;
-					NetworkAddress a = server.second->lastKnownInterface.address();
-					AddressExclusion addr(a.ip, a.port);
-					TraceEvent("WrongStoreTypeRemover", self->distributorId)
-					    .detail("Server", server.first)
-					    .detail("Addr", addr.toString())
-					    .detail("StoreType", server.second->storeType)
-					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-					break;
-				} else if (!secondPreferedSSToRemove.isValid()) {
-					secondPreferedSSToRemove = server.second;
-				}
+				// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the storageServerTracker.
+				// This race may cause the server to be removed before react to wrongStoreTypeToRemove
+				server.second->wrongStoreTypeToRemove.set(true);
+				removeServerID = server.second->id;
+				foundSSToRemove = true;
+				TraceEvent("WrongStoreTypeRemover", self->distributorId)
+				    .detail("Server", server.first)
+				    .detail("StoreType", server.second->storeType)
+				    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
+				break;
 			}
 		}
 
-		if (!foundSSToRemove && secondPreferedSSToRemove.isValid()) {
-			// To ensure all wrong storeType SS to be removed, we have to face the fact that health team number will
-			// drop to 0; This may create more than one SS on a worker, which cause performance issue. In a correct
-			// operation configuration, this should not happen.
-			secondPreferedSSToRemove->wrongStoreTypeToRemove.set(true);
-			foundSSToRemove = true;
-			NetworkAddress a = secondPreferedSSToRemove->lastKnownInterface.address();
-			AddressExclusion addr(a.ip, a.port);
-			TraceEvent(SevWarnAlways, "WrongStoreTypeRemover", self->distributorId)
-			    .detail("Server", secondPreferedSSToRemove->id)
-			    .detail("Addr", addr.toString())
-			    .detail("StoreType", secondPreferedSSToRemove->storeType)
-			    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-		}
-
-		self->doRemoveWrongStoreType.set(false);
 		if (!foundSSToRemove) {
 			break;
+		} else {
+			self->doRemoveWrongStoreType.set(false);
+			fisServerRemoved = checkWrongStoreTypeServerRemoved(self, removeServerID);
 		}
 	}
 
@@ -3252,25 +3255,23 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 	}
 }
 
-// Set the server's storeType
+// Set the server's storeType; Error is catched by the caller
 ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
-	try {
-		// Update server's storeType, especially when it was created
-		state KeyValueStoreType type = wait(
-		    brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
-		        TaskPriority::DataDistribution)));
-		server->storeType = type;
-	} catch (Error& e) {
-		// Failed server should be removed by storageServerTracker
-		wait(Future<Void>(Never()));
+	// Update server's storeType, especially when it was created
+	state KeyValueStoreType type =
+	    wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
+	        TaskPriority::DataDistribution)));
+	server->storeType = type;
+
+	if (type != self->configuration.storageServerStoreType) {
+		self->doRemoveWrongStoreType.set(true);
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
 	}
 
-	self->doRemoveWrongStoreType.set(true);
-	if (self->wrongStoreTypeRemover.isReady()) {
-		self->wrongStoreTypeRemover = removeWrongStoreType(self);
-		self->addActor.send(self->wrongStoreTypeRemover);
-	}
-	return Void();
+	return Never();
 }
 
 ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
@@ -3621,7 +3622,8 @@ ACTOR Future<Void> storageServerTracker(
 
 					// self->traceTeamCollectionInfo();
 					recordTeamCollectionInfo = true;
-					//Restart the storeTracker for the new interface
+					// Restart the storeTracker for the new interface. This will cancel the previous
+					// keyValueStoreTypeTracker
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
 					hasWrongDC = !inCorrectDC(self, server);
 					self->restartTeamBuilder.trigger();
@@ -3642,6 +3644,7 @@ ACTOR Future<Void> storageServerTracker(
 				when( wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
 				}
+				when(wait(storeTypeTracker)) {}
 			}
 
 			if (recordTeamCollectionInfo) {
