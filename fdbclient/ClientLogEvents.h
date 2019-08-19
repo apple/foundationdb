@@ -79,20 +79,20 @@ namespace FdbClientLogEvents {
     enum {
 	    GET_VERSION_LATENCY = 0,
 	    GET_VALUE = 1,
-	    GET_KEY = 2,
-	    GET_RANGE = 3,
-	    GET_SUBRANGE = 4,
-	    COMMIT_LATENCY = 5,
-	    CONTACTED_PROXY = 6,
-	    ERROR_GET = 7,
-	    ERROR_GET_RANGE = 8,
-	    ERROR_COMMIT = 9,
+	    GET_RANGE = 2,
+	    COMMIT_LATENCY = 3,
+	    ERROR_GET = 4,
+	    ERROR_GET_RANGE = 5,
+	    ERROR_COMMIT = 6,
+	    GET_KEY = 7,
+	    GET_SUBRANGE = 8,
+	    CONTACTED_PROXY = 9,
 
 	    EVENTTYPEEND // End of EventType
     };
 
-	typedef int TrasactionPriorityType;
-	enum {
+    typedef int TrasactionPriorityType;
+    enum {
 		PRIORITY_DEFAULT   = 0,
 		PRIORITY_BATCH     = 1,
 		PRIORITY_IMMEDIATE = 2,
@@ -166,11 +166,41 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventGetValue : public Event {
-		EventGetValue(double ts, int readId, double lat, int size, const KeyRef &in_key, NetworkAddress storageContacted) :
-			Event(GET_VALUE, ts), readId(readId), latency(lat), valueSize(size), key(in_key), storageContacted(storageContacted) {}
-		EventGetValue() { }
+	    EventGetValue(double ts, double lat, int size, const KeyRef& in_key)
+	      : Event(GET_VALUE, ts), latency(lat), valueSize(size), key(in_key) {}
+	    EventGetValue() {}
 
-		template <typename Ar>	Ar& serialize(Ar &ar) {
+	    template <typename Ar>
+	    Ar& serialize(Ar& ar) {
+		    if (!ar.isDeserializing)
+			    return serializer(Event::serialize(ar), latency, valueSize, key);
+		    else
+			    return serializer(ar, latency, valueSize, key);
+	    }
+
+	    double latency;
+	    int valueSize;
+	    Key key;
+
+	    override void logEvent(std::string id, int maxFieldLength) const {
+		    TraceEvent("TransactionTrace_Get")
+		        .setMaxEventLength(-1)
+		        .detail("TransactionID", id)
+		        .detail("Latency", latency)
+		        .detail("ValueSizeBytes", valueSize)
+		        .setMaxFieldLength(maxFieldLength)
+		        .detail("Key", key);
+	    }
+    };
+
+    struct EventGetValue_V3 : public Event {
+	    EventGetValue_V3(double ts, int readId, double lat, int size, const KeyRef& in_key,
+	                     NetworkAddress storageContacted)
+	      : Event(GET_VALUE, ts), readId(readId), latency(lat), valueSize(size), key(in_key),
+	        storageContacted(storageContacted) {}
+	    EventGetValue_V3() {}
+
+	    template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
 				return serializer(Event::serialize(ar), readId, latency, valueSize, key, storageContacted);
 			else
@@ -208,10 +238,10 @@ namespace FdbClientLogEvents {
 				}
 			);
 		}
-	};
+    };
 
-	struct EventGetKey : public Event {
-		EventGetKey(double ts, int readId, double latency, Key key, NetworkAddress storageContacted) :
+    struct EventGetKey : public Event {
+	    EventGetKey(double ts, int readId, double latency, Key key, NetworkAddress storageContacted) :
 			Event(GET_KEY, ts), readId(readId), latency(latency), key(key), storageContacted(storageContacted) {}
 	    EventGetKey() {}
 
@@ -252,9 +282,9 @@ namespace FdbClientLogEvents {
 				}
 			);
 		}
-	};
+    };
 
-	struct EventGetRange : public Event {
+    struct EventGetRange : public Event {
 		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
 		EventGetRange() { }
 

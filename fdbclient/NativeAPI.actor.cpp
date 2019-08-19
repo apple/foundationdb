@@ -1345,8 +1345,8 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 			if (trLogInfo) {
 				trLogInfo->addLog(
-				    FdbClientLogEvents::EventGetValue{ startTimeD, trLogInfo->requestStats.getNextReadId(), latency,
-				                                       key.size() + valueSize, key, trackedReply.address });
+				    FdbClientLogEvents::EventGetValue_V3{ startTimeD, trLogInfo->requestStats.getNextReadId(), latency,
+				                                          key.size() + valueSize, key, trackedReply.address });
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
