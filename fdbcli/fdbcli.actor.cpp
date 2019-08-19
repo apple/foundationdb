@@ -1777,6 +1777,10 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		printf("ERROR: Invalid JSON\n");
 		return true;
 	}
+	if(config.type() != json_spirit::obj_type) {
+		printf("ERROR: Configuration file must contain a JSON object\n");
+		return true;
+	}
 	StatusObject configJSON = config.get_obj();
 
 	json_spirit::mValue schema;
