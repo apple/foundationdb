@@ -603,7 +603,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 		.detail("Proxies", recruits.proxies.size())
 		.detail("TLogs", recruits.tLogs.size())
 		.detail("Resolvers", recruits.resolvers.size())
-		.detail("BackupWorkers", recruits.backupWorkers.size())
+		.detail("BackupWorkers", self->backupWorkers.size())
 		.trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are

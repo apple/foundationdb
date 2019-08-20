@@ -104,9 +104,9 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			return Void();
 		}
 
-		// TODO: knobify the delay of 20s. This delay is sensitive, as it is the
-		// lag TLog might have.
-		state Future<Void> uploadDelay = delay(20);
+		// FIXME: knobify the delay of 10s. This delay is sensitive, as it is the
+		// lag TLog might have. Changing to 20s may fail consistency check.
+		state Future<Void> uploadDelay = delay(10);
 
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.

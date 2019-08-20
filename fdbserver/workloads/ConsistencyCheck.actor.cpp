@@ -78,6 +78,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	// Whether to suspendConsistencyCheck
 	AsyncVar<bool> suspendConsistencyCheck;
 
+	// Storage queue size limit
+	static const int64_t kStorageQueueLimit = 10000;
+
 	Future<Void> monitorConsistencyCheckSettingsActor;
 
 	ConsistencyCheckWorkload(WorkloadContext const& wcx)
@@ -121,7 +124,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, kStorageQueueLimit, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
 			}
 			catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -272,14 +275,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 					try
 					{
 						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
-						if(maxStorageServerQueueSize > 0)
-						{
-							TraceEvent("ConsistencyCheck_NonZeroStorageServerQueue").detail("MaxQueueSize", maxStorageServerQueueSize);
-							self->testFailure("Non-zero storage server queue size");
+						if (maxStorageServerQueueSize > kStorageQueueLimit) {
+							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
+							    .detail("MaxQueueSize", maxStorageServerQueueSize);
+							self->testFailure("Storage server queue size exceeds limit");
 						}
-					}
-					catch(Error& e)
-					{
+					} catch (Error& e) {
 						if(e.code() == error_code_attribute_not_found)
 						{
 							TraceEvent("ConsistencyCheck_StorageQueueSizeError").error(e).detail("Reason", "Could not read queue size");
