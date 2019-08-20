@@ -155,11 +155,11 @@ struct RequestStatsWorkload : KVWorkload {
 		return Void();
 	}
 
-	override virtual std::string description() { return "RequestStats"; }
-	override virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
-	override virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	override virtual Future<bool> check(Database const& cx) { return !testFailed; }
-	override virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual std::string description() override { return "RequestStats"; }
+	virtual Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	virtual Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	virtual Future<bool> check(Database const& cx) override { return !testFailed; }
+	virtual void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<RequestStatsWorkload> RequestStatsWorkloadFactory("RequestStats");

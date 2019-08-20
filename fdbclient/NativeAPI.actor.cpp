@@ -2961,9 +2961,9 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			else {
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before tracking request stats");
-			    throw client_invalid_operation();
-		    }
-		    break;
+				throw client_invalid_operation();
+			}
+			break;
 
 		case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
 			validateOptionValue(value, true);
