@@ -102,7 +102,7 @@ else()
   # check linker flags.
   if (USE_LD STREQUAL "DEFAULT")
     set(USE_LD "LD")
-	else()
+  else()
     if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
       message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
     endif()
