@@ -3434,9 +3434,21 @@ ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
-	ExclusionSafetyCheckRequest req(exclusions);
-	state bool ddCheck =
-	    wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID));
+	TraceEvent("ExclusionSafetyCheckBegin")
+	    .detail("NumExclusion", exclusions.size())
+	    .detail("Exclusions", describe(exclusions));
+	state ExclusionSafetyCheckRequest req(exclusions);
+	state bool ddCheck;
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(bool _ddCheck = wait(loadBalance(cx->getMasterProxies(false),
+			                                      &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID))) {
+				ddCheck = _ddCheck;
+				break;
+			}
+		}
+	}
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
@@ -3461,12 +3473,14 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		}
 	}
 	int faultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
+	bool coordinatorCheck = (attemptCoordinatorExclude <= faultTolerance);
 	TraceEvent("ExclusionSafetyCheck")
 	    .detail("CoordinatorListSize", leaderServers.size())
 	    .detail("NumExclusions", exclusions.size())
 	    .detail("FaultTolerance", faultTolerance)
-	    .detail("AttemptCoordinatorExclude", attemptCoordinatorExclude);
+	    .detail("AttemptCoordinatorExclude", attemptCoordinatorExclude)
+	    .detail("CoordinatorCheck", coordinatorCheck)
+	    .detail("DataDistributorCheck", ddCheck);
 
-	bool coordinatorCheck = (attemptCoordinatorExclude <= faultTolerance);
 	return (ddCheck && coordinatorCheck);
 }

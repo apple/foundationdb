@@ -412,8 +412,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
 				TraceEvent("RemoveAndKill", functionId)
-					.detail("Step", "Safety Check")
-					.detail("Exclusions", describe(toKillMarkFailedArray));
+				    .detail("Step", "SafetyCheck")
+				    .detail("Exclusions", describe(toKillMarkFailedArray));
 				bool safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray));
 				if (safe) break;
 			}

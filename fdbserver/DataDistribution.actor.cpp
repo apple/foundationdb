@@ -4284,7 +4284,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req, Reference<DDTeamCollection> tc,
                                           Database cx) {
+	TraceEvent("DDExclusionSafetyCheckBegin");
 	if (!tc.isValid()) {
+		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid");
 		req.reply.send(false);
 		return Void();
 	}

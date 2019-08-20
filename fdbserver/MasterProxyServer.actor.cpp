@@ -1531,6 +1531,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 }
 
 ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
+	TraceEvent("SafetyCheckMasterProxyBegin");
 	if (!db->get().distributor.present()) {
 		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
 		req.reply.send(false);
