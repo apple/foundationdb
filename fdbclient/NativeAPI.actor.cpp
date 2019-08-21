@@ -458,8 +458,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-                                                     AsyncTrigger* triggerVar) {
+ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+											   AsyncTrigger* masterProxyTriggerVar,
+											   AsyncTrigger* readProxyTriggerVar) {
 	state vector<MasterProxyInterface> curProxies;
 	state vector<ReadProxyInterface> curReadProxies;
 	curProxies = clientDBInfo->get().proxies;
@@ -467,10 +468,15 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 
 	loop {
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies || clientDBInfo->get().readProxies != curReadProxies) {
+
+		if (clientDBInfo->get().proxies != curProxies) {
 			curProxies = clientDBInfo->get().proxies;
+			masterProxyTriggerVar->trigger();
+		}
+
+		if (clientDBInfo->get().readProxies != curReadProxies) {
 			curReadProxies = clientDBInfo->get().readProxies;
-			triggerVar->trigger();
+			readProxyTriggerVar->trigger();
 		}
 	}
 }
@@ -543,7 +549,8 @@ DatabaseContext::DatabaseContext(
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
+	monitorProxiesInfoChange =
+	    monitorProxiesChange(clientInfo, &masterProxiesChangeTrigger, &readProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
@@ -562,7 +569,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 }
 
 DatabaseContext::~DatabaseContext() {
-	monitorMasterProxiesInfoChange.cancel();
+	monitorProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -642,6 +649,10 @@ void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
 	return this->masterProxiesChangeTrigger.onTrigger();
+}
+
+Future<Void> DatabaseContext::onReadProxiesChanged() {
+	return this->readProxiesChangeTrigger.onTrigger();
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -1342,8 +1353,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 					                      false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
 						reply = _reply;
 					}
-					when(wait(cx->onMasterProxiesChanged())) {
-						// TODO (Vishesh): Use onReadProxiesChanged()
+					when(wait(cx->onReadProxiesChanged())) {
 						continue;
 					}
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
@@ -1431,7 +1441,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 					                                           TaskPriority::DefaultPromiseEndpoint, false, NULL))) {
 						reply = _reply;
 					}
-					when(wait(cx->onMasterProxiesChanged())) { continue; }
+					when(wait(cx->onReadProxiesChanged())) { continue; }
 				}
 				k = reply.sel;
 				if (!k.offset && k.orEqual) {
@@ -1925,7 +1935,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						                          cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
 							rep = _rep;
 						}
-						when(wait(cx->onMasterProxiesChanged())) { throw transaction_too_old(); }
+						when(wait(cx->onReadProxiesChanged())) { throw transaction_too_old(); }
 					}
 				} else {
 					GetKeyValuesReply _rep = wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues,

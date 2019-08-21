@@ -71,6 +71,7 @@ public:
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
+	Future<Void> onReadProxiesChanged();
 
 	Reference<ReadProxyInfo> getReadProxies();
 
@@ -121,7 +122,8 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
+	AsyncTrigger readProxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	bool provisional;
 	UID clientInfoLastChange;
