@@ -1862,7 +1862,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
-			state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward ) );
+			state pair<KeyRange, Reference<LocationInfo>> beginServer =
+			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
@@ -1913,7 +1914,26 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 							transaction_too_old(), future_version()
 								});
 				}
-				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskPriority::DefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				state GetKeyValuesReply rep;
+
+				state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
+				                            FlowTransport::transport().isClient();
+				if (useReadProxies) {
+					choose {
+						when(GetKeyValuesReply _rep =
+						         wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKeyValues, req,
+						                          TaskPriority::DefaultPromiseEndpoint, false,
+						                          cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
+							rep = _rep;
+						}
+						when(wait(cx->onMasterProxiesChanged())) { throw transaction_too_old(); }
+					}
+				} else {
+					GetKeyValuesReply _rep = wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues,
+					                                          req, TaskPriority::DefaultPromiseEndpoint, false,
+					                                          cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
+					rep = _rep;
+				}
 
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());

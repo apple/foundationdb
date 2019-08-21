@@ -32,17 +32,20 @@ struct ReadProxyInterface {
 	RequestStream<ReplyPromise<Version>> getVersion;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
+	RequestStream<struct GetKeyValuesRequest> getKeyValues;
+
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, getValue, getKey, waitFailure);
+		serializer(ar, getVersion, getValue, getKey, getKeyValues, waitFailure);
 	}
 
 	void initEndpoints() {
 		getVersion.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 
 	UID id() const { return getValue.getEndpoint().token; }

@@ -49,7 +49,6 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 			         loadBalance(cx->getMasterProxies(true), &MasterProxyInterface::getKeyServersLocations,
 			                     GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()),
 			                     TaskPriority::DefaultPromiseEndpoint))) {
-				// FIXME (Vishesh) Why was there an ASSERT here?
 				ASSERT( rep.results.size() == 1 );
 				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
 				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
@@ -158,6 +157,41 @@ ACTOR Future<Void> getValue(GetValueRequest req, Database cx) {
 	return Void();
 }
 
+ACTOR Future<Void> getKeyValues(GetKeyValuesRequest req, Database cx) {
+	try {
+		state pair<KeyRange, Reference<LocationInfo>> beginServer =
+		    wait(getKeyLocation(cx, req.begin.getKey(), &StorageServerInterface::getKeyValues));
+		state KeyRange shard = beginServer.first;
+
+		++cx->transactionPhysicalReads;
+		GetKeyValuesRequest _req;
+		_req.begin = req.begin;
+		_req.end = req.end;
+		_req.version = req.version;
+		_req.limit = req.limit;
+		_req.limitBytes = req.limitBytes;
+		_req.isFetchKeys = req.isFetchKeys;
+		_req.debugID = req.debugID;
+		GetKeyValuesReply rep = wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, _req,
+		                                         TaskPriority::DefaultPromiseEndpoint, false,
+		                                         cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
+		req.reply.send(rep);
+	} catch (Error& e) {
+		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+		    (e.code() == error_code_transaction_too_old)) {
+			cx->invalidateCache(req.begin.getKey());
+			req.reply.sendError(e);
+		} else if (e.code() == error_code_actor_cancelled) {
+			req.reply.sendError(transaction_too_old());
+			throw e;
+		} else {
+			req.reply.sendError(e);
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> readProxyServerCore(ReadProxyInterface readProxy, Reference<AsyncVar<ServerDBInfo>> serverDBInfo) {
 	state Database cx = openDBOnServer(serverDBInfo, TaskPriority::DefaultEndpoint, true, true);
 	state ActorCollection actors(false);
@@ -166,6 +200,9 @@ ACTOR Future<Void> readProxyServerCore(ReadProxyInterface readProxy, Reference<A
 	loop choose {
 		when(GetKeyRequest req = waitNext(readProxy.getKey.getFuture())) { actors.add(getKey(req, cx)); }
 		when(GetValueRequest req = waitNext(readProxy.getValue.getFuture())) { actors.add(getValue(req, cx)); }
+		when(GetKeyValuesRequest req = waitNext(readProxy.getKeyValues.getFuture())) {
+			actors.add(getKeyValues(req, cx));
+		}
 		when(wait(actors.getResult())) {}
 	}
 }
