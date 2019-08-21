@@ -177,7 +177,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
 	init( DD_SHARD_SIZE_GRANULARITY_SIM,                      500000 ); if( randomize && BUGGIFY ) DD_SHARD_SIZE_GRANULARITY_SIM = 0;
-	init( DD_MOVE_KEYS_PARALLELISM,                               10 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
+	init( DD_MOVE_KEYS_PARALLELISM,                               15 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
 	init( DD_MERGE_LIMIT,                                       2000 ); if( randomize && BUGGIFY ) DD_MERGE_LIMIT = 2;
 	init( DD_SHARD_METRICS_TIMEOUT,                             60.0 ); if( randomize && BUGGIFY ) DD_SHARD_METRICS_TIMEOUT = 0.1;
 	init( DD_LOCATION_CACHE_SIZE,                            2000000 ); if( randomize && BUGGIFY ) DD_LOCATION_CACHE_SIZE = 3;
@@ -417,7 +417,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	init( MAX_TPS_HISTORY_SAMPLES,                               600 );
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
-	init( TARGET_DURABILITY_LAG_VERSIONS,                      300e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
+	init( TARGET_DURABILITY_LAG_VERSIONS,                      350e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                250e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );

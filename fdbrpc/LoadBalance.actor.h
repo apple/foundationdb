@@ -205,7 +205,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		int badServers = 0;
 
 		for(int i=0; i<alternatives->size(); i++) {
-			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS) && i == alternatives->countBest()) {
+			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
 				break;
 			}
 			
