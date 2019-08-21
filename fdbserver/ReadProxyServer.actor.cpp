@@ -164,14 +164,8 @@ ACTOR Future<Void> getKeyValues(GetKeyValuesRequest req, Database cx) {
 		state KeyRange shard = beginServer.first;
 
 		++cx->transactionPhysicalReads;
-		GetKeyValuesRequest _req;
-		_req.begin = req.begin;
-		_req.end = req.end;
-		_req.version = req.version;
-		_req.limit = req.limit;
-		_req.limitBytes = req.limitBytes;
-		_req.isFetchKeys = req.isFetchKeys;
-		_req.debugID = req.debugID;
+		GetKeyValuesRequest _req = req;
+		_req.reply = ReplyPromise<GetKeyValuesReply>();
 		GetKeyValuesReply rep = wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, _req,
 		                                         TaskPriority::DefaultPromiseEndpoint, false,
 		                                         cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
