@@ -1070,7 +1070,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				if( !error.code() ) {
 					TraceEvent(relocateShardInterval.end(), distributorId).detail("Duration", now() - startTime).detail("Result","Success");
 					if(now() - startTime > 600) {
-						TraceEvent(SevWarnAlways, "RelocateShardTooLong").detail("Duration", now() - startTime).detail("Dest", describe(destIds));
+						TraceEvent(SevWarnAlways, "RelocateShardTooLong").detail("Duration", now() - startTime).detail("Dest", describe(destIds)).detail("Src", describe(rd.src));
 					}
 					if(rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys").detail("Dest", describe(destIds)).trackLatest("MovedKeyServers");
@@ -1097,7 +1097,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	} catch (Error& e) {
 		TraceEvent(relocateShardInterval.end(), distributorId).error(e, true).detail("Duration", now() - startTime);
 		if(now() - startTime > 600) {
-			TraceEvent(SevWarnAlways, "RelocateShardTooLong").error(e, true).detail("Duration", now() - startTime).detail("Dest", describe(destIds));
+			TraceEvent(SevWarnAlways, "RelocateShardTooLong").error(e, true).detail("Duration", now() - startTime).detail("Dest", describe(destIds)).detail("Src", describe(rd.src));
 		}
 		if( !signalledTransferComplete )
 			dataTransferComplete.send( rd );
