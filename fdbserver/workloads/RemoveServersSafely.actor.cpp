@@ -408,13 +408,26 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		killProcArray = self->getProcesses(toKill);
 		if (safeKillSet) {
 			loop {
+				state bool safe = false;
 				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size() / 2 + 2));
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusions", describe(toKillMarkFailedArray));
-				bool safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray));
+				loop {
+					choose {
+						when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray))) {
+							safe = _safe;
+							break;
+						}
+						when(wait(delay(5.0))) {
+							TraceEvent("RemoveAndKill", functionId)
+							    .detail("Step", "SafetyCheckTimedOut")
+							    .detail("Exclusions", describe(toKillMarkFailedArray));
+						}
+					}
+				}
 				if (safe) break;
 			}
 		}

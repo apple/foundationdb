@@ -4315,6 +4315,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 			break;
 		}
 	}
+	TraceEvent("DDExclusionSafetyCheckFinish");
 	req.reply.send(safe);
 	return Void();
 }

@@ -3449,6 +3449,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 			}
 		}
 	}
+	TraceEvent("ExclusionSafetyCheckCoordinators");
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
@@ -3474,7 +3475,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	}
 	int faultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
 	bool coordinatorCheck = (attemptCoordinatorExclude <= faultTolerance);
-	TraceEvent("ExclusionSafetyCheck")
+	TraceEvent("ExclusionSafetyCheckFinish")
 	    .detail("CoordinatorListSize", leaderServers.size())
 	    .detail("NumExclusions", exclusions.size())
 	    .detail("FaultTolerance", faultTolerance)

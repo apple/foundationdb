@@ -1552,6 +1552,7 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 			throw e;
 		}
 	}
+	TraceEvent("SafetyCheckMasterProxyFinish");
 	req.reply.send(safe);
 	return Void();
 }
