@@ -3358,6 +3358,8 @@ ACTOR Future<Void> storageServerTracker(
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
 					server->removed.send( Void() );
 					self->removedServers.send( server->id );
+					self->doBuildTeams = true;
+					self->restartTeamBuilder.trigger();
 					return Void();
 				}
 				when( std::pair<StorageServerInterface, ProcessClass> newInterface = wait( interfaceChanged ) ) {
