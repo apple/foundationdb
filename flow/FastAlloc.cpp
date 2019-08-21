@@ -55,8 +55,7 @@
 #ifdef __linux__
 #define INIT_SEG __attribute__ ((init_priority (1000)))
 #elif defined(__FreeBSD__)
-#pragma message "init_priority is not supported on this platform; will this be a problem?"
-#define INIT_SEG
+#define INIT_SEG  __attribute__ ((init_priority (1000)))
 #elif defined(__APPLE__)
 #pragma message "init_priority is not supported on this platform; will this be a problem?"
 #define INIT_SEG

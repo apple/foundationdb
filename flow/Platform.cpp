@@ -3032,19 +3032,19 @@ std::string exePath() {
 		throw platform_error();
 	}
 #elif defined(__FreeBSD__)
-	char binPath[2048];	
-	int mib[4];
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_PROC;
-	mib[2] = KERN_PROC_PATHNAME;
-	mib[3] = -1;
-	size_t len = sizeof(binPath);
-	if (sysctl(mib, 4, binPath, &len, NULL, 0) != 0) {
-		binPath[0] = '\0';
-		return std::string(binPath);
-	} else {
-		throw platform_error();
-	}
+    char binPath[2048];
+    int mib[4];
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PATHNAME;
+    mib[3] = -1;
+    size_t len = sizeof(binPath);
+    if (sysctl(mib, 4, binPath, &len, NULL, 0) != 0) {
+        binPath[0] = '\0';
+        return std::string(binPath);
+    } else {
+        throw platform_error();
+    }
 #elif defined(__APPLE__)
 	uint32_t bufSize = 1024;
 	std::unique_ptr<char[]> buf(new char[bufSize]);
