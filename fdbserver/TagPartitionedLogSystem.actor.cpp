@@ -210,19 +210,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	    locality(locality), remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false),
 	    addActor(addActor), popActors(false) {}
 
-	virtual void stopRejoins() {
-		rejoins = Future<Void>();
-	}
+	void stopRejoins() override { rejoins = Future<Void>(); }
 
-	virtual void addref() {
+	void addref() override {
 		ReferenceCounted<TagPartitionedLogSystem>::addref();
 	}
 
-	virtual void delref() {
+	void delref() override {
 		ReferenceCounted<TagPartitionedLogSystem>::delref();
 	}
 
-	virtual std::string describe() {
+	std::string describe() override {
 		std::string result;
 		for( int i = 0; i < tLogs.size(); i++ ) {
 			result += format("%d: ", i);
@@ -233,9 +231,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return result;
 	}
 
-	virtual UID getDebugID() {
-		return dbgid;
-	}
+	UID getDebugID() override { return dbgid; }
 
 	void addPseudoLocality(int8_t locality) {
 		ASSERT(locality < 0);
@@ -347,7 +343,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
-	virtual void toCoreState( DBCoreState& newState ) {
+	void toCoreState(DBCoreState& newState) override {
 		if( recoveryComplete.isValid() && recoveryComplete.isError() )
 			throw recoveryComplete.getError();
 
@@ -381,11 +377,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		newState.logSystemType = logSystemType;
 	}
 
-	virtual bool remoteStorageRecovered() {
+	bool remoteStorageRecovered() override {
 		return remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady();
 	}
 
-	virtual Future<Void> onCoreStateChanged() {
+	Future<Void> onCoreStateChanged() override {
 		std::vector<Future<Void>> changes;
 		changes.push_back(Never());
 		if(recoveryComplete.isValid() && !recoveryComplete.isReady()) {
@@ -400,8 +396,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAny(changes);
 	}
 
-	virtual void coreStateWritten( DBCoreState const& newState ) {
-		if( !newState.oldTLogData.size() ) {
+	void coreStateWritten(DBCoreState const& newState) override {
+		if (!newState.oldTLogData.size()) {
 			recoveryCompleteWrittenToCoreState.set(true);
 		}
 		for(auto& t : newState.tLogs) {
@@ -413,15 +409,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Future<Void> onError() {
+	Future<Void> onError() override {
 		return onError_internal(this);
 	}
 
 	ACTOR static Future<Void> onError_internal( TagPartitionedLogSystem* self ) {
 		// Never returns normally, but throws an error if the subsystem stops working
 		loop {
-			vector<Future<Void>> failed;
-			vector<Future<Void>> changes;
+			std::vector<Future<Void>> failed;
+			std::vector<Future<Void>> backupFailed(1, Never());
+			std::vector<Future<Void>> changes;
 
 			for(auto& it : self->tLogs) {
 				for(auto &t : it->logServers) {
@@ -440,7 +437,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 				for (const auto& worker : it->backupWorkers) {
 					if (worker->get().present()) {
-						failed.push_back(waitFailureClient(
+						backupFailed.push_back(waitFailureClient(
 						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
 						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
 					} else {
@@ -471,11 +468,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			changes.push_back(self->backupWorkerChanged.onTrigger());
 
 			ASSERT( failed.size() >= 1 );
-			wait( quorum(changes, 1) || tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) );
+			wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), master_tlog_failed()) ||
+			     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
 		}
 	}
 
-	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
+	Future<Version> push(Version prevVersion, Version version, Version knownCommittedVersion,
+	                     Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID) override {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
@@ -647,7 +646,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore ) {
+	Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore ) override {
 		if(!tLogs.size()) {
 			TraceEvent("TLogPeekNoLogSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
@@ -660,7 +659,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore ) {
+	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore) override {
 		if(tags.empty()) {
 			TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
@@ -785,7 +784,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peekTxs( UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped ) {
+	Reference<IPeekCursor> peekTxs(UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped) override {
 		Version end = getEnd();
 		if(!tLogs.size()) {
 			TraceEvent("TLogPeekTxsNoLogs", dbgid);
@@ -867,7 +866,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, std::vector<std::pair<Version,Tag>> history ) {
+	Reference<IPeekCursor> peekSingle(UID dbgid, Version begin, Tag tag, std::vector<std::pair<Version,Tag>> history) override {
 		while(history.size() && begin >= history.back().first) {
 			history.pop_back();
 		}
@@ -892,7 +891,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) {
+	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) override {
 		bool found = false;
 		for (const auto& log : tLogs) {
 			found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
@@ -991,7 +990,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 	}
 
-	virtual Version getKnownCommittedVersion() {
+	Version getKnownCommittedVersion() override {
 		Version result = invalidVersion;
 		for(auto& it : lockResults) {
 			auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
@@ -1002,7 +1001,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return result;
 	}
 
-	virtual Future<Void> onKnownCommittedVersionChange() {
+	Future<Void> onKnownCommittedVersionChange() override {
 		std::vector<Future<Void>> result;
 		for(auto& it : lockResults) {
 			result.push_back(TagPartitionedLogSystem::getDurableVersionChanged(it));
@@ -1043,7 +1042,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual void popTxs( Version upTo, int8_t popLocality ) {
+	void popTxs(Version upTo, int8_t popLocality) override {
 		if( getTLogVersion() < TLogVersion::V4 ) {
 			pop(upTo, txsTag, 0, popLocality);
 		} else {
@@ -1053,7 +1052,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) {
+	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) override {
 		if (upTo <= 0) return;
 		if( tag.locality == tagLocalityRemoteLog) {
 			popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
@@ -1153,7 +1152,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return maxPopped;
 	}
 
-	virtual Future<Version> getTxsPoppedVersion() {
+	Future<Version> getTxsPoppedVersion() override {
 		return getPoppedTxs(this);
 	}
 
@@ -1205,7 +1204,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	// Returns success after confirming that pushes in the current epoch are still possible
-	virtual Future<Void> confirmEpochLive(Optional<UID> debugID) {
+	Future<Void> confirmEpochLive(Optional<UID> debugID) override {
 		vector<Future<Void>> quorumResults;
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
@@ -1216,7 +1215,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAll(quorumResults);
 	}
 
-	virtual Future<Void> endEpoch() {
+	Future<Void> endEpoch() override {
 		std::vector<Future<Void>> lockResults;
 		for( auto& logSet : tLogs ) {
 			for( auto& log : logSet->logServers ) {
@@ -1226,9 +1225,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAll(lockResults);
 	}
 
-	virtual Future<Reference<ILogSystem>> newEpoch( RecruitFromConfigurationReply const& recr, Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> const& allTags, Reference<AsyncVar<bool>> const& recruitmentStalled ) {
-		// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.  The new epoch
-		// is only provisional until the caller updates the coordinated DBCoreState
+	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
+	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
+	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
+	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                       DatabaseConfiguration const& config, LogEpoch recoveryCount,
+	                                       int8_t primaryLocality, int8_t remoteLocality,
+	                                       std::vector<Tag> const& allTags,
+	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) override {
 		return newEpoch( Reference<TagPartitionedLogSystem>::addRef(this), recr, fRemoteWorkers, config, recoveryCount, primaryLocality, remoteLocality, allTags, recruitmentStalled );
 	}
 
@@ -1257,7 +1261,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystemConfig;
 	}
 
-	virtual Standalone<StringRef> getLogsValue() {
+	Standalone<StringRef> getLogsValue() override {
 		vector<std::pair<UID, NetworkAddress>> logs;
 		vector<std::pair<UID, NetworkAddress>> oldLogs;
 		for(auto& t : tLogs) {
@@ -1279,7 +1283,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logsValue( logs, oldLogs );
 	}
 
-	virtual Future<Void> onLogSystemConfigChange() {
+	Future<Void> onLogSystemConfigChange() override {
 		std::vector<Future<Void>> changes;
 		changes.push_back(logSystemConfigChanged.onTrigger());
 		for(auto& t : tLogs) {
@@ -1302,7 +1306,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAny(changes);
 	}
 
-	virtual Version getEnd() {
+	Version getEnd() override {
 		ASSERT( recoverAt.present() );
 		return recoverAt.get() + 1;
 	}
@@ -1314,7 +1318,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) {
+	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) override {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
 			if(log->isLocal && log->logServers.size()) {
@@ -1324,19 +1328,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual bool hasRemoteLogs() const {
+	bool hasRemoteLogs() const override {
 		return logRouterTags > 0 || pseudoLocalities.size() > 0;
 	}
 
-	virtual Tag getRandomRouterTag() const {
+	Tag getRandomRouterTag() const override {
 		return Tag(tagLocalityLogRouter, deterministicRandom()->randomInt(0, logRouterTags));
 	}
 
-	virtual Tag getRandomTxsTag() const {
+	Tag getRandomTxsTag() const override {
 		return Tag(tagLocalityTxs, deterministicRandom()->randomInt(0, txsTags));
 	}
 
-	virtual TLogVersion getTLogVersion() const {
+	TLogVersion getTLogVersion() const override {
 		return tLogs[0]->tLogVersion;
 	}
 

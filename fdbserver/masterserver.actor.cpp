@@ -1337,7 +1337,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(worker.backup.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
+		                    master_backup_worker_failed()));
 	}
 
 	std::map<LogEpoch, std::map<Tag, Version>> progress = wait(backupProgress);
@@ -1361,7 +1361,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 			initializationReplies.push_back(transformErrors(
 			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
 			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    master_recovery_failed()));
+			    master_backup_worker_failed()));
 		}
 	}
 
