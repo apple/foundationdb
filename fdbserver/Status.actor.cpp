@@ -2032,6 +2032,57 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 	return statusObj;
 }
 
+ACTOR Future<JsonBuilderObject> ddStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+	state JsonBuilderObject statusObj;
+	state Transaction tr(cx);
+	state int timeoutSeconds = 5;
+	state Future<Void> timeoutDelay = delay(timeoutSeconds);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
+			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
+			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
+			wait(timeoutDelay || (success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF)));
+			if(timeoutDelay.isReady()) {
+				incomplete_reasons->insert(format("Unable to determine data distribution status after %d seconds.", timeoutSeconds));
+				break;
+			}
+
+			bool dataDistributionEnabled = true;
+			if (overallSwitchF.get().present()) {
+				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
+				int currentMode;
+				rd >> currentMode;
+				if (currentMode == 0) {
+					dataDistributionEnabled = false;
+				}
+			}
+			statusObj["data_distribution"] = dataDistributionEnabled ? "on" : "off";
+
+			bool failureReactionEnabled = true;
+			if (healthyZoneValueF.get().present()) {
+				auto healthyZoneKV = decodeHealthyZoneValue(healthyZoneValueF.get().get());
+				if (healthyZoneKV.first == ignoreSSFailuresZoneString) {
+					failureReactionEnabled = false;
+				}
+			}
+			statusObj["data_distribution_failure_reaction"] = failureReactionEnabled ? "on" : "off";
+			statusObj["data_distribution_rebalancing"] = !rebalanceDDIgnoreValueF.get().present() ? "on" : "off";
+			break;
+		} catch (Error& e) {
+			try {
+				wait(tr.onError(e));
+			}
+			catch (Error &e) {
+				incomplete_reasons->insert(format("Unable to determine data distribution status (%s).", e.what()));
+				break;
+			}
+		}
+	}
+	return statusObj;
+}
+
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
@@ -2207,7 +2258,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
-
+			futures2.push_back(ddStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
@@ -2254,6 +2305,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Insert cluster summary statistics
 			if(!workerStatuses[4].empty()) {
 				statusObj.addContents(workerStatuses[4]);
+			}
+
+			// Insert data distribution status section
+			if(!workerStatuses[5].empty()) {
+				statusObj.addContents(workerStatuses[5]);
 			}
 
 			// Need storage servers now for processStatusFetcher() below.

@@ -1339,54 +1339,6 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	}
 }
 
-ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnly) {
-	state Transaction tr(cx);
-	state Future<Void> timeoutDelay = printWarningOnly ? delay(2.0) : Never();
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
-			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
-			wait(timeoutDelay || (success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF)));
-			if(timeoutDelay.isReady()) {
-				return Void();
-			}
-			if (overallSwitchF.get().present()) {
-				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
-				int currentMode;
-				rd >> currentMode;
-				if (currentMode == 0) {
-					printf("WARNING: Data distribution is off.\n");
-					return Void();
-				}
-			}
-			if (!printWarningOnly) {
-				printf("Data distribution is on.\n");
-			}
-			if (healthyZoneValueF.get().present()) {
-				auto healthyZoneKV = decodeHealthyZoneValue(healthyZoneValueF.get().get());
-				if (healthyZoneKV.first == ignoreSSFailuresZoneString) {
-					printf("WARNING: Data distribution is currently turned on but disabled for all storage server "
-					       "failures.\n");
-				} else {
-					printf("WARNING: Data distribution is currently turned on but zone %s is under maintenance and "
-					       "will continue for %" PRId64 " seconds.\n",
-					       healthyZoneKV.first.toString().c_str(),
-					       (healthyZoneKV.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-				}
-			}
-			if (rebalanceDDIgnoreValueF.get().present()) {
-				printf("WARNING: Data distribution is currently turned on but shard size balancing is currently "
-				       "disabled.\n");
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> printHealthyZone( Database cx ) {
 	state Transaction tr(cx);
 	loop {
