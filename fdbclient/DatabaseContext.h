@@ -124,7 +124,7 @@ public:
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	bool provisional;
-	UID masterProxiesLastChange;
+	UID clientInfoLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;

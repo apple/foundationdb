@@ -1025,8 +1025,8 @@ void stopNetwork() {
 }
 
 Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
-	if (masterProxiesLastChange != clientInfo->get().id) {
-		masterProxiesLastChange = clientInfo->get().id;
+	if (clientInfoLastChange != clientInfo->get().id) {
+		clientInfoLastChange = clientInfo->get().id;
 		masterProxies.clear();
 		if( clientInfo->get().proxies.size() ) {
 			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
@@ -1067,7 +1067,6 @@ void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
 }
 
 Reference<ReadProxyInfo> DatabaseContext::getReadProxies() {
-	// TODO (Vishesh): Rename masterProxiesLastChange to clientInfoLastChange
 	// TODO (Vishesh): Checkout implementation for MasterProxy and refactor it.
 	return Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies));
 }
