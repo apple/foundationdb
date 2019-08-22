@@ -602,8 +602,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<int> recruitingStream;
 	Debouncer restartRecruiting;
 
-	AsyncVar<bool> doRemoveWrongStoreType; // true if DD should check if there exist SS with wrong store type to be removed
-
 	int healthyTeamCount;
 	Reference<AsyncVar<bool>> zeroHealthyTeams;
 
@@ -672,7 +670,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    healthyTeamCount(0), storageServerSet(new LocalityMap<UID>()),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
-	    doRemoveWrongStoreType(true), unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
+	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    processingUnhealthy(processingUnhealthy) {
 		if(!primary || configuration.usableRegions == 1) {
@@ -2461,7 +2459,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// This is ok as long as we do not arbitrarily validate if machine team satisfies replication policy.
 
 		if (server_info[removedServer]->wrongStoreTypeToRemove.get()) {
-			self->doRemoveWrongStoreType.set(true); // DD can remove the next wrong storeType server
 			if (self->wrongStoreTypeRemover.isReady()) {
 				self->wrongStoreTypeRemover = removeWrongStoreType(self);
 				self->addActor.send(self->wrongStoreTypeRemover);
@@ -2549,21 +2546,6 @@ bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
 	return false;
 }
 
-ACTOR Future<Void> checkWrongStoreTypeServerRemoved(DDTeamCollection* self, UID removeServerID) {
-	loop {
-		wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_TIMEOUT));
-		bool exist = self->server_info.find(removeServerID) != self->server_info.end();
-		// The server with wrong store type can either be removed or replaced with a correct storeType interface
-		// Q: How to swap a SS interface? Change a new storage filename to use the old SS id?
-		if (!exist ||
-		    self->server_info[removeServerID]->isCorrectStoreType(self->configuration.storageServerStoreType)) {
-			break;
-		}
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY));
@@ -2577,12 +2559,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 		// the server with wrong storeType is shutting down while this actor marks it as to-be-removed.
 		// In addition, removing servers cause extra data movement, which should be done while a cluster is healthy
 		wait(waitUntilHealthy(self));
-		while (self->doRemoveWrongStoreType.get() == false) {
-			// Once the wrong storeType SS picked to be removed is removed, doRemoveWrongStoreType will be set to true;
-			// In case the SS fails in between, we should time out and check for the next SS.
-			wait(self->doRemoveWrongStoreType.onChange() || fisServerRemoved);
-			wait(waitUntilHealthy(self)); // In case the healthyness changes
-		}
 
 		bool foundSSToRemove = false;
 
@@ -2603,9 +2579,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 		if (!foundSSToRemove) {
 			break;
-		} else {
-			self->doRemoveWrongStoreType.set(false);
-			fisServerRemoved = checkWrongStoreTypeServerRemoved(self, removeServerID);
 		}
 	}
 
@@ -3264,7 +3237,6 @@ ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo
 	server->storeType = type;
 
 	if (type != self->configuration.storageServerStoreType) {
-		self->doRemoveWrongStoreType.set(true);
 		if (self->wrongStoreTypeRemover.isReady()) {
 			self->wrongStoreTypeRemover = removeWrongStoreType(self);
 			self->addActor.send(self->wrongStoreTypeRemover);
