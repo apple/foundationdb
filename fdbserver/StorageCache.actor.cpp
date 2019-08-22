@@ -40,7 +40,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *self ) {
 	loop {
 		loop {
 			choose {
-				when(wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
+				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
 					break;
 				}
 				when( wait( dbInfoChange ) ) {
