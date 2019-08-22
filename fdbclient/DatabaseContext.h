@@ -72,6 +72,8 @@ public:
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
 	Future<Void> onReadProxiesChanged();
+	void updateFromLatestClientInfo();
+	bool readProxiesEnabled();
 
 	Reference<ReadProxyInfo> getReadProxies();
 
@@ -125,6 +127,7 @@ public:
 	AsyncTrigger readProxiesChangeTrigger;
 	Future<Void> monitorProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	Reference<ReadProxyInfo> readProxies;
 	bool provisional;
 	UID clientInfoLastChange;
 	LocalityData clientLocality;

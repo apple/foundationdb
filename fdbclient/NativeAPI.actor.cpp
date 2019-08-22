@@ -685,37 +685,48 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 		transactionDefaults.addOption((FDBTransactionOptions::Option)defaultFor, value.castTo<Standalone<StringRef>>());
 	}
 	else {
-		switch(option) {
-			case FDBDatabaseOptions::LOCATION_CACHE_SIZE:
-				locationCacheSize = (int)extractIntOption(value, 0, std::numeric_limits<int>::max());
-				break;
-			case FDBDatabaseOptions::MACHINE_ID:
-				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ) );
-				server_interf.clear();
-				locationCache.insert( allKeys, Reference<LocationInfo>() );
-				break;
-			case FDBDatabaseOptions::MAX_WATCHES:
-				maxOutstandingWatches = (int)extractIntOption(value, 0, CLIENT_KNOBS->ABSOLUTE_MAX_WATCHES);
-				break;
-			case FDBDatabaseOptions::DATACENTER_ID:
-				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
-				server_interf.clear();
-				locationCache.insert( allKeys, Reference<LocationInfo>() );
-				break;
-			case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
-				validateOptionValue(value, false);
-				snapshotRywEnabled++;
-				break;
-			case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
-				validateOptionValue(value, false);
-				snapshotRywEnabled--;
-				break;
-			default:
-				break;
+		switch (option) {
+		case FDBDatabaseOptions::LOCATION_CACHE_SIZE:
+			locationCacheSize = (int)extractIntOption(value, 0, std::numeric_limits<int>::max());
+			break;
+		case FDBDatabaseOptions::MACHINE_ID:
+			clientLocality =
+			    LocalityData(clientLocality.processId(),
+			                 value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(),
+			                 clientLocality.machineId(), clientLocality.dcId());
+			if (clientInfo->get().proxies.size())
+				masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().proxies, clientLocality));
+			if (clientInfo->get().readProxies.size())
+				readProxies =
+				    Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies, clientLocality));
+			server_interf.clear();
+			locationCache.insert(allKeys, Reference<LocationInfo>());
+			break;
+		case FDBDatabaseOptions::MAX_WATCHES:
+			maxOutstandingWatches = (int)extractIntOption(value, 0, CLIENT_KNOBS->ABSOLUTE_MAX_WATCHES);
+			break;
+		case FDBDatabaseOptions::DATACENTER_ID:
+			clientLocality =
+			    LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(),
+			                 value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
+			if (clientInfo->get().proxies.size())
+				masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().proxies, clientLocality));
+			if (clientInfo->get().readProxies.size())
+				readProxies =
+				    Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies, clientLocality));
+			server_interf.clear();
+			locationCache.insert(allKeys, Reference<LocationInfo>());
+			break;
+		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
+			validateOptionValue(value, false);
+			snapshotRywEnabled++;
+			break;
+		case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
+			validateOptionValue(value, false);
+			snapshotRywEnabled--;
+			break;
+		default:
+			break;
 		}
 	}
 }
@@ -744,6 +755,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
+	self->readProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
@@ -1035,15 +1047,32 @@ void stopNetwork() {
 	closeTraceFile();
 }
 
-Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
-	if (clientInfoLastChange != clientInfo->get().id) {
-		clientInfoLastChange = clientInfo->get().id;
-		masterProxies.clear();
-		if( clientInfo->get().proxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
-			provisional = clientInfo->get().proxies[0].provisional;
-		}
+bool DatabaseContext::readProxiesEnabled() {
+	return CLIENT_KNOBS->USE_READ_PROXY_SERVER && FlowTransport::transport().isClient() &&
+		this->getReadProxies() && this->getReadProxies()->size();
+}
+
+void DatabaseContext::updateFromLatestClientInfo() {
+	if (clientInfoLastChange == clientInfo->get().id) {
+		return;
 	}
+
+	clientInfoLastChange = clientInfo->get().id;
+
+	masterProxies.clear();
+	if (clientInfo->get().proxies.size()) {
+		masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().proxies, clientLocality));
+		provisional = clientInfo->get().proxies[0].provisional;
+	}
+
+	readProxies.clear();
+	if (clientInfo->get().readProxies.size()) {
+		readProxies = Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies, clientLocality));
+	}
+}
+
+Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
+	updateFromLatestClientInfo();
 	if(provisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
 	}
@@ -1078,8 +1107,8 @@ void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
 }
 
 Reference<ReadProxyInfo> DatabaseContext::getReadProxies() {
-	// TODO (Vishesh): Checkout implementation for MasterProxy and refactor it.
-	return Reference<ReadProxyInfo>(new ReadProxyInfo(clientInfo->get().readProxies));
+	updateFromLatestClientInfo();
+	return readProxies;
 }
 
 void GetRangeLimits::decrement( KeyValueRef const& data ) {
@@ -1320,8 +1349,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	cx->validateVersion(ver);
 
 	loop {
-		state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
-		                            FlowTransport::transport().isClient();
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
@@ -1346,7 +1373,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			}
 
 			state GetValueReply reply;
-			if (useReadProxies) {
+			if (cx->readProxiesEnabled()) {
 				choose {
 					when(GetValueReply _reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getValue,
 					                      GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint,
@@ -1431,7 +1458,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 
 		Key locationKey(k.getKey(), k.arena());
-		if (CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() && FlowTransport::transport().isClient()) {
+		if (cx->readProxiesEnabled()) {
 			try {
 				GetKeyReply reply ;
 				choose {
@@ -1925,9 +1952,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 				state GetKeyValuesReply rep;
 
-				state bool useReadProxies = CLIENT_KNOBS->USE_READ_PROXY_SERVER && cx->getReadProxies()->size() &&
-				                            FlowTransport::transport().isClient();
-				if (useReadProxies) {
+				if (cx->readProxiesEnabled()) {
 					choose {
 						when(GetKeyValuesReply _rep =
 						         wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKeyValues, req,
