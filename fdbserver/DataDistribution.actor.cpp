@@ -2535,17 +2535,6 @@ bool inCorrectDC(DDTeamCollection* self, TCServerInfo* server) {
 	            self->includedDCs.end());
 }
 
-// Is there any healthy team whose members do not include serverID
-bool existOtherHealthyTeams(DDTeamCollection* self, UID serverID) {
-	for (auto& team : self->teams) {
-		if (team->isHealthy() && std::count(team->serverIDs.begin(), team->serverIDs.end(), serverID) == 0) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY));
@@ -3608,7 +3597,7 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent("SameAddressChangedStatus", self->distributorId).detail("ServerID", server->id);
 				}
 				when(wait(server->wrongStoreTypeToRemove.onChange())) {
-					TraceEvent(SevWarn, "UndesiredStorageServerTriggered", self->distributorId)
+					TraceEvent("UndesiredStorageServerTriggered", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("StoreType", server->storeType)
 					    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
