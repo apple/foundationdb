@@ -819,10 +819,12 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
 	}
 
+	state std::vector<Future<Void>> recoveries;
+	state Promise<Void> recovery;
+
 	try {
 		std::vector<DiskStore> stores = getDiskStores( folder );
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-		std::vector<Future<Void>> recoveries;
 		for( int f = 0; f < stores.size(); f++ ) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
@@ -853,7 +855,6 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 
-				Promise<Void> recovery;
 				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery, connFile);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors( f, kv, s.storeID, kvClosed );
@@ -882,7 +883,6 @@ ACTOR Future<Void> workerServer(
 				startRole( Role::SHARED_TRANSACTION_LOG, s.storeID, interf.id(), details, "Restored" );
 
 				Promise<Void> oldLog;
-				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
 				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
@@ -1239,6 +1239,7 @@ ACTOR Future<Void> workerServer(
 			when( wait( handleErrors ) ) {}
 		}
 	} catch (Error& err) {
+		for (auto f : recoveries) f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_delete;
 
@@ -1389,8 +1390,9 @@ ACTOR Future<Void> fdbd(
 	int64_t memoryProfileThreshold,
 	std::string whitelistBinPaths)
 {
-	try {
+	state vector<Future<Void>> v;
 
+	try {
 		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
@@ -1398,7 +1400,6 @@ ACTOR Future<Void> fdbd(
 		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-		state vector<Future<Void>> v;
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
@@ -1423,7 +1424,8 @@ ACTOR Future<Void> fdbd(
 		wait( quorum(v,1) );
 		ASSERT(false);  // None of these actors should terminate normally
 		throw internal_error();
-	} catch(Error &e) {
+	} catch (Error& e) {
+		for (auto f : v) f.cancel();
 		Error err = checkIOTimeout(e);
 		throw err;
 	}
