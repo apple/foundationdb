@@ -74,7 +74,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
-	init( NETWORK_TEST_REPLY_SIZE,                          600000 );
+	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
