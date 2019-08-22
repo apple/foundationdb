@@ -48,6 +48,8 @@ from cancellation_timeout_tests import test_retry_limits
 from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
+from size_limit_tests import test_size_limit_option, test_get_approximate_size
+
 random.seed(0)
 
 if len(sys.argv) == 4:
@@ -126,9 +128,13 @@ class Instruction:
 
 
 def test_db_options(db):
+    db.options.set_location_cache_size(100001)
     db.options.set_max_watches(100001)
     db.options.set_datacenter_id("dc_id")
     db.options.set_machine_id("machine_id")
+    db.options.set_snapshot_ryw_enable()
+    db.options.set_snapshot_ryw_disable()
+    db.options.set_transaction_logging_max_field_length(1000)
     db.options.set_transaction_timeout(100000)
     db.options.set_transaction_timeout(0)
     db.options.set_transaction_timeout(0)
@@ -136,8 +142,7 @@ def test_db_options(db):
     db.options.set_transaction_size_limit(100000)
     db.options.set_transaction_retry_limit(10)
     db.options.set_transaction_retry_limit(-1)
-    db.options.set_snapshot_ryw_enable()
-    db.options.set_snapshot_ryw_disable()
+    db.options.set_transaction_causal_read_risky()
 
 
 @fdb.transactional
@@ -149,6 +154,7 @@ def test_options(tr):
     tr.options.set_read_your_writes_disable()
     tr.options.set_read_system_keys()
     tr.options.set_access_system_keys()
+    tr.options.set_transaction_logging_max_field_length(1000)
     tr.options.set_timeout(60 * 1000)
     tr.options.set_retry_limit(50)
     tr.options.set_max_retry_delay(100)
@@ -473,6 +479,9 @@ class Tester:
                 elif inst.op == six.u("GET_COMMITTED_VERSION"):
                     self.last_version = inst.tr.get_committed_version()
                     inst.push(b"GOT_COMMITTED_VERSION")
+                elif inst.op == six.u("GET_APPROXIMATE_SIZE"):
+                    approximate_size = inst.tr.get_approximate_size().wait()
+                    inst.push(b"GOT_APPROXIMATE_SIZE")
                 elif inst.op == six.u("GET_VERSIONSTAMP"):
                     inst.push(inst.tr.get_versionstamp())
                 elif inst.op == six.u("TUPLE_PACK"):
@@ -543,8 +552,6 @@ class Tester:
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
-                        db.options.set_location_cache_size(100001)
-
                         test_db_options(db)
                         test_options(db)
                         test_watches(db)
@@ -556,6 +563,9 @@ class Tester:
                         test_combinations(db)
                         test_locality(db)
                         test_predicates()
+
+                        test_size_limit_option(db)
+                        test_get_approximate_size(db)
 
                     except fdb.FDBError as e:
                         print("Unit tests failed: %s" % e.description)

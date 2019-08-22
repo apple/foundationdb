@@ -51,6 +51,10 @@
 .. |max-retry-delay-database-option| replace:: FIXME
 .. |transaction-size-limit-database-option| replace:: FIXME
 .. |timeout-database-option| replace:: FIXME
+.. |causal-read-risky-database-option| replace:: FIXME
+.. |causal-read-risky-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
 .. include:: api-common.rst.inc
 

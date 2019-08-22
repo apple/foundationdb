@@ -30,7 +30,7 @@ NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
 
 NetworkTestInterface::NetworkTestInterface( INetwork* local )
 {
-	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskDefaultEndpoint );
+	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint );
 }
 
 ACTOR Future<Void> networkTestServer() {

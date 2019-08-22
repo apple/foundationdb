@@ -93,7 +93,7 @@ namespace HTTP {
 		loop {
 			// Wait for connection to have something to read
 			wait(conn->onReadable());
-			wait( delay( 0, TaskReadSocket ) );
+			wait( delay( 0, TaskPriority::ReadSocket ) );
 
 			// Read into buffer
 			int originalSize = buf->size();
@@ -334,7 +334,7 @@ namespace HTTP {
 			}
 
 			// Write headers to a packet buffer chain
-			PacketBuffer *pFirst = new PacketBuffer();
+			PacketBuffer* pFirst = PacketBuffer::create();
 			PacketBuffer *pLast = writeRequestHeader(verb, resource, headers, pFirst);
 			// Prepend headers to content packer buffer chain
 			pContent->prependWriteBuffer(pFirst, pLast);
@@ -353,7 +353,7 @@ namespace HTTP {
 
 			loop {
 				wait(conn->onWritable());
-				wait( delay( 0, TaskWriteSocket ) );
+				wait( delay( 0, TaskPriority::WriteSocket ) );
 
 				// If we already got a response, before finishing sending the request, then close the connection,
 				// set the Connection header to "close" as a hint to the caller that this connection can't be used

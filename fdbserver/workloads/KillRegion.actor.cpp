@@ -85,7 +85,7 @@ struct KillRegionWorkload : TestWorkload {
 
 		TraceEvent("ForceRecovery_Begin");
 
-		wait( forceRecovery(cx->cluster->getConnectionFile(), LiteralStringRef("1")) );
+		wait( forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")) );
 
 		TraceEvent("ForceRecovery_UsableRegions");
 

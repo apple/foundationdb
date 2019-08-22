@@ -28,6 +28,7 @@ struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 	Key		keyPrefix;
+	bool checkOnly;
 
 	vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
@@ -42,8 +43,9 @@ struct CycleWorkload : TestWorkload {
 		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
 		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef(""));
+		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
+		checkOnly = getOption(options, LiteralStringRef("checkOnly"), false);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }
@@ -51,6 +53,7 @@ struct CycleWorkload : TestWorkload {
 		return bulkSetup( cx, this, nodeCount, Promise<double>() );
 	}
 	virtual Future<Void> start( Database const& cx ) {
+		if (checkOnly) return Void();
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(

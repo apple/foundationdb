@@ -55,6 +55,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
+	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
+	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
@@ -65,13 +68,14 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
 	//AsyncFileCached
-	init( PAGE_CACHE_4K,                                2000LL<<20 );
+	init( PAGE_CACHE_4K,                                   2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
 	init( SIM_PAGE_CACHE_4K,                                   1e8 );
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
@@ -134,6 +138,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
+	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -144,6 +150,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 1 );
+	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
 	init( LOAD_BALANCE_BACKOFF_RATE,                           2.0 );
@@ -155,12 +163,25 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SECOND_REQUEST_BUDGET_GROWTH,                       0.05 );
 	init( SECOND_REQUEST_MAX_BUDGET,                         100.0 );
 	init( ALTERNATIVES_FAILURE_RESET_TIME,                     5.0 );
-	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
 	init( ALTERNATIVES_FAILURE_MIN_DELAY,                     0.05 );
 	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 );
+	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
+	init( ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,              0.04 );
+	init( ALTERNATIVES_FAILURE_SLOW_MAX_DELAY,                30.0 );
+	init( ALTERNATIVES_FAILURE_SKIP_DELAY,                     1.0 );
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
+}
+
+static std::string toLower( std::string const& name ) {
+	std::string lower_name;
+	for(auto c = name.begin(); c != name.end(); ++c)
+		if (*c >= 'A' && *c <= 'Z')
+			lower_name += *c - 'A' + 'a';
+		else
+			lower_name += *c;
+	return lower_name;
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
@@ -171,6 +192,24 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 			throw invalid_option_value();
 		*double_knobs[knob] = v;
 		return true;
+	}
+	if (bool_knobs.count(knob)) {
+		if(toLower(value) == "true") {
+			*bool_knobs[knob] = true;
+		} else if(toLower(value) == "false") {
+			*bool_knobs[knob] = false;
+		} else {
+			int64_t v;
+			int n=0;
+			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
+				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			} else {
+				if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			}
+			*bool_knobs[knob] = v;
+		}
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;
@@ -198,16 +237,6 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	return false;
 }
 
-static std::string toLower( std::string const& name ) {
-	std::string lower_name;
-	for(auto c = name.begin(); c != name.end(); ++c)
-		if (*c >= 'A' && *c <= 'Z')
-			lower_name += *c - 'A' + 'a';
-		else
-			lower_name += *c;
-	return lower_name;
-}
-
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
 	knob = value;
 	double_knobs[toLower(name)] = &knob;
@@ -228,6 +257,11 @@ void Knobs::initKnob( std::string& knob, const std::string& value, const std::st
 	string_knobs[toLower(name)] = &knob;
 }
 
+void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
+	knob = value;
+	bool_knobs[toLower(name)] = &knob;
+}
+
 void Knobs::trace() {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
@@ -236,5 +270,7 @@ void Knobs::trace() {
 	for(auto &k : int64_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : string_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for(auto &k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

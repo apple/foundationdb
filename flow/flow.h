@@ -123,7 +123,9 @@ class Void {
 public:
 	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
-	void serialize(Ar&) {}
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
 };
 
 class Never {};
@@ -207,11 +209,13 @@ template <class T>
 struct union_like_traits<ErrorOr<T>> : std::true_type {
 	using Member = ErrorOr<T>;
 	using alternatives = pack<Error, T>;
-	static uint8_t index(const Member& variant) { return variant.present() ? 1 : 0; }
-	static bool empty(const Member& variant) { return false; }
+	template <class Context>
+	static uint8_t index(const Member& variant, Context&) { return variant.present() ? 1 : 0; }
+	template <class Context>
+	static bool empty(const Member& variant, Context&) { return false; }
 
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member& m) {
+	template <int i, class Context>
+	static const index_t<i, alternatives>& get(const Member& m, Context&) {
 		if constexpr (i == 0) {
 			return m.getError();
 		} else {
@@ -220,8 +224,8 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 		}
 	}
 
-	template <int i, class Alternative>
-	static const void assign(Member& m, const Alternative& a) {
+	template <int i, class Alternative, class Context>
+	static const void assign(Member& m, const Alternative& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {
@@ -817,7 +821,7 @@ public:
 		return getReplyPromise(value).getFuture();
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, int taskID) const {
+	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		return getReplyPromise(value).getFuture();
 	}
@@ -827,7 +831,7 @@ public:
 		return getReply(Promise<X>());
 	}
 	template <class X>
-	Future<X> getReplyWithTaskID(int taskID) const {
+	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
 		Promise<X> reply;
 		reply.getEndpoint(taskID);
 		return getReply(reply);
@@ -908,11 +912,11 @@ struct ActorSingleCallback : SingleCallback<ValueType> {
 	}
 };
 inline double now() { return g_network->now(); }
-inline Future<Void> delay(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds, taskID); }
-inline Future<Void> delayUntil(double time, int taskID = TaskDefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
-inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
-inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
-inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
+inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds, taskID); }
+inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(std::max(0.0, time - g_network->now()), taskID); }
+inline Future<Void> delayJittered(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*deterministicRandom()->random01()), taskID); }
+inline Future<Void> yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->yield(taskID); }
+inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) { return g_network->check_yield(taskID); }
 
 #include "flow/genericactors.actor.h"
 #endif

@@ -248,7 +248,7 @@ struct Profiler {
 		outOffset += self->environmentInfoWriter.getLength();
 
 		loop {
-			wait( self->network->delay(1.0, TaskMinPriority) || self->network->delay(2.0, TaskMaxPriority) );
+			wait( self->network->delay(1.0, TaskPriority::Min) || self->network->delay(2.0, TaskPriority::Max) );
 
 			self->enableSignal(false);
 			std::swap( self->output_buffer, otherBuffer );

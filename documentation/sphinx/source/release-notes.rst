@@ -2,11 +2,8 @@
 Release Notes
 #############
 
-6.2.0
+7.0.0
 =====
-
-Features
---------
 
 Performance
 -----------
@@ -14,22 +11,18 @@ Performance
 Fixes
 -----
 
-* If a cluster is upgraded during an ``onError`` call, the cluster could return a ``cluster_version_changed`` error. `(PR #1734) <https://github.com/apple/foundationdb/pull/1734>`_.
-
 Status
 ------
 
 Bindings
 --------
 
-* Go: The Go bindings now require Go version 1.11 or later.
-* Go: Fix issue with finalizers running too early that could lead to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
-
 Other Changes
 -------------
 
 Earlier release notes
 ---------------------
+* :doc:`6.2 (API Version 620) </old-release-notes/release-notes-620>`
 * :doc:`6.1 (API Version 610) </old-release-notes/release-notes-610>`
 * :doc:`6.0 (API Version 600) </old-release-notes/release-notes-600>`
 * :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`

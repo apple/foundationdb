@@ -132,19 +132,19 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
-	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
-	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 
-	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
 

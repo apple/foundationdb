@@ -22,13 +22,15 @@
 #include "flow/Error.h"
 #include "flow/Arena.h"
 #include "flow/flat_buffers.h"
+#include "flow/ProtocolVersion.h"
 
 template <class Ar>
 struct LoadContext {
-	Ar& ar;
-	std::vector<std::function<void()>> doAfter;
-	LoadContext(Ar& ar) : ar(ar) {}
-	Arena& arena() { return ar.arena(); }
+	Ar* ar;
+	LoadContext(Ar* ar) : ar(ar) {}
+	Arena& arena() { return ar->arena(); }
+
+	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
 
 	const uint8_t* tryReadZeroCopy(const uint8_t* ptr, unsigned len) {
 		if constexpr (Ar::ownsUnderlyingMemory) {
@@ -41,24 +43,43 @@ struct LoadContext {
 		}
 	}
 
-	void done() const {
-		for (auto& f : doAfter) {
-			f();
-		}
+	void addArena(Arena& arena) { arena = ar->arena(); }
+
+	LoadContext& context() { return *this; }
+};
+
+template <class Ar, class Allocator>
+struct SaveContext {
+	Ar* ar;
+	Allocator allocator;
+
+	SaveContext(Ar* ar, const Allocator& allocator) : ar(ar), allocator(allocator) {}
+
+	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
+
+	void addArena(Arena& arena) {}
+
+	uint8_t* allocate(size_t s) {
+		return allocator(s);
 	}
-	void addArena(Arena& arena) { arena = ar.arena(); }
+
+	SaveContext& context() { return *this; }
 };
 
 template <class ReaderImpl>
 class _ObjectReader {
+	ProtocolVersion mProtocolVersion;
 public:
+
+	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
+
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
-		LoadContext<ReaderImpl> context(*static_cast<ReaderImpl*>(this));
+		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		ASSERT(read_file_identifier(data) == file_identifier);
 		load_members(data, context, items...);
-		context.done();
 	}
 
 	template <class Item>
@@ -68,10 +89,21 @@ public:
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
+	friend struct _IncludeVersion;
+	ObjectReader& operator>> (ProtocolVersion& version) {
+		uint64_t result;
+		memcpy(&result, _data, sizeof(result));
+		_data += sizeof(result);
+		version = ProtocolVersion(result);
+		return *this;
+	}
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
-	ObjectReader(const uint8_t* data) : _data(data) {}
+	template<class VersionOptions>
+	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
+		vo.read(*this);
+	}
 
 	const uint8_t* data() { return _data; }
 
@@ -83,10 +115,22 @@ private:
 };
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
+	friend struct _IncludeVersion;
+	ArenaObjectReader& operator>> (ProtocolVersion& version) {
+		uint64_t result;
+		memcpy(&result, _data, sizeof(result));
+		_data += sizeof(result);
+		version = ProtocolVersion(result);
+		return *this;
+	}
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
 
-	ArenaObjectReader(Arena const& arena, const StringRef& input) : _data(input.begin()), _arena(arena) {}
+	template <class VersionOptions>
+	ArenaObjectReader(Arena const& arena, const StringRef& input, VersionOptions vo)
+	  : _data(input.begin()), _arena(arena) {
+		vo.read(*this);
+	}
 
 	const uint8_t* data() { return _data; }
 
@@ -98,18 +142,44 @@ private:
 };
 
 class ObjectWriter {
+	friend struct _IncludeVersion;
+	bool writeProtocolVersion = false;
+	ObjectWriter& operator<< (const ProtocolVersion& version) {
+		writeProtocolVersion = true;
+		return *this;
+	}
+	ProtocolVersion mProtocolVersion;
 public:
+	template <class VersionOptions>
+	ObjectWriter(VersionOptions vo) {
+		vo.write(*this);
+	}
+	template <class VersionOptions>
+	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator, VersionOptions vo)
+	  : customAllocator(customAllocator) {
+		vo.write(*this);
+	}
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
-		ASSERT(data == nullptr); // object serializer can only serialize one object
 		int allocations = 0;
 		auto allocator = [this, &allocations](size_t size_) {
 			++allocations;
-			size = size_;
-			data = new (arena) uint8_t[size];
+			this->size = writeProtocolVersion ? size_ + sizeof(uint64_t) : size_;
+			if (customAllocator) {
+				data = customAllocator(this->size);
+			} else {
+				data = new (arena) uint8_t[this->size];
+			}
+			if (writeProtocolVersion) {
+				auto v = protocolVersion().versionWithFlags();
+				memcpy(data, &v, sizeof(uint64_t));
+				return data + sizeof(uint64_t);
+			}
 			return data;
 		};
-		save_members(allocator, file_identifier, items...);
+		ASSERT(data == nullptr); // object serializer can only serialize one object
+		SaveContext<ObjectWriter, decltype(allocator)> context(this, allocator);
+		save_members(context, file_identifier, items...);
 		ASSERT(allocations == 1);
 	}
 
@@ -123,18 +193,26 @@ public:
 	}
 
 	Standalone<StringRef> toString() const {
+		ASSERT(!customAllocator);
 		return Standalone<StringRef>(toStringRef(), arena);
 	}
 
-	template <class Item>
-	static Standalone<StringRef> toValue(Item const& item) {
-		ObjectWriter writer;
+	template <class Item, class VersionOptions>
+	static Standalone<StringRef> toValue(Item const& item, VersionOptions vo) {
+		ObjectWriter writer(vo);
 		writer.serialize(item);
 		return writer.toString();
 	}
 
+	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+	void setProtocolVersion(ProtocolVersion v) {
+		mProtocolVersion = v;
+		ASSERT(mProtocolVersion.isValid());
+	}
+
 private:
 	Arena arena;
+	std::function<uint8_t*(size_t)> customAllocator;
 	uint8_t* data = nullptr;
 	int size = 0;
 };
@@ -143,12 +221,14 @@ private:
 // Standalone<T> and T to be equivalent for serialization
 namespace detail {
 
-template <class T>
-struct LoadSaveHelper<Standalone<T>> {
-	template <class Context>
-	void load(Standalone<T>& member, const uint8_t* current, Context& context) {
-		helper.load(member.contents(), current, context);
-		context.addArena(member.arena());
+template <class T, class Context>
+struct LoadSaveHelper<Standalone<T>, Context> : Context {
+	LoadSaveHelper(const Context& context)
+		: Context(context), helper(context) {}
+
+	void load(Standalone<T>& member, const uint8_t* current) {
+		helper.load(member.contents(), current);
+		this->addArena(member.arena());
 	}
 
 	template <class Writer>
@@ -157,7 +237,7 @@ struct LoadSaveHelper<Standalone<T>> {
 	}
 
 private:
-	LoadSaveHelper<T> helper;
+	LoadSaveHelper<T, Context> helper;
 };
 
 } // namespace detail

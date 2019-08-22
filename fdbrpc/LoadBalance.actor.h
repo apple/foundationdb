@@ -66,15 +66,11 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 };
 
 // Subclasses must initialize all members in their default constructors
+// Subclasses must serialize all members
 struct LoadBalancedReply {
 	double penalty;
 	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, penalty, error);
-	}
 };
 
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
@@ -179,7 +175,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {
@@ -302,8 +298,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
 					g_network->networkMetrics.oldestAlternativesFailure = now();
 				}
-
-				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
+				
+				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
+				if(now() - g_network->networkMetrics.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+					g_network->networkMetrics.lastAlternativesFailureSkipDelay = now();
+				} else {
+					double elapsed = now()-g_network->networkMetrics.oldestAlternativesFailure;
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
+				}
 
 				// Making this SevWarn means a lot of clutter
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {

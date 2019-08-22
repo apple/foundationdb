@@ -42,36 +42,62 @@ public:
 							break;
 						}
 						when( wait( self->localityChanged ) ) {
-							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+							self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 							self->localityChanged = self->peekLocality->onChange();
 						}
 						when( wait( delay(self->peekTypeSwitches==0 ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME)) ) {
 							self->peekTypeSwitches++;
 							if(self->peekTypeSwitches%3==1) {
-								self->cursor = self->logSystem->peek( UID(), self->recoveryLoc, self->tag, true );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = Never();
 							} else if(self->peekTypeSwitches%3==2) {
-								self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = self->peekLocality->onChange();
 							} else {
-								self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion );
+								self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, self->totalRecoveredBytes == 0 );
 								self->localityChanged = self->peekLocality->onChange();
 							}
 						}
 					}
 				}
-				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
+				TraceEvent("PeekNextGetMore").detail("Total", self->totalRecoveredBytes).detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc)
+					.detail("End", self->logSystem->getEnd()).detail("HasMessage", self->cursor->hasMessage()).detail("Version", self->cursor->version().version); 
+				
+				if(self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
+					TEST(true); //disk adapter reset
+					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
+					self->recoveryQueue.clear();
+					self->recoveryQueueDataSize = 0;
+					self->recoveryLoc = self->cursor->popped();
+					self->recoveryQueueLoc = self->recoveryLoc;
+					self->totalRecoveredBytes = 0;
+					if(self->peekTypeSwitches%3==1) {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, tagLocalityInvalid, invalidVersion, true );
+						self->localityChanged = Never();
+					} else if(self->peekTypeSwitches%3==2) {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, true );
+						self->localityChanged = self->peekLocality->onChange();
+					} else {
+						self->cursor = self->logSystem->peekTxs( UID(), self->recoveryLoc, self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion, true );
+						self->localityChanged = self->peekLocality->onChange();
+					}
+					self->hasDiscardedData = true;
+					throw disk_adapter_reset();
+				}
+
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;
 				}
 				if(!self->cursor->hasMessage()) {
 					self->recoveryLoc = self->cursor->version().version;
+					wait(yield());
 					continue;
 				}
 			}
 			
 			self->recoveryQueue.push_back( Standalone<StringRef>(self->cursor->getMessage(), self->cursor->arena()) );
 			self->recoveryQueueDataSize += self->recoveryQueue.back().size();
+			self->totalRecoveredBytes += self->recoveryQueue.back().size();
 			self->cursor->nextMessage();
 			if(!self->cursor->hasMessage()) self->recoveryLoc = self->cursor->version().version;
 
@@ -168,6 +194,6 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<PeekSpecialInfo>> peekLocality ) {
-	return new LogSystemDiskQueueAdapter( logSystem, tag, peekLocality );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality, Version txsPoppedVersion ) {
+	return new LogSystemDiskQueueAdapter( logSystem, peekLocality, txsPoppedVersion, true );
 }

@@ -2,10 +2,12 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(SolutionDir)versions.target" />
   <PropertyGroup Condition="'$(Release)' != 'true' ">
+    <SuppressValidation>true</SuppressValidation>
     <PreReleaseDecoration>-PRERELEASE</PreReleaseDecoration>
     <PreReleaseVersion>.0</PreReleaseVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Release)' == 'true' ">
+    <SuppressValidation>true</SuppressValidation>
     <PreReleaseDecoration>
     </PreReleaseDecoration>
     <PreReleaseVersion>.1</PreReleaseVersion>

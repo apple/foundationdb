@@ -1,5 +1,6 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
+  ApplyMetadataMutation.cpp
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
@@ -116,6 +117,7 @@ set(FDBSERVER_SRCS
   workloads/Cycle.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
+  workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DummyWorkload.actor.cpp
@@ -167,6 +169,7 @@ set(FDBSERVER_SRCS
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp

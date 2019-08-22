@@ -237,6 +237,7 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent). Th
     # class = 
     # memory = 8GiB
     # storage_memory = 1GiB
+    # cache_memory = 2GiB
     # locality_machineid = 
     # locality_zoneid = 
     # locality_data_hall = 
@@ -256,8 +257,9 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
 * ``maxlogssize``: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.
 * ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
-* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory`` parameter is increased, the ``memory`` parameter should be increased by an equal amount.
-* ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory``, you should also increase the ``memory`` parameter by the same amount.
+* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory``  or ``cache_memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
+* ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``cache_memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
 * ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
 * ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
 * ``locality_dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
@@ -295,7 +297,7 @@ These sections run and configure the backup agent process used for :doc:`point-i
 Choosing a redundancy mode
 ==========================
 
-FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the ``configure`` command ``fdbcli``. For example::
+FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the ``configure`` command of ``fdbcli``. For example::
 
     user@host$ fdbcli
     Using cluster file `/etc/foundationdb/fdb.cluster'.
@@ -316,19 +318,19 @@ Single datacenter modes
 +==============================+==+=================+=================+================+
 | Best for                     |  | 1-2 machines    | 3-4 machines    | 5+ machines    | 
 +------------------------------+--+-----------------+-----------------+----------------+
-| Replication                  |  | 1 copy          | 2 copy          | 3 copy         |
+| Total Replicas               |  | 1 copy          | 2 copies        | 3 copies       |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # live machines              |  |                 |                 |                |
+| Live machines required       |  |                 |                 |                |
 | to make progress             |  | 1               | 2               | 3              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Minimum # of machines        |  |                 |                 |                |
+| Required machines            |  |                 |                 |                |
 | for fault tolerance          |  | impossible      | 3               | 4              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| Ideal # of                   |  |                 |                 |                |
+| Ideal number of              |  |                 |                 |                |
 | coordination servers         |  | 1               | 3               | 5              |
 +------------------------------+--+-----------------+-----------------+----------------+
-| # simultaneous failures      |  |                 |                 |                |
-| after which data may be lost |  | any machine     | 2+ machines     | 3+ machines    |
+| Simultaneous failures        |  |                 |                 |                |
+| after which data may be lost |  | any process     | 2+ machines     | 3+ machines    |
 +------------------------------+--+-----------------+-----------------+----------------+
 
 In the three single datacenter redundancy modes, FoundationDB replicates data across the required number of machines in the cluster, but without aiming for datacenter redundancy. Although machines may be placed in more than one datacenter, the cluster will not be tolerant of datacenter-correlated failures. 
@@ -534,7 +536,7 @@ While everything is healthy, writes need to be made durable in both west coast d
 
 If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.
 
-The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, to bring the west coast back online FoundationDB will have to copy all the data between the regions.
+The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, FoundationDB will have to copy all the data between the regions in order to bring it back online.
 
 If a region failover occurs, clients will generally only see a latency spike of a few seconds.
 

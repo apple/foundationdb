@@ -18,34 +18,35 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbclient/SystemData.h"
-#include "fdbrpc/sim_validation.h"
-#include "fdbclient/Notified.h"
-#include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbclient/SystemData.h"
-#include "flow/Stats.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/Atomic.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Notified.h"
+#include "fdbclient/SystemData.h"
+#include "fdbrpc/sim_validation.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Knobs.h"
+#include "flow/Stats.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -95,11 +96,11 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 	loop choose {
 		when ( wait( db->onChange() ) ) {
 			if ( db->get().ratekeeper.present() ) {
-				TraceEvent("Proxy_RatekeeperChanged", myID)
+				TraceEvent("ProxyRatekeeperChanged", myID)
 				.detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void();  // trigger GetRate request
 			} else {
-				TraceEvent("Proxy_RatekeeperDied", myID);
+				TraceEvent("ProxyRatekeeperDied", myID);
 				nextRequestTimer = Never();
 				reply = Never();
 			}
@@ -158,7 +159,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				if (now() - *lastGRVTime > *GRVBatchTime)
 					*lastGRVTime = now() - *GRVBatchTime;
 
-				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskProxyGRVTimer));
+				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskPriority::ProxyGRVTimer));
 			}
 
 			transactionQueue->push(std::make_pair(req, counter--));
@@ -236,6 +237,9 @@ struct ProxyCommitData {
 	vector<Standalone<StringRef>> whitelistedBinPathVec;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
+	double lastStartCommit;
+	double lastCommitLatency;
+	NotifiedDouble lastCommitTime;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -263,8 +267,8 @@ struct ProxyCommitData {
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-			firstProxy(firstProxy), cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)), db(db),
-			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0)
+			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
+			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
 	{}
 };
 
@@ -350,7 +354,7 @@ struct ResolutionRequestBuilder {
 };
 
 ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
-	wait(delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher));  
+	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));  
 
 	state double lastBatch = 0;
 
@@ -363,7 +367,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 			timeout = Never();
 		}
 		else {
-			timeout = delayJittered(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskProxyCommitBatcher);
+			timeout = delayJittered(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskPriority::ProxyCommitBatcher);
 		}
 
 		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
@@ -378,6 +382,12 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						continue;
 					}
 
+					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
+						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						    .suppressFor(1.0)
+						    .detail("Size", bytes)
+						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
+					}
 					++commitData->stats.txnCommitIn;
 
 					if(req.debugID.present()) {
@@ -387,10 +397,10 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					if(!batch.size()) {
 						commitData->commitBatchStartNotifications.send(Void());
 						if(now() - lastBatch > commitData->commitBatchInterval) {
-							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskProxyCommitBatcher);
+							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskPriority::ProxyCommitBatcher);
 						}
 						else {
-							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskProxyCommitBatcher);
+							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskPriority::ProxyCommitBatcher);
 						}
 					}
 
@@ -398,7 +408,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						out.send({ batch, batchBytes });
 						lastBatch = now();
 						commitData->commitBatchStartNotifications.send(Void());
-						timeout = delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher);
+						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 						batch = std::vector<CommitTransactionRequest>();
 						batchBytes = 0;
 					}
@@ -457,7 +467,7 @@ ACTOR Future<Void> commitBatch(
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
-	wait(delay(0, TaskProxyCommit));
+	wait(delay(0, TaskPriority::ProxyCommit));
 
 	self->lastVersionTime = t1;
 
@@ -534,7 +544,7 @@ ACTOR Future<Void> commitBatch(
 	vector< Future<ResolveTransactionBatchReply> > replies;
 	for (int r = 0; r<self->resolvers.size(); r++) {
 		requests.requests[r].debugID = debugID;
-		replies.push_back(brokenPromiseToNever(self->resolvers[r].resolve.getReply(requests.requests[r], TaskProxyResolverReply)));
+		replies.push_back(brokenPromiseToNever(self->resolvers[r].resolve.getReply(requests.requests[r], TaskPriority::ProxyResolverReply)));
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
@@ -762,96 +772,6 @@ ACTOR Future<Void> commitBatch(
 						toCommit.addTags(allSources);
 					}
 					toCommit.addTypedMessage(m);
-				} else if (m.type == MutationRef::Exec) {
-					state std::string param2 = m.param2.toString();
-					state ExecCmdValueString execArg(param2);
-					execArg.dbgPrint();
-					state StringRef binPath = execArg.getBinaryPath();
-					state StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-
-					auto result =
-						self->txnStateStore->readValue(LiteralStringRef("log_anti_quorum").withPrefix(configKeysPrefix)).get();
-					state int logAntiQuorum = 0;
-					if (result.present()) {
-						logAntiQuorum = atoi(result.get().toString().c_str());
-					}
-
-					if (m.param1 != execDisableTLogPop
-						&& m.param1 != execEnableTLogPop
-						&& !isWhitelisted(self->whitelistedBinPathVec, binPath)) {
-						TraceEvent("ExecTransactionNotPermitted")
-							.detail("TransactionNum", transactionNum);
-						committed[transactionNum] = ConflictBatch::TransactionNotPermitted;
-					} else if (self->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
-						// Cluster is not fully recovered and needs TLogs
-						// from previous generation for full recovery.
-						// Currently, snapshot of old tlog generation is not
-						// supported and hence failing the snapshot request until
-						// cluster is fully_recovered.
-						TraceEvent("ExecTransactionNotFullyRecovered")
-							.detail("TransactionNum", transactionNum);
-						committed[transactionNum] = ConflictBatch::TransactionNotFullyRecovered;
-					} else if (logAntiQuorum > 0) {
-						// exec op is not supported when logAntiQuorum is configured
-						// FIXME: Add support for exec ops in the presence of log anti quorum
-						TraceEvent("ExecOpNotSupportedWithLogAntiQuorum")
-							.detail("LogAntiQuorum", logAntiQuorum)
-							.detail("TransactionNum", transactionNum);
-						committed[transactionNum] = ConflictBatch::TransactionExecLogAntiQuorum;
-					} else {
-						// Send the ExecOp to
-						// - all the storage nodes in a single region and
-						// - only to storage nodes in local region in multi-region setup
-						// step 1: get the DatabaseConfiguration
-						auto result =
-							self->txnStateStore->readValue(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix)).get();
-						ASSERT(result.present());
-						state int usableRegions = atoi(result.get().toString().c_str());
-
-						// step 2: find the tag.id from locality info of the master
-						auto localityKey =
-							self->txnStateStore->readValue(tagLocalityListKeyFor(self->master.locality.dcId())).get();
-
-						int8_t locality = tagLocalityInvalid;
-						if (usableRegions > 1) {
-							if (!localityKey.present()) {
-								TraceEvent(SevError, "LocalityKeyNotPresentForMasterDCID");
-								ASSERT(localityKey.present());
-							}
-							locality = decodeTagLocalityListValue(localityKey.get());
-						}
-
-						std::set<Tag> allSources;
-						auto& m = (*pMutations)[mutationNum];
-						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid)
-								.detail("To", "all sources")
-								.detail("Mutation", m.toString())
-								.detail("Version", commitVersion);
-
-						std::vector<Tag> localTags;
-						auto tagKeys = self->txnStateStore->readRange(serverTagKeys).get();
-						for( auto& kv : tagKeys ) {
-							Tag t = decodeServerTagValue( kv.value );
-							if ((usableRegions > 1 && t.locality == locality)
-								|| (usableRegions == 1))  {
-								localTags.push_back(t);
-							}
-							allSources.insert(localTags.begin(), localTags.end());
-						}
-
-						auto te1 = TraceEvent("ProxyCommitTo", self->dbgid);
-						te1.detail("To", "all sources");
-						te1.detail("UidStr", uidStr);
-						te1.detail("Mutation", m.toString());
-						te1.detail("Version", commitVersion);
-						te1.detail("NumTags", allSources.size());
-						for (auto& tag : allSources) {
-							toCommit.addTag(tag);
-						}
-						toCommit.addTypedMessage(m, true /* allLocations */);
-						toCommit.setHasExecOp();
-					}
 				} else
 					UNREACHABLE();
 
@@ -986,7 +906,7 @@ ACTOR Future<Void> commitBatch(
 	bool firstMessage = true;
 	for(auto m : msg.messages) {
 		if(firstMessage) {
-			toCommit.addTag(txsTag);
+			toCommit.addTxsTag();
 		}
 		toCommit.addMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
@@ -1001,6 +921,8 @@ ACTOR Future<Void> commitBatch(
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
 
+	state double commitStartTime = now();
+	self->lastStartCommit = commitStartTime;
 	Future<Version> loggingComplete = self->logSystem->push( prevVersion, commitVersion, self->committedVersion.get(), self->minKnownCommittedVersion, toCommit, debugID );
 
 	if (!forceRecovery) {
@@ -1023,6 +945,8 @@ ACTOR Future<Void> commitBatch(
 		}
 		throw;
 	}
+	self->lastCommitLatency = now()-commitStartTime;
+	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
 	wait(yield());
 
 	if( self->popRemoteTxs && msg.popTo > ( self->txsPopVersions.size() ? self->txsPopVersions.back().second : self->lastTxsPop ) ) {
@@ -1033,7 +957,7 @@ ACTOR Future<Void> commitBatch(
 
 		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
-	self->logSystem->pop(msg.popTo, txsTag);
+	self->logSystem->popTxs(msg.popTo);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1071,22 +995,14 @@ ACTOR Future<Void> commitBatch(
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
 		}
-		else if (committed[t] == ConflictBatch::TransactionNotPermitted) {
-			trs[t].reply.sendError(transaction_not_permitted());
-		}
-		else if (committed[t] == ConflictBatch::TransactionNotFullyRecovered) {
-			trs[t].reply.sendError(cluster_not_fully_recovered());
-		}
-		else if (committed[t] == ConflictBatch::TransactionExecLogAntiQuorum) {
-			trs[t].reply.sendError(txn_exec_log_anti_quorum());
-		} else {
+		else {
 			trs[t].reply.sendError(not_committed());
 		}
 
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {
 			bool filter = maxTransactionBytes > self->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime, filter);
+			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime(), filter);
 		}
 	}
 
@@ -1124,6 +1040,14 @@ ACTOR Future<Void> commitBatch(
 	return Void();
 }
 
+ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
+	state double confirmStart = now();
+	self->lastStartCommit = confirmStart;
+	wait(self->logSystem->confirmEpochLive(debugID));
+	self->lastCommitLatency = now()-confirmStart;
+	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
+	return Void();
+}
 
 ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
@@ -1135,11 +1059,12 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	state vector<Future<GetReadVersionReply>> proxyVersions;
 	for (auto const& p : *otherProxies)
-		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskTLogConfirmRunningReply)));
+		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
 
-	if (!(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY))
-	{
-		wait(commitData->logSystem->confirmEpochLive(debugID));
+	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
+		wait(updateLastCommit(commitData, debugID));
+	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 && now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > commitData->lastCommitTime.get()) {
+		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
 
 	if (debugID.present())
@@ -1199,7 +1124,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
-		stats->grvLatencyBands.addMeasurement(end - request.requestTime);
+		stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		request.reply.send(reply);
 	}
 
@@ -1292,7 +1217,7 @@ ACTOR static Future<Void> transactionStarter(
 		}
 
 		if (!transactionQueue.empty())
-			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskProxyGRVTimer));
+			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
 
 		/*TraceEvent("GRVBatch", proxy.id())
 		.detail("Elapsed", elapsed)
@@ -1505,7 +1430,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 
 			while(self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {
 				self->lastTxsPop = self->txsPopVersions.front().second;
-				self->logSystem->pop(self->txsPopVersions.front().second, txsTag, 0, tagLocalityRemoteLog);
+				self->logSystem->popTxs(self->txsPopVersions.front().second, tagLocalityRemoteLog);
 				self->txsPopVersions.pop_front();
 			}
 
@@ -1515,6 +1440,94 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 			}
 		}
 	}
+}
+
+ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future<Void>> addActor) {
+	loop {
+		double interval = std::max(SERVER_KNOBS->MIN_CONFIRM_INTERVAL, (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION - self->lastCommitLatency)/2.0);
+		double elapsed = now()-self->lastStartCommit;
+		if(elapsed < interval) {
+			wait( delay(interval + 0.0001 - elapsed) );
+		} else {
+			addActor.send(updateLastCommit(self));
+		}
+	}
+}
+
+ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData) {
+	TraceEvent("SnapMasterProxy_SnapReqEnter")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	try {
+		// whitelist check
+		ExecCmdValueString execArg(snapReq.snapPayload);
+		StringRef binPath = execArg.getBinaryPath();
+		if (!isWhitelisted(commitData->whitelistedBinPathVec, binPath)) {
+			TraceEvent("SnapMasterProxy_WhiteListCheckFailed")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw transaction_not_permitted();
+		}
+		// db fully recovered check
+		if (commitData->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
+			// Cluster is not fully recovered and needs TLogs
+			// from previous generation for full recovery.
+			// Currently, snapshot of old tlog generation is not
+			// supported and hence failing the snapshot request until
+			// cluster is fully_recovered.
+			TraceEvent("SnapMasterProxy_ClusterNotFullyRecovered")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw cluster_not_fully_recovered();
+		}
+
+		auto result =
+			commitData->txnStateStore->readValue(LiteralStringRef("log_anti_quorum").withPrefix(configKeysPrefix)).get();
+		int logAntiQuorum = 0;
+		if (result.present()) {
+			logAntiQuorum = atoi(result.get().toString().c_str());
+		}
+		// FIXME: logAntiQuorum not supported, remove it later,
+		// In version2, we probably don't need this limtiation, but this needs to be tested.
+		if (logAntiQuorum > 0) {
+			TraceEvent("SnapMasterProxy_LogAnitQuorumNotSupported")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			throw txn_exec_log_anti_quorum();
+		}
+
+		// send a snap request to DD
+		if (!commitData->db->get().distributor.present()) {
+			TraceEvent(SevWarnAlways, "DataDistributorNotPresent");
+			throw operation_failed();
+		}
+		state Future<ErrorOr<Void>> ddSnapReq =
+			commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
+		try {
+			wait(throwErrorOr(ddSnapReq));
+		} catch (Error& e) {
+			TraceEvent("SnapMasterProxy_DDSnapResponseError")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID)
+				.error(e, true /*includeCancelled*/ );
+			throw e;
+		}
+		snapReq.reply.send(Void());
+	} catch (Error& e) {
+		TraceEvent("SnapMasterProxy_SnapReqError")
+			.detail("SnapPayload", snapReq.snapPayload)
+			.detail("SnapUID", snapReq.snapUID)
+			.error(e, true /*includeCancelled*/);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	TraceEvent("SnapMasterProxy_SnapReqExit")
+		.detail("SnapPayload", snapReq.snapPayload)
+		.detail("SnapUID", snapReq.snapUID);
+	return Void();
 }
 
 ACTOR Future<Void> masterProxyServerCore(
@@ -1563,7 +1576,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
+	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
@@ -1581,6 +1594,10 @@ ACTOR Future<Void> masterProxyServerCore(
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
 
+	if(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
+		addActor.send(lastCommitUpdater(&commitData, addActor));
+	}
+
 	int commitBatchByteLimit = 
 		(int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX, 
 			std::max<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MIN, 
@@ -1595,7 +1612,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
-				commitData.logSystem->pop(commitData.lastTxsPop, txsTag, 0, tagLocalityRemoteLog);
+				commitData.logSystem->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
 			}
 
 			Optional<LatencyBandConfig> newLatencyBandConfig = commitData.db->get().latencyBandConfig;
@@ -1650,62 +1667,9 @@ ACTOR Future<Void> masterProxyServerCore(
 			rep.version = commitData.committedVersion.get();
 			req.reply.send(rep);
 		}
-		when(ExecRequest _execReq = waitNext(proxy.execReq.getFuture())) {
-			state ExecRequest execReq = _execReq;
-			if (execReq.debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", execReq.debugID.get().first(),
-				                      "MasterProxyServer.masterProxyServerCore."
-				                      "ExecRequest");
-
-			TraceEvent("ExecRequest").detail("Payload", execReq.execPayload.toString());
-
-			// get the list of coordinators
-			state Optional<Value> coordinators = commitData.txnStateStore->readValue(coordinatorsKey).get();
-			state std::vector<NetworkAddress> coordinatorsAddr =
-			    ClusterConnectionString(coordinators.get().toString()).coordinators();
-			state std::set<NetworkAddress> coordinatorsAddrSet;
-			for (int i = 0; i < coordinatorsAddr.size(); i++) {
-				TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", coordinatorsAddr[i]);
-				coordinatorsAddrSet.insert(coordinatorsAddr[i]);
-			}
-
-			// get the list of workers
-			state std::vector<WorkerDetails> workers =
-			    wait(commitData.db->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
-
-			// send the exec command to the list of workers which are
-			// coordinators
-			state vector<Future<Void>> execCoords;
-			for (int i = 0; i < workers.size(); i++) {
-				NetworkAddress primary = workers[i].interf.address();
-				Optional<NetworkAddress> secondary = workers[i].interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end()
-					|| (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
-					TraceEvent("ExecReqToCoordinator")
-						.detail("PrimaryWorkerAddr", primary)
-						.detail("SecondaryWorkerAddr", secondary);
-					execCoords.push_back(brokenPromiseToNever(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayload))));
-				}
-			}
-			if (execCoords.size() <= 0) {
-				TraceEvent(SevDebug, "CoordinatorWorkersNotFound");
-				execReq.reply.sendError(operation_failed());
-			} else {
-				try {
-					wait(timeoutError(waitForAll(execCoords), 10.0));
-					int numSucc = 0;
-					for (auto item : execCoords) {
-						if (item.isValid() && item.isReady()) {
-							++numSucc;
-						}
-					}
-					bool succ = (numSucc >= ((execCoords.size() + 1) / 2));
-					succ ? execReq.reply.send(Void()) : execReq.reply.sendError(operation_failed());
-				} catch (Error& e) {
-					TraceEvent("WaitingForAllExecCoords").error(e);
-					execReq.reply.sendError(broken_promise());
-				}
-			}
+		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
+			TraceEvent(SevDebug, "SnapMasterEnqueue");
+			addActor.send(proxySnapCreate(snapReq, &commitData));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;
@@ -1782,8 +1746,9 @@ ACTOR Future<Void> masterProxyServerCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface))
-		throw worker_removed();
+		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface)) {
+			throw worker_removed();
+		}
 		wait(db->onChange());
 	}
 }
@@ -1796,19 +1761,16 @@ ACTOR Future<Void> masterProxyServer(
 {
 	try {
 		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
-		loop choose{
-			when(wait(core)) { return Void(); }
-			when(wait(checkRemoved(db, req.recoveryCount, proxy))) {}
-		}
+		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed || e.code() == error_code_tlog_stopped ||
-			e.code() == error_code_master_tlog_failed || e.code() == error_code_coordinators_changed || e.code() == error_code_coordinated_state_conflict ||
-			e.code() == error_code_new_coordinators_timed_out)
-		{
-			TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
-			return Void();
+		TraceEvent("MasterProxyTerminated", proxy.id()).error(e, true);
+
+		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
+			e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+			e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+			throw;
 		}
-		throw;
 	}
+	return Void();
 }

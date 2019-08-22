@@ -37,7 +37,7 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, int taskID){
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, TaskPriority taskID){
 	loop {
 		try {
 			state double start = now();
@@ -55,7 +55,7 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 	}
 }
 
-ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime, int taskID){
+ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime, TaskPriority taskID){
 	loop {
 		wait(waitFailureClient(waitFailure, 0, 0, taskID));
 		wait(delay(failureReactionTime, taskID) || IFailureMonitor::failureMonitor().onStateEqual( waitFailure.getEndpoint(), FailureStatus(false)));
@@ -65,7 +65,7 @@ ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> wai
 	}
 }
 
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, int taskID){
+ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, TaskPriority taskID){
 	loop {
 		try {	
 			failed->set( IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed() );

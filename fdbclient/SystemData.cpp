@@ -36,14 +36,6 @@ const KeyRef keyServersEnd = keyServersKeys.end;
 const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-// list of reserved exec commands
-const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent state of
-                                                     // storage, TLog and coordinated state
-const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
-const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
-// used to communicate snap failures between TLog and SnapTest Workload, used only in simulator
-const StringRef snapTestFailStatus = LiteralStringRef("\xff/SnapTestFailStatus/");
-
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
 }
@@ -119,6 +111,9 @@ const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+// serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
+// For example, we can copy a SS file to a remote DC and start the SS there;
+//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );
@@ -150,7 +145,7 @@ const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
 	wr.serializeBytes( serverTagHistoryKeys.begin );
 	wr << serverID;
 	version = bigEndian64(version);
-	
+
 	Key versionStr = makeString( 8 );
 	uint8_t* data = mutateString( versionStr );
 	memcpy(data, &version, 8);
@@ -442,6 +437,9 @@ const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientI
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
 const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
 
+// ConsistencyCheck settings
+const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
+
 // Request latency measurement key
 const KeyRef latencyBandConfigKey = LiteralStringRef("\xff\x02/latencyBandConfig");
 
@@ -618,6 +616,8 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 }
 
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
+const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
+const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
 	BinaryWriter wr(IncludeVersion());
