@@ -248,7 +248,6 @@ public:
 	}
 };
 
-// MXQ: Why do we need to count the utilization for each priority? Can a relocationShard have multiple priorities?
 struct Busyness {
 	vector<int> ledger;
 

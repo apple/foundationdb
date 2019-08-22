@@ -259,10 +259,7 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 }
 
 // keyServer: map from keys to destination servers
-// serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
-// complete(already has), ""()
-// MXQ: What does serverKeys[dest][keys] mean? It seems having the same meaning with serverKeys[servers][keys]? (I think so.)
-
+// serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have), complete(already has), ""().
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
 // Set serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member of servers OR if the source list is sufficiently degraded)

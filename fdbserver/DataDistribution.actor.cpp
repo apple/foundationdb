@@ -2564,8 +2564,9 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 
 		for (auto& server : self->server_info) {
 			if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
-				// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the storageServerTracker.
-				// This race may cause the server to be removed before react to wrongStoreTypeToRemove
+				// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
+				// storageServerTracker. This race may cause the server to be removed before react to
+				// wrongStoreTypeToRemove
 				server.second->wrongStoreTypeToRemove.set(true);
 				removeServerID = server.second->id;
 				foundSSToRemove = true;
