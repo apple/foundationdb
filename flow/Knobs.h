@@ -92,6 +92,8 @@ public:
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 
+	int NETWORK_TEST_REPLY_SIZE;
+
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
