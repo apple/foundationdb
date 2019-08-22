@@ -2676,6 +2676,18 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 	}
 }
 
+bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team) {
+	auto ssis = team->getLastKnownServerInterfaces();
+	for (const auto &ssi : ssis) {
+		AddressExclusion addr(ssi.address().ip, ssi.address().port);
+		AddressExclusion ipaddr(ssi.address().ip);
+		if (self->failedServers.count(addr) || self->failedServers.count(ipaddr)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Track a team and issue RelocateShards when the level of degradation changes
 // A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
@@ -2838,7 +2850,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
-				if( self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get() ) {
+				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) ||
+				    teamContainsFailedServer(self, team)) {
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
 
 					for(int i=0; i<shards.size(); i++) {
