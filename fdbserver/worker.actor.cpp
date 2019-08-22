@@ -75,7 +75,7 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
@@ -128,6 +128,9 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 				// no need to wait.
 			} else {
 				wait(onClosed);
+			}
+			if(e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
+				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			}
 			if(storeError.isReady()) throw storeError.get().getError();
 			if (e.isError()) throw e.getError(); else return e.get();
@@ -278,10 +281,27 @@ struct TLogOptions {
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
 	auto tLogFn = tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::VALUE) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::REFERENCE) ASSERT(false);
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::VALUE ) return oldTLog_6_0::tLog;
-	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::REFERENCE) return tLog;
+	if ( options.spillType == TLogSpillType::VALUE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return oldTLog_6_0::tLog;
+		default:
+			ASSERT(false);
+		}
+	}
+	if ( options.spillType == TLogSpillType::REFERENCE ) {
+		switch (options.version) {
+		case TLogVersion::V2:
+			ASSERT(false);
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			return tLog;
+		default:
+			ASSERT(false);
+		}
+	}
 	ASSERT(false);
 	return tLogFn;
 }
@@ -522,7 +542,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	*error = false;
 	uint64_t page_size = sysconf(_SC_PAGESIZE);
-	int fd = open("/proc/self/statm", O_RDONLY);
+	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		TraceEvent("OpenStatmFileFailure");
 		*error = true;
@@ -586,13 +606,13 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
-		DUMPTOKEN(recruited.getPhysicalMetrics);
+		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 
-		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>() );
+		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -669,6 +689,36 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 	if(role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);
 	}
+}
+
+ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFolder) {
+	state ExecCmdValueString snapArg(snapReq.snapPayload);
+	try {
+		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
+		int err = wait(execHelper(&snapArg, snapFolder.toString(), role.toString()));
+		std::string uidStr = snapReq.snapUID.toString();
+		TraceEvent("ExecTraceWorker")
+			.detail("Uid", uidStr)
+			.detail("Status", err)
+			.detail("Role", snapReq.role)
+			.detail("Value", snapFolder)
+			.detail("ExecPayload", snapReq.snapPayload);
+		if (err != 0) {
+			throw operation_failed();
+		}
+		if (snapReq.role.toString() == "storage") {
+			printStorageVersionInfo();
+		}
+		snapReq.reply.send(Void());
+	} catch (Error& e) {
+		TraceEvent("ExecHelperError").error(e, true /*includeCancelled*/);
+		if (e.code() != error_code_operation_cancelled) {
+			snapReq.reply.sendError(e);
+		} else {
+			throw e;
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
@@ -766,14 +816,14 @@ ACTOR Future<Void> workerServer(
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
 			try {
-				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, locality);
+				state Database db = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, true, locality);
 				metricsLogger = runMetrics( db, KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
 			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskDefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
+			metricsLogger = runMetrics( openDBOnServer( dbInfo, TaskPriority::DefaultEndpoint, true, lockAware ), KeyRef(metricsPrefix) );
 		}
 	}
 
@@ -833,14 +883,14 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getShardState);
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
-				DUMPTOKEN(recruited.getPhysicalMetrics);
+				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 
 				Promise<Void> recovery;
-				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
+				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery, connFile);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors( f, kv, s.storeID, kvClosed );
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
@@ -902,6 +952,13 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				if(req.waitForDuration) {
+					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
+					flushTraceFileVoid();
+					setProfilingEnabled(0);
+					g_network->stop();
+					threadSleep(req.waitForDuration);
+				}
 				if(rebootReq.checkData) {
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					wait( checkFile->sync() );
@@ -1053,7 +1110,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getPhysicalMetrics);
+					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
 					DUMPTOKEN(recruited.getKeyValueStoreType);
@@ -1205,26 +1262,14 @@ ACTOR Future<Void> workerServer(
 			}
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
-				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+				loggingTrigger = delay( loggingDelay, TaskPriority::FlushTrace );
 			}
-			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
-				state ExecCmdValueString execArg(req.execPayload);
-				try {
-					int err = wait(execHelper(&execArg, coordFolder, "role=coordinator"));
-					StringRef uidStr = execArg.getBinaryArgValue(LiteralStringRef("uid"));
-					auto tokenStr = "ExecTrace/Coordinators/" + uidStr.toString();
-					auto te = TraceEvent("ExecTraceCoordinators");
-					te.detail("Uid", uidStr.toString());
-					te.detail("Status", err);
-					te.detail("Role", "coordinator");
-					te.detail("Value", coordFolder);
-					te.detail("ExecPayload", execArg.getCmdValueString().toString());
-					te.trackLatest(tokenStr.c_str());
-					req.reply.send(Void());
-				} catch (Error& e) {
-					TraceEvent("ExecHelperError").error(e);
-					req.reply.sendError(broken_promise());
+			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
+				Standalone<StringRef> snapFolder = StringRef(folder);
+				if (snapReq.role.toString() == "coord") {
+					snapFolder = coordFolder;
 				}
+				errorForwarders.add(workerSnapCreate(snapReq, snapFolder));
 			}
 			when( wait( errorForwarders.getResult() ) ) {}
 			when( wait( handleErrors ) ) {}
@@ -1433,3 +1478,4 @@ const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
+const Role Role::COORDINATOR("Coordinator", "CD");

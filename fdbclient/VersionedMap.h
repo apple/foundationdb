@@ -484,7 +484,7 @@ public:
 	}
 
 	// For each item in the versioned map, 4 PTree nodes are potentially allocated:
-	static const int overheadPerItem = NextFastAllocatedSize<sizeof(PTreeT)>::Result*4;
+	static const int overheadPerItem = nextFastAllocatedSize(sizeof(PTreeT)) * 4;
 	struct iterator;
 
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
@@ -511,7 +511,7 @@ public:
 		oldestVersion = newOldestVersion;
 	}
 
-	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, int taskID = 7000 ) {
+	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
 		roots[newOldestVersion] = getRoot(newOldestVersion);
 

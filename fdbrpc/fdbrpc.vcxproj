@@ -109,6 +109,7 @@
     <ClInclude Include="simulator.h" />
     <ClInclude Include="sim_validation.h" />
     <ClInclude Include="Smoother.h" />
+    <ClInclude Include="TimedRequest.h" />
     <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="TraceFileIO.h" />
     <ClInclude Include="zlib\zlib.h" />

@@ -40,13 +40,19 @@
 .. |retry-limit-transaction-option| replace:: FIXME
 .. |timeout-transaction-option| replace:: FIXME
 .. |max-retry-delay-transaction-option| replace:: FIXME
+.. |size-limit-transaction-option| replace:: FIXME
 .. |snapshot-ryw-enable-transaction-option| replace:: FIXME
 .. |snapshot-ryw-disable-transaction-option| replace:: FIXME
 .. |snapshot-ryw-enable-database-option| replace:: FIXME
 .. |snapshot-ryw-disable-database-option| replace:: FIXME
 .. |retry-limit-database-option| replace:: FIXME
 .. |max-retry-delay-database-option| replace:: FIXME
+.. |transaction-size-limit-database-option| replace:: FIXME
 .. |timeout-database-option| replace:: FIXME
+.. |causal-read-risky-transaction-option| replace:: FIXME
+.. |causal-read-risky-database-option| replace:: FIXME
+.. |transaction-logging-max-field-length-database-option| replace:: FIXME
+.. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 
 .. include:: api-common.rst.inc
 
@@ -127,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 610
+  #define FDB_API_VERSION 620
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -287,9 +293,9 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1|.
 
-.. function:: fdb_error_t fdb_future_get_version(FDBFuture* future, int64_t* out_version)
+.. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
-   Extracts a version from an :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
+   Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -443,7 +449,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_read_version(FDBTransaction* transaction)
 
-   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_version()` to extract the version into an int64_t that you provide, |future-return2|
+   |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_int64()` to extract the version into an int64_t that you provide, |future-return2|
 
    The transaction obtains a snapshot read version automatically at the time of the first call to :func:`fdb_transaction_get_*()` (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.
 
@@ -715,6 +721,12 @@ Applications must provide error handling and an appropriate retry loop around th
    Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling :func:`fdb_transaction_set_read_version()` on another subsequent transaction.
 
    Most applications will not call this function.
+
+.. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
+
+  |future-return0| the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+  This can be called multiple times before the transaction is committed.
 
 .. function:: FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* transaction)
 

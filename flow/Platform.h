@@ -310,6 +310,20 @@ std::string joinPath( std::string const& directory, std::string const& filename 
 // Relative paths remain relative and are NOT rebased on the current working directory.
 std::string cleanPath( std::string const& path );
 
+// Removes the last component from a path string (if possible) and returns the result with one trailing separator.
+// If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
+// Note that this is NOT the same as getting the parent of path, as the final component could be ".."
+// or "." and it would still be simply removed.
+// ALL of the following inputs will yield the result "/a/"
+//   /a/b
+//   /a/b/
+//   /a/..
+//   /a/../
+//   /a/.
+//   /a/./
+//   /a//..//
+std::string popPath(const std::string &path);
+
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
 // If resolveLinks is true then symbolic links will be expanded BEFORE resolving '..' references.
@@ -348,6 +362,8 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary( const char* filename );
+
+void setCloseOnExec( int fd );
 
 // Logs an out of memory error and exits the program
 void outOfMemory();
@@ -515,7 +531,7 @@ inline static void* aligned_alloc(size_t alignment, size_t size) {
 	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
 	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
 	// powers of 2 of any size will fail as they would on other platforms.  This change does not
-	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
+	// break the platform::aligned_alloc() contract as all addresses which are aligned to
 	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
 	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
 		alignment = sizeof(void *);
@@ -531,7 +547,10 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 // resolved by whatever linker is hanging around on this system
 bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
+void closeLibrary(void* handle);
 void* loadFunction(void* lib, const char* func_name);
+
+std::string exePath();
 
 #ifdef _WIN32
 inline static int ctzll( uint64_t value ) {
@@ -541,8 +560,32 @@ inline static int ctzll( uint64_t value ) {
     }
     return 64;
 }
+inline static int clzll( uint64_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse64( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
+inline static int ctz( uint32_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+inline static int clz( uint32_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
 #else
 #define ctzll __builtin_ctzll
+#define clzll __builtin_clzll
+#define ctz __builtin_ctz
+#define clz __builtin_clz
 #endif
 
 #include <boost/config.hpp>
@@ -580,6 +623,36 @@ EXTERNC void setProfilingEnabled(int enabled);
 
 #if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
 #error Clean builds must define NDEBUG, and not define various debug macros
+#endif
+
+// DTrace probing
+#if defined(DTRACE_PROBES)
+#include <sys/sdt.h>
+#define FDB_TRACE_PROBE_STRING_EXPAND(x) x
+#define FDB_TRACE_PROBE_STRING_CONCAT2(h, t) h ## t
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) FDB_TRACE_PROBE_STRING_CONCAT2(h, t)
+#define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9,   \
+									 _10, _11, _12, NAME, ...)                 \
+	NAME
+#define FDB_TRACE_PROBE(...)                                                   \
+	FDB_TRACE_PROBE_EXPAND_MACRO(__VA_ARGS__, DTRACE_PROBE12, DTRACE_PROBE11,  \
+								 DTRACE_PROBE10, DTRACE_PROBE9, DTRACE_PROBE8, \
+								 DTRACE_PROBE7, DTRACE_PROBE6, DTRACE_PROBE5,  \
+								 DTRACE_PROBE4, DTRACE_PROBE3, DTRACE_PROBE2,  \
+								 DTRACE_PROBE1, DTRACE_PROBE)                  \
+	(foundationdb, __VA_ARGS__)
+
+extern void fdb_probe_actor_create(const char* name, unsigned long id);
+extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
+extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
+extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
+#else
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
+#define FDB_TRACE_PROBE(...)
+inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
+inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
 #endif
 
 #endif /* FLOW_PLATFORM_H */

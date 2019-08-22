@@ -107,6 +107,7 @@
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
+#include <mach-o/dyld.h>
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
@@ -1211,7 +1212,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 	uint64_t nowBusyTicks = (*statState)->lastBusyTicks;
 	uint64_t nowReads = (*statState)->lastReads;
 	uint64_t nowWrites = (*statState)->lastWrites;
-	uint64_t nowWriteSectors = (*statState)->lastWriteSectors; 
+	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
 	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
 	if(dataFolder != "") {
@@ -1606,12 +1607,12 @@ int getRandomSeed() {
 		}
 	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);	// randomSeed cannot be 0 since we use mersenne twister in DeterministicRandom. Get a new one if randomSeed is 0.
 #else
-	int devRandom = open("/dev/urandom", O_RDONLY);
+	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
 	do {
 		retryCount++;
 		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed) ) {
 			TraceEvent(SevError, "OpenURandom").GetLastError();
-			throw platform_error();	
+			throw platform_error();
 		}
 	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);
 	close(devRandom);
@@ -1659,13 +1660,21 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
+#if defined(__linux__)
+#define FOPEN_CLOEXEC_MODE "e"
+#elif defined(_WIN32)
+#define FOPEN_CLOEXEC_MODE "N"
+#else
+#define FOPEN_CLOEXEC_MODE ""
+#endif
+
 void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
-		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
+		f = textmode ? fopen( tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 	#ifdef _WIN32
@@ -1875,18 +1884,6 @@ std::string cleanPath(std::string const &path) {
 	return result.empty() ? "." : result;
 }
 
-// Removes the last component from a path string (if possible) and returns the result with one trailing separator.
-// If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
-// Note that this is NOT the same as getting the parent of path, as the final component could be ".."
-// or "." and it would still be simply removed.
-// ALL of the following inputs will yield the result "/a/"
-//   /a/b
-//   /a/b/
-//   /a/..
-//   /a/../
-//   /a/.
-//   /a/./
-//   /a//..//
 std::string popPath(const std::string &path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
@@ -2171,6 +2168,19 @@ void makeTemporary( const char* filename ) {
 	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
 #endif
 }
+
+void setCloseOnExec( int fd ) {
+#if defined(__unixish__)
+	int options = fcntl(fd, F_GETFD);
+	if (options != -1) {
+		options = fcntl(fd, F_SETFD, options | FD_CLOEXEC);
+	}
+	if (options == -1) {
+		TraceEvent(SevWarnAlways, "PlatformSetCloseOnExecError").suppressFor(60).GetLastError();
+	}
+#endif
+}
+
 } // namespace platform
 
 #ifdef _WIN32
@@ -2206,7 +2216,7 @@ void deprioritizeThread() {
 }
 
 bool fileExists(std::string const& filename) {
-	FILE* f = fopen(filename.c_str(), "rb");
+	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE );
 	if (!f) return false;
 	fclose(f);
 	return true;
@@ -2245,7 +2255,7 @@ int64_t fileSize(std::string const& filename) {
 
 std::string readFileBytes( std::string const& filename, int maxSize ) {
 	std::string s;
-	FILE* f = fopen(filename.c_str(), "rb");
+	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
 	if (!f) throw file_not_readable();
 	try {
 		fseek(f, 0, SEEK_END);
@@ -2265,7 +2275,7 @@ std::string readFileBytes( std::string const& filename, int maxSize ) {
 }
 
 void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	FILE* f = fopen(filename.c_str(), "wb");
+	FILE* f = fopen(filename.c_str(), "wb" FOPEN_CLOEXEC_MODE);
 	if (!f)
 	{
 		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
@@ -2682,6 +2692,56 @@ void* loadFunction(void* lib, const char* func_name) {
 	return dlfcn;
 }
 
+void closeLibrary(void* handle) {
+#ifdef __unixish__
+	dlclose(handle);
+#else
+	FreeLibrary(reinterpret_cast<HMODULE>(handle));
+#endif
+}
+
+std::string exePath() {
+#if defined(__linux__)
+	std::unique_ptr<char[]> buf(new char[PATH_MAX]);
+	auto len = readlink("/proc/self/exe", buf.get(), PATH_MAX);
+	if (len > 0 && len < PATH_MAX) {
+		buf[len] = '\0';
+		return std::string(buf.get());
+	} else {
+		throw platform_error();
+	}
+#elif defined(__APPLE__)
+	uint32_t bufSize = 1024;
+	std::unique_ptr<char[]> buf(new char[bufSize]);
+	while (true) {
+		auto res = _NSGetExecutablePath(buf.get(), &bufSize);
+		if (res == -1) {
+			buf.reset(new char[bufSize]);
+		} else {
+			return std::string(buf.get());
+		}
+	}
+#elif defined(_WIN32)
+	DWORD bufSize = 1024;
+	std::unique_ptr<char[]> buf(new char[bufSize]);
+	while (true) {
+		auto s = GetModuleFileName(nullptr, buf.get(), bufSize);
+		if (s >= 0) {
+			if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+				bufSize *= 2;
+				buf.reset(new char[bufSize]);
+				continue;
+			}
+			return std::string(buf.get());
+		} else {
+			throw platform_error();
+		}
+	}
+#else
+#  error Port me!
+#endif
+}
+
 void platformInit() {
 #ifdef WIN32
 	_set_FMA3_enable(0); // Workaround for VS 2013 code generation bug. See https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
@@ -2752,8 +2812,8 @@ volatile thread_local bool profileThread = false;
 
 volatile thread_local int profilingEnabled = 1;
 
-void setProfilingEnabled(int enabled) { 
-	profilingEnabled = enabled; 
+void setProfilingEnabled(int enabled) {
+	profilingEnabled = enabled;
 }
 
 void profileHandler(int sig) {
@@ -2819,6 +2879,22 @@ void* checkThread(void *arg) {
 	return NULL;
 #endif
 }
+
+#if defined(DTRACE_PROBES)
+void fdb_probe_actor_create(const char* name, unsigned long id) {
+	FDB_TRACE_PROBE(actor_create, name, id);
+}
+void fdb_probe_actor_destroy(const char* name, unsigned long id) {
+	FDB_TRACE_PROBE(actor_destroy, name, id);
+}
+void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {
+	FDB_TRACE_PROBE(actor_enter, name, id, index);
+}
+void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
+	FDB_TRACE_PROBE(actor_exit, name, id, index);
+}
+#endif
+
 
 void setupSlowTaskProfiler() {
 #ifdef __linux__
@@ -2980,7 +3056,7 @@ int testPathFunction2(const char *name, std::function<std::string(std::string, b
 		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
 		return 0;
 	}
-	
+
 	ErrorOr<std::string> result;
 	try { result  = fun(a, resolveLinks, mustExist); } catch(Error &e) { result = e; }
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());

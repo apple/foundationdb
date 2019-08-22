@@ -38,14 +38,6 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 
-struct TimedRequest {
-	double requestTime;
-
-	TimedRequest() {
-		requestTime = timer();
-	}
-};
-
 struct ICounter {
 	// All counters have a name and value
 	virtual std::string const& getName() const = 0;
@@ -62,12 +54,26 @@ struct ICounter {
 	virtual void remove() {}
 };
 
+template<>
+struct Traceable<ICounter*> : std::true_type {
+	static std::string toString(ICounter const *counter) {
+		if (counter->hasRate() && counter->hasRoughness()) {
+			return format("%g %g %lld", counter->getRate(), counter->getRoughness(), (long long)counter->getValue());
+		}
+		else {
+			return format("%lld", (long long)counter->getValue());
+		}
+	}
+};
+
 struct CounterCollection {
 	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
 	std::vector<struct ICounter*> counters, counters_to_remove;
 	~CounterCollection() { for (auto c : counters_to_remove) c->remove(); }
 	std::string name;
 	std::string id;
+
+	void logToTraceEvent(TraceEvent& te) const;
 };
 
 struct Counter : ICounter, NonCopyable {
@@ -95,6 +101,13 @@ private:
 	double interval_start, last_event, interval_sq_time;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
+};
+
+template<>
+struct Traceable<Counter> : std::true_type {
+	static std::string toString(Counter const& counter) {
+		return Traceable<ICounter*>::toString((ICounter const*)&counter);
+	}
 };
 
 template <class F>

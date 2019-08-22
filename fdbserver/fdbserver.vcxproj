@@ -20,6 +20,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ApplyMetadataMutation.cpp" />
     <ActorCompiler Include="ClusterController.actor.cpp" />
     <ActorCompiler Include="DataDistribution.actor.cpp" />
     <ActorCompiler Include="DataDistributionQueue.actor.cpp" />
@@ -74,6 +75,7 @@
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
+    <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp" />
     <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp" />
     <ClCompile Include="sqlite\btree.c">
@@ -97,6 +99,7 @@
     <ActorCompiler Include="workloads\ConsistencyCheck.actor.cpp" />
     <ActorCompiler Include="workloads\CpuProfiler.actor.cpp" />
     <ActorCompiler Include="workloads\DDMetrics.actor.cpp" />
+    <ActorCompiler Include="workloads\DDMetricsExclude.actor.cpp" />
     <ActorCompiler Include="workloads\ConfigureDatabase.actor.cpp" />
     <ActorCompiler Include="workloads\CommitBugCheck.actor.cpp" />
     <ActorCompiler Include="workloads\FastTriggeredWatches.actor.cpp" />
@@ -107,6 +110,7 @@
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp" />
+    <ActorCompiler Include="workloads\SuspendProcesses.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp" />
@@ -131,6 +135,7 @@
     <ActorCompiler Include="workloads\RandomMoveKeys.actor.cpp" />
     <ActorCompiler Include="workloads\TargetedKill.actor.cpp" />
     <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\DifferentClustersSameRV.actor.cpp" />
     <ActorCompiler Include="workloads\WriteDuringRead.actor.cpp" />
     <ActorCompiler Include="workloads\Watches.actor.cpp" />
     <ActorCompiler Include="workloads\ThreadSafety.actor.cpp" />
@@ -156,6 +161,7 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
     <ActorCompiler Include="workloads\SnapTest.actor.cpp" />
     <ActorCompiler Include="workloads\Mako.actor.cpp" />
+    <ActorCompiler Include="workloads\ExternalWorkload.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />

@@ -44,8 +44,8 @@ struct ResolverInterface {
 	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		metrics.getEndpoint( TaskResolutionMetrics );
-		split.getEndpoint( TaskResolutionMetrics );
+		metrics.getEndpoint( TaskPriority::ResolutionMetrics );
+		split.getEndpoint( TaskPriority::ResolutionMetrics );
 	}
 
 	template <class Ar> 

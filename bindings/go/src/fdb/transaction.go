@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 610
+// #define FDB_API_VERSION 620
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -370,6 +370,16 @@ func (t Transaction) GetCommittedVersion() (int64, error) {
 // values may be optimized to a read-only transaction.
 func (t Transaction) GetVersionstamp() FutureKey {
 	return &futureKey{future: newFuture(C.fdb_transaction_get_versionstamp(t.ptr))}
+}
+
+func (t *transaction) getApproximateSize() FutureInt64 {
+	return &futureInt64{
+		future: newFuture(C.fdb_transaction_get_approximate_size(t.ptr)),
+	}
+}
+
+func (t Transaction) GetApproximateSize() FutureInt64 {
+	return t.getApproximateSize()
 }
 
 // Reset rolls back a transaction, completely resetting it to its initial

@@ -29,81 +29,108 @@
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "fdbrpc/crc32c.h"
 
-enum {
-	TaskMaxPriority = 1000000,
-	TaskRunCycleFunction = 20000,
-	TaskFlushTrace = 10500,
-	TaskWriteSocket = 10000,
-	TaskPollEIO = 9900,
-	TaskDiskIOComplete = 9150,
-	TaskLoadBalancedEndpoint = 9000,
-	TaskReadSocket = 9000,
-	TaskCoordinationReply = 8810,
-	TaskCoordination = 8800,
-	TaskFailureMonitor = 8700,
-	TaskResolutionMetrics = 8700,
-	TaskClusterController = 8650,
-	TaskProxyStorageRejoin = 8645,
-	TaskProxyCommitDispatcher = 8640,
-	TaskTLogQueuingMetrics = 8620,
-	TaskTLogPop = 8610,
-	TaskTLogPeekReply = 8600,
-	TaskTLogPeek = 8590,
-	TaskTLogCommitReply = 8580,
-	TaskTLogCommit = 8570,
-	TaskProxyGetRawCommittedVersion = 8565,
-	TaskProxyResolverReply = 8560,
-	TaskProxyCommitBatcher = 8550,
-	TaskProxyCommit = 8540,
-	TaskTLogConfirmRunningReply = 8530,
-	TaskTLogConfirmRunning = 8520,
-	TaskProxyGRVTimer = 8510,
-	TaskProxyGetConsistentReadVersion = 8500,
-	TaskDefaultPromiseEndpoint = 8000,
-	TaskDefaultOnMainThread = 7500,
-	TaskDefaultDelay = 7010,
-	TaskDefaultYield = 7000,
-	TaskDiskRead = 5010,
-	TaskDefaultEndpoint = 5000,
-	TaskUnknownEndpoint = 4000,
-	TaskMoveKeys = 3550,
-	TaskDataDistributionLaunch = 3530,
-	TaskRatekeeper = 3510,
-	TaskDataDistribution = 3500,
-	TaskDiskWrite = 3010,
-	TaskUpdateStorage = 3000,
-	TaskTLogSpilledPeekReply = 2800,
-	TaskLowPriority = 2000,
+enum class TaskPriority {
+	Max = 1000000,
+	RunCycleFunction = 20000,
+	FlushTrace = 10500,
+	WriteSocket = 10000,
+	PollEIO = 9900,
+	DiskIOComplete = 9150,
+	LoadBalancedEndpoint = 9000,
+	ReadSocket = 9000,
+	CoordinationReply = 8810,
+	Coordination = 8800,
+	FailureMonitor = 8700,
+	ResolutionMetrics = 8700,
+	ClusterController = 8650,
+	MasterTLogRejoin = 8646,
+	ProxyStorageRejoin = 8645,
+	ProxyCommitDispatcher = 8640,
+	TLogQueuingMetrics = 8620,
+	TLogPop = 8610,
+	TLogPeekReply = 8600,
+	TLogPeek = 8590,
+	TLogCommitReply = 8580,
+	TLogCommit = 8570,
+	ProxyGetRawCommittedVersion = 8565,
+	ProxyResolverReply = 8560,
+	ProxyCommitBatcher = 8550,
+	ProxyCommit = 8540,
+	TLogConfirmRunningReply = 8530,
+	TLogConfirmRunning = 8520,
+	ProxyGRVTimer = 8510,
+	ProxyGetConsistentReadVersion = 8500,
+	DefaultPromiseEndpoint = 8000,
+	DefaultOnMainThread = 7500,
+	DefaultDelay = 7010,
+	DefaultYield = 7000,
+	DiskRead = 5010,
+	DefaultEndpoint = 5000,
+	UnknownEndpoint = 4000,
+	MoveKeys = 3550,
+	DataDistributionLaunch = 3530,
+	Ratekeeper = 3510,
+	DataDistribution = 3500,
+	DiskWrite = 3010,
+	UpdateStorage = 3000,
+	TLogSpilledPeekReply = 2800,
+	FetchKeys = 2500,
+	Low = 2000,
 
-	TaskMinPriority = 1000
+	Min = 1000,
+	Zero = 0
 };
+
+// These have been given long, annoying names to discourage their use.
+
+inline TaskPriority incrementPriority(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) + 1 );
+}
+
+inline TaskPriority decrementPriority(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) - 1 );
+}
+
+inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
+	return static_cast<TaskPriority>( static_cast<uint64_t>(p) | 1 );
+}
 
 class Void;
 
 template<class T> class Optional;
 
 struct IPAddress {
-	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
-	// only the first 32bits are relevant and rest are initialized to
-	// 0.
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
 	              "IPAddressStore must be std::array<uint8_t, 16>");
 
+private:
+	struct IsV6Visitor : boost::static_visitor<> {
+		bool result = false;
+		void operator() (const IPAddressStore&) { result = true; }
+		void operator() (const uint32_t&) { result = false; }
+	};
+public:
+	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
+	// only the first 32bits are relevant and rest are initialized to
+	// 0.
 	IPAddress() : addr(uint32_t(0)) {}
 	explicit IPAddress(const IPAddressStore& v6addr) : addr(v6addr) {}
 	explicit IPAddress(uint32_t v4addr) : addr(v4addr) {}
 
-	bool isV6() const { return std::holds_alternative<IPAddressStore>(addr); }
+	bool isV6() const {
+		IsV6Visitor visitor;
+		boost::apply_visitor(visitor, addr);
+		return visitor.result;
+	}
 	bool isV4() const { return !isV6(); }
 	bool isValid() const;
 
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
-	uint32_t toV4() const { return std::get<uint32_t>(addr); }
-	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
+	uint32_t toV4() const { return boost::get<uint32_t>(addr); }
+	const IPAddressStore& toV6() const { return boost::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -144,7 +171,7 @@ struct IPAddress {
 	}
 
 private:
-	std::variant<uint32_t, IPAddressStore> addr;
+	boost::variant<uint32_t, IPAddressStore> addr;
 };
 
 template<>
@@ -196,7 +223,7 @@ struct NetworkAddress {
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, ip, port, flags);
 		} else {
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
 				serializer(ar, ipV4, port, flags);
 				ip = IPAddress(ipV4);
@@ -270,11 +297,15 @@ struct NetworkMetrics {
 	uint64_t countSlowEvents[SLOW_EVENT_BINS];
 
 	enum { PRIORITY_BINS = 9 };
-	int priorityBins[ PRIORITY_BINS ];
+	TaskPriority priorityBins[ PRIORITY_BINS ];
+	bool priorityBlocked[PRIORITY_BINS];
+	double priorityBlockedDuration[PRIORITY_BINS];
 	double secSquaredPriorityBlocked[PRIORITY_BINS];
+	double priorityTimer[PRIORITY_BINS];
 
 	double oldestAlternativesFailure;
 	double newestAlternativesFailure;
+	double lastAlternativesFailureSkipDelay;
 	double lastSync;
 
 	double secSquaredSubmit;
@@ -342,7 +373,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, bool useObjectSerializer = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
@@ -351,9 +382,19 @@ public:
 	//   to the network should be through FlowTransport, not directly through these low level interfaces!
 
 	enum enumGlobal {
-		enFailureMonitor = 0, enFlowTransport = 1, enTDMetrics = 2, enNetworkConnections = 3,
-		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10,
-		enNetworkAddressesFunc = 11
+		enFailureMonitor = 0,
+		enFlowTransport = 1,
+		enTDMetrics = 2,
+		enNetworkConnections = 3,
+		enNetworkAddressFunc = 4,
+		enFileSystem = 5,
+		enASIOService = 6,
+		enEventFD = 7,
+		enRunCycleFunc = 8,
+		enASIOTimedOut = 9,
+		enBlobCredentialFiles = 10,
+		enNetworkAddressesFunc = 11,
+		enClientFailureMonitor = 12
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -362,19 +403,19 @@ public:
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	// FIXME: Return a fixed point Time class
 
-	virtual Future<class Void> delay( double seconds, int taskID ) = 0;
+	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed
 
-	virtual Future<class Void> yield( int taskID ) = 0;
+	virtual Future<class Void> yield( TaskPriority taskID ) = 0;
 	// The given future will be set immediately or after higher-priority tasks have executed
 
-	virtual bool check_yield( int taskID ) = 0;
+	virtual bool check_yield( TaskPriority taskID ) = 0;
 	// Returns true if a call to yield would result in a delay
 
-	virtual int getCurrentTask() = 0;
+	virtual TaskPriority getCurrentTask() = 0;
 	// Gets the taskID/priority of the current task
 
-	virtual void setCurrentTask(int taskID ) = 0;
+	virtual void setCurrentTask(TaskPriority taskID ) = 0;
 	// Sets the taskID/priority of the current task, without yielding
 
 	virtual flowGlobalType global(int id) = 0;
@@ -386,7 +427,10 @@ public:
 	virtual bool isSimulated() const = 0;
 	// Returns true if this network is a local simulation
 
-	virtual void onMainThread( Promise<Void>&& signal, int taskID ) = 0;
+	virtual bool isOnMainThread() const = 0;
+	// Returns true if the current thread is the main thread
+
+	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network
 
 	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void *), void *arg) = 0;
@@ -403,9 +447,6 @@ public:
 
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
-
-	virtual bool useObjectSerializer() const = 0;
-	// Whether or not the object serializer should be used when sending packets
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

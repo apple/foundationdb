@@ -16,9 +16,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.1.0
+  VERSION 7.0.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -177,6 +177,7 @@ add_subdirectory(tests)
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
+add_subdirectory(monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)

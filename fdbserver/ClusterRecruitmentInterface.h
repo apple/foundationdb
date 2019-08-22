@@ -63,19 +63,19 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskClusterController );
-		recruitRemoteFromConfiguration.getEndpoint( TaskClusterController );
-		recruitStorage.getEndpoint( TaskClusterController );
-		registerWorker.getEndpoint( TaskClusterController );
-		getWorkers.getEndpoint( TaskClusterController );
-		registerMaster.getEndpoint( TaskClusterController );
-		getServerDBInfo.getEndpoint( TaskClusterController );
+		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterController );
+		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterController );
+		recruitStorage.getEndpoint( TaskPriority::ClusterController );
+		registerWorker.getEndpoint( TaskPriority::ClusterController );
+		getWorkers.getEndpoint( TaskPriority::ClusterController );
+		registerMaster.getEndpoint( TaskPriority::ClusterController );
+		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
 		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
@@ -246,7 +246,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
 		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);

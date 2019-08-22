@@ -2,6 +2,45 @@
 Release Notes
 #############
 
+6.1.12
+======
+
+Fixes
+-----
+
+* Fixed a thread safety issue while writing large keys or values. `(Issue #1846) <https://github.com/apple/foundationdb/issues/1846>`_
+* An untracked data distributor could prevent a newly recruited data distributor from being started. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
+
+6.1.11
+======
+
+Fixes
+-----
+
+* Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. `(PR #1764) <https://github.com/apple/foundationdb/pull/1764>`_
+
+6.1.10
+======
+
+Performance
+-----------
+
+* Improved the recovery speed of storage servers with large amount of data. `(PR #1700) <https://github.com/apple/foundationdb/pull/1700>`_
+
+Fixes
+-----
+
+* The ``fdbrestore`` commands ``abort``, ``wait``, and ``status`` would use a default cluster file instead of the destination cluster file argument.  `(PR #1701) <https://github.com/apple/foundationdb/pull/1701>`_
+
+6.1.9
+=====
+
+Fixes
+-----
+
+* Sometimes a minority of coordinators would not converge to the leader. `(PR #1649) <https://github.com/apple/foundationdb/pull/1649>`_
+* HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. `(PR #1651) <https://github.com/apple/foundationdb/pull/1651>`_
+
 6.1.8
 =====
 

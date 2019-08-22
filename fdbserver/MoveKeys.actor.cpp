@@ -28,7 +28,41 @@
 using std::min;
 using std::max;
 
-ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
+// in-memory flag to disable DD
+bool ddEnabled = true;
+UID ddEnabledStatusUID = UID();
+
+bool isDDEnabled() {
+	return ddEnabled;
+}
+
+bool setDDEnabled(bool status, UID snapUID) {
+	TraceEvent("SetDDEnabled")
+		.detail("Status", status)
+		.detail("SnapUID", snapUID);
+	ASSERT(snapUID != UID());
+	if (!status) {
+		// disabling DD
+		if (ddEnabledStatusUID != UID()) {
+			// disable DD when a disable is already in progress not allowed
+			return false;
+		}
+		ddEnabled = status;
+		ddEnabledStatusUID = snapUID;
+		return true;
+	}
+	// enabling DD
+	if (snapUID != ddEnabledStatusUID) {
+		// enabling DD not allowed if UID does not match with the disable request
+		return false;
+	}
+	// reset to default status
+	ddEnabled = status;
+	ddEnabledStatusUID = UID();
+	return true;
+}
+
+ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -36,7 +70,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
 				UID id(deterministicRandom()->randomUniqueID());
-				TraceEvent("TakeMoveKeysLockTransaction", masterId)
+				TraceEvent("TakeMoveKeysLockTransaction", ddId)
 					.detail("TransactionUID", id);
 				tr.debugTransaction( id );
 			}
@@ -49,6 +83,8 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
 			lock.myOwner = deterministicRandom()->randomUniqueID();
+			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
+			wait(tr.commit());
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
@@ -58,6 +94,10 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 }
 
 ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool isWrite = true ) {
+	if (!isDDEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
+		throw movekeys_conflict();
+	}
 	Optional<Value> readVal = wait( tr->get( moveKeysLockOwnerKey ) );
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
@@ -130,12 +170,12 @@ ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard, vector<Sto
 
 	state vector< Future<Optional<UID>> > srcChecks;
 	for(int s=0; s<srcInterfs.size(); s++) {
-		srcChecks.push_back( checkReadWrite( srcInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), srcInterfs[s].id(), 0 ) );
+		srcChecks.push_back( checkReadWrite( srcInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskPriority::MoveKeys ), srcInterfs[s].id(), 0 ) );
 	}
 
 	state vector< Future<Optional<UID>> > destChecks;
 	for(int s=0; s<destInterfs.size(); s++) {
-		destChecks.push_back( checkReadWrite( destInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), destInterfs[s].id(), version ) );
+		destChecks.push_back( checkReadWrite( destInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskPriority::MoveKeys ), destInterfs[s].id(), version ) );
 	}
 
 	wait( waitForAll(srcChecks) && waitForAll(destChecks) );
@@ -225,7 +265,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	//state TraceInterval waitInterval("");
 
-	wait( startMoveKeysLock->take( TaskDataDistributionLaunch ) );
+	wait( startMoveKeysLock->take( TaskPriority::DataDistributionLaunch ) );
 	state FlowLock::Releaser releaser( *startMoveKeysLock );
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
@@ -255,7 +295,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					//Keep track of shards for all src servers so that we can preserve their values in serverKeys
 					state Map<UID, VectorRef<KeyRangeRef>> shardMap;
 
-					tr.info.taskID = TaskMoveKeys;
+					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					wait( checkMoveKeysLock(&tr, lock) );
@@ -394,11 +434,11 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode ) {
 	loop {
 		try {
-			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
+			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskPriority::MoveKeys ) );
 			if (rep.first >= minVersion) {
 				return Void();
 			}
-			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );
+			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys ) );
 		}
 		catch (Error& e) {
 			if( e.code() != error_code_timed_out ) {
@@ -419,7 +459,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 		try {
 			if (BUGGIFY) wait(delay(5));
 
-			tr.info.taskID = TaskMoveKeys;
+			tr.info.taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			vector< Future< Optional<Value> > > serverListEntries;
@@ -439,7 +479,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 			}
 
 			wait( timeoutError( waitForAll( requests ),
-					SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, TaskMoveKeys ) );
+					SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, TaskPriority::MoveKeys ) );
 
 			dataMovementComplete.send(Void());
 			return Void();
@@ -480,11 +520,11 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 			//printf("finishMoveKeys( '%s'-'%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
 				try {
-					tr.info.taskID = TaskMoveKeys;
+					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					releaser.release();
-					wait( finishMoveKeysParallelismLock->take( TaskDataDistributionLaunch ) );
+					wait( finishMoveKeysParallelismLock->take( TaskPriority::DataDistributionLaunch ) );
 					releaser = FlowLock::Releaser( *finishMoveKeysParallelismLock );
 
 					wait( checkMoveKeysLock(&tr, lock) );
@@ -630,9 +670,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						storageServerInterfaces.push_back( si );
 					}
 
+					// Wait for new destination servers to fetch the keys
 					for(int s=0; s<storageServerInterfaces.size(); s++)
 						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
-					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
+					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskPriority::MoveKeys ) );
 					int count = dest.size() - newDestinations.size();
 					for(int s=0; s<serverReady.size(); s++)
 						count += serverReady[s].isReady() && !serverReady[s].isError();
@@ -808,7 +849,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 			if (!canRemove) {
 				TEST(true); // The caller had a transaction in flight that assigned keys to the server.  Wait for it to reverse its mistake.
 				TraceEvent(SevWarn,"NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
-				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
+				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch) );
 				tr.reset();
 				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {

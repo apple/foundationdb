@@ -1,5 +1,6 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
+  ApplyMetadataMutation.cpp
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
@@ -108,6 +109,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
+  workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
@@ -116,9 +118,11 @@ set(FDBSERVER_SRCS
   workloads/Cycle.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
+  workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
@@ -129,6 +133,7 @@ set(FDBSERVER_SRCS
   workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
+  workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
@@ -165,6 +170,7 @@ set(FDBSERVER_SRCS
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
@@ -191,26 +197,15 @@ if(NOT WIN32)
   target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
 
-set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
-set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
-if(WITH_JAVA_WORKLOAD)
-  list(APPEND FDBSERVER_SRCS workloads/JavaWorkload.actor.cpp)
-endif()
-
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
+  ${CMAKE_SOURCE_DIR}/bindings/c
+  ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
-if(WITH_JAVA_WORKLOAD)
-  if(NOT JNI_FOUND)
-    message(SEND_ERROR "Trying to build Java workload but couldn't find JNI")
-  endif()
-  target_include_directories(fdbserver PRIVATE "${JNI_INCLUDE_DIRS}")
-  target_link_libraries(fdbserver PRIVATE "${JNI_LIBRARIES}")
-endif()
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

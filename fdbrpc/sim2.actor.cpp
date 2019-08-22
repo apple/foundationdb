@@ -380,9 +380,17 @@ private:
 
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
-		// SOMEDAY: Make this value variable? Dependent on buggification status?
-		wait( delay( 20.0 ) );
-		TraceEvent(SevError, "LeakedConnection", self->dbgid).error(connection_leaked()).detail("MyAddr", self->process->address).detail("PeerAddr", self->peerEndpoint).detail("PeerId", self->peerId).detail("Opened", self->opened);
+		if (self->process->address.isPublic()) {
+			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
+		} else {
+			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
+		}
+		TraceEvent(SevError, "LeakedConnection", self->dbgid)
+		    .error(connection_leaked())
+		    .detail("MyAddr", self->process->address)
+		    .detail("PeerAddr", self->peerEndpoint)
+		    .detail("PeerId", self->peerId)
+		    .detail("Opened", self->opened);
 		return Void();
 	}
 };
@@ -394,6 +402,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode );
 
 #if defined(_WIN32)
 #include <io.h>
+#define O_CLOEXEC 0
 
 #elif defined(__unixish__)
 #define _open ::open
@@ -422,7 +431,7 @@ public:
 	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode,
 													Reference<DiskParameters> diskParameters = Reference<DiskParameters>(new DiskParameters(25000, 150000000)), bool delayOnWrite = true ) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-		state int currentTaskID = g_network->getCurrentTask();
+		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if(++openCount >= 3000) {
 			TraceEvent(SevError, "TooManyFiles");
@@ -520,7 +529,7 @@ private:
 		: h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename), actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
 
 	static int flagConversion( int flags ) {
-		int outFlags = O_BINARY;
+		int outFlags = O_BINARY | O_CLOEXEC;
 		if( flags&OPEN_READWRITE ) outFlags |= O_RDWR;
 		if( flags&OPEN_CREATE ) outFlags |= O_CREAT;
 		if( flags&OPEN_READONLY ) outFlags |= O_RDONLY;
@@ -741,11 +750,11 @@ public:
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
 	virtual double now() { return time; }
 
-	virtual Future<class Void> delay( double seconds, int taskID ) {
-		ASSERT(taskID >= TaskMinPriority && taskID <= TaskMaxPriority);
+	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
+		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
 	}
-	Future<class Void> delay( double seconds, int taskID, ProcessInfo* machine ) {
+	Future<class Void> delay( double seconds, TaskPriority taskID, ProcessInfo* machine ) {
 		ASSERT( seconds >= -0.0001 );
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
@@ -760,13 +769,13 @@ public:
 
 		return f;
 	}
-	ACTOR static Future<Void> checkShutdown(Sim2 *self, int taskID) {
+	ACTOR static Future<Void> checkShutdown(Sim2 *self, TaskPriority taskID) {
 		wait(success(self->getCurrentProcess()->shutdownSignal.getFuture()));
 		self->setCurrentTask(taskID);
 		return Void();
 	}
-	virtual Future<class Void> yield( int taskID ) {
-		if (taskID == TaskDefaultYield) taskID = currentTaskID;
+	virtual Future<class Void> yield( TaskPriority taskID ) {
+		if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
 		if (check_yield(taskID)) {
 			// We want to check that yielders can handle actual time elapsing (it sometimes will outside simulation), but
 			// don't want to prevent instantaneous shutdown of "rebooted" machines.
@@ -775,7 +784,7 @@ public:
 		setCurrentTask(taskID);
 		return Void();
 	}
-	virtual bool check_yield( int taskID ) {
+	virtual bool check_yield( TaskPriority taskID ) {
 		if (yielded) return true;
 		if (--yield_limit <= 0) {
 			yield_limit = deterministicRandom()->randomInt(1, 150);  // If yield returns false *too* many times in a row, there could be a stack overflow, since we can't deterministically check stack size as the real network does
@@ -783,10 +792,10 @@ public:
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
 	}
-	virtual int getCurrentTask() {
+	virtual TaskPriority getCurrentTask() {
 		return currentTaskID;
 	}
-	virtual void setCurrentTask(int taskID ) {
+	virtual void setCurrentTask(TaskPriority taskID ) {
 		currentTaskID = taskID;
 	}
 	// Sets the taskID/priority of the current task, without yielding
@@ -923,7 +932,7 @@ public:
 		}
 		if ( mustBeDurable || deterministicRandom()->random01() < 0.5 ) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
-			state int currentTaskID = g_network->getCurrentTask();
+			state TaskPriority currentTaskID = g_network->getCurrentTask();
 			wait( g_simulator.onMachine( currentProcess ) );
 			try {
 				wait( ::delay(0.05 * deterministicRandom()->random01()) );
@@ -949,7 +958,7 @@ public:
 	ACTOR static Future<Void> runLoop(Sim2 *self) {
 		state ISimulator::ProcessInfo *callingMachine = self->currentProcess;
 		while ( !self->isStopped ) {
-			wait( self->net2->yield(TaskDefaultYield) );
+			wait( self->net2->yield(TaskPriority::DefaultYield) );
 
 			self->mutex.enter();
 			if( self->tasks.size() == 0 ) {
@@ -971,16 +980,10 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> _run(Sim2 *self) {
-		Future<Void> loopFuture = self->runLoop(self);
-		self->net2->run();
-		wait( loopFuture );
-		return Void();
-	}
-
 	// Implement ISimulator interface
 	virtual void run() {
-		_run(this);
+		Future<Void> loopFuture = runLoop(this);
+		net2->run();
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -1081,10 +1084,6 @@ public:
 		}
 
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
-	}
-
-	virtual bool useObjectSerializer() const {
-		return net2->useObjectSerializer();
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
@@ -1579,23 +1578,23 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2(bool objSerializer) : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
+	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
-		g_network = net2 = newNet2(false, true, objSerializer);
+		g_network = net2 = newNet2(false, true);
 		Net2FileSystem::newFileSystem();
-		check_yield(0);
+		check_yield(TaskPriority::Zero);
 	}
 
 	// Implementation
 	struct Task {
-		int taskID;
+		TaskPriority taskID;
 		double time;
 		uint64_t stable;
 		ProcessInfo* machine;
 		Promise<Void> action;
-		Task( double time, int taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action ) : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
-		Task( double time, int taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future ) : time(time), taskID(taskID), stable(stable), machine(machine) { future = action.getFuture(); }
+		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action ) : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
+		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future ) : time(time), taskID(taskID), stable(stable), machine(machine) { future = action.getFuture(); }
 		Task(Task&& rhs) BOOST_NOEXCEPT : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), action(std::move(rhs.action)) {}
 		void operator= ( Task const& rhs ) { taskID = rhs.taskID; time = rhs.time; stable = rhs.stable; machine = rhs.machine; action = rhs.action; }
 		Task( Task const& rhs ) : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
@@ -1642,20 +1641,23 @@ public:
 		}
 	}
 
-	virtual void onMainThread( Promise<Void>&& signal, int taskID ) {
+	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) {
 		// This is presumably coming from either a "fake" thread pool thread, i.e. it is actually on this thread
 		// or a thread created with g_network->startThread
 		ASSERT(getCurrentProcess());
 
 		mutex.enter();
-		ASSERT(taskID >= TaskMinPriority && taskID <= TaskMaxPriority);
+		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		tasks.push( Task( time, taskID, taskCount++, getCurrentProcess(), std::move(signal) ) );
 		mutex.leave();
 	}
-	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID ) {
+	bool isOnMainThread() const override {
+		return net2->isOnMainThread();
+	}
+	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
 		return delay( 0, taskID, process );
 	}
-	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID ) {
+	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID ) {
 		if( process->machine == 0 )
 			return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
@@ -1664,7 +1666,7 @@ public:
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	//time should only be modified from the main thread.
 	double time;
-	int currentTaskID;
+	TaskPriority currentTaskID;
 
 	//taskCount is guarded by ISimulator::mutex
 	uint64_t taskCount;
@@ -1687,16 +1689,16 @@ public:
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
 
-void startNewSimulator(bool objSerializer) {
+void startNewSimulator() {
 	ASSERT( !g_network );
-	g_network = g_pSimulator = new Sim2(objSerializer);
+	g_network = g_pSimulator = new Sim2();
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
-	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskDefaultDelay", TaskDefaultDelay);
+	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
-	wait( g_sim2.delay( 0, TaskDefaultDelay, p ) ); // Switch to the machine in question
+	wait( g_sim2.delay( 0, TaskPriority::DefaultDelay, p ) ); // Switch to the machine in question
 
 	try {
 		ASSERT( kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete || kt == ISimulator::RebootProcessAndDelete );

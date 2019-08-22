@@ -43,6 +43,7 @@ add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
 add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
 add_fdb_test(TEST_FILES BlobStore.txt IGNORE)
 add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
+add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
 add_fdb_test(TEST_FILES DiskDurability.txt IGNORE)
 add_fdb_test(TEST_FILES FileSystem.txt IGNORE)
 add_fdb_test(TEST_FILES Happy.txt IGNORE)
@@ -61,8 +62,12 @@ add_fdb_test(TEST_FILES RandomRead.txt IGNORE)
 add_fdb_test(TEST_FILES RandomReadWrite.txt IGNORE)
 add_fdb_test(TEST_FILES ReadAbsent.txt IGNORE)
 add_fdb_test(TEST_FILES ReadHalfAbsent.txt IGNORE)
+add_fdb_test(TEST_FILES RedwoodCorrectnessUnits.txt IGNORE)
+add_fdb_test(TEST_FILES RedwoodCorrectnessBTree.txt IGNORE)
+add_fdb_test(TEST_FILES fast/RedwoodCorrectnessBTree.txt IGNORE)
 add_fdb_test(TEST_FILES RedwoodCorrectness.txt IGNORE)
 add_fdb_test(TEST_FILES RedwoodPerfTests.txt IGNORE)
+add_fdb_test(TEST_FILES SimpleExternalTest.txt)
 add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
 add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
 add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
@@ -99,6 +104,7 @@ add_fdb_test(TEST_FILES fast/IncrementTest.txt)
 add_fdb_test(TEST_FILES fast/InventoryTestAlmostReadOnly.txt)
 add_fdb_test(TEST_FILES fast/InventoryTestSomeWrites.txt)
 add_fdb_test(TEST_FILES fast/KillRegionCycle.txt)
+add_fdb_test(TEST_FILES fast/LocalRatekeeper.txt)
 add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.txt)
 add_fdb_test(TEST_FILES fast/LowLatency.txt)
 add_fdb_test(TEST_FILES fast/MemoryLifetime.txt)
@@ -108,7 +114,6 @@ add_fdb_test(TEST_FILES fast/RandomUnitTests.txt)
 add_fdb_test(TEST_FILES fast/SelectorCorrectness.txt)
 add_fdb_test(TEST_FILES fast/Sideband.txt)
 add_fdb_test(TEST_FILES fast/SidebandWithStatus.txt)
-add_fdb_test(TEST_FILES fast/SnapTestFailAndDisablePop.txt)
 add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.txt)
 add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.txt)
 add_fdb_test(TEST_FILES fast/TaskBucketCorrectness.txt)
@@ -143,6 +148,9 @@ add_fdb_test(
   TEST_FILES restarting/StorefrontTestRestart-1.txt
              restarting/StorefrontTestRestart-2.txt)
 add_fdb_test(
+  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
+             restarting/from_6.2.0/SnapTestAttrition-2.txt)
+add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
              restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
 add_fdb_test(
@@ -151,9 +159,6 @@ add_fdb_test(
 add_fdb_test(
   TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
-add_fdb_test(
-  TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-             restarting/from_6.2.0/SnapTestAttrition-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
              restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
@@ -171,6 +176,7 @@ add_fdb_test(TEST_FILES slow/ConfigureTest.txt)
 add_fdb_test(TEST_FILES slow/CycleRollbackPlain.txt)
 add_fdb_test(TEST_FILES slow/DDBalanceAndRemove.txt)
 add_fdb_test(TEST_FILES slow/DDBalanceAndRemoveStatus.txt)
+add_fdb_test(TEST_FILES slow/DifferentClustersSameRV.txt)
 add_fdb_test(TEST_FILES slow/FastTriggeredWatches.txt)
 add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.txt)
 add_fdb_test(TEST_FILES slow/MoveKeysClean.txt)
