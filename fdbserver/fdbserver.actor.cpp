@@ -883,7 +883,7 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 				.detail("Newname", dirToMove + "/" + fileEntry);
 			renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
 		}
-		}
+	}
 }
 
 namespace {
@@ -891,13 +891,13 @@ enum Role {
 	ConsistencyCheck,
 	CreateTemplateDatabase,
 	DSLTest,
-			FDBD,
+	FDBD,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
-			MultiTester,
-			NetworkTestClient,
-			NetworkTestServer,
-			Restore,
+	MultiTester,
+	NetworkTestClient,
+	NetworkTestServer,
+	Restore,
 	SearchMutations,
 	Simulation,
 	SkipListTest,
@@ -908,46 +908,46 @@ struct CLIOptions {
 	std::string commandLine;
 	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
 	                                                                                metricsPrefix;
-		std::string logGroup = "default";
+	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 	bool maxLogsSizeSet = false;
 	int maxLogs = 0;
 	bool maxLogsSet = false;
 
-		Role role = FDBD;
-		uint32_t randomSeed = platform::getRandomSeed();
+	Role role = FDBD;
+	uint32_t randomSeed = platform::getRandomSeed();
 
 	const char* testFile = "tests/default.txt";
-		std::string kvFile;
-		std::string testServersStr;
-		std::string whitelistBinPaths;
+	std::string kvFile;
+	std::string testServersStr;
+	std::string whitelistBinPaths;
 
-		std::vector<std::string> publicAddressStrs, listenAddressStrs;
+	std::vector<std::string> publicAddressStrs, listenAddressStrs;
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = NULL;
 	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
-		uint64_t storageMemLimit = 1LL << 30;
-		bool buggifyEnabled = false, restarting = false;
-		Optional<Standalone<StringRef>> zoneId;
-		Optional<Standalone<StringRef>> dcId;
+	uint64_t storageMemLimit = 1LL << 30;
+	bool buggifyEnabled = false, restarting = false;
+	Optional<Standalone<StringRef>> zoneId;
+	Optional<Standalone<StringRef>> dcId;
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
-		bool useNet2 = true;
-		bool useThreadPool = false;
-		std::vector<std::pair<std::string, std::string>> knobs;
-		LocalityData localities;
-		int minTesterCount = 1;
-		bool testOnServers = false;
+	bool useNet2 = true;
+	bool useThreadPool = false;
+	std::vector<std::pair<std::string, std::string>> knobs;
+	LocalityData localities;
+	int minTesterCount = 1;
+	bool testOnServers = false;
 
 	Reference<TLSOptions> tlsOptions = Reference<TLSOptions>(new TLSOptions);
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
-		std::vector<std::string> tlsVerifyPeers;
-		double fileIoTimeout = 0.0;
-		bool fileIoWarnOnly = false;
-		uint64_t rsssize = -1;
+	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+	std::vector<std::string> tlsVerifyPeers;
+	double fileIoTimeout = 0.0;
+	bool fileIoWarnOnly = false;
+	uint64_t rsssize = -1;
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1006,49 +1006,49 @@ private:
 			std::vector<std::string> tmpStrings;
 
 			switch (args.OptionId()) {
-				case OPT_HELP:
-					printUsage(argv[0], false);
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_DEVHELP:
-					printUsage(argv[0], true);
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_KNOB: {
-					std::string syn = args.OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
-						fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					syn = syn.substr(7);
+			case OPT_HELP:
+				printUsage(argv[0], false);
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_DEVHELP:
+				printUsage(argv[0], true);
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_KNOB: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				syn = syn.substr(7);
 				knobs.push_back(std::make_pair(syn, args.OptionArg()));
-					break;
-					}
-				case OPT_LOCALITY: {
-					std::string syn = args.OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-						fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					syn = syn.substr(11);
-					std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
-					break;
-					}
-				case OPT_VERSION:
-					printVersion();
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_NOBUFSTDOUT:
-					setvbuf(stdout, NULL, _IONBF, 0);
-					setvbuf(stderr, NULL, _IONBF, 0);
-					break;
-				case OPT_BUFSTDOUTERR:
-					setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-					setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
-					break;
-				case OPT_ROLE:
-					sRole = args.OptionArg();
+				break;
+			}
+			case OPT_LOCALITY: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				syn = syn.substr(11);
+				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
+				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
+				break;
+			}
+			case OPT_VERSION:
+				printVersion();
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_NOBUFSTDOUT:
+				setvbuf(stdout, NULL, _IONBF, 0);
+				setvbuf(stderr, NULL, _IONBF, 0);
+				break;
+			case OPT_BUFSTDOUTERR:
+				setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
+				setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+				break;
+			case OPT_ROLE:
+				sRole = args.OptionArg();
 				if (!strcmp(sRole, "fdbd"))
 					role = FDBD;
 				else if (!strcmp(sRole, "simulation"))
@@ -1079,217 +1079,217 @@ private:
 					role = KVFileGenerateIOLogChecksums;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ConsistencyCheck;
-					else {
-						fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_PUBLICADDR:
-					argStr = args.OptionArg();
-				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
-					publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
-					break;
-				case OPT_LISTEN:
-					argStr = args.OptionArg();
-				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
-					listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
-					break;
-				case OPT_CONNFILE:
-					connFile = args.OptionArg();
-					break;
-				case OPT_LOGGROUP:
-					logGroup = args.OptionArg();
-					break;
-				case OPT_SEEDCONNFILE:
-					seedConnFile = args.OptionArg();
-					break;
-				case OPT_SEEDCONNSTRING:
-					seedConnString = args.OptionArg();
-					break;
-#ifdef __linux__
-				case OPT_FILESYSTEM: {
-					fileSystemPath = args.OptionArg();
-					break;
+				else {
+					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
+				break;
+			case OPT_PUBLICADDR:
+				argStr = args.OptionArg();
+				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
+				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				break;
+			case OPT_LISTEN:
+				argStr = args.OptionArg();
+				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
+				listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				break;
+			case OPT_CONNFILE:
+				connFile = args.OptionArg();
+				break;
+			case OPT_LOGGROUP:
+				logGroup = args.OptionArg();
+				break;
+			case OPT_SEEDCONNFILE:
+				seedConnFile = args.OptionArg();
+				break;
+			case OPT_SEEDCONNSTRING:
+				seedConnString = args.OptionArg();
+				break;
+#ifdef __linux__
+			case OPT_FILESYSTEM: {
+				fileSystemPath = args.OptionArg();
+				break;
+			}
 			case OPT_PROFILER_RSS_SIZE: {
 				const char* a = args.OptionArg();
 				char* end;
-					rsssize = strtoull(a, &end, 10);
+				rsssize = strtoull(a, &end, 10);
 				if (*end) {
-						fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+					fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
+				break;
+			}
 #endif
-				case OPT_DATAFOLDER:
-					dataFolder = args.OptionArg();
-					break;
-				case OPT_LOGFOLDER:
-					logFolder = args.OptionArg();
-					break;
-				case OPT_NETWORKIMPL: {
-					const char* a = args.OptionArg();
+			case OPT_DATAFOLDER:
+				dataFolder = args.OptionArg();
+				break;
+			case OPT_LOGFOLDER:
+				logFolder = args.OptionArg();
+				break;
+			case OPT_NETWORKIMPL: {
+				const char* a = args.OptionArg();
 				if (!strcmp(a, "net2"))
 					useNet2 = true;
 				else if (!strcmp(a, "net2-threadpool")) {
 					useNet2 = true;
 					useThreadPool = true;
 				} else {
-						fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+					fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_TRACECLOCK: {
-					const char* a = args.OptionArg();
+				break;
+			}
+			case OPT_TRACECLOCK: {
+				const char* a = args.OptionArg();
 				if (!strcmp(a, "realtime"))
 					g_trace_clock = TRACE_CLOCK_REALTIME;
 				else if (!strcmp(a, "now"))
 					g_trace_clock = TRACE_CLOCK_NOW;
-					else {
-						fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				else {
+					fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_NUMTESTERS: {
-					const char* a = args.OptionArg();
-				if (!sscanf(a, "%d", &minTesterCount)) {
-						fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				}
-				case OPT_ROLLSIZE: {
-					const char* a = args.OptionArg();
-					ti = parse_with_suffix(a);
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					rollsize = ti.get();
-					break;
-				}
-				case OPT_MAXLOGSSIZE: {
+				break;
+			}
+			case OPT_NUMTESTERS: {
 				const char* a = args.OptionArg();
-					ti = parse_with_suffix(a);
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					maxLogsSize = ti.get();
-					maxLogsSizeSet = true;
-					break;
+				if (!sscanf(a, "%d", &minTesterCount)) {
+					fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_MAXLOGS: {
+				break;
+			}
+			case OPT_ROLLSIZE: {
+				const char* a = args.OptionArg();
+				ti = parse_with_suffix(a);
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				rollsize = ti.get();
+				break;
+			}
+			case OPT_MAXLOGSSIZE: {
+				const char* a = args.OptionArg();
+				ti = parse_with_suffix(a);
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				maxLogsSize = ti.get();
+				maxLogsSizeSet = true;
+				break;
+			}
+			case OPT_MAXLOGS: {
 				const char* a = args.OptionArg();
 				char* end;
-					maxLogs = strtoull(a, &end, 10);
+				maxLogs = strtoull(a, &end, 10);
 				if (*end) {
-						fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					maxLogsSet = true;
-					break;
+					fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
+				maxLogsSet = true;
+				break;
+			}
 #ifdef _WIN32
-				case OPT_PARENTPID: {
-					auto pid_str = args.OptionArg();
-					int parent_pid = atoi(pid_str);
+			case OPT_PARENTPID: {
+				auto pid_str = args.OptionArg();
+				int parent_pid = atoi(pid_str);
 				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
 				if (!pHandle) {
-						TraceEvent("ParentProcessOpenError").GetLastError();
-						fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-						throw platform_error();
-					}
-					startThread(&parentWatcher, pHandle);
-					break;
+					TraceEvent("ParentProcessOpenError").GetLastError();
+					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+					throw platform_error();
 				}
-				case OPT_NEWCONSOLE:
-					FreeConsole();
-					AllocConsole();
+				startThread(&parentWatcher, pHandle);
+				break;
+			}
+			case OPT_NEWCONSOLE:
+				FreeConsole();
+				AllocConsole();
 				freopen("CONIN$", "rb", stdin);
 				freopen("CONOUT$", "wb", stdout);
 				freopen("CONOUT$", "wb", stderr);
-					break;
-				case OPT_NOBOX:
-					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
-					break;
+				break;
+			case OPT_NOBOX:
+				SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
+				break;
 #else
-				case OPT_PARENTPID: {
-					auto pid_str = args.OptionArg();
+			case OPT_PARENTPID: {
+				auto pid_str = args.OptionArg();
 				int* parent_pid = new (int);
-					*parent_pid = atoi(pid_str);
-					startThread(&parentWatcher, parent_pid);
-					break;
-				}
+				*parent_pid = atoi(pid_str);
+				startThread(&parentWatcher, parent_pid);
+				break;
+			}
 #endif
-				case OPT_TESTFILE:
-					testFile = args.OptionArg();
-					break;
-				case OPT_KVFILE:
-					kvFile = args.OptionArg();
-					break;
-				case OPT_RESTARTING:
-					restarting = true;
-					break;
-			    case OPT_RANDOMSEED: {
-					char* end;
+			case OPT_TESTFILE:
+				testFile = args.OptionArg();
+				break;
+			case OPT_KVFILE:
+				kvFile = args.OptionArg();
+				break;
+			case OPT_RESTARTING:
+				restarting = true;
+				break;
+			case OPT_RANDOMSEED: {
+				char* end;
 				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
 				if (*end) {
-						fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_MACHINEID: {
-					zoneId = std::string(args.OptionArg());
-					break;
-				}
-				case OPT_DCID: {
-					dcId = std::string(args.OptionArg());
-					break;
-				}
-				case OPT_MACHINE_CLASS:
-					sRole = args.OptionArg();
+				break;
+			}
+			case OPT_MACHINEID: {
+				zoneId = std::string(args.OptionArg());
+				break;
+			}
+			case OPT_DCID: {
+				dcId = std::string(args.OptionArg());
+				break;
+			}
+			case OPT_MACHINE_CLASS:
+				sRole = args.OptionArg();
 				processClass = ProcessClass(sRole, ProcessClass::CommandLineSource);
-					if (processClass == ProcessClass::InvalidClass) {
-						fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_KEY:
-					targetKey = args.OptionArg();
-					break;
-				case OPT_MEMLIMIT:
-					ti = parse_with_suffix(args.OptionArg(), "MiB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					memLimit = ti.get();
-					break;
-				case OPT_STORAGEMEMLIMIT:
-					ti = parse_with_suffix(args.OptionArg(), "MB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse storage memory limit from `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					storageMemLimit = ti.get();
-					break;
+				if (processClass == ProcessClass::InvalidClass) {
+					fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			case OPT_KEY:
+				targetKey = args.OptionArg();
+				break;
+			case OPT_MEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				memLimit = ti.get();
+				break;
+			case OPT_STORAGEMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse storage memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				storageMemLimit = ti.get();
+				break;
 			case OPT_CACHEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MiB");
 				if (!ti.present()) {
@@ -1304,71 +1304,71 @@ private:
 				    format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the
 				                                             // next smaller multiple of 4K.
 				break;
-				case OPT_BUGGIFY:
+			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
-						buggifyEnabled = true;
+					buggifyEnabled = true;
 				else if (!strcmp(args.OptionArg(), "off"))
-						buggifyEnabled = false;
-					else {
-						fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_CRASHONERROR:
-					g_crashOnError = true;
-					break;
-				case OPT_TESTSERVERS:
-					testServersStr = args.OptionArg();
-					break;
-				case OPT_TEST_ON_SERVERS:
-					testOnServers = true;
-					break;
-				case OPT_METRICSCONNFILE:
-					metricsConnFile = args.OptionArg();
-					break;
-				case OPT_METRICSPREFIX:
-					metricsPrefix = args.OptionArg();
-					break;
-				case OPT_IO_TRUST_SECONDS: {
-					const char* a = args.OptionArg();
-				if (!sscanf(a, "%lf", &fileIoTimeout)) {
-						fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+					buggifyEnabled = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_IO_TRUST_WARN_ONLY:
-					fileIoWarnOnly = true;
-					break;
-				case OPT_TRACE_FORMAT:
-					if (!selectTraceFormatter(args.OptionArg())) {
-						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-					}
-					break;
-				case OPT_WHITELIST_BINPATH:
-					whitelistBinPaths = args.OptionArg();
-					break;
+				break;
+			case OPT_CRASHONERROR:
+				g_crashOnError = true;
+				break;
+			case OPT_TESTSERVERS:
+				testServersStr = args.OptionArg();
+				break;
+			case OPT_TEST_ON_SERVERS:
+				testOnServers = true;
+				break;
+			case OPT_METRICSCONNFILE:
+				metricsConnFile = args.OptionArg();
+				break;
+			case OPT_METRICSPREFIX:
+				metricsPrefix = args.OptionArg();
+				break;
+			case OPT_IO_TRUST_SECONDS: {
+				const char* a = args.OptionArg();
+				if (!sscanf(a, "%lf", &fileIoTimeout)) {
+					fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_IO_TRUST_WARN_ONLY:
+				fileIoWarnOnly = true;
+				break;
+			case OPT_TRACE_FORMAT:
+				if (!selectTraceFormatter(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				break;
+			case OPT_WHITELIST_BINPATH:
+				whitelistBinPaths = args.OptionArg();
+				break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
-					args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
-					tlsCertPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
-					tlsPassword = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
-					tlsCAPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_KEY:
-					tlsKeyPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
-					tlsVerifyPeers.push_back(args.OptionArg());
-					break;
+			case TLSOptions::OPT_TLS_PLUGIN:
+				args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_CERTIFICATES:
+				tlsCertPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_KEY:
+				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				tlsVerifyPeers.push_back(args.OptionArg());
+				break;
 #endif
 			}
 		}
@@ -1402,36 +1402,36 @@ private:
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
-					std::string connectionString = seedConnString.length() ? seedConnString : "";
-					ClusterConnectionString ccs;
+				std::string connectionString = seedConnString.length() ? seedConnString : "";
+				ClusterConnectionString ccs;
 				if (seedConnFile.length()) {
-						try {
-							connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
+					try {
+						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
 						fprintf(stderr, "%s\n",
 						        ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
-							throw;
-						}
-					}
-
-					try {
-						ccs = ClusterConnectionString(connectionString);
-				} catch (Error& e) {
-						fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
-						throw;
-					}
-					connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
-			} else {
-					std::pair<std::string, bool> resolvedClusterFile;
-					try {
-						resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
-					connectionFile =
-					    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
-					} catch (Error& e) {
-						fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 						throw;
 					}
 				}
+
+				try {
+					ccs = ClusterConnectionString(connectionString);
+				} catch (Error& e) {
+					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
+					throw;
+				}
+				connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
+			} else {
+				std::pair<std::string, bool> resolvedClusterFile;
+				try {
+					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
+					connectionFile =
+					    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+				} catch (Error& e) {
+					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+					throw;
+				}
+			}
 
 			// failmon?
 		}
@@ -1499,7 +1499,7 @@ private:
 			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
 
 		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present()) localities.set(LocalityData::keyDcId, dcId);
-		}
+	}
 };
 } // namespace
 
@@ -1670,22 +1670,22 @@ int main(int argc, char* argv[]) {
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
-			.detail("SourceVersion", getHGVersion())
+		    .detail("SourceVersion", getHGVersion())
 		    .detail("Version", FDB_VT_VERSION)
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
-			.detail("WorkingDirectory", cwd)
+		    .detail("WorkingDirectory", cwd)
 		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
-			.trackLatest("ProgramStart");
+		    .trackLatest("ProgramStart");
 
 		// Test for TraceEvent length limits
 		/*std::string foo(4096, 'x');
