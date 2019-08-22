@@ -45,9 +45,9 @@ static Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<Sto
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
-static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
-	KeyRangeMap<std::set<Key> >* vecBackupKeys = nullptr, KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr, KeyRangeMap<bool>* cacheInfo = nullptr, std::map<Key, applyMutationsData>* uid_applyMutationsData = nullptr, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
-	Database cx = Database(), NotifiedVersion* commitVersion = nullptr, std::map<UID, Reference<StorageInfo>>* storageCache = nullptr, std::map<Tag, Version>* tag_popped = nullptr, bool initialCommit = false ) {
+static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem, Version popVersion,
+	KeyRangeMap<std::set<Key> >* vecBackupKeys, KeyRangeMap<ServerCacheInfo>* keyInfo, KeyRangeMap<bool>* cacheInfo, std::map<Key, applyMutationsData>* uid_applyMutationsData, RequestStream<CommitTransactionRequest> commit,
+	Database cx, NotifiedVersion* commitVersion, std::map<UID, Reference<StorageInfo>>* storageCache, std::map<Tag, Version>* tag_popped, bool initialCommit ) {
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 
