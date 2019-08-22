@@ -36,14 +36,6 @@ const KeyRef keyServersEnd = keyServersKeys.end;
 const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-// list of reserved exec commands
-const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent state of
-                                                     // storage, TLog and coordinated state
-const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
-const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
-// used to communicate snap failures between TLog and SnapTest Workload, used only in simulator
-const StringRef snapTestFailStatus = LiteralStringRef("\xff/SnapTestFailStatus/");
-
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
 }
@@ -119,6 +111,9 @@ const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+// serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
+// For example, we can copy a SS file to a remote DC and start the SS there;
+//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );

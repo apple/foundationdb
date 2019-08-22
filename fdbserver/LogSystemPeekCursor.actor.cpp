@@ -1042,7 +1042,7 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 			cursor->advanceTo(self->messageVersion);
 		}
 		self->messageIndex = self->messages.size();
-		if (self->messages.size() > 0 && self->messages[self->messages.size()-1].version < self->messageVersion) {
+		if (self->messages.size() > 0 && self->messages[self->messages.size()-1].version.version < self->poppedVersion) {
  			self->hasNextMessage = false;
  		} else {
  			auto iter = std::lower_bound(self->messages.begin(), self->messages.end(),

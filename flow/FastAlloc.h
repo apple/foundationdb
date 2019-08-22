@@ -104,7 +104,7 @@ void recordDeallocation( void *ptr );
 template <int Size>
 class FastAllocator {
 public:
-	static void* allocate();
+	[[nodiscard]] static void* allocate();
 	static void release(void* ptr);
 	static void check( void* ptr, bool alloc );
 
@@ -188,7 +188,7 @@ inline constexpr int nextFastAllocatedSize(int x) {
 template <class Object>
 class FastAllocated {
 public:
-	static void* operator new(size_t s) {
+	[[nodiscard]] static void* operator new(size_t s) {
 		if (s != sizeof(Object)) abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
 		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
@@ -204,7 +204,7 @@ public:
 	static void operator delete( void*, void* ) { }
 };
 
-static void* allocateFast(int size) {
+[[nodiscard]] static void* allocateFast(int size) {
 	if (size <= 16) return FastAllocator<16>::allocate();
 	if (size <= 32) return FastAllocator<32>::allocate();
 	if (size <= 64) return FastAllocator<64>::allocate();

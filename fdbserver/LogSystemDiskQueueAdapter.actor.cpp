@@ -194,6 +194,6 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality ) {
-	return new LogSystemDiskQueueAdapter( logSystem, peekLocality );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Reference<AsyncVar<PeekTxsInfo>> peekLocality, Version txsPoppedVersion ) {
+	return new LogSystemDiskQueueAdapter( logSystem, peekLocality, txsPoppedVersion, true );
 }

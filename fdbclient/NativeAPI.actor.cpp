@@ -837,9 +837,6 @@ const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDe
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
 	switch(option) {
 		// SOMEDAY: If the network is already started, should these three throw an error?
-		case FDBNetworkOptions::USE_OBJECT_SERIALIZER:
-			networkOptions.useObjectSerializer = extractIntOption(value) != 0;
-			break;
 		case FDBNetworkOptions::TRACE_ENABLE:
 			networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 			break;
@@ -990,7 +987,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.useObjectSerializer);
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 
@@ -3080,14 +3077,15 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
-	++cx->transactionReadVersions;
-	flags |= options.getReadVersionFlags;
-
-	auto& batcher = cx->versionBatcher[ flags ];
-	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
-	}
 	if (!readVersion.isValid()) {
+		++cx->transactionReadVersions;
+		flags |= options.getReadVersionFlags;
+
+		auto& batcher = cx->versionBatcher[ flags ];
+		if (!batcher.actor.isValid()) {
+			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
+		}
+
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();
@@ -3351,7 +3349,7 @@ void enableClientInfoLogging() {
 }
 
 ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
-	TraceEvent("NativeAPI.SnapshotDatabaseEnter")
+	TraceEvent("SnapshotDatabaseEnter")
 		.detail("SnapPayload", snapPayload)
 		.detail("SnapUID", snapUID);
 	try {
@@ -3368,10 +3366,10 @@ ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef sna
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("NativeAPI.SnapshotDatabaseError")
+		TraceEvent("SnapshotDatabaseError")
+			.error(e)
 			.detail("SnapPayload", snapPayload)
-			.detail("SnapUID", snapUID)
-			.error(e, true /* includeCancelled */);
+			.detail("SnapUID", snapUID);
 		throw;
 	}
 	return Void();

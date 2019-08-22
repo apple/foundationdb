@@ -111,7 +111,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer);
+	Net2(bool useThreadPool, bool useMetrics);
 	void run();
 	void initMetrics();
 
@@ -148,11 +148,9 @@ public:
 
 	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
-	virtual bool useObjectSerializer() const { return _useObjectSerializer; }
 	std::vector<flowGlobalType>		globals;
 
 	bool useThreadPool;
-	bool _useObjectSerializer = false;
 //private:
 
 	ASIOReactor reactor;
@@ -490,9 +488,8 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer)
+Net2::Net2(bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
-	  _useObjectSerializer(useObjectSerializer),
 	  network(this),
 	  reactor(this),
 	  stopped(false),
@@ -1034,9 +1031,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(bool useThreadPool, bool useMetrics, bool useObjectSerializer) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, useObjectSerializer);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

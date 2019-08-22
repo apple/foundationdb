@@ -251,10 +251,9 @@ void uncancellable(Future<T> what, Promise<T> result)
 	}
 }
 
-//Waits for a future to complete and cannot be cancelled
-ACTOR template<class T>
-Future<T> uncancellable(Future<T> what)
-{
+// Waits for a future to complete and cannot be cancelled
+ACTOR template <class T>
+[[flow_allow_discard]] Future<T> uncancellable(Future<T> what) {
 	Promise<T> resultPromise;
 	Future<T> result = resultPromise.getFuture();
 
@@ -283,6 +282,7 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 	return Void();
 }
 
+// Assign the future value of what to out
 template<class T>
 Future<Void> store(T &out, Future<T> what) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });

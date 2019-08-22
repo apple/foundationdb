@@ -33,7 +33,8 @@ enum class CheckHashes {
 class IDiskQueue : public IClosable {
 public:
 	struct location {
-		int64_t hi, lo;
+		// location is same with seq., specifying the index of the virtualy infinite queue.
+		int64_t hi, lo; // hi is always 0, lo is always equal to seq.
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
@@ -105,9 +106,10 @@ struct numeric_limits<IDiskQueue::location> {
 };
 }
 
+// Specify which hash function to use for checksum of pages in DiskQueue
 enum class DiskQueueVersion : uint16_t {
-	V0 = 0,
-	V1 = 1,
+	V0 = 0, // Use hashlittle
+	V1 = 1, // Use crc32, which is faster than hashlittle
 };
 
 IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
