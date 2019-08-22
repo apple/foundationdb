@@ -1373,7 +1373,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			}
 
 			state GetValueReply reply;
-			if (cx->readProxiesEnabled()) {
+			if (cx->readProxiesEnabled() && info.useReadProxies) {
 				choose {
 					when(GetValueReply _reply = wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getValue,
 					                      GetValueRequest(key, ver, getValueID), TaskPriority::DefaultPromiseEndpoint,
@@ -1458,7 +1458,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 
 		Key locationKey(k.getKey(), k.arena());
-		if (cx->readProxiesEnabled()) {
+		if (cx->readProxiesEnabled() && info.useReadProxies) {
 			try {
 				GetKeyReply reply ;
 				choose {
@@ -1952,7 +1952,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 				state GetKeyValuesReply rep;
 
-				if (cx->readProxiesEnabled()) {
+				if (cx->readProxiesEnabled() && info.useReadProxies) {
 					choose {
 						when(GetKeyValuesReply _rep =
 						         wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKeyValues, req,
@@ -2532,6 +2532,7 @@ void Transaction::reset() {
 	committing = Future<Void>();
 	info.taskID = cx->taskID;
 	info.debugID = Optional<UID>();
+	info.useReadProxies = false;
 	flushTrLogsIfEnabled();
 	trLogInfo = Reference<TransactionLogInfo>(createTrLogInfoProbabilistically(cx));
 	cancelWatches();
@@ -3073,7 +3074,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
 			validateOptionValue(value, false);
 			options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
-			info.useProvisionalProxies = true;
+		    info.useProvisionalProxies = true;
+		    break;
+
+		case FDBTransactionOptions::USE_READ_PROXIES:
+			validateOptionValue(value, false);
+			info.useReadProxies = true;
 			break;
 
 		default:
