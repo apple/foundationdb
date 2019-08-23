@@ -532,11 +532,9 @@ inline static void aligned_free(void* ptr) { _aligned_free(ptr); }
 #elif defined(__linux__)
 #include <malloc.h>
 inline static void aligned_free(void* ptr) { free(ptr); }
+inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #elif defined(__FreeBSD__)
 inline static void aligned_free(void* ptr) { free(ptr); }
-#if (!defined(_ISOC11_SOURCE) && !defined(__FreeBSD__)) // old libc versions
-inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
-#endif
 #elif defined(__APPLE__)
 #include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
