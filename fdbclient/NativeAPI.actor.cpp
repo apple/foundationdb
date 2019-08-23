@@ -519,7 +519,7 @@ DatabaseContext::DatabaseContext(
 	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
 	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
 	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), outstandingWatches(0),
+	transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
 {
@@ -548,7 +548,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
 	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
 	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), latencies(1000), readLatencies(1000), commitLatencies(1000), 
+	transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
 	internal(false) {}
 
@@ -2705,10 +2705,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
-				&& e.code() != error_code_proxy_memory_limit_exceeded
-				&& e.code() != error_code_transaction_not_permitted
-				&& e.code() != error_code_cluster_not_fully_recovered
-				&& e.code() != error_code_txn_exec_log_anti_quorum)
+				&& e.code() != error_code_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -3115,8 +3112,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind ||
-		e.code() == error_code_cluster_not_fully_recovered)
+		e.code() == error_code_process_behind)
 	{
 		if(e.code() == error_code_not_committed)
 			++cx->transactionsNotCommitted;
@@ -3126,9 +3122,6 @@ Future<Void> Transaction::onError( Error const& e ) {
 			++cx->transactionsResourceConstrained;
 		if (e.code() == error_code_process_behind)
 			++cx->transactionsProcessBehind;
-		if (e.code() == error_code_cluster_not_fully_recovered) {
-			++cx->transactionWaitsForFullRecovery;
-		}
 
 		double backoff = getBackoff(e.code());
 		reset();
