@@ -62,8 +62,9 @@
 #include "versions.h"
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__)
 #include "fdbmonitor/SimpleIni.h"
+
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
 #ifdef ALLOC_INSTRUMENTATION
