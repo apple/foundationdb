@@ -116,6 +116,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
+	init( FLOW_TCP_NODELAY,                                      1 );
+	init( FLOW_TCP_QUICKACK,                                     0 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
