@@ -3534,9 +3534,6 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 				getQueuingMetrics(self, req);
 			}
-			when( ReplyPromise<Version> reply = waitNext(ssi.getVersion.getFuture()) ) {
-				reply.send( self->version.get() );
-			}
 			when( ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture()) ) {
 				reply.send( self->storage.getKeyValueStoreType() );
 			}

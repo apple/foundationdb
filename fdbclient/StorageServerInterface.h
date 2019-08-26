@@ -40,7 +40,6 @@ struct StorageServerInterface {
 	LocalityData locality;
 	UID uniqueID;
 
-	RequestStream<ReplyPromise<Version>> getVersion;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
 
@@ -60,7 +59,7 @@ struct StorageServerInterface {
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
-	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar> 
@@ -69,11 +68,11 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
