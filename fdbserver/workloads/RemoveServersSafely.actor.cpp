@@ -409,7 +409,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (safeKillSet) {
 			loop {
 				state bool safe = false;
-				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size() / 2 + 2));
+				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(1, toKillArray.size()));
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
 				TraceEvent("RemoveAndKill", functionId)

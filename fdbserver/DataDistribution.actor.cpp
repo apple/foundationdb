@@ -2855,7 +2855,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
 
 					for(int i=0; i<shards.size(); i++) {
-						int maxPriority = team->getPriority();
+						// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
+						int maxPriority = teamContainsFailedServer(self, team) ? PRIORITY_TEAM_0_LEFT : team->getPriority();
 						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
