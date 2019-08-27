@@ -2866,6 +2866,7 @@ void profileHandler(int sig) {
 }
 
 void setProfilingEnabled(int enabled) { 
+#ifdef __linux__
 	if(profileThread && enabled && !profilingEnabled && profileRequested) {
 		profilingEnabled = true;
 		profileRequested = false;
@@ -2874,6 +2875,9 @@ void setProfilingEnabled(int enabled) {
 	else {
 		profilingEnabled = enabled;
 	}
+#else
+	// No profiling for other platforms!
+#endif	
 }
 
 void* checkThread(void *arg) {
