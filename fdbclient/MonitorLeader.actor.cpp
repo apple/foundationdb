@@ -670,6 +670,19 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
+struct PeerReferenceHolder {
+	Optional<Endpoint> endpoint;
+	PeerReferenceHolder() {}
+	explicit PeerReferenceHolder( Endpoint const& e ) : endpoint(e) {
+		FlowTransport::transport().addPeerReference(e, true);
+	}
+	~PeerReferenceHolder() {
+		if(endpoint.present()) {
+			FlowTransport::transport().removePeerReference(endpoint.get(), true);
+		}
+	}
+};
+
 // Leader is the process that will be elected by coordinators as the cluster controller
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
@@ -683,6 +696,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
 		state ClientLeaderRegInterface clientLeaderServer( addrs[idx] );
+		state PeerReferenceHolder peerHolder( clientLeaderServer.openDatabase.getEndpoint() );
 		state OpenDatabaseCoordRequest req;
 		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();

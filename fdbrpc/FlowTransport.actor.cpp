@@ -303,6 +303,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
+	int keepConnectedReferences;
 	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
 	double lastDataPacketSentTime;
@@ -310,7 +311,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
 	  : transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), keepConnectedReferences(0), bytesReceived(0), lastDataPacketSentTime(now()) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
 		unsent.setWriteBuffer(pb);
@@ -419,7 +420,7 @@ struct Peer : public ReferenceCounted<Peer> {
 			//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
 			wait(delay(0));
 
-			if (peer->reliable.empty() && peer->unsent.empty()) {
+			if (peer->reliable.empty() && peer->unsent.empty() && peer->keepConnectedReferences == 0) {
 				if (peer->peerReferences == 0 &&
 				    (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
 					// TODO: What about when peerReference == -1?
@@ -1088,11 +1089,14 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 	return Endpoint(g_currentDeliveryPeerAddress, token);
 }
 
-void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+void FlowTransport::addPeerReference(const Endpoint& endpoint, bool keepConnected) {
+	if (!endpoint.getPrimaryAddress().isValid()) {
 		return;
-	else if (FlowTransport::transport().isClient())
+	}
+
+	if (FlowTransport::transport().isClient()) {
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+	}
 
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
@@ -1100,10 +1104,16 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	} else {
 		peer->peerReferences++;
 	}
+	if(keepConnected) {
+		peer->keepConnectedReferences++;
+	}
 }
 
-void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
+void FlowTransport::removePeerReference(const Endpoint& endpoint, bool keepConnected) {
+	if (!endpoint.getPrimaryAddress().isValid()) {
+		return;
+	}
+
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress(), false);
 	if(peer) {
 		peer->peerReferences--;
@@ -1112,6 +1122,9 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 				.detail("References", peer->peerReferences)
 				.detail("Address", endpoint.getPrimaryAddress())
 				.detail("Token", endpoint.token);
+		}
+		if(keepConnected) {
+			peer->keepConnectedReferences--;
 		}
 		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
 			peer->resetPing.trigger();
