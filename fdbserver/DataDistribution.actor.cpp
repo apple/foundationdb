@@ -2909,7 +2909,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 		}
 	} catch(Error& e) {
 		if(logTeamEvents) {
-			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc());
+			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {

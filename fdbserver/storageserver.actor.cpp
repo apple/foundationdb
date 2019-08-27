@@ -1936,9 +1936,18 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		ASSERT(false);  // Unknown mutation type in splitMutations
 }
 
+ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
+	state double startTime = now();
+	loop {
+		wait(delay(600));
+		TraceEvent(SevWarnAlways, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
+	}
+}
+
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
+	state Future<Void> warningLogger = logFetchKeysWarning(shard);
 	state double startt = now();
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
 
