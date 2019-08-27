@@ -3420,19 +3420,6 @@ ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 	return Void();
 }
 
-ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
-	state int oldMode = wait( setDDMode( cx, 0 ) );
-	try {
-		wait(snapCreateCore(cx, snapCmd, snapUID));
-	} catch (Error& e) {
-		state Error err = e;
-		wait(success( setDDMode( cx, oldMode ) ));
-		throw err;
-	}
-	wait(success( setDDMode( cx, oldMode ) ));
-	return Void();
-}
-
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
 	TraceEvent("ExclusionSafetyCheckBegin")
 	    .detail("NumExclusion", exclusions.size())
