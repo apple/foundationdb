@@ -211,6 +211,10 @@ The following options are available for use with the ``option`` command:
 
 ``TIMEOUT`` - Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to ``onError``. This behavior allows the user to make the timeouts dynamic.
 
+lock
+----
+
+The ``lock`` command locks the database with a randomly generated lockUID.
 
 include
 -------

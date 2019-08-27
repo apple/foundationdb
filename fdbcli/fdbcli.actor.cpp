@@ -565,6 +565,10 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2969,6 +2973,19 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						bool err = wait(createSnapshot(db, tokens));
 						if (err) is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
 					}
 					continue;
 				}
