@@ -553,6 +553,14 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] = CommandHelp(
+		"unlock <UID>",
+		"unlock the database",
+		"Unlocks the database using the given lockUID.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2817,6 +2825,40 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						bool err = wait(createSnapshot(db, tokens[1]));
 						if (err) is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					bool isValid = (tokens.size() == 2 && tokens[1].size() == 32);
+					if (isValid) {
+						for (int i = 0; i < 32; ++i) {
+							if (!isdigit(tokens[1][i]) && (tokens[1][i] > 'f' || tokens[1][i] < 'a')) {
+								isValid = false;
+								break;
+							}
+						}
+					}
+					if (!isValid) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						UID unlockUID = UID::fromString(tokens[1].toString());
+						wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+						printf("Database unlocked.\n");
 					}
 					continue;
 				}
