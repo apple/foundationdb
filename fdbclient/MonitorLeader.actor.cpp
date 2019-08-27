@@ -709,8 +709,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<ClientDBInfo> rep =
-		    wait(clientLeaderServer.openDatabase.getReplyUnlessFailedFor(req, 0, 0, TaskPriority::CoordinationReply));
+		state ErrorOr<ClientDBInfo> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
 		if (rep.present()) {
 			if( rep.get().forward.present() ) {
 				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
