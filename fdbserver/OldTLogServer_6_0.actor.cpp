@@ -1556,8 +1556,7 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 	}
 	ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
-		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
-		int err = wait(execHelper(&snapArg, self->dataFolder, role.toString()));
+		int err = wait(execHelper(&snapArg, snapReq.snapUID, self->dataFolder, snapReq.role.toString()));
 
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceTLog")

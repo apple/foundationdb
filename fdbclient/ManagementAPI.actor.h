@@ -197,7 +197,7 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
-ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd);
+ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd);
 
 #include "flow/unactorcompiler.h"
 #endif
