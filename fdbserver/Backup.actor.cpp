@@ -31,7 +31,7 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const Version startVersion;
-	const Version endVersion;
+	const Version endVersion; // old epoch's end version (inclusive), or numeric limit for current epoch
 	const LogEpoch recruitedEpoch;
 	const LogEpoch backupEpoch;
 	Version minKnownCommittedVersion;
@@ -113,7 +113,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			popVersion = std::max(popVersion, self->lastSeenVersion);
 		} else {
 			while (!self->messages.empty()) {
-				// if (self->versions[0] > self->minKnownCommittedVersion) break;
+				if (self->versions[0] > self->endVersion || self->versions[0] > self->minKnownCommittedVersion) break;
 				popVersion = std::max(popVersion, self->versions[0]);
 				// TODO: consume the messages
 				self->messages.erase(self->messages.begin());
