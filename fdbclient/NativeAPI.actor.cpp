@@ -1493,10 +1493,9 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
 
-			if (v - resp.version <
-			    50000000) // False if there is a master failure between getting the response and getting the committed
-			              // version, Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
-				return Void();
+			// False if there is a master failure between getting the response and getting the committed version,
+			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
+			if (v - resp.version < 50000000) return Void();
 			ver = v;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
