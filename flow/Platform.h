@@ -42,7 +42,7 @@
 #define EXTERNC extern "C"
 
 #include <cstdlib>
-#include <cstdint>
+#include <stdint.h>
 #include <stdio.h>
 
 #ifdef __unixish__
