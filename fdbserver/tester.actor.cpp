@@ -365,6 +365,10 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 			wait( tr.commit() );
 			return Void();
 		} catch( Error& e ) {
+			if (e.code() == error_code_database_locked) {
+				TraceEvent(SevWarn, "PingDatabaseFailedDueToLockedDatabase");
+				return Void();
+			}
 			TraceEvent("PingingDatabaseTransactionError").error(e);
 			wait( tr.onError( e ) );
 		}
