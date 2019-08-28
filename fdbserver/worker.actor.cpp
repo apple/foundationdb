@@ -819,10 +819,11 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
 	}
 
+	state std::vector<Future<Void>> recoveries;
+
 	try {
 		std::vector<DiskStore> stores = getDiskStores( folder );
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-		std::vector<Future<Void>> recoveries;
 		for( int f = 0; f < stores.size(); f++ ) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
@@ -1239,6 +1240,8 @@ ACTOR Future<Void> workerServer(
 			when( wait( handleErrors ) ) {}
 		}
 	} catch (Error& err) {
+		// Make sure actors are cancelled before "recovery" promises are destructed.
+		for (auto f : recoveries) f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_delete;
 
@@ -1389,8 +1392,10 @@ ACTOR Future<Void> fdbd(
 	int64_t memoryProfileThreshold,
 	std::string whitelistBinPaths)
 {
-	try {
+	state vector<Future<Void>> actors;
+	state Promise<Void> recoveredDiskFiles;
 
+	try {
 		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
@@ -1398,10 +1403,9 @@ ACTOR Future<Void> fdbd(
 		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-		state vector<Future<Void>> v;
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
-			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
+			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
 		
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
@@ -1411,19 +1415,21 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
-		Promise<Void> recoveredDiskFiles;
 
-		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
-		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
-		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
+		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
+		actors.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
+		actors.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
+		actors.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
+		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
-		wait( quorum(v,1) );
+		wait( quorum(actors,1) );
 		ASSERT(false);  // None of these actors should terminate normally
 		throw internal_error();
-	} catch(Error &e) {
+	} catch (Error& e) {
+		// Make sure actors are cancelled before recoveredDiskFiles is destructed.
+		// Otherwise, these actors may get a broken promise error.
+		for (auto f : actors) f.cancel();
 		Error err = checkIOTimeout(e);
 		throw err;
 	}
