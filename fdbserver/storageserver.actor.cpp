@@ -934,7 +934,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 					g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 				if( reply.value != req.value ) {
-					req.reply.send( latest );
+					req.reply.send(WatchValueReply{ latest });
 					return Void();
 				}
 
@@ -1012,7 +1012,7 @@ ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest
 		}
 
 		if( !onChange.size() ) {
-			req.reply.send(std::make_pair(data->version.get(), data->durableVersion.get()));
+			req.reply.send(GetShardStateReply{ data->version.get(), data->durableVersion.get() });
 			return Void();
 		}
 
@@ -3533,7 +3533,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {
 					if( self->isReadable( req.keys ) )
-						req.reply.send(std::make_pair(self->version.get(),self->durableVersion.get()));
+						req.reply.send(GetShardStateReply{ self->version.get(), self->durableVersion.get() });
 					else
 						req.reply.sendError(wrong_shard_server());
 				} else {
@@ -3543,7 +3543,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 				getQueuingMetrics(self, req);
 			}
-			when( ReplyPromise<Version> reply = waitNext(ssi.getVersion.getFuture()) ) {
+			when(ReplyPromise<VersionReply> reply = waitNext(ssi.getVersion.getFuture())) {
 				reply.send( self->version.get() );
 			}
 			when( ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture()) ) {

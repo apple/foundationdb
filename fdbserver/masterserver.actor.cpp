@@ -1018,7 +1018,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
 		while(self->resolverChanges.get().size())
 			wait(self->resolverChanges.onChange());
-		state std::vector<Future<int64_t>> futures;
+		state std::vector<Future<ResolutionMetricsReply>> futures;
 		for (auto& p : self->resolvers)
 			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
 		wait( waitForAll(futures) );
@@ -1026,8 +1026,8 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 
 		int64_t total = 0;
 		for (int i = 0; i < futures.size(); i++) {
-			total += futures[i].get();
-			metrics.insert(std::make_pair(futures[i].get(), i), NoMetric());
+			total += futures[i].get().value;
+			metrics.insert(std::make_pair(futures[i].get().value, i), NoMetric());
 			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
 		}
 		if( metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE ) {

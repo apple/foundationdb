@@ -302,7 +302,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			//TODO: use notify to only send a heartbeat once per interval
 			availableLeaders.erase( LeaderInfo(req.prevChangeID) );
 			availableLeaders.insert( req.myInfo );
-			req.reply.send( currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) );
+			req.reply.send(
+			    LeaderHeartbeatReply{ currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) });
 		}
 		when (ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
 			LeaderInfo newInfo;
@@ -499,7 +500,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 		when ( LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() )
-				req.reply.send( false );
+				req.reply.send(LeaderHeartbeatReply{ false });
 			else
 				regs.getInterface(req.key, id).leaderHeartbeat.send(req);
 		}
