@@ -591,6 +591,11 @@ inline static int clz( uint32_t value ) {
 #include <boost/config.hpp>
 // The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
 
+// These return thread local counts
+int64_t getNumProfilesDeferred();
+int64_t getNumProfilesOverflowed();
+int64_t getNumProfilesCaptured();
+
 #else
 #define EXTERNC
 #endif // __cplusplus
@@ -616,11 +621,6 @@ void platformInit();
 void registerCrashHandler();
 void setupSlowTaskProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
-
-// These return thread local counts
-int64_t getNumProfilesDeferred();
-int64_t getNumProfilesOverflowed();
-int64_t getNumProfilesCaptured();
 
 // Use _exit() or criticalError(), not exit()
 #define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [====]
