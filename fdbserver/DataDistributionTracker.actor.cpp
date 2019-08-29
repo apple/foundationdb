@@ -33,6 +33,8 @@ enum BandwidthStatus {
 	BandwidthStatusHigh
 };
 
+enum ReadBandwithStatus { ReadBandwithStatusNormal, ReadBandwithStatusHigh };
+
 BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	if( metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC )
 		return BandwidthStatusHigh;
@@ -40,6 +42,13 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 		return BandwidthStatusLow;
 
 	return BandwidthStatusNormal;
+}
+
+ReadBandwithStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
+	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC)
+		return ReadBandwithStatusHigh;
+	else
+		return ReadBandwithStatusNormal;
 }
 
 ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
@@ -136,26 +145,35 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 		(int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
+<<<<<<< HEAD
 ACTOR Future<Void> trackShardBytes(
 		DataDistributionTracker* self,
 		KeyRange keys,
 		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize)
 {
+=======
+ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
+                                   Reference<AsyncVar<Optional<StorageMetrics>>> shardMetrics,
+                                   bool addToSizeEstimate = true) {
+>>>>>>> Added metrics for read hot key detection
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardBytesStarting")
-		.detail("TrackerID", trackerID)
-		.detail("Keys", keys)
-		.detail("TrackedBytesInitiallyPresent", shardSize->get().present())
-		.detail("StartingSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
-		.detail("StartingMerges", shardSize->get().present() ? shardSize->get().get().merges : 0);*/
+	    .detail("TrackerID", trackerID)
+	    .detail("Keys", keys)
+	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
+	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
 
+	state ReadBandwithStatus readBandwithStatus;
 	try {
 		loop {
 			ShardSizeBounds bounds;
-			if( shardSize->get().present() ) {
-				auto bytes = shardSize->get().get().bytes;
-				auto bandwidthStatus = getBandwidthStatus( shardSize->get().get() );
+			if (shardMetrics->get().present()) {
+				auto bytes = shardMetrics->get().get().bytes;
+				auto bandwidthStatus = getBandwidthStatus(shardMetrics->get().get());
+				auto newReadBandwithStatus = getReadBandwidthStatus(shardMetrics->get().get());
+
 				bounds.max.bytes = std::max( int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES );
 				bounds.min.bytes = std::min( int64_t(bytes * 0.9), std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0) );
 				bounds.permittedError.bytes = bytes * 0.1;
@@ -171,15 +189,35 @@ ACTOR Future<Void> trackShardBytes(
 					bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
 					bounds.min.bytesPerKSecond = 0;
 					bounds.permittedError.bytesPerKSecond = bounds.max.bytesPerKSecond / 4;
-				} else
+				} else {
 					ASSERT( false );
-
+				}
+				// handle read bandkwith status
+				if (newReadBandwithStatus != readBandwithStatus) {
+					TraceEvent("ReadBandwithStatusChanged")
+					    .detail("from", readBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High")
+					    .detail("to", newReadBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High");
+					readBandwithStatus = newReadBandwithStatus;
+				}
+				if (newReadBandwithStatus == ReadBandwithStatusNormal) {
+					TEST(true);
+					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC;
+					bounds.min.bytesReadPerKSecond = 0;
+				} else if (newReadBandwithStatus == ReadBandwithStatusHigh) {
+					TEST(true);
+					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC;
+				} else {
+					ASSERT(false);
+				}
 			} else {
 				bounds.max.bytes = -1;
 				bounds.min.bytes = -1;
 				bounds.permittedError.bytes = -1;
 				bounds.max.bytesPerKSecond = bounds.max.infinity;
 				bounds.min.bytesPerKSecond = 0;
+				bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+				bounds.min.bytesReadPerKSecond = 0;
 				bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
 			}
 
@@ -191,6 +229,7 @@ ACTOR Future<Void> trackShardBytes(
 			StorageMetrics metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT ) );
 
 			/*TraceEvent("ShardSizeUpdate")
+<<<<<<< HEAD
 				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
@@ -211,6 +250,25 @@ ACTOR Future<Void> trackShardBytes(
 			}
 
 			shardSize->set( metrics );
+=======
+			    .detail("Keys", keys)
+			    .detail("UpdatedSize", metrics.metrics.bytes)
+			    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
+			    .detail("BandwithStatus", getBandwidthStatus(metrics))
+			    .detail("BytesLower", bounds.min.bytes)
+			    .detail("BytesUpper", bounds.max.bytes)
+			    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
+			    .detail("BandwidthUpper", bounds.max.bytesPerKSecond)
+			    .detail("ShardMetricsPresent", shardMetrics->get().present())
+			    .detail("OldShardMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
+			    .detail("TrackerID", trackerID);*/
+
+			if (shardMetrics->get().present() && addToSizeEstimate)
+				self->dbSizeEstimate->set(self->dbSizeEstimate->get() + metrics.bytes -
+				                          shardMetrics->get().get().bytes);
+
+			shardMetrics->set(metrics);
+>>>>>>> Added metrics for read hot key detection
 		}
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled)

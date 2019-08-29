@@ -184,12 +184,14 @@ private:
 struct StorageServerMetrics {
 	KeyRangeMap< vector< PromiseStream< StorageMetrics > > > waitMetricsMap;
 	StorageMetricSample byteSample;
-	TransientStorageMetricSample iopsSample, bandwidthSample;	// FIXME: iops and bandwidth calculations are not effectively tested, since they aren't currently used by data distribution
+	TransientStorageMetricSample iopsSample, bandwidthSample,
+	    bytesReadSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
+	                     // currently used by data distribution
 
 	StorageServerMetrics()
-		: byteSample( 0 ), iopsSample( SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE ), bandwidthSample( SERVER_KNOBS->BANDWIDTH_UNITS_PER_SAMPLE )
-	{
-	}
+	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
+	    bandwidthSample(SERVER_KNOBS->BANDWIDTH_UNITS_PER_SAMPLE),
+	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
 
 	// Get the current estimated metrics for the given keys
 	StorageMetrics getMetrics( KeyRangeRef const& keys ) {
@@ -197,6 +199,8 @@ struct StorageServerMetrics {
 		result.bytes = byteSample.getEstimate( keys );
 		result.bytesPerKSecond = bandwidthSample.getEstimate( keys ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		result.iosPerKSecond = iopsSample.getEstimate( keys ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		result.bytesReadPerKSecond =
+		    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		return result;
 	}
 
@@ -206,6 +210,7 @@ struct StorageServerMetrics {
 		ASSERT (metrics.bytes == 0); // ShardNotifyMetrics
 		TEST (metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
 		TEST (metrics.iosPerKSecond != 0); // ShardNotifyMetrics
+		TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 
@@ -215,6 +220,9 @@ struct StorageServerMetrics {
 			notifyMetrics.bytesPerKSecond = bandwidthSample.addAndExpire( key, metrics.bytesPerKSecond, expire ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		if (metrics.iosPerKSecond)
 			notifyMetrics.iosPerKSecond = iopsSample.addAndExpire( key, metrics.iosPerKSecond, expire ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		if (metrics.bytesReadPerKSecond)
+			notifyMetrics.bytesReadPerKSecond = bytesReadSample.addAndExpire(key, metrics.bytesReadPerKSecond, expire) *
+			                                    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		if (!notifyMetrics.allZero()) {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
@@ -263,6 +271,11 @@ struct StorageServerMetrics {
 	void poll() {
 		{ StorageMetrics m; m.bytesPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS; bandwidthSample.poll(waitMetricsMap, m); }
 		{ StorageMetrics m; m.iosPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS; iopsSample.poll(waitMetricsMap, m); }
+		{
+			StorageMetrics m;
+			m.bytesReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+			bytesReadSample.poll(waitMetricsMap, m);
+		}
 		// bytesSample doesn't need polling because we never call addExpire() on it
 	}
 
@@ -360,10 +373,12 @@ struct StorageServerMetrics {
 		rep.free.bytes = sb.free;
 		rep.free.iosPerKSecond = 10e6;
 		rep.free.bytesPerKSecond = 100e9;
+		rep.free.bytesReadPerKSecond = 100e9;
 
 		rep.capacity.bytes = sb.total;
 		rep.capacity.iosPerKSecond = 10e6;
 		rep.capacity.bytesPerKSecond = 100e9;
+		rep.capacity.bytesReadPerKSecond = 100e9;
 
 		rep.bytesInputRate = bytesInputRate;
 
