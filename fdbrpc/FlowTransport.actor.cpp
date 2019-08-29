@@ -294,7 +294,7 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 	state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 	loop {
-			if (!FlowTransport::transport().isClient() && !peer->destination.isPublic()) {
+		if (!FlowTransport::transport().isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
