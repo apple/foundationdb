@@ -1466,7 +1466,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_WhiteListCheckFailed")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw transaction_not_permitted();
+			throw snap_path_not_whitelisted();
 		}
 		// db fully recovered check
 		if (commitData->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
@@ -1478,7 +1478,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_ClusterNotFullyRecovered")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw cluster_not_fully_recovered();
+			throw snap_not_fully_recovered_unsupported();
 		}
 
 		auto result =
@@ -1493,7 +1493,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_LogAnitQuorumNotSupported")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw txn_exec_log_anti_quorum();
+			throw snap_log_anti_quorum_unsupported();
 		}
 
 		// send a snap request to DD
