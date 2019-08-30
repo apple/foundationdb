@@ -498,6 +498,10 @@ void initHelp() {
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
 	helpMap["waitopen"] = CommandHelp();
+	helpMap["sleep"] = CommandHelp(
+		"sleep <SECONDS>",
+		"sleep for a period of time",
+		"");
 	helpMap["get"] = CommandHelp(
 		"get <KEY>",
 		"fetch the value for a given key",
@@ -1491,6 +1495,17 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			}
 			if(processesMap.obj().size() > 9 && foundLogAndStorage) {
 				outputString += "\n\nWARNING: A single process is both a transaction log and a storage server.\n  For best performance use dedicated disks for the transaction logs by setting process classes.";
+			}
+
+			if (statusObjCluster.has("data_distribution_disabled")) {
+				outputString += "\n\nWARNING: Data distribution is off.";
+			} else {
+				if (statusObjCluster.has("data_distribution_disabled_for_ss_failures")) {
+					outputString += "\n\nWARNING: Data distribution is currently turned on but disabled for all storage server failures.";
+				}
+				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
+					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is currently disabled.";
+				}
 			}
 
 			printf("%s\n", outputString.c_str());
@@ -2593,8 +2608,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
 			Future<Void> checkStatusF = checkStatus(Void(), db->getConnectionFile());
-			Future<Void> checkDDStatusF = checkDataDistributionStatus(db, true);
-			wait(makeInterruptable(success(checkStatusF) && success(checkDDStatusF)));
+			wait(makeInterruptable(success(checkStatusF)));
 		}
 		else {
 			printf("\n");
@@ -2737,6 +2751,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if( tokencmp(tokens[0], "waitopen")) {
 					wait(success( getTransaction(db,tr,options,intrans)->getReadVersion() ));
+					continue;
+				}
+
+				if( tokencmp(tokens[0], "sleep")) {
+					if(tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						double v;
+						int n=0;
+						if (sscanf(tokens[1].toString().c_str(), "%lf%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(delay(v));
+						}
+					}
 					continue;
 				}
 
@@ -3430,13 +3461,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "datadistribution")) {
 					if (tokens.size() != 2 && tokens.size() != 3) {
-						printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 						       "<ssfailure|rebalance>>\n");
 						is_error = true;
 					} else {
-						if (tokencmp(tokens[1], "status")) {
-							wait(makeInterruptable(checkDataDistributionStatus(db)));
-						} else if (tokencmp(tokens[1], "on")) {
+						if (tokencmp(tokens[1], "on")) {
 							wait(success(setDDMode(db, 1)));
 							printf("Data distribution is turned on.\n");
 						} else if (tokencmp(tokens[1], "off")) {
@@ -3450,7 +3479,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
 								printf("Data distribution is disabled for rebalance.\n");
 							} else {
-								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 								       "<ssfailure|rebalance>>\n");
 								is_error = true;
 							}
@@ -3462,12 +3491,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
 								printf("Data distribution is enabled for rebalance.\n");
 							} else {
-								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 								       "<ssfailure|rebalance>>\n");
 								is_error = true;
 							}
 						} else {
-							printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 							       "<ssfailure|rebalance>>\n");
 							is_error = true;
 						}

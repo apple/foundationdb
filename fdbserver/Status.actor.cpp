@@ -1158,8 +1158,9 @@ struct LoadConfigurationResult {
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
+	bool dataDistributionDisabled;
 
-	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false) {}
+	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
@@ -1201,12 +1202,13 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 			}
 			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
 			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored))) {
+				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
 							unreplicated++;
 						}
 					}
@@ -1214,12 +1216,23 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 					if(healthyZoneValue.get().present()) {
 						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if(healthyZone.second > tr.getReadVersion().get()) {
+						if(healthyZone.first == ignoreSSFailuresZoneString) {
+							res.healthyZone = healthyZone.first;
+						}
+						else if(healthyZone.second > tr.getReadVersion().get()) {
 							res.healthyZone = healthyZone.first;
 							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+					if (ddModeKey.get().present()) {
+						BinaryReader rd(ddModeKey.get().get(), Unversioned());
+						int currentMode;
+						rd >> currentMode;
+						if (currentMode == 0) {
+							res.dataDistributionDisabled = true;
+						}
+					}
 					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
@@ -2188,6 +2201,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (loadResult.get().rebalanceDDIgnored) {
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
 			}
+			if (loadResult.get().dataDistributionDisabled) {
+				statusObj["data_distribution_disabled"] = true;
+			}
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
@@ -2222,7 +2238,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
-
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
