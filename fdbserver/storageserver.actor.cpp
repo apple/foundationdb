@@ -3322,7 +3322,7 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 					when( StorageMetrics c = waitNext( change.getFuture() ) ) {
 						metrics += c;
 
-						// SOMEDAY: validation! The changes here are possibly partial changes (we recieve multiple messages per
+						// SOMEDAY: validation! The changes here are possibly partial changes (we receive multiple messages per
 						//  update to our requested range). This means that the validation would have to occur after all
 						//  the messages for one clear or set have been dispatched.
 
@@ -3510,7 +3510,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
 				// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
 				if( req.debugID.present() )
-					g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.recieved"); //.detail("TaskID", g_network->getCurrentTask());
+					g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
 
 				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 					req.reply.send(GetValueReply());

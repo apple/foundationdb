@@ -265,7 +265,7 @@ public:
 
 	void send(const T& value) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 		}
 		else
 			queue->send(value);
@@ -317,9 +317,9 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID));
+			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p);
+			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p, peer);
 		}
 		send(value);
 		auto& p = getReplyPromise(value);
@@ -333,9 +333,9 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p);
+			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p, peer);
 		}
 		else {
 			send(value);

@@ -70,7 +70,7 @@ struct WorkloadRequest {
 
 	VectorRef< VectorRef<KeyValueRef> > options;
 
-	int clientId;				// the "id" of the client recieving the request (0 indexed)
+	int clientId;				// the "id" of the client receiving the request (0 indexed)
 	int clientCount;			// the total number of test clients participating in the workload
 	ReplyPromise< struct WorkloadInterface > reply;
 
