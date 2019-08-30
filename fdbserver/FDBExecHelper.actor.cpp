@@ -163,7 +163,6 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 		auto snapBin = execArg->getBinaryPath();
 		auto dataFolder = "path=" + folder;
 		std::vector<std::string> paramList;
-		paramList.push_back(snapBin.toString());
 		// get user passed arguments
 		auto listArgs = execArg->getBinaryArgs();
 		for (auto elem : listArgs) {
