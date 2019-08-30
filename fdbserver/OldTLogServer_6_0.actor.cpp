@@ -1477,9 +1477,9 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
 				choose {
-					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
-						if (success)
-							lastMasterID = self->dbInfo->get().master.id();
+					when(TLogRejoinReply rep =
+					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+						if (rep.masterIsRecovered) lastMasterID = self->dbInfo->get().master.id();
 					}
 					when ( wait( self->dbInfo->onChange() ) ) { }
 				}

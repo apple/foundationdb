@@ -139,8 +139,8 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<std::pair<Version,Version>> > fReply, UID uid, Version version ) {
-	ErrorOr<std::pair<Version,Version>> reply = wait( fReply );
+ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
+	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
@@ -443,7 +443,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode ) {
 	loop {
 		try {
-			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskPriority::MoveKeys ) );
+			GetShardStateReply rep =
+			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
 				return Void();
 			}

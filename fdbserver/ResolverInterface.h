@@ -103,9 +103,22 @@ struct ResolveTransactionBatchRequest {
 	}
 };
 
+struct ResolutionMetricsReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	int64_t value;
+	ResolutionMetricsReply() = default;
+	explicit ResolutionMetricsReply(int64_t value) : value(value) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
 struct ResolutionMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 11663527;
-	ReplyPromise<int64_t> reply;
+	ReplyPromise<ResolutionMetricsReply> reply;
 
 	template <class Archive>
 	void serialize(Archive& ar) {

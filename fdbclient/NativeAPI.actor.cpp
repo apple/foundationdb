@@ -1474,11 +1474,11 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			state Version resp;
+			state WatchValueReply resp;
 			choose {
-				when(Version r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
-				                                  WatchValueRequest(key, value, ver, watchValueID),
-				                                  TaskPriority::DefaultPromiseEndpoint))) {
+				when(WatchValueReply r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
+				                                          WatchValueRequest(key, value, ver, watchValueID),
+				                                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
 				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
@@ -1489,12 +1489,13 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 			//FIXME: wait for known committed version on the storage server before replying,
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
-			Version v = wait( waitForCommittedVersion( cx, resp ) );
+			Version v = wait(waitForCommittedVersion(cx, resp.version));
 
-			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key",  key ).detail("Value", value);
+			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
 
-			if( v - resp < 50000000 ) // False if there is a master failure between getting the response and getting the committed version, Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
-				return Void();
+			// False if there is a master failure between getting the response and getting the committed version,
+			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
+			if (v - resp.version < 50000000) return Void();
 			ver = v;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {

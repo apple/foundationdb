@@ -31,12 +31,22 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+struct CheckReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	bool value = false;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
 
 struct WorkloadInterface {
 	constexpr static FileIdentifier file_identifier = 4454551;
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
-	RequestStream<ReplyPromise<bool>> check;
+	RequestStream<ReplyPromise<CheckReply>> check;
 	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 

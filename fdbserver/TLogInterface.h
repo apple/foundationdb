@@ -216,6 +216,19 @@ struct TagMessagesRef {
 	}
 };
 
+struct TLogCommitReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	Version version;
+	TLogCommitReply() = default;
+	explicit TLogCommitReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	Arena arena;
@@ -223,7 +236,7 @@ struct TLogCommitRequest {
 
 	StringRef messages;// Each message prefixed by a 4-byte length
 
-	ReplyPromise<Version> reply;
+	ReplyPromise<TLogCommitReply> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}

@@ -1140,12 +1140,19 @@ inline FileIdentifier read_file_identifier(const uint8_t* in) {
 	return result;
 }
 
+namespace detail {
+template <class T>
+struct YesFileIdentifier {
+	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+};
+struct NoFileIdentifier {};
+}; // namespace detail
+
 // members of unions must be tables in flatbuffers, so you can use this to
 // introduce the indirection only when necessary.
 template <class T>
-struct EnsureTable {
-	static_assert(HasFileIdentifier<T>::value);
-	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+struct EnsureTable
+  : std::conditional_t<HasFileIdentifier<T>::value, detail::YesFileIdentifier<T>, detail::NoFileIdentifier> {
 	EnsureTable() = default;
 	EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
