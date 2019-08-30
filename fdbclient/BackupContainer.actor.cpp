@@ -258,15 +258,15 @@ std::string BackupDescription::toJSON() const {
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
-	void addref() = 0 override;
-	void delref() = 0 override;
+	void addref() override = 0;
+	void delref() override = 0;
 
 	BackupContainerFileSystem() {}
 	virtual ~BackupContainerFileSystem() {}
 
 	// Create the container
-	Future<Void> create() = 0 override;
-	Future<bool> exists() = 0 override;
+	Future<Void> create() override = 0;
+	Future<bool> exists() override = 0;
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
@@ -275,7 +275,7 @@ public:
 	virtual Future<FilesAndSizesT> listFiles(std::string path = "", std::function<bool(std::string const &)> folderPathFilter = nullptr) = 0;
 
 	// Open a file for read by fileName
-	Future<Reference<IAsyncFile>> readFile(std::string fileName) = 0 override;
+	Future<Reference<IAsyncFile>> readFile(std::string fileName) override = 0;
 
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(std::string fileName) = 0;
@@ -285,7 +285,7 @@ public:
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
-	Future<Void> deleteContainer(int* pNumDeleted) = 0 override;
+	Future<Void> deleteContainer(int* pNumDeleted) override = 0;
 
 	// Creates a 2-level path (x/y) where v should go such that x/y/* contains (10^smallestBucket) possible versions
 	static std::string versionFolderString(Version v, int smallestBucket) {
