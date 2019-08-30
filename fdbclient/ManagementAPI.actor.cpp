@@ -1532,7 +1532,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd) {
 	state UID snapUID = deterministicRandom()->randomUniqueID();
 	try {
 		wait(snapCreate(cx, snapCmd, snapUID));

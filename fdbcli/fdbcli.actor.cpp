@@ -2214,7 +2214,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 	}
 }
 
-ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
+ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
+	state Standalone<StringRef> snapCmd;
+	for ( int i = 1; i < tokens.size(); i++) {
+		snapCmd = snapCmd.withSuffix(tokens[i]);
+		if (i != tokens.size() - 1) {
+			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+		}
+	}
 	try {
 		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
 		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
@@ -2846,11 +2853,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					if (tokens.size() != 2) {
+					if (tokens.size() < 2) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait(createSnapshot(db, tokens[1]));
+						bool err = wait(createSnapshot(db, tokens));
 						if (err) is_error = true;
 					}
 					continue;

@@ -21,7 +21,6 @@ ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
 void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 	// reset everything
 	binaryPath = StringRef();
-	keyValueMap.clear();
 
 	// set the new cmdValueString
 	cmdValueString = pCmdValueString;
@@ -42,18 +41,10 @@ VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() {
 	return binaryArgs;
 }
 
-StringRef ExecCmdValueString::getBinaryArgValue(StringRef key) {
-	StringRef res;
-	if (keyValueMap.find(key) != keyValueMap.end()) {
-		res = keyValueMap[key];
-	}
-	return res;
-}
-
 void ExecCmdValueString::parseCmdValue() {
 	StringRef param = this->cmdValueString;
 	// get the binary path
-	this->binaryPath = param.eat(LiteralStringRef(":"));
+	this->binaryPath = param.eat(LiteralStringRef(" "));
 
 	// no arguments provided
 	if (param == StringRef()) {
@@ -62,11 +53,8 @@ void ExecCmdValueString::parseCmdValue() {
 
 	// extract the arguments
 	while (param != StringRef()) {
-		StringRef token = param.eat(LiteralStringRef(","));
+		StringRef token = param.eat(LiteralStringRef(" "));
 		this->binaryArgs.push_back(this->binaryArgs.arena(), token);
-
-		StringRef key = token.eat(LiteralStringRef("="));
-		keyValueMap.insert(std::make_pair(key, token));
 	}
 	return;
 }
@@ -153,15 +141,14 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 }
 #endif
 
-ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role) {
-	state StringRef uidStr = execArg->getBinaryArgValue(LiteralStringRef("uid"));
+ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+	state Standalone<StringRef> uidStr = snapUID.toString();
 	state int err = 0;
 	state Future<int> cmdErr;
 	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	if (!g_network->isSimulated()) {
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
-		auto dataFolder = "path=" + folder;
 		std::vector<std::string> paramList;
 		// get user passed arguments
 		auto listArgs = execArg->getBinaryArgs();
@@ -169,12 +156,15 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, st
 			paramList.push_back(elem.toString());
 		}
 		// get additional arguments
-		paramList.push_back(dataFolder);
+		paramList.push_back("--path");
+		paramList.push_back(folder);
 		const char* version = FDB_VT_VERSION;
-		std::string versionString = "version=";
-		versionString += version;
-		paramList.push_back(versionString);
+		paramList.push_back("--version");
+		paramList.push_back(version);
+		paramList.push_back("--role");
 		paramList.push_back(role);
+		paramList.push_back("--uid");
+		paramList.push_back(uidStr.toString());
 		cmdErr = spawnProcess(snapBin.toString(), paramList, maxWaitTime, false /*isSync*/, 0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
