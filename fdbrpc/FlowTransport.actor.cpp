@@ -296,6 +296,8 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 	loop {
 		if (!FlowTransport::transport().isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
+			// We ignore this block for incompatible clients because pings from server would trigger the
+			// peer->resetPing and prevent 'connection_failed' due to ping timeout.
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
