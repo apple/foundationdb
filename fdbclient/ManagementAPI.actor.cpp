@@ -1345,11 +1345,11 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait( tr.get(healthyZoneKey) );
-			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
-				printf("No ongoing maintenance.\n");
-			} else if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
 				       "maintenance mode is not active.\n");
+			} else if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
+				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
 				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);

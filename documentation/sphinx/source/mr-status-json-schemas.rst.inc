@@ -460,6 +460,9 @@
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
+      "data_distribution_disabled_for_ss_failures":true,
+      "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled":true,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,

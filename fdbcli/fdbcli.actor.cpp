@@ -1497,14 +1497,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n\nWARNING: A single process is both a transaction log and a storage server.\n  For best performance use dedicated disks for the transaction logs by setting process classes.";
 			}
 
-			std::string ddEnabled;
-			if (statusObjCluster.get("data_distribution", ddEnabled) && ddEnabled == "off") {
+			if (statusObjCluster.has("data_distribution_disabled")) {
 				outputString += "\n\nWARNING: Data distribution is off.";
 			} else {
-				if (statusObjCluster.get("data_distribution_failure_reaction", ddEnabled) && ddEnabled == "off") {
+				if (statusObjCluster.has("data_distribution_disabled_for_ss_failures")) {
 					outputString += "\n\nWARNING: Data distribution is currently turned on but disabled for all storage server failures.";
 				}
-				if (statusObjCluster.get("data_distribution_rebalancing", ddEnabled) && ddEnabled == "off") {
+				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
 					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is currently disabled.";
 				}
 			}

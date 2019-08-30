@@ -1150,8 +1150,9 @@ struct LoadConfigurationResult {
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
+	bool dataDistributionDisabled;
 
-	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false) {}
+	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
@@ -1193,12 +1194,13 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 			}
 			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
 			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored))) {
+				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
 							unreplicated++;
 						}
 					}
@@ -1206,12 +1208,23 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 					if(healthyZoneValue.get().present()) {
 						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if(healthyZone.second > tr.getReadVersion().get()) {
+						if(healthyZone.first == ignoreSSFailuresZoneString) {
+							res.healthyZone = healthyZone.first;
+						}
+						else if(healthyZone.second > tr.getReadVersion().get()) {
 							res.healthyZone = healthyZone.first;
 							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+					if (ddModeKey.get().present()) {
+						BinaryReader rd(ddModeKey.get().get(), Unversioned());
+						int currentMode;
+						rd >> currentMode;
+						if (currentMode == 0) {
+							res.dataDistributionDisabled = true;
+						}
+					}
 					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
@@ -2032,57 +2045,6 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 	return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> ddStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
-	state JsonBuilderObject statusObj;
-	state Transaction tr(cx);
-	state int timeoutSeconds = 5;
-	state Future<Void> timeoutDelay = delay(timeoutSeconds);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
-			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
-			wait(timeoutDelay || (success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF)));
-			if(timeoutDelay.isReady()) {
-				incomplete_reasons->insert(format("Unable to determine data distribution status after %d seconds.", timeoutSeconds));
-				break;
-			}
-
-			bool dataDistributionEnabled = true;
-			if (overallSwitchF.get().present()) {
-				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
-				int currentMode;
-				rd >> currentMode;
-				if (currentMode == 0) {
-					dataDistributionEnabled = false;
-				}
-			}
-			statusObj["data_distribution"] = dataDistributionEnabled ? "on" : "off";
-
-			bool failureReactionEnabled = true;
-			if (healthyZoneValueF.get().present()) {
-				auto healthyZoneKV = decodeHealthyZoneValue(healthyZoneValueF.get().get());
-				if (healthyZoneKV.first == ignoreSSFailuresZoneString) {
-					failureReactionEnabled = false;
-				}
-			}
-			statusObj["data_distribution_failure_reaction"] = failureReactionEnabled ? "on" : "off";
-			statusObj["data_distribution_rebalancing"] = !rebalanceDDIgnoreValueF.get().present() ? "on" : "off";
-			break;
-		} catch (Error& e) {
-			try {
-				wait(tr.onError(e));
-			}
-			catch (Error &e) {
-				incomplete_reasons->insert(format("Unable to determine data distribution status (%s).", e.what()));
-				break;
-			}
-		}
-	}
-	return statusObj;
-}
-
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
@@ -2224,6 +2186,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (loadResult.get().rebalanceDDIgnored) {
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
 			}
+			if (loadResult.get().dataDistributionDisabled) {
+				statusObj["data_distribution_disabled"] = true;
+			}
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
@@ -2258,7 +2223,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
-			futures2.push_back(ddStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
@@ -2305,11 +2269,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Insert cluster summary statistics
 			if(!workerStatuses[4].empty()) {
 				statusObj.addContents(workerStatuses[4]);
-			}
-
-			// Insert data distribution status section
-			if(!workerStatuses[5].empty()) {
-				statusObj.addContents(workerStatuses[5]);
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
