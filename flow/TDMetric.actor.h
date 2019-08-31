@@ -269,6 +269,14 @@ struct MetricUtil {
 		return m;
 	}
 
+	static ValueType getValueOrDefault(StringRef const& name, StringRef const& id = StringRef(), ValueType defaultValue = ValueType()) {
+		Reference<T> r = getOrCreateInstance(name, id);
+		if(r) {
+			return r->getValue();
+		}
+		return defaultValue;
+	}
+
 	// Lookup the T metric by name and return its value (or nullptr if it doesn't exist)
 	static T * lookupMetric(MetricNameRef const &name) {
 		auto it = T::metricMap().find(name);
@@ -1319,6 +1327,7 @@ public:
 };
 
 typedef ContinuousMetric<int64_t> Int64Metric;
+typedef ContinuousMetric<double> DoubleMetric;
 typedef Int64Metric VersionMetric;
 typedef ContinuousMetric<bool> BoolMetric;
 typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
@@ -1406,6 +1415,7 @@ typedef MetricHandle<Int64Metric> Int64MetricHandle;
 typedef MetricHandle<VersionMetric> VersionMetricHandle;
 typedef MetricHandle<BoolMetric> BoolMetricHandle;
 typedef MetricHandle<StringMetric> StringMetricHandle;
+typedef MetricHandle<DoubleMetric> DoubleMetricHandle;
 
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
