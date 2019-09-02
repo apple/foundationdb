@@ -1,5 +1,5 @@
 /*
- * MutablePrefixTree.h
+ * DeltaTree.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,11 +20,11 @@
 
 #pragma once
 
+#include "fdbserver/PrefixTree.h"
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/PrefixTree.h"
 #include <string.h>
 
 // Delta Tree is a memory mappable binary tree of T objects such that each node's item is
@@ -209,7 +209,7 @@ public:
 		}
 	};
 
-	// Cursor provides a way to seek into a PrefixTree and iterate over its contents
+	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
 	// All Cursors from a Reader share the same decoded node 'cache' (tree of DecodedNodes)
 	struct Cursor {
 		Cursor() : reader(nullptr), node(nullptr) {

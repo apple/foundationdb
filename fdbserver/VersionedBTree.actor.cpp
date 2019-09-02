@@ -42,13 +42,21 @@
 #include <boost/intrusive/list.hpp>
 
 // A FIFO queue of T stored as a linked list of pages.  
+// Operations are popFront(), pushBack(), and pushFront(), and flush().
+// Flush() will ensure all queue pages are written to the pager.
+// popFront() will only return records that have been flushed.
+//
 // Each page contains some number of T items and a link to the next page.
-// When the queue is flushed, the final page is ended and linked to a newly allocated
-// but not-yet-written-to page, which future writes after the flush will write to.
+// When the queue is flushed, the last page in the chain is ended and linked to a newly allocated
+// but not-yet-written-to pageID, which future writes after the flush will write to.
+// Items pushed onto the front of the queue are written to a separate linked list until flushed,
+// at which point that list becomes the new front of the queue.
+//
 // Committing changes to a queue involves flushing the queue, calling fsync, and then
-// writing the QueueState somewhere and making it durable.  
-// The write pattern is designed such that non-fsync'd writes are not relied on, to include
-// unchanging bytes in a page that was updated but not fsync'd.
+// writing the QueueState which flush() returns somewhere and making it durable.  
+//
+// The write pattern is designed such that no written/updated yet not fsync'd page is ever 
+// expected to be valid.
 template<typename T>
 class FIFOQueue {
 	static_assert(std::is_trivially_copyable<T>::value);
@@ -80,24 +88,49 @@ public:
 		// Cursor will not read this page or anything beyond it.
 		LogicalPageID endPageID;
 
-		Cursor() : queue(nullptr), pageID(0), endPageID(0) {
+		Cursor() : queue(nullptr), pageID(invalidLogicalPageID), endPageID(invalidLogicalPageID) {
+		}
+
+		Cursor(const Cursor &c) = delete;
+
+		~Cursor() {
+			loading.cancel();
+		}
+
+		Cursor & operator=(const Cursor &c) {
+			ASSERT(c.notLoading());
+			pageID = c.pageID;
+			index = c.index;
+			page = c.page;
+			queue = c.queue;
+			endPageID = c.endPageID;
+			loading = Void();
+			return *this;
 		}
 
 		void setEnd(Cursor &end) {
 			endPageID = end.pageID;
 		}
 
-		// Point cursor to a page which has never been written before, allocate
-		// a page buffer and initialize it
-		void initWrite(FIFOQueue *q, LogicalPageID newPageID) {
-			debug_printf("FIFOQueue(%s): New write queue cursor at page id=%u\n", q->name.c_str(), newPageID);
+		// Initializes a cursor that will write to new pages in the forward direction starting from newPageID
+		void initWriteTail(FIFOQueue *q, LogicalPageID newPageID) {
+			debug_printf("FIFOQueue(%s): New writeTail queue cursor at page id=%u\n", q->name.c_str(), newPageID);
 			queue = q;
-			pageID = newPageID;
-			initNewPageBuffer();
+			initNewTailPage(newPageID);
 			loading = Void();
 		}
 
-		// Point cursor to a page to read from.  Begin loading the page if beginLoad is set.
+		// Initializes a cursor that will write to new pages in the reverse direction, allocating pages as needed.
+		void initWriteHead(FIFOQueue *q) {
+			debug_printf("FIFOQueue(%s): New writeHead queue cursor\n", q->name.c_str());
+			queue = q;
+			// Initially the page is invalid and the index is 0
+			initNewHeadPage(invalidLogicalPageID);
+			index = 0;
+			loading = Void();
+		}
+
+		// Initializes a cursor that will read in the forward direction starting from pageID p, index i up to but not touching pageID end
 		void initRead(FIFOQueue *q, LogicalPageID p, int i, LogicalPageID end) {
 			debug_printf("FIFOQueue(%s): New read queue cursor at page id=%u index=%d end page id=%u\n", q->name.c_str(), p, i, end);
 			queue = q;
@@ -110,29 +143,35 @@ public:
 			loading = (p == endPageID) ? Future<Void>() : loadPage();
 		}
 
-		void initNewPageBuffer() {
+		void initNewTailPage(LogicalPageID newPageID) {
+			pageID = newPageID;
 			index = 0;
 			page = queue->pager->newPageBuffer();
-			auto p = raw();
-			p->next = 0;
-			p->count = 0;
+			setNext(0, 0);
+			raw()->endIndex = 0;
 		}
 
-		Cursor(Cursor &) = delete;
-		void operator=(Cursor &) = delete;
-
-		~Cursor() {
-			loading.cancel();
+		void initNewHeadPage(LogicalPageID newPageID) {
+			page = queue->pager->newPageBuffer();
+			setNext(pageID, index);
+			raw()->endIndex = queue->itemsPerPage;
+			pageID = newPageID;
+			index = queue->itemsPerPage;
 		}
 
-		Future<Void> notLoading() {
+		Future<Void> onNotLoading() const {
 			return loading.isValid() ? loading : Void();
+		}
+
+		bool notLoading() const {
+			return !loading.isValid() || loading.isReady();
 		}
 
 #pragma pack(push, 1)
 		struct RawPage {
-			LogicalPageID next;
-			uint32_t count;
+			LogicalPageID nextPageID;
+			uint16_t nextIndex;
+			uint16_t endIndex;
 
 			inline T & at(int i) {
 				return ((T *)(this + 1))[i];
@@ -144,6 +183,16 @@ public:
 			return ((RawPage *)(page->begin()));
 		}
 
+		void setNext(LogicalPageID pageID, int index) {
+			RawPage *p = raw();
+			p->nextPageID = pageID;
+			p->nextIndex = index;
+		}
+
+		void setNext(const Cursor &cursor) {
+			setNext(cursor.pageID, cursor.index);
+		}
+
 		Future<Void> loadPage() {
 			debug_printf("FIFOQueue(%s): loading page id=%u index=%d\n", queue->name.c_str(), pageID, index);
 			return map(queue->pager->readPage(pageID), [=](Reference<IPage> p) {
@@ -152,18 +201,36 @@ public:
 			});
 		}
 
-		Future<Void> newPage() {
+		// Allocate a new next page for the cursor's old page to link to, write the old page, then point the cursor at the new page.
+		Future<Void> newTailPage() {
 			ASSERT(page);
 			ASSERT(loading.isReady());
 
 			loading = map(queue->pager->newPageID(), [=](LogicalPageID newPageID) {
-				debug_printf("FIFOQueue(%s): new page id=%u\n", queue->name.c_str(), newPageID);
-				auto p = raw();
-				p->next = newPageID;
+				debug_printf("FIFOQueue(%s): new tail page id=%u\n", queue->name.c_str(), newPageID);
+				setNext(newPageID, 0);
 				writePage();
 				++queue->numPages;
-				pageID = newPageID;
-				initNewPageBuffer();
+				initNewTailPage(newPageID);
+				return Void();
+			});
+
+			return loading;
+		}
+
+		// Allocate a new previous page which links to the cursor's old page, write the old page if first is false, and then point the cursor at the new page.
+		Future<Void> newHeadPage() {
+			ASSERT(page);
+			ASSERT(loading.isReady());
+
+			loading = map(queue->pager->newPageID(), [=](LogicalPageID newPageID) {
+				debug_printf("FIFOQueue(%s): new head page id=%u\n", queue->name.c_str(), newPageID);
+				// Write the page if it has a valid ID and a valid nextPageID
+				if(pageID != invalidLogicalPageID && raw()->nextPageID != invalidLogicalPageID) {
+					writePage();
+				}
+				initNewHeadPage(newPageID);
+				++queue->numPages;
 				return Void();
 			});
 
@@ -175,7 +242,7 @@ public:
 		}
 
 		bool empty() {
-			return raw()->count == 0;
+			return raw()->endIndex == 0;
 		}
 
 		void writePage() {
@@ -183,28 +250,53 @@ public:
 			queue->pager->updatePage(pageID, page);
 		}
 
-		ACTOR static Future<Void> waitThenWriteNext(Cursor *self, T item) {
+		ACTOR static Future<Void> waitThenWriteTail(Cursor *self, T item) {
 			wait(self->loading);
-			wait(self->writeNext(item));
+			wait(self->writeTail(item));
 			return Void();
 		}
 
-		Future<Void> writeNext(const T &item) {
+		Future<Void> writeTail(const T &item) {
 			// If the cursor is loaded already, write the item and move to the next slot
 			if(loading.isReady()) {
-				debug_printf("FIFOQueue(%s): write next to %u:%d\n", queue->name.c_str(), pageID, index);
+				debug_printf("FIFOQueue(%s): writeTail to %u:%d\n", queue->name.c_str(), pageID, index);
 				auto p = raw();
 				p->at(index) = item;
-				++p->count;
 				++queue->numEntries;
 				++index;
+				p->endIndex = index;
 				if(index == queue->itemsPerPage) {
-					newPage();
+					newTailPage();
 				}
 				return Void();
 			}
 
-			return waitThenWriteNext(this, item);
+			return waitThenWriteTail(this, item);
+		}
+
+		ACTOR static Future<Void> waitThenWriteHead(Cursor *self, T item) {
+			wait(self->loading);
+			wait(self->writeHead(item));
+			return Void();
+		}
+
+		Future<Void> writeHead(const T &item) {
+			// If the cursor is loaded already, write the item and move to the next slot
+			if(loading.isReady()) {
+				debug_printf("FIFOQueue(%s): writeHead to %u:%d\n", queue->name.c_str(), pageID, index);
+				if(index == 0) {
+					newHeadPage();
+				}
+				else {
+					--index;
+					auto p = raw();
+					p->at(index) = item;
+					++queue->numEntries;
+					return Void();
+				}
+			}
+
+			return waitThenWriteHead(this, item);
 		}
 
 		ACTOR static Future<Optional<T>> waitThenMoveNext(Cursor *self, Optional<T> upperBound) {
@@ -232,21 +324,22 @@ public:
 			// If loading is ready, read an item and move forward
 			if(loading.isReady()) {
 				auto p = raw();
-				if(upperBound.present() && p->at(index) >= upperBound.get()) {
-					debug_printf("FIFOQueue(%s) pop upperbound limit exceeded\n", queue->name.c_str());
+				T result = p->at(index);
+
+				if(upperBound.present() && upperBound.get() < result) {
+					debug_printf("FIFOQueue(%s) read cursor page id=%u index=%d endIndex=%d exceeds upper bound\n", queue->name.c_str(), pageID, index, p->endIndex);
 					return Optional<T>();
 				}
 
-				debug_printf("FIFOQueue(%s) read cursor pop from page id=%u index=%d count=%d\n", queue->name.c_str(), pageID, index, p->count);
-				T result = p->at(index);
+				debug_printf("FIFOQueue(%s) read cursor pop from page id=%u index=%d endIndex=%d\n", queue->name.c_str(), pageID, index, p->endIndex);
 				--queue->numEntries;
 				++index;
 
 				// If this page is out of items, start reading the next one
-				if(index == p->count) {
+				if(index == p->endIndex) {
 					LogicalPageID oldPageID = pageID;
-					pageID = p->next;
-					index = 0;
+					pageID = p->nextPageID;
+					index = p->nextIndex;
 					--queue->numPages;
 					debug_printf("FIFOQueue(%s) advancing to next page id=%u endPageID=%u\n", queue->name.c_str(), pageID, endPageID);
 					loading = (pageID == endPageID) ? Future<Void>() : loadPage();
@@ -278,8 +371,8 @@ public:
 		numPages = 1;
 		numEntries = 0;
 		itemsPerPage = (pager->getUsablePageSize() - sizeof(typename Cursor::RawPage)) / sizeof(T);
-		tail.initWrite(this, newPageID);
-		head.initRead(this, newPageID, 0, newPageID);
+		tailWriter.initWriteTail(this, newPageID);
+		headReader.initRead(this, newPageID, 0, newPageID);
 		ASSERT(flush().isReady());
 	}
 
@@ -291,23 +384,23 @@ public:
 		numPages = qs.numPages;
 		numEntries = qs.numEntries;
 		itemsPerPage = (pager->getUsablePageSize() - sizeof(typename Cursor::RawPage)) / sizeof(T);
-		tail.initWrite(this, qs.tailPageID);
-		head.initRead(this, qs.headPageID, qs.headIndex, qs.tailPageID);
+		tailWriter.initWriteTail(this, qs.tailPageID);
+		headReader.initRead(this, qs.headPageID, qs.headIndex, qs.tailPageID);
 		ASSERT(flush().isReady());
 	}
 
 	Future<Optional<T>> pop(Optional<T> upperBound = {}) {
-		return head.moveNext(upperBound);
+		return headReader.moveNext(upperBound);
 	}
 
 	QueueState getState() const {
 		// It only makes sense to save queue state when the tail cursor points to a new empty page
-		ASSERT(tail.index == 0);
+		ASSERT(tailWriter.index == 0);
 
 		QueueState s;
-		s.headIndex = head.index;
-		s.headPageID = head.pageID;
-		s.tailPageID = tail.pageID;
+		s.headIndex = headReader.index;
+		s.headPageID = headReader.pageID;
+		s.tailPageID = tailWriter.pageID;
 		s.numEntries = numEntries;
 		s.numPages = numPages;
 
@@ -315,11 +408,11 @@ public:
 		return s;
 	}
 
-	ACTOR static Future<QueueState> writeActor(FIFOQueue *self, FutureStream<T> queue) {
+	ACTOR static Future<QueueState> pushBackActor(FIFOQueue *self, FutureStream<T> input) {
 		try {
 			loop {
-				state T item = waitNext(queue);
-				wait(self->tail.writeNext(item));
+				state T item = waitNext(input);
+				wait(self->tailWriter.writeTail(item));
 			}
 		}
 		catch(Error &e) {
@@ -330,39 +423,118 @@ public:
 
 		// Wait for the head cursor to be done loading because it might free a page, which would add to the
 		// free list queue, which might be this queue.
-		wait(self->head.notLoading());
+		wait(self->headReader.onNotLoading());
 
 		// Wait for the final write to the queue to be finished, it may be waiting for a new pageID after
 		// filling a page to capacity.
-		wait(self->tail.notLoading());
+		wait(self->tailWriter.onNotLoading());
 
 		// If tail page is not empty, link it to a new unwritten/empty page
-		if(!self->tail.empty()) {
-			wait(self->tail.newPage());
+		if(!self->tailWriter.empty()) {
+			wait(self->tailWriter.newTailPage());
+		}
+
+		// We should not reach here until the pushFrontActor has already finished
+		ASSERT(self->pushFrontFuture.isReady());
+		ASSERT(self->headWriterFront.notLoading());
+		ASSERT(self->headWriterBack.notLoading());
+
+		// If any new pages were pushed on the front of the queue, link the tail page of the new front pages
+		// to the current head and write the page, then update head to point to the head of the new front pages.
+		if(self->headWriterBack.pageID != invalidLogicalPageID) {
+			self->headWriterBack.setNext(self->headReader);
+			self->headWriterBack.writePage();
+			self->headReader = self->headWriterFront;
 		}
 
 		// After queue is flushed, head may read everything written so far (which will have been committed)
-		self->head.setEnd(self->tail);
+		self->headReader.setEnd(self->tailWriter);
 
 		return self->getState();
 	}
 
-	void push(const T &item) {
-		writeQueue.send(item);
+	// Create pages to prepend to the front of the queue.
+	ACTOR static Future<Void> pushFrontActor(FIFOQueue *self, FutureStream<T> input) {
+		self->headWriterFront.initWriteHead(self);
+		self->headWriterBack.initWriteHead(self);
+
+		state bool first = true;
+
+		try {
+			loop {
+				state T item = waitNext(input);
+				wait(self->headWriterFront.writeHead(item));
+				if(first) {
+					self->headWriterBack = self->headWriterFront;
+					first = false;
+				}
+			}
+		}
+		catch(Error &e) {
+			if(e.code() != error_code_end_of_stream) {
+				throw;
+			}
+		}
+
+		// If any items were written, then at least one page was written.
+		if(!first) {
+			// If the head is on a different page than the tail then write the head page
+			if(self->headWriterFront.pageID != self->headWriterBack.pageID) {
+				self->headWriterFront.writePage();
+			}
+		}
+
+		return Void();
+	}
+
+	void pushBack(const T &item) {
+		debug_printf("FIFOQueue(%s): pushBack\n", name.c_str());
+		pushBackQueue.send(item);
+	}
+
+	void pushFront(const T &item) {
+		debug_printf("FIFOQueue(%s): pushFront\n", name.c_str());
+		pushFrontQueue.send(item);
 	}
 
 	// Flush changes to the pager and return the resulting queue state.
-	Future<QueueState> flush() {
-		debug_printf("FIFOQueue(%s): flush\n", name.c_str());
-		Future<QueueState> oldWriter = writer;
-		writeQueue.sendError(end_of_stream());
-		writeQueue = PromiseStream<T>();
-		writer = writeActor(this, writeQueue.getFuture());
-		if(!oldWriter.isValid()) {
-			debug_printf("FIFOQueue(%s): flush, oldwriter not valid\n", name.c_str());
-			return getState();
+	ACTOR static Future<QueueState> flush_impl(FIFOQueue *self) {
+		debug_printf("FIFOQueue(%s): flush\n", self->name.c_str());
+
+		// Signal head writer to flush and wait for it
+		// This must be done first in case this queue is the freelist itself, since
+		// flushing the head writer might require getting a new pageID.
+		if(self->pushFrontFuture.isValid()) {
+			debug_printf("FIFOQueue(%s): headWriter valid\n", self->name.c_str());
+			self->pushFrontQueue.sendError(end_of_stream());
+			wait(self->pushFrontFuture);
 		}
-		return oldWriter;
+
+		state QueueState qstate;
+
+		// Signal tail writer to flush and wait for it
+		if(self->pushBackFuture.isValid()) {
+			debug_printf("FIFOQueue(%s): tailWriter valid\n", self->name.c_str());
+			self->pushBackQueue.sendError(end_of_stream());
+			wait(store(qstate, self->pushBackFuture));
+		}
+		else {
+			qstate = self->getState();
+		}
+
+		// Start new tail writer
+		self->pushBackQueue = PromiseStream<T>();
+		self->pushBackFuture = pushBackActor(self, self->pushBackQueue.getFuture());
+
+		// Start new head writer
+		self->pushFrontQueue = PromiseStream<T>();
+		self->pushFrontFuture = pushFrontActor(self, self->pushFrontQueue.getFuture());
+
+		return qstate;
+	}
+
+	Future<QueueState> flush() {
+		return flush_impl(this);
 	}
 
 	IPager2 *pager;
@@ -370,13 +542,21 @@ public:
 	int64_t numEntries;
 	int itemsPerPage;
 	
-	PromiseStream<T> writeQueue;
-	Future<QueueState> writer;
+	PromiseStream<T> pushBackQueue;
+	PromiseStream<T> pushFrontQueue;
+	Future<QueueState> pushBackFuture;
+	Future<Void> pushFrontFuture;
 
-	// Head points to the next location to read
-	Cursor head;
-	// Tail points to the next location to write
-	Cursor tail;
+	// Head points to the next location to pop().
+	// pop() will only return committed records.
+	Cursor headReader;
+	// Tail points to the next location to pushBack() to
+	Cursor tailWriter;
+
+	// These cursors point to the front and back of the queue block
+	// chain being created for items sent to pushFront()
+	Cursor headWriterFront;
+	Cursor headWriterBack;
 
 	// For debugging
 	std::string name;
@@ -524,6 +704,17 @@ public:
 	typedef FastAllocatedPage Page;
 	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
 
+	struct DelayedFreePage {
+		Version version;
+		LogicalPageID pageID;
+
+		bool operator<(const DelayedFreePage &rhs) const {
+			return version < rhs.version;
+		}
+	};
+
+	typedef FIFOQueue<DelayedFreePage> VersionedLogicalPageQueueT;
+
 	// If the file already exists, pageSize might be different than desiredPageSize
 	// Use pageCacheSizeBytes == 0 for default
 	COWPager(int desiredPageSize, std::string filename, int pageCacheSizeBytes) : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes) {
@@ -615,6 +806,7 @@ public:
 			}
 
 			self->freeList.recover(self, self->pHeader->freeList, "FreeListRecovered");
+			self->delayedFreeList.recover(self, self->pHeader->delayedFreeList, "DelayedFreeListRecovered");
 
 			// If the header was recovered from the backup at Page 1 then write and sync it to Page 0 before continuing.
 			// If this fails, the backup header is still in tact for the next recovery attempt.
@@ -623,7 +815,7 @@ public:
 				wait(self->writeHeaderPage(0, self->headerPage));
 
 				// Wait for all outstanding writes to complete
-				wait(self->writes.signalAndCollapse());
+				wait(self->operations.signalAndCollapse());
 
 				// Sync header
 				wait(self->pageFile->sync());
@@ -632,6 +824,7 @@ public:
 
 			// Update the last committed header with the one that was recovered (which is the last known committed header)
 			self->updateCommittedHeader();
+			self->addLatestSnapshot();
 		}
 		else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully committed.
@@ -659,11 +852,13 @@ public:
 
 			// Create a new free list
 			self->freeList.create(self, self->newPageID().get(), "FreeListNew");
+			self->delayedFreeList.create(self, self->newPageID().get(), "delayedFreeListtNew");
 
-			// The first commit() below will flush the queue and update the queue state in the header,
-			// but since the queue will not be used between now and then its state will not change.
-			// In order to populate lastCommittedHeader, update the header now with the queue's state.
+			// The first commit() below will flush the queues and update the queue states in the header,
+			// but since the queues will not be used between now and then their states will not change.
+			// In order to populate lastCommittedHeader, update the header now with the queue states.
 			self->pHeader->freeList = self->freeList.getState();
+			self->pHeader->delayedFreeList = self->delayedFreeList.getState();
 
 			// Set remaining header bytes to \xff
 			memset(self->headerPage->mutate() + self->pHeader->size(), 0xff, self->headerPage->size() - self->pHeader->size());
@@ -741,7 +936,7 @@ public:
 		// the new content in the cache entry when the write is launched, not when it is completed.
 		// Any waiting readers should not see this write (though this might change)
 		if(cacheEntry.reading()) {
-			// Wait for the read to finish, then start the right.
+			// Wait for the read to finish, then start the write.
 			cacheEntry.writeFuture = map(success(cacheEntry.page), [=](Void) {
 				writePhysicalPage(pageID, data);
 				return Void();
@@ -760,7 +955,7 @@ public:
 			}
 		}
 
-		writes.add(forwardError(cacheEntry.writeFuture, errorPromise));
+		operations.add(forwardError(cacheEntry.writeFuture, errorPromise));
 
 		// Always update the page contents immediately regardless of what happened above.
 		cacheEntry.page = data;
@@ -777,7 +972,7 @@ public:
 
 	// Free pageID to be used again after the next commit
 	void freePage(LogicalPageID pageID) {
-		freeList.push(pageID);
+		freeList.pushBack(pageID);
 	};
 
 	// Header pages use a page size of smallestPhysicalBlock
@@ -826,17 +1021,32 @@ public:
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
-	Reference<IPagerSnapshot> getReadSnapshot();
+	Reference<IPagerSnapshot> getReadSnapshot(Version v);
+	void addLatestSnapshot();
+
+	void setOldestVersion(Version v) {
+		oldestVersion.set(v);
+	};
+
+	Future<Version> getOldestVersion() {
+		return map(recoverFuture, [=](Void) {
+			return oldestVersion.get();
+		});
+	};
 
 	ACTOR static Future<Void> commit_impl(COWPager *self) {
 		// Write old committed header to Page 1
-		self->writes.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
+		self->operations.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
+
+		// Flush the delayed free list queue to the pager and get the new queue state into the header
+		// This must be done before flushing the free list as it may free or allocate pages.
+		wait(store(self->pHeader->delayedFreeList, self->delayedFreeList.flush()));
 
 		// Flush the free list queue to the pager and get the new queue state into the header
 		wait(store(self->pHeader->freeList, self->freeList.flush()));
 
 		// Wait for all outstanding writes to complete
-		wait(self->writes.signalAndCollapse());
+		wait(self->operations.signalAndCollapse());
 
 		// Sync everything except the header
 		wait(self->pageFile->sync());
@@ -849,6 +1059,7 @@ public:
 
 		// Update the last committed header for use in the next commit.
 		self->updateCommittedHeader();
+		self->addLatestSnapshot();
 
 		return Void();
 	}
@@ -884,7 +1095,7 @@ public:
 		// Destroy the cache, cancelling reads and writes in progress
 		self->pageCache.destroy();
 
-		wait(ready(self->writes.signal()));
+		wait(ready(self->operations.signal()));
 
 		self->pageFile.clear();
 
@@ -935,6 +1146,39 @@ public:
 private:
 	~COWPager() {}
 
+	// Expire snapshots up to but not including v
+	void expireSnapshots(Version v) {
+		while(snapshots.size() > 1 && snapshots.at(1).version <= v) {
+			snapshots.front().expired.sendError(transaction_too_old());
+			snapshots.pop_front();
+		}
+	}
+
+	ACTOR Future<Void> expireActor(COWPager *self) {
+		state DelayedFreePage upperBound;
+
+		loop {
+			state Version v = self->oldestVersion.get();
+			upperBound.version = v;
+			self->expireSnapshots(v);
+
+			// Pop things from the delayed free queue until a version >= v is reached
+			loop {
+				Optional<DelayedFreePage> dfp = wait(self->delayedFreeList.pop(upperBound));
+
+				if(!dfp.present()) {
+					break;
+				}
+
+				self->freeList.pushBack(dfp.get().pageID);
+			}
+
+			if(self->oldestVersion.get() == v) {
+				wait(self->oldestVersion.onChange());
+			}
+		}
+	}
+
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
@@ -942,6 +1186,7 @@ private:
 		uint32_t pageSize;
 		int64_t pageCount;
 		FIFOQueue<LogicalPageID>::QueueState freeList;
+		FIFOQueue<DelayedFreePage>::QueueState delayedFreeList;
 		Version committedVersion;
 		int32_t metaKeySize;
 
@@ -1013,25 +1258,48 @@ private:
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise; 
 	Future<Void> commitFuture;
-	SignalableActorCollection writes;
+	SignalableActorCollection operations;
 	Future<Void> recoverFuture;
-	AsyncTrigger leastSnapshotVersionChanged;
-	std::map<Version, int> snapshotsInUse;
+
+	// The oldest readable snapshot version
+	AsyncVar<Version> oldestVersion;
 
 	Reference<IAsyncFile> pageFile;
 
 	LogicalPageQueueT freeList;
+	VersionedLogicalPageQueueT delayedFreeList;
+
+	struct SnapshotEntry {
+		Version version;
+		Promise<Void> expired;
+		Reference<IPagerSnapshot> snapshot;
+	};
+
+	struct SnapshotEntryLessThanVersion {
+		bool operator() (Version v, const SnapshotEntry &snapshot) {
+			return v < snapshot.version;
+		}
+
+		bool operator() (const SnapshotEntry &snapshot, Version v) {
+			return snapshot.version < v;
+		}
+	};
+
+	std::deque<SnapshotEntry> snapshots;
 };
 
 // Prevents pager from reusing freed pages from version until the snapshot is destroyed
 class COWPagerSnapshot : public IPagerSnapshot, ReferenceCounted<COWPagerSnapshot> {
 public:
-	COWPagerSnapshot(COWPager *pager, Key meta, Version version) : pager(pager), metaKey(meta), version(version) {
+	COWPagerSnapshot(COWPager *pager, Key meta, Version version, Future<Void> expiredFuture) : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {
 	}
 	virtual ~COWPagerSnapshot() {
 	}
 
 	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) {
+		if(expired.isError()) {
+			throw expired.getError();
+		}
 		return map(pager->readPage(pageID), [=](Reference<IPage> p) {
 			return Reference<const IPage>(p);
 		});
@@ -1053,16 +1321,33 @@ public:
 		ReferenceCounted<COWPagerSnapshot>::delref();
 	}
 
-private:
 	COWPager *pager;
+	Future<Void> expired;
 	Version version;
 	Key metaKey;
 };
 
-Reference<IPagerSnapshot> COWPager::getReadSnapshot() {
-	++snapshotsInUse[pLastCommittedHeader->committedVersion];
-	return Reference<IPagerSnapshot>(new COWPagerSnapshot(this, pLastCommittedHeader->getMetaKey(), pLastCommittedHeader->committedVersion));
+// TODO: Add version parameter and search snapshots for result
+Reference<IPagerSnapshot> COWPager::getReadSnapshot(Version v) {
+	ASSERT(!snapshots.empty());
+
+	auto i = std::upper_bound(snapshots.begin(), snapshots.end(), v, SnapshotEntryLessThanVersion());
+	if(i == snapshots.begin()) {
+		throw version_invalid();
+	}
+	--i;
+	return i->snapshot;
 }
+
+void COWPager::addLatestSnapshot() {
+	Promise<Void> expired;
+	snapshots.push_back({
+		pLastCommittedHeader->committedVersion,
+		expired,
+		Reference<IPagerSnapshot>(new COWPagerSnapshot(this, pLastCommittedHeader->getMetaKey(), pLastCommittedHeader->committedVersion, expired.getFuture()))
+	});
+}
+
 
 // TODO: Move this to a flow header once it is mature.
 struct SplitStringRef {
@@ -1490,10 +1775,12 @@ struct RedwoodRecordRef {
 
 			StringRef k;
 
+			// Separate the borrowed key string byte count from the borrowed int field byte count
 			int keyPrefixLen = std::min(prefixLen, base.key.size());
 			int intFieldPrefixLen = prefixLen - keyPrefixLen;
 			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
+			// If there is a key suffix, reconstitute the complete key into a contiguous string
 			if(keySuffixLen > 0) {
 				k = makeString(keyPrefixLen + keySuffixLen, arena);
 				memcpy(mutateString(k), base.key.begin(), keyPrefixLen);
@@ -1563,6 +1850,30 @@ struct RedwoodRecordRef {
 
 			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
 				size(), flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
+		}
+	};
+
+	// Using this class as an alternative for Delta enables reading a DeltaTree<RecordRef> while only decoding
+	// its values, so the Reader does not require the original prev/next ancestors.
+	struct DeltaValueOnly : Delta {
+		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
+			Reader r(data());
+
+			// Skip prefix length
+			r.readVarInt();
+
+			// Get value length
+			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
+
+			// Skip key suffix length and bytes if exists
+			if(flags & HAS_KEY_SUFFIX) {
+				r.readString(r.readVarInt());
+			}
+
+			// Skip int field suffix if present
+			r.readBytes(flags & INT_FIELD_SUFFIX_BITS);
+
+			return RedwoodRecordRef(StringRef(), 0, (flags & HAS_VALUE ? r.readString(valueLen) : Optional<ValueRef>()) );
 		}
 	};
 #pragma pack(pop)
@@ -2288,7 +2599,7 @@ public:
 		if(singleVersion) {
 			ASSERT(v == m_lastCommittedVersion);
 		}
-		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(/* v */);
+		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(v);
 		Key m = snapshot->getMetaKey();
 		return Reference<IStoreCursor>(new Cursor(snapshot, ((MetaKey *)m.begin())->root, recordVersion));
 	}
@@ -3266,15 +3577,15 @@ private:
 		debug_printf("%s: Beginning commit of version %" PRId64 "\n", self->m_name.c_str(), writeVersion);
 
 		// Get the latest version from the pager, which is what we will read at
-		//Version latestVersion = wait(self->m_pager->getLatestVersion());
-		//debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
+		Version latestVersion = wait(self->m_pager->getLatestVersion());
+		debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
 
 		if(REDWOOD_DEBUG) {
 			self->printMutationBuffer(mutations);
 		}
 
 		state RedwoodRecordRef lowerBound = dbBegin.withPageID(self->m_header.root);
-		VersionedChildrenT newRoot = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(/*latestVersion*/), self->m_header.root, &lowerBound, &dbEnd, &lowerBound, &dbEnd));
+		VersionedChildrenT newRoot = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_header.root, &lowerBound, &dbEnd, &lowerBound, &dbEnd));
 		debug_printf("CommitSubtree(root) returned %s\n", toString(newRoot).c_str());
 		ASSERT(newRoot.size() == 1);
 
@@ -4661,7 +4972,11 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();
 	DeltaTree<RedwoodRecordRef>::Cursor rev = r.getCursor();
 
+	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Reader rValuesOnly(tree, &prev, &next);
+	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly = rValuesOnly.getCursor();
+
 	ASSERT(fwd.moveFirst());
+	ASSERT(fwdValueOnly.moveFirst());
 	ASSERT(rev.moveLast());
 	int i = 0;
 	while(1) {
@@ -4675,9 +4990,21 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 			printf("Delta: %s\n", rev.node->raw->delta().toString().c_str());
 			ASSERT(false);
 		}
+		if(fwdValueOnly.get().value != items[i].value) {
+			printf("forward values-only iterator i=%d\n  %s found\n  %s expected\n", i, fwdValueOnly.get().toString().c_str(), items[i].toString().c_str());
+			printf("Delta: %s\n", fwdValueOnly.node->raw->delta().toString().c_str());
+			ASSERT(false);
+		}
 		++i;
-		ASSERT(fwd.moveNext() == rev.movePrev());
-		ASSERT(fwd.valid() == rev.valid());
+	
+		bool more = fwd.moveNext();
+		ASSERT(fwdValueOnly.moveNext() == more);
+		ASSERT(rev.movePrev() == more);
+
+		ASSERT(fwd.valid() == more);
+		ASSERT(fwdValueOnly.valid() == more);
+		ASSERT(rev.valid() == more);
+
 		if(!fwd.valid()) {
 			break;
 		}

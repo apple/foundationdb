@@ -183,10 +183,9 @@ public:
 	//   - the most recent non-atomic write
 	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID) = 0;
 
-	// Get a snapshot of the metakey and all pages as of the latest committed version.
-	// When a pager snapshot is created, the pager is guaraunteed to not remove or reuse any pages
-	// that were freed after the creation of this snapshot until the snapshot is destroyed
-	virtual Reference<IPagerSnapshot> getReadSnapshot() = 0;
+	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
+	// The snapshot shall be usable until setOldVersion() is called with a version > v.
+	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
 
 	// Atomically make durable all pending page writes, page frees, and update the metadata string.
 	virtual Future<Void> commit() = 0;
@@ -205,6 +204,13 @@ public:
 	// Returns latest committed version
 	// After the returned future is ready, future calls must not wait.
 	virtual Future<Version> getLatestVersion() = 0;
+
+	// The pager can invalidate snapshots at versions < v and reuse
+	// any pages that were freed as of version v
+	virtual void setOldestVersion(Version v) = 0;
+
+	// Get the oldest readable version
+	virtual Future<Version> getOldestVersion() = 0;
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
