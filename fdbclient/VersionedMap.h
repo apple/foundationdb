@@ -519,15 +519,15 @@ public:
 
 	void forgetVersionsBefore(Version newOldestVersion) {
 		ASSERT( newOldestVersion <= latestVersion );
-		//auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
-		//r--;
-		//roots.insert(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), *r);
-		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
-		if (!binary_search(roots.begin(), roots.end(), newOldestVersion, compare())) {
-			roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto upper = r;
+		--r;
+		if (r->first != newOldestVersion) {
+			r = roots.emplace(upper, *r);
 		}
 
-		roots.erase(roots.begin(), lower_bound(roots.begin(), roots.end(), newOldestVersion, compare()));
+		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
+		roots.erase(roots.begin(), r);
 		oldestVersion = newOldestVersion;
 	}
 
