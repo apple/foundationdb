@@ -202,8 +202,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
+		int badServers = 0;
+
 		for(int i=0; i<alternatives->size(); i++) {
-			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
 				break;
 			}
 			
@@ -213,6 +215,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() > qd.failedUntil) {
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
 					double thisTime = qd.latency;
+					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
+						++badServers;
+					}
 				
 					if(thisMetric < bestMetric) {
 						if(i != bestAlt) {
@@ -228,7 +233,11 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						nextMetric = thisMetric;
 						nextTime = thisTime;
 					}
+				} else {
+					++badServers;
 				}
+			} else {
+				++badServers;
 			}
 		}
 		if( nextMetric > 1e8 ) {

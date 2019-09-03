@@ -369,7 +369,13 @@ private:
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
 			TEST(true);  // Simulated connection failure
-			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
+			TraceEvent("ConnectionFailure", dbgid)
+			    .detail("MyAddr", process->address)
+			    .detail("PeerAddr", peerProcess->address)
+			    .detail("PeerIsValid", peer.isValid())
+			    .detail("SendClosed", a > .33)
+			    .detail("RecvClosed", a < .66)
+			    .detail("Explicit", b < .3);
 			if (a < .66 && peer) peer->closeInternal();
 			if (a > .33) closeInternal();
 			// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen but only after a delay.
@@ -381,7 +387,8 @@ private:
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
 		if (self->process->address.isPublic()) {
-			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
+			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
+			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 		} else {
 			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
 		}

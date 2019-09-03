@@ -3008,7 +3008,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 		}
 	} catch(Error& e) {
 		if(logTeamEvents) {
-			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc());
+			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
@@ -4347,7 +4347,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> disablePops;
 		for (const auto & tlog : tlogs) {
 			disablePops.push_back(
-				transformErrors(throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))), operation_failed())
+				transformErrors(throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))), snap_disable_tlog_pop_failed())
 				);
 		}
 		wait(waitForAll(disablePops));
@@ -4356,14 +4356,14 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
-		std::vector<WorkerInterface> storageWorkers = wait(getStorageWorkers(cx, db, true /* localOnly */));
+		std::vector<WorkerInterface> storageWorkers = wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
 		TraceEvent("SnapDataDistributor_GotStorageWorkers")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> storageSnapReqs;
 		for (const auto & worker : storageWorkers) {
 			storageSnapReqs.push_back(
-				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))), operation_failed())
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))), snap_storage_failed())
 				);
 		}
 		wait(waitForAll(storageSnapReqs));
@@ -4375,7 +4375,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> tLogSnapReqs;
 		for (const auto & tlog : tlogs) {
 			tLogSnapReqs.push_back(
-				transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))), operation_failed())
+				transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))), snap_tlog_failed())
 				);
 		}
 		wait(waitForAll(tLogSnapReqs));
@@ -4387,7 +4387,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> enablePops;
 		for (const auto & tlog : tlogs) {
 			enablePops.push_back(
-				transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), operation_failed())
+				transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), snap_enable_tlog_pop_failed())
 				);
 		}
 		wait(waitForAll(enablePops));
@@ -4403,18 +4403,36 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> coordSnapReqs;
 		for (const auto & worker : coordWorkers) {
 			coordSnapReqs.push_back(
-				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))), operation_failed())
+				transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))), snap_coord_failed())
 				);
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-	} catch (Error& e) {
+	} catch (Error& err) {
+		state Error e = err;
 		TraceEvent("SnapDataDistributor_SnapReqExit")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID)
 			.error(e, true /*includeCancelled */);
+		if (e.code() == error_code_snap_storage_failed
+			|| e.code() == error_code_snap_tlog_failed
+			|| e.code() == error_code_operation_cancelled) {
+			// enable tlog pop on local tlog nodes
+			std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
+			try {
+				std::vector<Future<Void>> enablePops;
+				for (const auto & tlog : tlogs) {
+					enablePops.push_back(
+						transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))), snap_enable_tlog_pop_failed())
+						);
+				}
+				wait(waitForAll(enablePops));
+			} catch (Error& error) {
+				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure");
+			}
+		}
 		throw e;
 	}
 	return Void();
@@ -4435,7 +4453,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 				TraceEvent("SnapDDCreateDBInfoChanged")
 					.detail("SnapPayload", snapReq.snapPayload)
 					.detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.sendError(operation_failed());
+				snapReq.reply.sendError(snap_with_recovery_unsupported());
 			}
 			when (wait(ddSnapCreateCore(snapReq, db))) {
 				TraceEvent("SnapDDCreateSuccess")
