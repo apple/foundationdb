@@ -3932,9 +3932,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
-	Reference<DDTeamCollection> teamCollection;
+	DDTeamCollection* teamCollection;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id)
+	  : dbInfo(db), ddId(id), teamCollection(nullptr) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {
@@ -4131,7 +4132,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
-			self->teamCollection = primaryTeamCollection;
+			self->teamCollection = primaryTeamCollection.getPtr();
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
@@ -4140,6 +4141,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		}
 		catch( Error &e ) {
 			state Error err = e;
+			self->teamCollection = nullptr;
 			if( e.code() != error_code_movekeys_conflict )
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
@@ -4296,10 +4298,10 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 	return Void();
 }
 
-ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req, Reference<DDTeamCollection> tc,
-                                          Database cx) {
+ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
+                                          Reference<DataDistributorData> self, Database cx) {
 	TraceEvent("DDExclusionSafetyCheckBegin");
-	if (!tc.isValid()) {
+	if (!self->teamCollection) {
 		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid");
 		req.reply.send(false);
 		return Void();
@@ -4317,7 +4319,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		}
 	}
 	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
-	for (const auto &team : tc->teams) {
+	for (const auto& team : self->teamCollection->teams) {
 		vector<UID> teamServerIDs = team->getServerIDs();
 		std::sort(teamServerIDs.begin(), teamServerIDs.end());
 		TraceEvent("DDExclusionSafetyCheck")
@@ -4360,7 +4362,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				actors.add(ddSnapCreate(snapReq, db));
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq = waitNext(di.distributorExclCheckReq.getFuture())) {
-				actors.add(ddExclusionSafetyCheck(exclCheckReq, self->teamCollection, cx));
+				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
 			}
 		}
 	}
