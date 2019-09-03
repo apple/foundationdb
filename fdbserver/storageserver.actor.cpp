@@ -2711,7 +2711,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
 					if (debugMutation("SSPeek", ver, msg) || ver == 1) {
 						TraceEvent("SSPeekMutation", data->thisServerID);
-						// MX: The following trace event may produce a value with special characters
+						// The following trace event may produce a value with special characters
 						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
 					}
 

@@ -60,18 +60,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double lastLoopTopTime;
 	loop {
-
-		double loopTopTime = now();
-		double elapsedTime = loopTopTime - lastLoopTopTime;
-		if (elapsedTime > 0.050) {
-			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreLoaderLoopx100")
-				    .detail("NodeDesc", self->describeNode())
-				    .detail("Elapsed", elapsedTime);
-		}
-		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
 
 		try {
@@ -138,8 +127,8 @@ ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Refere
 ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req,
                                                          Reference<RestoreLoaderData> self) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
-	if (self->range2Applier.empty()) {
-		self->range2Applier = req.range2Applier;
+	if (self->rangeToApplier.empty()) {
+		self->rangeToApplier = req.rangeToApplier;
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
 
@@ -269,7 +258,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 					kvCount++;
 				}
 			} else { // mutation operates on a particular key
-				std::map<Standalone<KeyRef>, UID>::iterator itlow = self->range2Applier.upper_bound(kvm.param1);
+				std::map<Standalone<KeyRef>, UID>::iterator itlow = self->rangeToApplier.upper_bound(kvm.param1);
 				--itlow; // make sure itlow->first <= m.param1
 				ASSERT(itlow->first <= kvm.param1);
 				MutationRef mutation = kvm;
@@ -309,22 +298,22 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 	ASSERT(nodeIDs.empty());
 	// key range [m->param1, m->param2)
 	std::map<Standalone<KeyRef>, UID>::iterator itlow, itup; // we will return [itlow, itup)
-	itlow = self->range2Applier.lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
+	itlow = self->rangeToApplier.lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
 	if (itlow->first > m.param1) {
-		if (itlow != self->range2Applier.begin()) {
+		if (itlow != self->rangeToApplier.begin()) {
 			--itlow;
 		}
 	}
 
-	itup = self->range2Applier.upper_bound(m.param2); // return rmap::end if no key is after m.param2.
-	ASSERT(itup == self->range2Applier.end() || itup->first > m.param2);
+	itup = self->rangeToApplier.upper_bound(m.param2); // return rmap::end if no key is after m.param2.
+	ASSERT(itup == self->rangeToApplier.end() || itup->first > m.param2);
 
 	std::map<Standalone<KeyRef>, UID>::iterator itApplier;
 	while (itlow != itup) {
 		Standalone<MutationRef> curm; // current mutation
 		curm.type = m.type;
 		// The first split mutation should starts with m.first.
-		// The later ones should start with the range2Applier boundary.
+		// The later ones should start with the rangeToApplier boundary.
 		if (m.param1 > itlow->first) {
 			curm.param1 = m.param1;
 		} else {
@@ -382,18 +371,19 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	if (mutationMap.find(id) == mutationMap.end()) {
 		mutationMap.insert(std::make_pair(id, val_input));
 		if (part != 0) {
-			fprintf(stderr, "[ERROR]!!! part:%d != 0 for key_input:%s\n", part, getHexString(key_input).c_str());
+			TraceEvent(SevError, "FastRestore").detail("FirstPartNotZero", part).detail("KeyInput", getHexString(key_input));
 		}
 		mutationPartMap.insert(std::make_pair(id, part));
-	} else { // concatenate the val string with the same commitVersion
+	} else { // Concatenate the val string with the same commitVersion
 		mutationMap[id] =
 		    mutationMap[id].contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
 		if (part != (mutationPartMap[id] + 1)) {
 			// Check if the same range or log file has been processed more than once!
-			fprintf(stderr,
-			        "[ERROR]!!! current part id:%d new part_direct:%d is not the next integer of key_input:%s\n",
-			        mutationPartMap[id], part, getHexString(key_input).c_str());
-			printf("[HINT] Check if the same range or log file has been processed more than once!\n");
+			TraceEvent(SevError, "FastRestore")
+				.detail("CurrentPart1", mutationPartMap[id])
+				.detail("CurrentPart2", part)
+				.detail("KeyInput", getHexString(key_input))
+				.detail("Hint", "Check if the same range or log file has been processed more than once");
 		}
 		mutationPartMap[id] = part;
 		concatenated = true;

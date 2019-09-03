@@ -45,17 +45,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double lastLoopTopTime;
 	loop {
-		double loopTopTime = now();
-		double elapsedTime = loopTopTime - lastLoopTopTime;
-		if (elapsedTime > 0.050) {
-			if (deterministicRandom()->random01() < 0.01)
-				TraceEvent(SevWarn, "SlowRestoreApplierLoopx100")
-				    .detail("NodeDesc", self->describeNode())
-				    .detail("Elapsed", elapsedTime);
-		}
-		lastLoopTopTime = loopTopTime;
 		state std::string requestTypeStr = "[Init]";
 
 		try {
@@ -152,14 +142,12 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		TraceEvent("FastRestore").detail("ApplierApplyToDBEmpty", self->id());
 		return Void();
 	}
+	ASSERT_WE_THINK(self->kvOps.size());
 	std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator begin = self->kvOps.begin();
-	std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator end = self->kvOps.end();
-	end--;
-	ASSERT_WE_THINK(end != self->kvOps.end());
 	TraceEvent("FastRestore")
 	    .detail("ApplierApplyToDB", self->id())
 	    .detail("FromVersion", begin->first)
-	    .detail("EndVersion", end->first);
+	    .detail("EndVersion", self->kvOps.rbegin()->first);
 
 	self->sanityCheckMutationOps();
 
@@ -184,8 +172,9 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				state MutationRef m;
 				for (; index < it->second.size(); ++index) {
 					m = it->second[index];
-					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP)
+					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
+					}
 					else {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}

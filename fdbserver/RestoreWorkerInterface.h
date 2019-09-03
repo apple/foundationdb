@@ -36,9 +36,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
 
-#define DUMPTOKEN(name)                                                                                                \
-	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
-
 class RestoreConfigFR;
 
 struct RestoreCommonReply;
@@ -393,22 +390,22 @@ struct RestoreVersionBatchRequest : TimedRequest {
 struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 92038306;
 
-	std::map<Standalone<KeyRef>, UID> range2Applier;
+	std::map<Standalone<KeyRef>, UID> rangeToApplier;
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSetApplierKeyRangeVectorRequest() = default;
-	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> range2Applier)
-	  : range2Applier(range2Applier) {}
+	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> rangeToApplier)
+	  : rangeToApplier(rangeToApplier) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range2Applier, reply);
+		serializer(ar, rangeToApplier, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest range2ApplierSize:" << range2Applier.size();
+		ss << "RestoreVersionBatchRequest rangeToApplierSize:" << rangeToApplier.size();
 		return ss.str();
 	}
 };

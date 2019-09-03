@@ -40,6 +40,8 @@ std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
 
+std::string getHexString(StringRef input);
+
 // Fast restore operation configuration
 // The initRestoreWorkerConfig function will reset the configuration params in simulation
 struct FastRestoreOpConfig {

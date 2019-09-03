@@ -692,7 +692,7 @@ const Key restoreStatusKeyFor(StringRef statusType) {
 	return wr.toValue();
 }
 
-const Value restoreStatusValue(double const& val) {
+const Value restoreStatusValue(double val) {
 	BinaryWriter wr(IncludeVersion());
 	wr << StringRef(std::to_string(val));
 	return wr.toValue();

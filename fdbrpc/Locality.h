@@ -121,8 +121,8 @@ public:
 			case LogClass: return "log";
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
-		    case FastRestoreClass: return "fast_restore";
-		    case DataDistributorClass: return "data_distributor";
+			case FastRestoreClass: return "fast_restore";
+			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
 			default: return "invalid";

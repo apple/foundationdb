@@ -45,9 +45,9 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	NotifiedVersion logVersion; // All requests of mutations in log file below this version has been processed
 	Optional<Future<Void>> dbApplier;
 
-	// range2Applier is in master and loader. Loader uses it to determine which applier a mutation should be sent
+	// rangeToApplier is in master and loader. Loader uses it to determine which applier a mutation should be sent
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> range2Applier;
+	std::map<Standalone<KeyRef>, UID> rangeToApplier;
 	// keyOpsCount is the number of operations per key that is used to determine the key-range boundary for appliers
 	std::map<Standalone<KeyRef>, int> keyOpsCount;
 

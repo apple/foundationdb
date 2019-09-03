@@ -82,7 +82,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
 			// Add backup ranges
-			// MX:Q: why the range endpoints (the range interval) are randomly generated?
+			// Q: why the range endpoints (the range interval) are randomly generated?
 			// Won't this cause unbalanced range interval in backup?
 			std::set<std::string> rangeEndpoints;
 			while (rangeEndpoints.size() < backupRangesCount * 2) {
@@ -459,9 +459,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	/**
-	    This actor attempts to restore the database without clearing the keyspace.
-	 */
+	
+	// This actor attempts to restore the database without clearing the keyspace.
+	// TODO: Enable this function in correctness test
 	ACTOR static Future<Void> attemptDirtyRestore(BackupAndParallelRestoreCorrectnessWorkload* self, Database cx,
 	                                              FileBackupAgent* backupAgent,
 	                                              Standalone<StringRef> lastBackupContainer, UID randomID) {
@@ -480,7 +480,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Try doing a restore without clearing the keys
 		if (rowCount > 0) {
 			try {
-				// TODO: MX: change to my restore agent code
+				// TODO: Change to my restore agent code
 				TraceEvent(SevError, "MXFastRestore").detail("RestoreFunction", "ShouldChangeToMyOwnRestoreLogic");
 				wait(success(backupAgent->restore(cx, cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true,
 				                                  normalKeys, Key(), Key(), self->locked)));
@@ -673,11 +673,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				// MX: We should wait on all restore before proceeds
-				printf("Wait for restore to finish\n");
+				// We should wait on all restore before proceeds
+				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
 				state bool restoreDone = false;
 				state ReadYourWritesTransaction tr2(cx);
-				state Future<Void> watch4RestoreRequestDone;
+				state Future<Void> watchForRestoreRequestDone;
 				loop {
 					try {
 						if (restoreDone) break;
@@ -692,9 +692,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 							wait(tr2.commit());
 							break;
 						} else {
-							watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
+							watchForRestoreRequestDone = tr2.watch(restoreRequestDoneKey);
 							wait(tr2.commit());
-							wait(watch4RestoreRequestDone);
+							wait(watchForRestoreRequestDone);
 							break;
 						}
 					} catch (Error& e) {
@@ -702,7 +702,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				printf("MX: Restore is finished\n");
+				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
 				wait(checkDB(cx, "FinishRestore", self));
 
 				for (auto& restore : restores) {
@@ -710,7 +710,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			// MX:Q:Ask Steve or Evan: What is the extra backup and why do we need to care about it?
+			// Q: What is the extra backup and why do we need to care about it?
 			if (extraBackup.isValid()) {
 				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
 				extraTasks = true;

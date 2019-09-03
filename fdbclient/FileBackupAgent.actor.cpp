@@ -94,8 +94,8 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	}
 }
 
-template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
-template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
+template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
+template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
 ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
 	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor

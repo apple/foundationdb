@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/RestoreWorkerInterface.h"
+
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
@@ -298,7 +299,7 @@ const Key restoreRequestKeyFor(int const& index);
 const Value restoreRequestValue(RestoreRequest const& server);
 RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
 const Key restoreStatusKeyFor(StringRef statusType);
-const Value restoreStatusValue(double const& val);
+const Value restoreStatusValue(double val);
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;

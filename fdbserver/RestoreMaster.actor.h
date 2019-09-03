@@ -52,9 +52,9 @@ struct VersionBatch {
 };
 
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
-	// range2Applier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
+	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> range2Applier;
+	std::map<Standalone<KeyRef>, UID> rangeToApplier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex;
@@ -81,18 +81,19 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	// Split allFiles into multiple versionBatches based on files' version
 	void buildVersionBatches(const std::vector<RestoreFileFR>& allFiles,
-	                         std::map<Version, VersionBatch>& versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches) {
 		// A version batch includes a log file; Because log file's verion range does not overlap,
 		// we use log file's version range as the version range of a version batch.
 		Version beginVersion = 0;
 		Version maxVersion = 0;
 		for (int i = 0; i < allFiles.size(); ++i) {
 			if (!allFiles[i].isRange) {
-				ASSERT(versionBatches.find(allFiles[i].beginVersion) == versionBatches.end());
+				ASSERT(versionBatches->find(allFiles[i].beginVersion) == versionBatches->end());
 				VersionBatch vb;
 				vb.beginVersion = beginVersion;
 				vb.endVersion = allFiles[i].endVersion;
-				versionBatches[vb.beginVersion] = vb; // Ensure continuous version range across version batches
+				versionBatches->insert(std::make_pair(vb.beginVersion, vb));
+				//(*versionBatches)[vb.beginVersion] = vb; // Ensure continuous version range across version batches
 				beginVersion = allFiles[i].endVersion;
 			}
 			if (maxVersion < allFiles[i].endVersion) {
@@ -100,27 +101,28 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 		}
 		// In case there is no log file
-		if (versionBatches.empty()) {
+		if (versionBatches->empty()) {
 			VersionBatch vb;
 			vb.beginVersion = 0;
 			vb.endVersion = maxVersion + 1; // version batch's endVersion is exclusive
-			versionBatches[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
+			versionBatches->insert(std::make_pair(vb.beginVersion, vb));
+			//(*versionBatches)[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
 		}
 		// Put range and log files into its version batch
 		for (int i = 0; i < allFiles.size(); ++i) {
 			// vbiter's beginVersion > allFiles[i].beginVersion.
-			std::map<Version, VersionBatch>::iterator vbIter = versionBatches.upper_bound(allFiles[i].beginVersion);
+			std::map<Version, VersionBatch>::iterator vbIter = versionBatches->upper_bound(allFiles[i].beginVersion);
 			--vbIter;
-			ASSERT_WE_THINK(vbIter != versionBatches.end());
+			ASSERT_WE_THINK(vbIter != versionBatches->end());
 			if (allFiles[i].isRange) {
 				vbIter->second.rangeFiles.push_back(allFiles[i]);
 			} else {
 				vbIter->second.logFiles.push_back(allFiles[i]);
 			}
 		}
-		TraceEvent("FastRestore").detail("VersionBatches", versionBatches.size());
+		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
 		// Sanity check
-		for (auto& versionBatch : versionBatches) {
+		for (auto& versionBatch : *versionBatches) {
 			for (auto& logFile : versionBatch.second.logFiles) {
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
@@ -134,8 +136,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	}
 
 	void logApplierKeyRange() {
-		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", range2Applier.size());
-		for (auto& applier : range2Applier) {
+		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", rangeToApplier.size());
+		for (auto& applier : rangeToApplier) {
 			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
 		}
 	}

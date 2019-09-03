@@ -45,9 +45,9 @@
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 
-	// range2Applier is in master and loader. Loader uses this to determine which applier a mutation should be sent
+	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> range2Applier;
+	std::map<Standalone<KeyRef>, UID> rangeToApplier;
 	// keyOpsCount is the number of operations per key which is used to determine the key-range boundary for appliers
 	std::map<Standalone<KeyRef>, int> keyOpsCount;
 	int numSampledMutations; // The total number of mutations received from sampled data.
@@ -76,7 +76,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		RestoreRoleData::resetPerVersionBatch();
-		range2Applier.clear();
+		rangeToApplier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;
 		processedFileParams.clear();
@@ -85,7 +85,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	// Only get the appliers that are responsible for a range
 	std::vector<UID> getWorkingApplierIDs() {
 		std::vector<UID> applierIDs;
-		for (auto& applier : range2Applier) {
+		for (auto& applier : rangeToApplier) {
 			applierIDs.push_back(applier.second);
 		}
 

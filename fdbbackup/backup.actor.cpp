@@ -1176,7 +1176,6 @@ enumProgramExe	getProgramType(std::string programExe)
 
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
-	printf("programExe:%s\n", programExe.c_str());
 
 	// Remove the extension, if Windows
 #ifdef _WIN32
@@ -2174,8 +2173,9 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 					fprintf(stderr, "Backup is not restorable\n");
 					throw restore_invalid_version();
 				}
-			} else
+			} else {
 				restoreVersion = dbVersion;
+			}
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
@@ -3795,9 +3795,9 @@ int main(int argc, char* argv[]) {
 //------Restore Agent: Kick off the restore by sending the restore requests
 ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx, Key tagName, bool verbose) {
 	// We should wait on all restore to finish before proceeds
-	printf("Wait for restore to finish\n");
+	TraceEvent("FastRestore").detail("Progress", "WaitForRestoreToFinish");
 	state ReadYourWritesTransaction tr(cx);
-	state Future<Void> watch4RestoreRequestDone;
+	state Future<Void> watchForRestoreRequestDone;
 	state bool restoreRequestDone = false;
 
 	loop {
@@ -3813,7 +3813,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				wait(tr.commit());
 				break;
 			} else {
-				watch4RestoreRequestDone = tr.watch(restoreRequestDoneKey);
+				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 				wait(tr.commit());
 			}
 			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
@@ -3823,7 +3823,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 		}
 	}
 
-	printf("MX: Restore is finished\n");
+	TraceEvent("FastRestore").detail("Progress", "RestoreFinished");
 
 	return FileBackupAgent::ERestoreState::COMPLETED;
 }
