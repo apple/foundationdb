@@ -136,12 +136,29 @@ struct CandidacyRequest {
 	}
 };
 
+struct LeaderHeartbeatReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	bool value = false;
+	LeaderHeartbeatReply() = default;
+	explicit LeaderHeartbeatReply(bool value) : value(value) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
+inline bool operator==(const LeaderHeartbeatReply& lhs, const LeaderHeartbeatReply& rhs) {
+	return lhs.value == rhs.value;
+}
+
 struct LeaderHeartbeatRequest {
 	constexpr static FileIdentifier file_identifier = 9495992;
 	Key key;
 	LeaderInfo myInfo;
 	UID prevChangeID;
-	ReplyPromise<bool> reply;
+	ReplyPromise<LeaderHeartbeatReply> reply;
 
 	LeaderHeartbeatRequest() {}
 	explicit LeaderHeartbeatRequest( Key key, LeaderInfo const& myInfo, UID prevChangeID ) : key(key), myInfo(myInfo), prevChangeID(prevChangeID) {}

@@ -574,6 +574,9 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Delete the oldest log file when the total size of all log\n"
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
+	printf("  --loggroup LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace_format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported.\n");

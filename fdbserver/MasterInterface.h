@@ -55,10 +55,25 @@ struct MasterInterface {
 	}
 };
 
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
+	}
+};
+
 struct TLogRejoinRequest {
 	constexpr static FileIdentifier file_identifier = 15692200;
 	TLogInterface myInterface;
-	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
+	ReplyPromise<TLogRejoinReply> reply;
 
 	TLogRejoinRequest() { }
 	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
