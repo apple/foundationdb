@@ -150,7 +150,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
-	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 1 );
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 0 );
 	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
@@ -172,6 +172,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
+	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
+	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
 }
 
 static std::string toLower( std::string const& name ) {

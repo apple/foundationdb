@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.0
+6.2.3
 =====
 
 Performance
@@ -25,6 +25,7 @@ Performance
 * Made the storage cache eviction policy configurable, and added an LRU policy. `(PR #1506) <https://github.com/apple/foundationdb/pull/1506>`_.
 * Improved the speed of recoveries on large clusters at ``log_version >= 4``. `(PR #1729) <https://github.com/apple/foundationdb/pull/1729>`_.
 * Log routers will prefer to peek from satellites at ``log_version >= 4``. `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
+* In clusters using a region configuration, clients will read from the remote region if all of the servers in the primary region are overloaded. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
 
 Fixes
 -----
@@ -40,6 +41,10 @@ Fixes
 * In very rare scenarios, master recovery would restart because system metadata was loaded incorrectly. `(PR #1919) <https://github.com/apple/foundationdb/pull/1919>`_.
 * Ratekeeper will aggressively throttle when unable to fetch the list of storage servers for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
 * Proxies could become overloaded when all storage servers on a team fail. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+* Proxies could start too few transactions if they didn't receive get read version requests frequently enough. [6.2.3] `(PR #1999) <https://github.com/apple/foundationdb/pull/1999>`_.
+* The ``fileconfigure`` command in ``fdbcli`` could fail with an unknown error if the file did not contain a valid JSON object. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
+* Configuring regions would fail with an internal error if the cluster contained storage servers that didn't set a datacenter ID. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
+* Clients no longer prefer reading from servers with the same zone ID, because it could create hot shards. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
 
 Status
 ------
@@ -53,6 +58,10 @@ Status
 * ``fdbcli`` status now reports the configured zone count. The fault tolerance is now reported in terms of the number of zones unless machine IDs are being used as zone IDs. `(PR #1924) <https://github.com/apple/foundationdb/pull/1924>`_.
 * ``connected_clients`` is now only a sample of the connected clients, rather than a complete list. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
 * Added ``max_protocol_clients`` to the ``supported_versions`` section, which provides a sample of connected clients which cannot connect to any higher protocol version. `(PR #1902) <https://github.com/apple/foundationdb/pull/1902>`_.
+* Clients which connect without specifying their supported versions are tracked as an ``Unknown`` version in the ``supported_versions`` section. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
+* Add ``coordinator`` to the list of roles that can be reported for a process. [6.2.3] `(PR #2006) <https://github.com/apple/foundationdb/pull/2006>`_.
+* Added ``worst_durability_lag_storage_server`` and ``limiting_durability_lag_storage_server`` to  the ``cluster.qos`` section, each with subfields ``versions`` and ``seconds``. These report the durability lag values being used by ratekeeper to potentially limit the transaction rate. [6.2.3] `(PR #2003) <https://github.com/apple/foundationdb/pull/2003>`_.
+* Added ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` to  the ``cluster.qos`` section, each with subfields ``versions`` and ``seconds``. These are meant to replace ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server``, which are now deprecated. [6.2.3] `(PR #2003) <https://github.com/apple/foundationdb/pull/2003>`_.
 
 Bindings
 --------
@@ -90,6 +99,11 @@ Fixes only impacting 6.2.0+
 
 * Clients could crash when closing connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
 * Do not close idle network connections with incompatible servers. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
+* In status, ``max_protocol_clients`` were incorrectly added to the ``connected_clients`` list. [6.2.2] `(PR #1990) <https://github.com/apple/foundationdb/pull/1990>`_.
+* Ratekeeper ignores the (default 5 second) MVCC window when controlling on durability lag. [6.2.3] `(PR #2012) <https://github.com/apple/foundationdb/pull/2012>`_.
+* The macOS client was not compatible with a Linux server. [6.2.3] `(PR #2045) <https://github.com/apple/foundationdb/pull/2045>`_.
+* Incompatible clients would continually reconnect with coordinators. [6.2.3] `(PR #2048) <https://github.com/apple/foundationdb/pull/2048>`_.
+* Connections were being closed as idle when there were still unreliable requests waiting for a response. [6.2.3] `(PR #2048) <https://github.com/apple/foundationdb/pull/2048>`_.
 
 Earlier release notes
 ---------------------

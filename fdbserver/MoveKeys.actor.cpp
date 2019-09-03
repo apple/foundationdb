@@ -139,8 +139,8 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<std::pair<Version,Version>> > fReply, UID uid, Version version ) {
-	ErrorOr<std::pair<Version,Version>> reply = wait( fReply );
+ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
+	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
@@ -258,11 +258,20 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 	return result;
 }
 
+ACTOR Future<Void> logWarningAfter( const char * context, double duration, vector<UID> servers) {
+	state double startTime = now();
+	loop {
+		wait(delay(duration));
+		TraceEvent(SevWarnAlways, context).detail("Duration", now() - startTime).detail("Servers", describe(servers));
+	}
+}
+
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
 // Set serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member of servers OR if the source list is sufficiently degraded)
 ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> servers, MoveKeysLock lock, FlowLock *startMoveKeysLock, UID relocationIntervalId ) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
+	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	//state TraceInterval waitInterval("");
 
 	wait( startMoveKeysLock->take( TaskPriority::DataDistributionLaunch ) );
@@ -434,7 +443,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode ) {
 	loop {
 		try {
-			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskPriority::MoveKeys ) );
+			GetShardStateReply rep =
+			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
 				return Void();
 			}
@@ -500,6 +510,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
+	state Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
 	state Key begin = keys.begin;
 	state Key endKey;
 	state int retries = 0;

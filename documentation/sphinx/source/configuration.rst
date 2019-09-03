@@ -199,14 +199,12 @@ The ``foundationdb.conf`` file contains several sections, detailed below. Note t
     ## foundationdb.conf 
     ##
     ## Configuration file for FoundationDB server processes 
-    ## Full documentation is available in the FoundationDB Administration document.
 
     [fdbmonitor]
-    restart_delay = 60
     user = foundationdb
     group = foundationdb
 
-Contains basic configuration parameters of the ``fdbmonitor`` process. ``restart_delay`` specifies the number of seconds that ``fdbmonitor`` waits before restarting a failed process. ``user`` and ``group`` are used on Linux systems to control the privilege level of child processes.
+Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` and ``group`` are used on Linux systems to control the privilege level of child processes.
 
 ``[general]`` section
 -----------------------
@@ -215,8 +213,41 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``restart
 
     [general]
     cluster_file = /etc/foundationdb/fdb.cluster
+    restart_delay = 60
+    ## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay
+    # initial_restart_delay = 0
+    # restart_backoff = 60.0
+    # restart_delay_reset_interval = 60
+    # delete_envvars =
+    # kill_on_configuration_change = true
+    # disable_lifecycle_logging = false
 
-Contains settings applicable to all processes (e.g. fdbserver, backup_agent). The main setting of interest is ``cluster_file``, which specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the [fdbmonitor] section).
+Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
+
+* ``cluster_file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
+* ``delete_envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
+* ``kill_on_configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
+* ``disable_lifecycle_logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
+
+The ``[general]`` section also contains some parameters to control how processes are restarted when they die. ``fdbmonitor`` uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. ``fdbmonitor`` tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.
+
+* ``restart_delay``: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.
+* ``initial_restart_delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
+* ``restart_backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
+* ``restart_delay_reset_interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
+
+As an example, let's say the following parameters have been set:
+
+.. code-block:: ini
+
+    restart_delay = 60
+    initial_restart_delay = 0
+    restart_backoff = 2.0
+    restart_delay_reset_interval = 180
+
+The progression of delays for a process that fails repeatedly would be ``0, 2, 4, 8, 16, 32, 60, 60, ...``, each subject to a 10% random jitter. After the process stays alive for 180 seconds, the backoff would reset and the next failure would restart the process immediately.
+
+Using the default parameters, a process will restart immediately if it fails and then delay ``restart_delay`` seconds if it fails again within ``restart_delay`` seconds. 
 
 .. _foundationdb-conf-fdbserver:
 
@@ -536,7 +567,7 @@ While everything is healthy, writes need to be made durable in both west coast d
 
 If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.
 
-The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, to bring the west coast back online FoundationDB will have to copy all the data between the regions.
+The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, FoundationDB will have to copy all the data between the regions in order to bring it back online.
 
 If a region failover occurs, clients will generally only see a latency spike of a few seconds.
 
