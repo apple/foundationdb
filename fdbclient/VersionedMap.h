@@ -522,6 +522,7 @@ public:
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		auto upper = r;
 		--r;
+		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
 		if (r->first != newOldestVersion) {
 			r = roots.emplace(upper, *r);
 		}
@@ -533,16 +534,22 @@ public:
 
 	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto upper = r;
+		--r;
 		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
-		if (!binary_search(roots.begin(), roots.end(), newOldestVersion, compare())) {
-			//auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
-			//r--;
-			roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
+		//if (!binary_search(roots.begin(), roots.end(), newOldestVersion, compare())) {
+		//	roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
+		//}
+		if (r->first != newOldestVersion) {
+			r = roots.emplace(upper, *r);
 		}
+
+		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
-		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto newBegin = r;//lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		Tree *lastRoot = nullptr;
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second) {
