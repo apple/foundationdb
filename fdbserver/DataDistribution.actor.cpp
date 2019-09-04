@@ -4301,13 +4301,13 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributorData> self, Database cx) {
 	TraceEvent("DDExclusionSafetyCheckBegin");
+	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
 	if (!self->teamCollection) {
 		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid");
 		req.reply.send(false);
 		return Void();
 	}
-	state bool safe = true;
-	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
+	bool safe = true;
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
 	for (const auto &ssi : ssis) {
