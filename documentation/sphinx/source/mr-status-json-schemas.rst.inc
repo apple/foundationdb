@@ -332,7 +332,10 @@
       },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state":{
+         "locked":true,
+         "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
+      }
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read

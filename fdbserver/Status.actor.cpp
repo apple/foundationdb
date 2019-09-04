@@ -2150,10 +2150,19 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 
 	loop {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
 			choose{
-				when(wait(success(tr.getReadVersion()))) { statusObj["database_locked"] = false; }
-
+				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
+					if (lockUID.present()) {
+						statusObj["locked"] = true;
+						statusObj["lock_uid"] =
+						    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
+					} else {
+						statusObj["locked"] = false;
+					}
+				}
 				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 				}
@@ -2161,18 +2170,11 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 			break;
 		}
 		catch (Error &e) {
-			if (e.code() == error_code_database_locked) {
-				statusObj["database_locked"] = true;
+			try {
+				wait(tr.onError(e));
+			} catch (Error& e) {
+				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
-			}
-			else {
-				try {
-					wait(tr.onError(e));
-				}
-				catch (Error &e) {
-					incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
-					break;
-				}
 			}
 		}
 	}
@@ -2437,9 +2439,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!clusterDataSection.empty())
 				statusObj["data"] = clusterDataSection;
 
-			// Insert database_locked section
+			// Insert database_lock_state section
 			if(!workerStatuses[3].empty()) {
-				statusObj.addContents(workerStatuses[3]);
+				statusObj["database_lock_state"] = workerStatuses[3];
 			}
 
 			// Insert cluster summary statistics
