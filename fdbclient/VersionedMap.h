@@ -475,8 +475,9 @@ public:
 
 	Version oldestVersion, latestVersion;
 
-    // This deque keeps track of PTree root nodes at various versions. Since the versions increase monotonically, the deque is
-	// implicitly sorted and hence binary-searchable.
+    // This deque keeps track of PTree root nodes at various versions. Since the
+	// versions increase monotonically, the deque is implicitly sorted and hence
+	// binary-searchable.
 	std::deque<std::pair<Version, Tree>> roots;
 
 	struct compare {
@@ -522,9 +523,9 @@ public:
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		auto upper = r;
 		--r;
-		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
+		// if the specified newOldestVersion does not exist, insert a new
+		// entry-pair with newOldestVersion and the root from next lower version
 		if (r->first != newOldestVersion) {
-			//r = roots.emplace(upper, *r);
 			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
 		}
 
@@ -538,12 +539,9 @@ public:
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		auto upper = r;
 		--r;
-		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
-		//if (!binary_search(roots.begin(), roots.end(), newOldestVersion, compare())) {
-		//	roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
-		//}
+		// if the specified newOldestVersion does not exist, insert a new
+		// entry-pair with newOldestVersion and the root from next lower version
 		if (r->first != newOldestVersion) {
-			//r = roots.emplace(upper, *r);
 			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
 		}
 
@@ -551,7 +549,7 @@ public:
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
-		auto newBegin = r; //lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto newBegin = r;
 		Tree *lastRoot = nullptr;
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second) {
