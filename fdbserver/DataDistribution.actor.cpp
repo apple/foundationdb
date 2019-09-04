@@ -2539,7 +2539,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 	// Wait for storage servers to initialize its storeType
 	wait(delay(SERVER_KNOBS->DD_REMOVE_STORE_ENGINE_DELAY));
 
-	state UID removeServerID;
 	state Future<Void> fisServerRemoved = Never();
 
 	TraceEvent("WrongStoreTypeRemoverStart", self->distributorId).detail("Servers", self->server_info.size());
@@ -2557,7 +2556,6 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				// storageServerTracker. This race may cause the server to be removed before react to
 				// wrongStoreTypeToRemove
 				server.second->wrongStoreTypeToRemove.set(true);
-				removeServerID = server.second->id;
 				foundSSToRemove = true;
 				TraceEvent("WrongStoreTypeRemover", self->distributorId)
 				    .detail("Server", server.first)

@@ -156,7 +156,6 @@ public:
 	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
 
 	// Remove wrong storage engines
-	double DD_REMOVE_STORE_ENGINE_TIMEOUT; // wait for at most timeout time before remove next wrong stroage engine
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
 
 	double DD_FAILURE_TIME;
