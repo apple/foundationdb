@@ -114,6 +114,31 @@ struct TagsAndMessage {
 
 	TagsAndMessage() {}
 	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+
+	// Loads tags and message from a serialized buffer and returns the raw byte number.
+	void loadFromArena(ArenaReader* rd, uint32_t* messageVersionSub) {
+		int32_t messageLength;
+		uint16_t tagCount;
+		uint32_t sub;
+		tags.clear();
+
+		rd->checkpoint();
+		*rd >> messageLength >> sub >> tagCount;
+		if (messageVersionSub) *messageVersionSub = sub;
+		tags.resize(tagCount);
+		for (int i = 0; i < tagCount; i++) {
+			*rd >> tags[i];
+		}
+		const int32_t rawLength = messageLength + sizeof(messageLength);
+		rd->rewind();
+		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
+	}
+	StringRef getMessageWithoutTags() const {
+		// Header includes: msg_length, version.sub, tag_count, tags
+		const int32_t headerLen = sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
+		return message.substr(headerLen);
+	}
+	StringRef getMessage() const { return message; }
 };
 
 struct KeyRangeRef;

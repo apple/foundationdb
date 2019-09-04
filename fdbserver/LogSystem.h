@@ -376,14 +376,13 @@ struct ILogSystem {
 
 	struct ServerPeekCursor : IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 		Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
-		Tag tag;
+		const Tag tag;
 
 		TLogPeekReply results;
 		ArenaReader rd;
 		LogMessageVersion messageVersion, end;
 		Version poppedVersion;
-		int32_t messageLength, rawLength;
-		std::vector<Tag> tags;
+		TagsAndMessage messageAndTags;
 		bool hasMsg;
 		Future<Void> more;
 		UID randomID;
@@ -396,7 +395,7 @@ struct ILogSystem {
 		Future<Void> interfaceChanged;
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
-		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag );
+		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
