@@ -1032,7 +1032,7 @@ ACTOR Future<Void> getShardStateQ( StorageServer* data, GetShardStateRequest req
 }
 
 void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output,
-			VectorRef<KeyValueRef, VecSerStrategy::String> const& vm_output,
+			VectorRef<KeyValueRef> const& vm_output,
 			VectorRef<KeyValueRef> const& base,
 			int& vCount, int limit, bool stopAtEndOfBase, int& pos, int limitBytes = 1<<30 )
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
@@ -1084,7 +1084,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state int vCount = 0;
 
     // for caching the storage queue results during the first PTree traversal
-	state VectorRef<KeyValueRef, VecSerStrategy::String> resultCache;
+	state VectorRef<KeyValueRef> resultCache;
 	// for remembring the position in the resultCache
 	state int pos = 0;
 

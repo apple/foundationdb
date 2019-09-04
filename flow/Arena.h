@@ -943,6 +943,7 @@ public:
 	bool empty() const { return m_size == 0; }
 	const T& operator[](int i) const { return data[i]; }
 
+	// const versions of some VectorRef operators
 	const T* cbegin() const { return data; }
 	const T* cend() const { return data + m_size; }
 	T const& cfront() const { return *begin(); }
