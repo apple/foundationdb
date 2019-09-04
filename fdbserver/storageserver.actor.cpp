@@ -1032,7 +1032,7 @@ ACTOR Future<Void> getShardStateQ( StorageServer* data, GetShardStateRequest req
 }
 
 void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output,
-			Arena& arenaCache, VectorRef<KeyValueRef, VecSerStrategy::String>& vm_output,
+			VectorRef<KeyValueRef, VecSerStrategy::String>& vm_output,
 			VectorRef<KeyValueRef> const& base,
 			int& vCount, int limit, bool stopAtEndOfBase, int& pos, int limitBytes = 1<<30 )
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
@@ -1043,16 +1043,14 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 	bool forward = limit>0;
 	if (!forward) limit = -limit;
 	int accumulatedBytes = 0;
-    //int pos = 0; //forward? 0 : (vm_output.size() -1);
-    //int vCount = versionedDataCount;
 	KeyValueRef const* baseStart = base.begin();
 	KeyValueRef const* baseEnd = base.end();
 	while (baseStart!=baseEnd && vCount>0 && --limit>=0 && accumulatedBytes < limitBytes) {
-		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key)
+		if (forward ? baseStart->key < static_cast<const KeyValueRef&>(vm_output[pos]).key : baseStart->key > static_cast<const KeyValueRef&>(vm_output[pos]).key)
 			output.push_back_deep( arena, *baseStart++ );
 		else {
-			output.push_back_deep( arena, vm_output[pos]);
-			if (baseStart->key == vm_output[pos].key) ++baseStart;
+			output.push_back_deep( arena, static_cast<const KeyValueRef&>(vm_output[pos]));
+			if (baseStart->key == static_cast<const KeyValueRef&>(vm_output[pos]).key) ++baseStart;
 			++pos;
 			vCount--;
 		}
@@ -1064,7 +1062,7 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 	}
 	if( !stopAtEndOfBase ) {
 		while (vCount>0 && --limit>=0 && accumulatedBytes < limitBytes) {
-			output.push_back_deep( arena, vm_output[pos]);
+			output.push_back_deep( arena, static_cast<const KeyValueRef&>(vm_output[pos]));
 			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 			++pos;
 			vCount--;
@@ -1080,15 +1078,13 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
-	//state StorageServer::VersionedData::iterator vStart = view.end();
-	//state StorageServer::VersionedData::iterator vEnd = view.end();
 	state KeyRef readBegin;
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount = 0;
 
     // for caching the storage queue results during the first PTree traversal
-	state GetKeyValuesReply resultCache;
+	state VectorRef<KeyValueRef, VecSerStrategy::String> resultCache;
 	// for remembring the position in the resultCache
 	state int pos = 0;
 
@@ -1128,8 +1124,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			ASSERT( !vCurrent || vCurrent.key() >= readBegin );
 			ASSERT( data->storageVersion() <= version );
 
-			/* Traverse the PTree further, if thare are no unconsumed resultCahce items */
-			if (pos == resultCache.data.size()) {
+			/* Traverse the PTree further, if thare are no unconsumed resultCache items */
+			if (pos == resultCache.size()) {
 				if (vCurrent) {
 					auto b = vCurrent;
 					--b;
@@ -1141,8 +1137,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				while (vCurrent && vCurrent.key() < range.end && !vCurrent->isClearTo() && vCount < limit &&
 					   vSize < *pLimitBytes) {
 					// Store the versionedData results in resultCache
-					resultCache.data.push_back(resultCache.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
-					vSize += sizeof(KeyValueRef) + resultCache.data.end()[-1].expectedSize();
+					resultCache.push_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					vSize += sizeof(KeyValueRef) + static_cast<KeyValueRef const&>(resultCache.back()).expectedSize();
 					++vCount;
 					++vCurrent;
 				}
@@ -1166,7 +1162,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 			// merge the sets in resultCache with the sets on disk, stopping at the last key from disk if there is 'more'
 			int prevSize = result.data.size();
-			merge( result.arena, result.data, resultCache.arena, resultCache.data,
+			merge( result.arena, result.data, resultCache,
 				   atStorageVersion, vCount, limit, more, pos, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
 
@@ -1241,8 +1237,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			vCount = 0;
 			int vSize=0;
 			while (vCurrent && vCurrent.key() >= range.begin && !vCurrent->isClearTo() && vCount < -limit && vSize < *pLimitBytes){
-				resultCache.data.push_back(resultCache.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
-				vSize += sizeof(KeyValueRef) + resultCache.data.end()[-1].expectedSize();
+				resultCache.push_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+				vSize += sizeof(KeyValueRef) + static_cast<KeyValueRef const&>(resultCache.back()).expectedSize();
 				++vCount;
 				--vCurrent;
 			}
@@ -1255,7 +1251,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			if (data->storageVersion() > version) throw transaction_too_old();
 
 			int prevSize = result.data.size();
-			merge( result.arena, result.data, resultCache.arena, resultCache.data,
+			merge( result.arena, result.data, resultCache,
 				   atStorageVersion, vCount, limit, false, pos, *pLimitBytes );
 			limit += result.data.size() - prevSize;
 
