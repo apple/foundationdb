@@ -524,7 +524,8 @@ public:
 		--r;
 		// if the specified newOldestVersion does not exist, copy the root from next lower version to newOldestVersion position
 		if (r->first != newOldestVersion) {
-			r = roots.emplace(upper, *r);
+			//r = roots.emplace(upper, *r);
+			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
 		}
 
 		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
@@ -542,14 +543,15 @@ public:
 		//	roots.emplace(upper_bound(roots.begin(), roots.end(), newOldestVersion, compare()), newOldestVersion, getRoot(newOldestVersion));
 		//}
 		if (r->first != newOldestVersion) {
-			r = roots.emplace(upper, *r);
+			//r = roots.emplace(upper, *r);
+			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
 		}
 
 		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
-		auto newBegin = r;//lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto newBegin = r; //lower_bound(roots.begin(), roots.end(), newOldestVersion, compare());
 		Tree *lastRoot = nullptr;
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second) {
