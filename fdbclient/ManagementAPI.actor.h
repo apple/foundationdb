@@ -181,7 +181,6 @@ ACTOR Future<int> setDDMode( Database  cx, int  mode );
 
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId );
 
-ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnly = false);
 ACTOR Future<Void> printHealthyZone( Database cx );
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
@@ -197,7 +196,7 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
-ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd);
+ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd);
 
 #include "flow/unactorcompiler.h"
 #endif

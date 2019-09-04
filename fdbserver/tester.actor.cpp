@@ -404,10 +404,10 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 	state unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
-	state Optional<ErrorOr<bool>> checkResult;
+	state Optional<ErrorOr<CheckReply>> checkResult;
 	state ReplyPromise<Void> setupReq;
 	state ReplyPromise<Void> startReq;
-	state ReplyPromise<bool> checkReq;
+	state ReplyPromise<CheckReply> checkReq;
 
 	TraceEvent("TestBeginAsync", workIface.id()).detail("Workload", workload->description()).detail("DatabasePingDelay", databasePingDelay);
 
@@ -452,12 +452,12 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			}
 			sendResult( startReq, startResult );
 		}
-		when( ReplyPromise<bool> req = waitNext( workIface.check.getFuture() ) ) {
+		when(ReplyPromise<CheckReply> req = waitNext(workIface.check.getFuture())) {
 			checkReq = req;
 			if (!checkResult.present()) {
 				try {
 					bool check = wait( timeoutError( workload->check(cx), workload->getCheckTimeout() ) );
-					checkResult = (!startResult.present() || !startResult.get().isError()) && check;
+					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
 					checkResult = operation_failed();  // was: checkResult = false;
 					if( e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
@@ -693,13 +693,13 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 			wait( delay(3.0) );
 		}
 
-		state std::vector< Future<ErrorOr<bool>> > checks;
+		state std::vector<Future<ErrorOr<CheckReply>>> checks;
 		TraceEvent("CheckingResults");
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
 		for(int i= 0; i < workloads.size(); i++)
-			checks.push_back( workloads[i].check.template getReplyUnlessFailedFor<bool>(waitForFailureTime, 0) );
+			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
 
 		printf("checking tests DONE num_workloads:%d\n", workloads.size());
@@ -707,7 +707,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
-			if(checks[i].get().get())
+			if (checks[i].get().get().value)
 				success++;
 			else
 				failure++;

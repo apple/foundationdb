@@ -357,7 +357,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 			catch(Error &e)
 			{
-				tr.onError(e);
+				wait(tr.onError(e));
 			}
 		}
 	}

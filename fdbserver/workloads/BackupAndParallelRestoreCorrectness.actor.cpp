@@ -775,7 +775,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						       waitCycles, (long long)taskCount);
 
 						wait(delay(5.0));
-						tr->commit();
+						wait(tr->commit());
 						tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 						int64_t _taskCount = wait(backupAgent.getTaskCount(tr));
 						taskCount = _taskCount;

@@ -156,7 +156,7 @@ info:
 	@echo "Make Dir:       $(MAKEDIR)"
 	@echo "Foundation Dir: $(FDBDIR)"
 	@echo "Fdb Dir Base:   $(FDBDIRBASE)"
-	@echo "User:           ($(USERID)) $(USER)"
+	@echo "User Id:        $(USERID)"
 	@echo "Java Version:   ($(JAVAVERMAJOR).$(JAVAVERMINOR)) $(JAVAVER)"
 	@echo "Platform:       $(PLATFORM)"
 ifdef TLS_DISABLED

@@ -211,22 +211,27 @@ public:
 	void setVersion( Version v );
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 
-	Future< Optional<Value> > get( const Key& key, bool snapshot = false );
-	Future< Void > watch( Reference<Watch> watch );
-	Future< Key > getKey( const KeySelector& key, bool snapshot = false );
+	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
+	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
+	[[nodiscard]] Future<Key> getKey(const KeySelector& key, bool snapshot = false);
 	//Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	Future< Standalone<RangeResultRef> > getRange( const KeySelector& begin, const KeySelector& end, int limit, bool snapshot = false, bool reverse = false );
-	Future< Standalone<RangeResultRef> > getRange( const KeySelector& begin, const KeySelector& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false );
-	Future< Standalone<RangeResultRef> > getRange( const KeyRange& keys, int limit, bool snapshot = false, bool reverse = false ) { 
-		return getRange( KeySelector( firstGreaterOrEqual(keys.begin), keys.arena() ), 
-			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limit, snapshot, reverse ); 
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
+	                                                          int limit, bool snapshot = false, bool reverse = false);
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
+	                                                          GetRangeLimits limits, bool snapshot = false,
+	                                                          bool reverse = false);
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
+	                                                          bool reverse = false) {
+		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
 	}
-	Future< Standalone<RangeResultRef> > getRange( const KeyRange& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) { 
-		return getRange( KeySelector( firstGreaterOrEqual(keys.begin), keys.arena() ),
-			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limits, snapshot, reverse ); 
+	[[nodiscard]] Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, GetRangeLimits limits,
+	                                                          bool snapshot = false, bool reverse = false) {
+		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
 	}
 
-	Future< Standalone<VectorRef< const char*>>> getAddressesForKey (const Key& key );
+	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void enableCheckWrites();
 	void addReadConflictRange( KeyRangeRef const& keys );
@@ -244,17 +249,18 @@ public:
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
-	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
+	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
 	Version getCommittedVersion() { return committedVersion; }   // May be called only after commit() returns success
-	Future<Standalone<StringRef>> getVersionstamp(); // Will be fulfilled only after commit() returns success
+	[[nodiscard]] Future<Standalone<StringRef>>
+	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
 	uint32_t getSize();
-	Future<Void> onError( Error const& e );
+	[[nodiscard]] Future<Void> onError(Error const& e);
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
@@ -310,7 +316,7 @@ int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::num
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
-ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID);
+ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -282,6 +282,11 @@ struct SpilledData {
 
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
+	// A process has only 1 SharedTLog, which holds data for multiple logs, so that it obeys its assigned memory limit.
+	// A process has only 1 active log and multiple non-active log from old generations.
+	// In the figure below, TLog [1-4] are logs from old generations.
+	// Because SS may need to pull data from old generation log, we keep Tlog [1-4].
+	//
 	//  We always pop the disk queue from the oldest TLog, spill from the oldest TLog that still has
 	//  data in memory, and commits to the disk queue come from the most recent TLog.
 	//
@@ -290,15 +295,18 @@ struct TLogData : NonCopyable {
 	//  | TLog 1 | TLog 2 | TLog 3 | TLog 4 | TLog 5 |
 	//  +--------+--------+--------+--------+--------+
 	//    ^ popOrder         ^spillOrder         ^committing
+	// 
+	// ^popOrder is the location where SS reads the to-be-read data from tlog.
+	// ^committing is the location where the active TLog accepts the pushed data.
 	Deque<UID> popOrder;
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
 
 	UID dbgid;
 
-	IKeyValueStore* persistentData;
-	IDiskQueue* rawPersistentQueue;
-	TLogQueue *persistentQueue;
+	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
+	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log interface should work without directly accessing rawPersistentQueue
+	TLogQueue *persistentQueue;	// Logical queue the log operates on and persist its data.
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
@@ -1853,9 +1861,9 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
 				choose {
-					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
-						if (success)
-							lastMasterID = self->dbInfo->get().master.id();
+					when(TLogRejoinReply rep =
+					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+						if (rep.masterIsRecovered) lastMasterID = self->dbInfo->get().master.id();
 					}
 					when ( wait( self->dbInfo->onChange() ) ) { }
 				}
@@ -1933,8 +1941,7 @@ tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logDa
 	}
 	ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
-		Standalone<StringRef> role = LiteralStringRef("role=").withSuffix(snapReq.role);
-		int err = wait(execHelper(&snapArg, self->dataFolder, role.toString()));
+		int err = wait(execHelper(&snapArg, snapReq.snapUID, self->dataFolder, snapReq.role.toString()));
 
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceTLog")
@@ -2111,6 +2118,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
+// copy data from old gene to new gene without desiarlzing 
 ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted, bool parallelGetMore ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
@@ -2303,6 +2311,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 	return Void();
 }
 
+// Recovery persistent state of tLog from disk
 ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;

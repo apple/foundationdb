@@ -295,9 +295,6 @@ namespace actorcompiler
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
 
-            if (actor.returnType == null)
-                actor.isUncancellable = true;
-
             FindState();
         }
         public void Write(TextWriter writer)
@@ -306,6 +303,9 @@ namespace actorcompiler
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
             if (actor.isForwardDeclaration) {
+                foreach (string attribute in actor.attributes) {
+                    writer.Write(attribute + " ");
+                }
                 if (actor.isStatic) writer.Write("static ");
                 writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
                 return;
@@ -402,6 +402,9 @@ namespace actorcompiler
             if (isTopLevel) writer.WriteLine("}");  // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
+            foreach (string attribute in actor.attributes) {
+                writer.Write(attribute + " ");
+            }
             if (actor.isStatic) writer.Write("static ");
             writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
             LineNumber(writer, actor.SourceLine);
@@ -853,7 +856,7 @@ namespace actorcompiler
                     // not evaluate `expr2()`.
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);
-                    if (!actor.isUncancellable)
+                    if (actor.IsCancellable())
                         cx.target.WriteLine("if ({1}->actor_wait_state < 0) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
                 }
 
@@ -1150,7 +1153,7 @@ namespace actorcompiler
         }
         void WriteCancelFunc(TextWriter writer)
         {
-            if (!actor.isUncancellable)
+            if (actor.IsCancellable())
             {
                 Function cancelFunc = new Function
                 {

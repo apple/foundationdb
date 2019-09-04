@@ -202,8 +202,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
+		int badServers = 0;
+
 		for(int i=0; i<alternatives->size(); i++) {
-			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
 				break;
 			}
 			
@@ -213,6 +215,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() > qd.failedUntil) {
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
 					double thisTime = qd.latency;
+					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
+						++badServers;
+					}
 				
 					if(thisMetric < bestMetric) {
 						if(i != bestAlt) {
@@ -228,7 +233,11 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						nextMetric = thisMetric;
 						nextTime = thisTime;
 					}
+				} else {
+					++badServers;
 				}
+			} else {
+				++badServers;
 			}
 		}
 		if( nextMetric > 1e8 ) {
@@ -298,8 +307,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
 					g_network->networkMetrics.oldestAlternativesFailure = now();
 				}
-
-				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
+				
+				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
+				if(now() - g_network->networkMetrics.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+					g_network->networkMetrics.lastAlternativesFailureSkipDelay = now();
+				} else {
+					double elapsed = now()-g_network->networkMetrics.oldestAlternativesFailure;
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
+				}
 
 				// Making this SevWarn means a lot of clutter
 				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
