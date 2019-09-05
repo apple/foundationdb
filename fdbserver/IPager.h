@@ -174,8 +174,8 @@ public:
 	// call freePage(pageID), and return the new page id.  Otherwise the pageID argument will be returned.
 	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
 
-	// Free pageID to be used again after the next commit
-	virtual void freePage(LogicalPageID pageID) = 0;
+	// Free pageID to be used again after version v is durable
+	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
 	// Returns the data for a page by LogicalPageID
 	// The data returned will be the later of
