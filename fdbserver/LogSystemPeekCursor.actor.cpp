@@ -90,17 +90,24 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	}
 
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
+	// Rewind and consume the header so that reader() starts from the message.
+	rd.rewind();
+	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
 	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessage() {
 	//TraceEvent("SPC_GetMessage", randomID);
-	return messageAndTags.getMessageWithoutTags();
+	StringRef message = messageAndTags.getMessageWithoutTags();
+	rd.readBytes(message.size()); // Consumes the message.
+	return message;
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
-	return messageAndTags.getMessage();
+	StringRef rawMessage = messageAndTags.getRawMessage();
+	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
+	return rawMessage;
 }
 
 const std::vector<Tag>& ILogSystem::ServerPeekCursor::getTags() {

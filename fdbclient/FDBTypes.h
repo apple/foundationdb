@@ -115,7 +115,8 @@ struct TagsAndMessage {
 	TagsAndMessage() {}
 	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
 
-	// Loads tags and message from a serialized buffer and returns the raw byte number.
+	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
+	// its begining position to allow the caller to be rewinded if needed.
 	void loadFromArena(ArenaReader* rd, uint32_t* messageVersionSub) {
 		int32_t messageLength;
 		uint16_t tagCount;
@@ -131,14 +132,21 @@ struct TagsAndMessage {
 		}
 		const int32_t rawLength = messageLength + sizeof(messageLength);
 		rd->rewind();
+		rd->checkpoint();
 		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
 	}
-	StringRef getMessageWithoutTags() const {
-		// Header includes: msg_length, version.sub, tag_count, tags
-		const int32_t headerLen = sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
-		return message.substr(headerLen);
+
+	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
+	int32_t getHeaderSize() const {
+		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
 	}
-	StringRef getMessage() const { return message; }
+
+	StringRef getMessageWithoutTags() const {
+		return message.substr(getHeaderSize());
+	}
+
+	// Returns the message with the header.
+	StringRef getRawMessage() const { return message; }
 };
 
 struct KeyRangeRef;
