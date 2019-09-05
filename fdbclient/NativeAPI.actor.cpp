@@ -2975,7 +2975,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			options.includePort = true;
 			break;
 
-	    default:
+		default:
 			break;
 	}
 }
