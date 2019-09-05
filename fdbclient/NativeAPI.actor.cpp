@@ -2137,14 +2137,10 @@ Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	return ::watch(watch, cx, this);
 }
 
-ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key key, Future<Version> ver, Database cx, TransactionInfo info ) {
+ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key, Future<Version> ver, Database cx,
+                                                                         TransactionInfo info,
+                                                                         TransactionOptions options) {
 	state vector<StorageServerInterface> ssi;
-
-	state bool includePort = false;
-	if (key.startsWith(LiteralStringRef("\xff\xff"))) {
-		key = key.removePrefix(LiteralStringRef("\xff\xff"));
-		includePort = true;
-	}
 
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 
@@ -2164,7 +2160,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 
 	Standalone<VectorRef<const char*>> addresses;
 	for (auto i : ssi) {
-		std::string ipString = includePort ? i.address().toString() : i.address().ip.toString();
+		std::string ipString = options.includePort ? i.address().toString() : i.address().ip.toString();
 		char* c_string = new (addresses.arena()) char[ipString.length()+1];
 		strcpy(c_string, ipString.c_str());
 		addresses.push_back(addresses.arena(), c_string);
@@ -2176,7 +2172,7 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 	++cx->transactionLogicalReads;
 	auto ver = getReadVersion();
 
-	return getAddressesForKeyActor(key, ver, cx, info);
+	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
 ACTOR Future< Key > getKeyAndConflictRange(
@@ -2974,7 +2970,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			info.useProvisionalProxies = true;
 			break;
 
-		default:
+		case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
+			validateOptionValue(value, false);
+			options.includePort = true;
+			break;
+
+	    default:
 			break;
 	}
 }
