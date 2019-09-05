@@ -116,8 +116,10 @@ struct TagsAndMessage {
 	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
-	// its begining position to allow the caller to be rewinded if needed.
-	void loadFromArena(ArenaReader* rd, uint32_t* messageVersionSub) {
+	// its begining position to allow the caller to rewind if needed.
+	// T can be ArenaReader or BinaryReader.
+	template <class T>
+	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
 		int32_t messageLength;
 		uint16_t tagCount;
 		uint32_t sub;
