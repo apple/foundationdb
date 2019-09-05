@@ -350,10 +350,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
-			if (!g_network->isSimulated() || 
-				(g_simulator.storagePolicy.isValid() &&
-			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos)) {
-				// Do not test DD team number for data_hall modes
+			if (!g_network->isSimulated()) {
 				return true;
 			}
 
