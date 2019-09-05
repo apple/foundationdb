@@ -177,7 +177,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		wait(unlockDatabase(cx, randomUID));
 	} catch (Error& e) {
-		TraceEvent(SevError, "UnlockDBFailed").detail("UID", randomUID.toString());
+		TraceEvent(SevWarn, "UnlockDBFailed").detail("UID", randomUID.toString());
 	}
 
 	TraceEvent("FastRestore").detail("RestoreMasterComplete", self->id());
