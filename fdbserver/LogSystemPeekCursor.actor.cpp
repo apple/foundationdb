@@ -70,7 +70,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == -1) {
+	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
 		// A version
 		int32_t dummy;
 		Version ver;

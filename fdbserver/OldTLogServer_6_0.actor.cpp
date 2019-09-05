@@ -1008,7 +1008,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			}
 
 			currentVersion = it->first;
-			messages << int32_t(-1) << currentVersion;
+			messages << VERSION_HEADER << currentVersion;
 		}
 
 		messages << it->second.toStringRef();
@@ -1152,7 +1152,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 		for (auto &kv : kvs) {
 			auto ver = decodeTagMessagesKey(kv.key);
-			messages << int32_t(-1) << ver;
+			messages << VERSION_HEADER << ver;
 			messages.serializeBytes(kv.value);
 		}
 
