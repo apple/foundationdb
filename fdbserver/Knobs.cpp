@@ -496,6 +496,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TIME_KEEPER_DELAY,                                      10 );
 	init( TIME_KEEPER_MAX_ENTRIES,                              3600 * 24 * 30 * 6); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
+	// Fast Restore
+	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
+	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
 	// clang-format on
 
 	if(clientKnobs)

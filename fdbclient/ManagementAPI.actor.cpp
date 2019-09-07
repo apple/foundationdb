@@ -1718,6 +1718,12 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
+	if (val.present()) {
+		printf("DB is locked at uid:%s\n", id.toString().c_str());
+	} else {
+		printf("DB is not locked!\n");
+	}
+
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();

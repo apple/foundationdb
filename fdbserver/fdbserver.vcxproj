@@ -54,7 +54,13 @@
     <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
-    <ActorCompiler Include="Restore.actor.cpp" />
+    <ActorCompiler Include="RestoreWorker.actor.cpp" />
+    <ActorCompiler Include="RestoreUtil.actor.cpp" />
+    <ActorCompiler Include="RestoreCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreRoleCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreMaster.actor.cpp" />
+    <ActorCompiler Include="RestoreLoader.actor.cpp" />
+    <ActorCompiler Include="RestoreApplier.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="MemoryPager.actor.cpp" />
@@ -105,6 +111,8 @@
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp" />
     <ActorCompiler Include="workloads\DummyWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\BackupCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupAndParallelRestoreCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\ParallelRestore.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
@@ -207,7 +215,25 @@
     <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
-    <ClInclude Include="RestoreInterface.h" />
+    <ClInclude Include="RestoreUtil.h" />
+    <ActorCompiler Include="RestoreWorker.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreRoleCommon.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreMaster.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreLoader.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreApplier.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreCommon.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />
