@@ -299,7 +299,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "database_available":true,
       "database_lock_state": {
          "locked": true,
-         "lockUID": "00000000000000000000000000000000"
+         "lock_uid": "00000000000000000000000000000000"
       },
       "generation":2,
       "latency_probe":{

@@ -2010,7 +2010,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
 					if (lockUID.present()) {
 						statusObj["locked"] = true;
-						statusObj["lockUID"] =
+						statusObj["lock_uid"] =
 						    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
 					} else {
 						statusObj["locked"] = false;
