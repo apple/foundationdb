@@ -702,8 +702,6 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
 
-		printf("checking tests DONE num_workloads:%d\n", workloads.size());
-
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
@@ -801,7 +799,6 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, spec );
 		if( spec.timeout > 0 ) {
-			printf("[INFO] TestSpec, timeout:%d\n", spec.timeout);
 			fTestResults = timeoutError( fTestResults, spec.timeout );
 		}
 		DistributedTestResults _testResults = wait( fTestResults );

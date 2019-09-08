@@ -142,7 +142,7 @@ struct CycleWorkload : TestWorkload {
 	}
 
 	void logTestData(const VectorRef<KeyValueRef>& data) {
-		TraceEvent("MXTestFailureDetail");
+		TraceEvent("TestFailureDetail");
 		int index = 0;
 		for (auto& entry : data) {
 			TraceEvent("CurrentDataEntry")

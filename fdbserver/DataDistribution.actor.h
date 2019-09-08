@@ -114,6 +114,22 @@ struct GetTeamRequest {
 
 	GetTeamRequest() {}
 	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
+
+	std::string getDesc() {
+		std::stringstream ss;
+
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "Sources:";
+		for (auto& s : sources) {
+			ss << s.toString() << ",";
+		}
+		ss << "CompleteSources:";
+		for (auto& cs : completeSources) {
+			ss << cs.toString() << ",";
+		}
+
+		return ss.str();
+	}
 };
 
 struct GetMetricsRequest {
