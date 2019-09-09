@@ -33,7 +33,7 @@ std::string describe( uint32_t const& item ) {
 
 struct RemoveServersSafelyWorkload : TestWorkload {
 	bool enabled, killProcesses;
-	int minMachinesToKill, maxMachinesToKill;
+	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckTimeouts;
 	double minDelay, maxDelay;
 	double kill1Timeout, kill2Timeout;
 
@@ -48,6 +48,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		minMachinesToKill = getOption( options, LiteralStringRef("minMachinesToKill"), 1 );
 		maxMachinesToKill = getOption( options, LiteralStringRef("maxMachinesToKill"), 10 );
 		maxMachinesToKill = std::max(minMachinesToKill, maxMachinesToKill);
+		maxSafetyCheckTimeouts = getOption(options, LiteralStringRef("maxSafetyCheckTimeouts"), 50);
 		minDelay = getOption( options, LiteralStringRef("minDelay"), 0.0 );
 		maxDelay = getOption( options, LiteralStringRef("maxDelay"), 60.0 );
 		kill1Timeout = getOption( options, LiteralStringRef("kill1Timeout"), 60.0 );
@@ -407,6 +408,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
 		if (safeKillSet) {
+			state int timeouts = 0;
 			loop {
 				state bool safe = false;
 				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
@@ -427,6 +429,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 							    .detail("Exclusions", describe(toKillMarkFailedArray));
 						}
 					}
+					if (timeouts == self->maxSafetyCheckTimeouts) {
+						// Do not perform safety check, essentially simulating 'FORCE' option
+						TraceEvent("RemoveAndKill", functionId).detail("Step", "SafetyCheckLimitReached").detail("Timeouts", timeouts);
+						safe = true;
+						break;
+					}
+					timeouts++;
 				}
 				if (safe) break;
 			}
