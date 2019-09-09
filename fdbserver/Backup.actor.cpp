@@ -18,14 +18,25 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BackupContainer.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+
+struct VersionedMessage {
+	LogMessageVersion version;
+	StringRef message;
+
+	VersionedMessage(LogMessageVersion v, StringRef m) : version(v), message(m) {}
+	const Version getVersion() const { return version.version; }
+	const uint32_t getSubVersion() const { return version.sub; }
+};
 
 struct BackupData {
 	const UID myId;
@@ -38,8 +49,8 @@ struct BackupData {
 	Version savedVersion, lastSeenVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
-	std::vector<TagsAndMessage> messages;
-	std::vector<Version> versions;  // one for each of the "messages"
+	std::vector<VersionedMessage> messages;
+	Reference<IBackupContainer> container;
 
 	CounterCollection cc;
 	Future<Void> logger;
@@ -55,6 +66,13 @@ struct BackupData {
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
+		if (g_network->isSimulated()) {
+			container = IBackupContainer::openContainer("file://simfdb/mutation_backups/");
+		} else {
+			// TODO: use blobstore URL passed from somewhere.
+			ASSERT(false);
+			container = IBackupContainer::openContainer("blobstore://");
+		}
 	}
 
 	void pop() {
@@ -94,12 +112,27 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
+// Debug function: to be removed.
+void parseMessage(StringRef message) {
+	// MutationRef m = BinaryReader::fromStringRef<MutationRef>(message, AssumeVersion(currentProtocolVersion));
+	// std::cout << m.toString() << std::endl;
+	std::cout << message.printable() << " : " << message.toHexString() << std::endl;
+	BinaryReader reader(message.begin(), message.size(), Unversioned());
+	if (LogProtocolMessage::isNextIn(reader)) {
+		LogProtocolMessage lpm;
+		reader >> lpm;
+	} else {
+		MutationRef m;
+		reader >> m;
+		std::cout << m.toString() << std::endl;
+	}
+}
+
 // Uploads self->messages to cloud storage and updates poppedVersion.
 ACTOR Future<Void> uploadData(BackupData* self) {
 	state Version popVersion = invalidVersion;
 
 	loop {
-		ASSERT(self->messages.size() == self->versions.size());
 		if (self->savedVersion >= self->endVersion) {
 			return Void();
 		}
@@ -108,20 +141,36 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		// lag TLog might have. Changing to 20s may fail consistency check.
 		state Future<Void> uploadDelay = delay(10);
 
+		state std::string logFilename;
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
 			popVersion = std::max(popVersion, self->lastSeenVersion);
 		} else {
-			while (!self->messages.empty()) {
-				if (self->versions[0] > self->endVersion || self->versions[0] > self->minKnownCommittedVersion) break;
-				popVersion = std::max(popVersion, self->versions[0]);
-				// TODO: consume the messages
-				self->messages.erase(self->messages.begin());
-				self->versions.erase(self->versions.begin());
+			state int numMsg = 0;
+			for (auto it = self->messages.begin(); it < self->messages.end(); it++) {
+				if (it->getVersion() > std::min(self->endVersion, self->minKnownCommittedVersion)) break;
+				popVersion = std::max(popVersion, it->getVersion());
+				numMsg++;
+			}
+			if (numMsg > 0) {
+				// Upload messages
+				const int blockSize = 1 << 20;
+				state Reference<IBackupFile> logFile =
+				    wait(self->container->writeLogFile(self->messages[0].getVersion(), popVersion, blockSize));
+				state int idx = 0;
+				for (; idx < numMsg; idx++) {
+					// TODO: Endianness for version.version & version.sub
+					wait(logFile->append((void*)&self->messages[idx].version.version, sizeof(Version)));
+					wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(int32_t)));
+					// parseMessage(self->messages[idx].message);
+					wait(logFile->appendStringRefWithLen(self->messages[idx].message));
+				}
+
+				self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
+				wait(logFile->finish());
+				logFilename = logFile->getFileName(); // TODO: save this somewhere with tag info.
 			}
 		}
-
-		// TODO: upload messages
 
 		state Future<Void> savedProgress = Never();
 		if (popVersion > self->savedVersion) {
@@ -166,13 +215,10 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
-		// TODO: avoid peeking uncommitted messages
-		// Should we wait until knownCommittedVersion == startVersion - 1 ? In this way, we know previous
-		// epoch has finished and then starting for this epoch.
+		// Note we aggressively peek (uncommitted) messages, but only committed
+		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			lastVersion = r->version().version;
-			self->messages.emplace_back(r->getMessage(), std::vector<Tag>());
-			self->versions.push_back(lastVersion);
+			self->messages.emplace_back(r->version(), r->getMessage());
 			r->nextMessage();
 		}
 
