@@ -195,18 +195,18 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
 				// handle read bandkwith status
 				if (newReadBandwithStatus != readBandwithStatus) {
 					TraceEvent("ReadBandwithStatusChanged")
-					    .detail("from", readBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High")
-					    .detail("to", newReadBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High");
+					    .detail("From", readBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High")
+					    .detail("To", newReadBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High");
 					readBandwithStatus = newReadBandwithStatus;
 				}
 				if (newReadBandwithStatus == ReadBandwithStatusNormal) {
 					TEST(true);
-					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC;
+					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC * 1.1;
 					bounds.min.bytesReadPerKSecond = 0;
 				} else if (newReadBandwithStatus == ReadBandwithStatusHigh) {
 					TEST(true);
 					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC;
+					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC * 0.9;
 				} else {
 					ASSERT(false);
 				}
