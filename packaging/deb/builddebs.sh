@@ -1,5 +1,9 @@
 #!/bin/bash
 
+MAINTAINER="Your Name <you@example.com>"
+# Version must be numeric
+VERSION=$(grep FDB_VT_PACKAGE_NAME versions.h | awk '{gsub(/"/,""); print $3}')
+
 umask 0022
 status=0
 
@@ -27,7 +31,12 @@ install -m 0644 packaging/argparse.py $SERVERDIR/usr/lib/foundationdb
 dos2unix -q -n README.md $SERVERDIR/usr/share/doc/foundationdb-server/README
 chmod 0644 $SERVERDIR/usr/share/doc/foundationdb-server/README
 
+echo "Package: foundationdb-server" >> $SERVERDIR/DEBIAN/control
+echo "Version: $VERSION" >> $SERVERDIR/DEBIAN/control
+echo "Maintainer: $MAINTAINER" >> $SERVERDIR/DEBIAN/control
+echo "Description: FoundationDB server" >> $SERVERDIR/DEBIAN/control
 echo "Installed-Size:" $(du -sx --exclude DEBIAN $SERVERDIR | awk '{print $1}') >> $SERVERDIR/DEBIAN/control
+echo "Architecture: all" >> $SERVERDIR/DEBIAN/control
 
 if ! fakeroot dpkg-deb --build "${SERVERDIR}" packages 2> /dev/null
 then
@@ -63,6 +72,11 @@ ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbresto
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbdr
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/dr_agent
 
+echo "Package: foundationdb-clients" >> $CLIENTSDIR/DEBIAN/control
+echo "Version: $VERSION" >> $CLIENTSDIR/DEBIAN/control
+echo "Maintainer: $MAINTAINER" >> $CLIENTSDIR/DEBIAN/control
+echo "Description: FoundationDB clients and library" >> $CLIENTSDIR/DEBIAN/control
+echo "Architecture: all" >> $CLIENTSDIR/DEBIAN/control
 echo "Installed-Size:" $(du -sx --exclude DEBIAN $CLIENTSDIR | awk '{print $1}') >> $CLIENTSDIR/DEBIAN/control
 
 if ! fakeroot dpkg-deb --build "${CLIENTSDIR}" packages 2> /dev/null
