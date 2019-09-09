@@ -225,6 +225,7 @@ public:
 			(*it)->setHealthy(h);
 		}
 	}
+
 	virtual int getPriority() {
 		int priority = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
@@ -295,6 +296,7 @@ int getWorkFactor( RelocateData const& relocation ) {
 
 // Data movement's resource control: Do not overload source servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
+// This ensure source servers will not be overloaded.
 bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
 	// assert this has not already been launched
@@ -356,7 +358,7 @@ struct DDQueueData {
 	int64_t bytesWritten;
 	int teamSize;
 
-	std::map<UID, Busyness> busymap;
+	std::map<UID, Busyness> busymap; // UID is serverID
 
 	KeyRangeMap< RelocateData > queueMap;
 	std::set<RelocateData, std::greater<RelocateData>> fetchingSourcesQueue;
@@ -365,7 +367,8 @@ struct DDQueueData {
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>> queue; //Key UID is serverID, value is the serverID's set of RelocateData to relocate
 
 	KeyRangeMap< RelocateData > inFlight;
-	KeyRangeActorMap inFlightActors; //Key: RelocatData, Value: Actor to move the data
+	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
+	KeyRangeActorMap inFlightActors;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -760,6 +763,9 @@ struct DDQueueData {
 		launchQueuedWork( combined );
 	}
 
+	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
+	// with rd. If there exist, cancel them by cancel their actors and reduce the src servers' busyness of those
+	// canceled inflight relocateData Launch the relocation for the rd.
 	void launchQueuedWork( std::set<RelocateData, std::greater<RelocateData>> combined ) {
 		int startedHere = 0;
 		double startTime = now();
@@ -768,6 +774,7 @@ struct DDQueueData {
 		for(; it != combined.end(); it++ ) {
 			RelocateData rd( *it );
 
+			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges( rd.keys );
 			for(auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
@@ -799,7 +806,8 @@ struct DDQueueData {
 			}
 
 			// Data movement avoids overloading source servers in moving data.
-			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the queue
+			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
+			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if( !canLaunch( rd, teamSize, busymap, cancellableRelocations ) ) {
 				//logRelocation( rd, "SkippingQueuedRelocation" );
@@ -842,6 +850,7 @@ struct DDQueueData {
 				launch( rrs, busymap );
 				activeRelocations++;
 				startRelocation(rrs.priority);
+				// Start the actor that relocates data in the rrs.keys
 				inFlightActors.insert( rrs.keys, dataDistributionRelocator( this, rrs ) );
 			}
 

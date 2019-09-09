@@ -305,6 +305,9 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
 		} catch( Error &e ) {
 			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxStorageServerQueue").detail("SS", servers[i].id());
+			for (auto& m : messages) {
+				TraceEvent("Messages").detail("Info", m.get().toString());
+			}
 			throw;
 		}
 	}
@@ -547,14 +550,20 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			     success(storageServersRecruiting));
 
 			TraceEvent(("QuietDatabase" + phase).c_str())
-					.detail("DataInFlight", dataInFlight.get())
-					.detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
-					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
-					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-					.detail("TeamCollectionValid", teamCollectionValid.get())
-					.detail("MaxStorageQueueSize", storageQueueSize.get())
-					.detail("DataDistributionActive", dataDistributionActive.get())
-					.detail("StorageServersRecruiting", storageServersRecruiting.get());
+			    .detail("DataInFlight", dataInFlight.get())
+			    .detail("DataInFlightGate", dataInFlightGate)
+			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
+			    .detail("MaxTLogQueueGate", maxTLogQueueGate)
+			    .detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
+			    .detail("MaxTLogPoppedVersionLagGate", maxPoppedVersionLag)
+			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+			    .detail("DataDistributionQueueSizeGate", maxDataDistributionQueueSize)
+			    .detail("TeamCollectionValid", teamCollectionValid.get())
+			    .detail("MaxStorageQueueSize", storageQueueSize.get())
+			    .detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
+			    .detail("DataDistributionActive", dataDistributionActive.get())
+			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
+			    .detail("NumSuccesses", numSuccesses);
 
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
