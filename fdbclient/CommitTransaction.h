@@ -24,6 +24,9 @@
 
 #include "fdbclient/FDBTypes.h"
 
+// The versioned message has wire format : -1, version, messages
+static const int32_t VERSION_HEADER = -1;
+
 static const char* typeString[] = { "SetValue",
 	                                "ClearRange",
 	                                "AddValue",
