@@ -227,7 +227,7 @@ namespace actorcompiler
         public string returnType;
         public string name;
         // "" if there is not enclosing class
-        public string enclosingClass;
+        public string enclosingClass = null;
         public VarDeclaration[] parameters;
         public VarDeclaration[] templateFormals;  //< null if not a template
         public CodeBlock body;

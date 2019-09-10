@@ -1208,17 +1208,69 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	return Void();
 }
 
-class Foo {
+// Tests for https://github.com/apple/foundationdb/issues/1226
+
+template <class>
+struct ShouldNotGoIntoClassContextStack;
+
+ACTOR static Future<Void> shouldNotHaveFriends();
+
+class Foo1 {
 public:
-	explicit Foo(int x) : x(x) {}
+	explicit Foo1(int x) : x(x) {}
 	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo* self);
+	ACTOR static Future<int> fooActor(Foo1* self);
 
 private:
 	int x;
 };
-
-ACTOR Future<int> Foo::fooActor(Foo* self) {
+ACTOR Future<int> Foo1::fooActor(Foo1* self) {
 	wait(Future<Void>());
 	return self->x;
 }
+
+class [[nodiscard]] Foo2 {
+public:
+	explicit Foo2(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo2 * self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo2::fooActor(Foo2* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class alignas(4) Foo3 {
+public:
+	explicit Foo3(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo3* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo3::fooActor(Foo3* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Super {};
+
+class Foo4 : Super {
+public:
+	explicit Foo4(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo4* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo4::fooActor(Foo4* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+ACTOR static Future<Void> shouldNotHaveFriends2();

@@ -288,7 +288,7 @@ namespace actorcompiler
         {
             this.actor = actor;
             this.sourceFile = sourceFile;
-            this.LineNumbersEnabled = false;
+            this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
 
             FindState();
@@ -300,10 +300,13 @@ namespace actorcompiler
                 : "void";
             for (int i = 0; ; i++)
             {
-                className = string.Format("{0}{1}Actor{2}",
+                className = string.Format("{3}{0}{1}Actor{2}",
                     actor.name.Substring(0, 1).ToUpper(),
                     actor.name.Substring(1),
-                    i!=0 ? i.ToString() : "");
+                    i != 0 ? i.ToString() : "",
+                    actor.enclosingClass != null ? actor.enclosingClass + "_"
+                    : actor.nameSpace != null ? actor.nameSpace + "_"
+                    : "");
                 if (actor.isForwardDeclaration || usedClassNames.Add(className))
                     break;
             }
@@ -320,7 +323,7 @@ namespace actorcompiler
                 }
                 if (actor.isStatic) writer.Write("static ");
                 writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
-                if (actor.enclosingClass.Length > 0) {
+                if (actor.enclosingClass != null) {
                     writer.WriteLine("template <class> friend class {0};", stateClassName);
                 }
                 return;
