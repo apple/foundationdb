@@ -223,6 +223,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		mutationLogPrefix = restoreConfig->mutationLogPrefix();
 	}
 
+	// sort files in increasing order of beginVersion
+	std::sort(files->begin(), files->end());
+
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
@@ -250,14 +253,15 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		param.addPrefix = request.addPrefix;
 		param.removePrefix = request.removePrefix;
 		param.mutationLogPrefix = mutationLogPrefix;
+
+		// Log file to be loaded
+		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
 		ASSERT_WE_THINK(param.length >= 0); // we may load an empty file
 		ASSERT_WE_THINK(param.offset >= 0);
 		ASSERT_WE_THINK(param.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.prevVersion <= param.endVersion);
 
 		requests.push_back(std::make_pair(loader->first, RestoreLoadFileRequest(param)));
-		// Log file to be loaded
-		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
 		loader++;
 	}
 
