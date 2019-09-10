@@ -344,7 +344,7 @@ namespace actorcompiler
                     var actor = ParseActor(i, out end);
                     if (classContextStack.Count > 0)
                     {
-                        actor.enclosingClass = classContextStack.Peek().name;
+                        actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
                     }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";

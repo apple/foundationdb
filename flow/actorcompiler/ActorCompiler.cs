@@ -304,8 +304,8 @@ namespace actorcompiler
                     actor.name.Substring(0, 1).ToUpper(),
                     actor.name.Substring(1),
                     i != 0 ? i.ToString() : "",
-                    actor.enclosingClass != null ? actor.enclosingClass + "_"
-                    : actor.nameSpace != null ? actor.nameSpace + "_"
+                    actor.enclosingClass != null ? actor.enclosingClass.Replace("::", "_") + "_"
+                    : actor.nameSpace != null ? actor.nameSpace.Replace("::", "_") + "_"
                     : "");
                 if (actor.isForwardDeclaration || usedClassNames.Add(className))
                     break;

@@ -1273,4 +1273,20 @@ ACTOR Future<int> Foo4::fooActor(Foo4* self) {
 	return self->x;
 }
 
+struct Outer {
+	class Foo5 : Super {
+	public:
+		explicit Foo5(int x) : x(x) {}
+		Future<int> foo() { return fooActor(this); }
+		ACTOR static Future<int> fooActor(Foo5* self);
+
+	private:
+		int x;
+	};
+};
+ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
 ACTOR static Future<Void> shouldNotHaveFriends2();
