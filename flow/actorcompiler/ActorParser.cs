@@ -255,6 +255,11 @@ namespace actorcompiler
             //showTokens();
         }
 
+        class ClassContext {
+            public string name;
+            public int inBlocks;
+        }
+
         public void Write(System.IO.TextWriter writer, string destFileName)
         {
             writer.NewLine = "\n";
@@ -266,6 +271,7 @@ namespace actorcompiler
                 outLine++;
             }
             int inBlocks = 0;
+            Stack<ClassContext> classContextStack = new Stack<ClassContext>();
             for(int i=0; i<tokens.Length; i++)
             {
                 if(tokens[0].SourceLine == 0)
@@ -276,9 +282,10 @@ namespace actorcompiler
                 {
                     int end;
                     var actor = ParseActor(i, out end);
+                    actor.enclosingClass = classContextStack.Count > 0 ? classContextStack.Peek().name : "";
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks==0, LineNumbersEnabled, generateProbes).Write(actorWriter);
+                    new ActorCompiler(actor, sourceFile, LineNumbersEnabled, generateProbes).Write(actorWriter);
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;
@@ -322,10 +329,29 @@ namespace actorcompiler
                         outLine++;
                     }
                 }
+                else if (tokens[i].Value == "class" || tokens[i].Value == "struct")
+                {
+                    writer.Write(tokens[i].Value);
+                    var toks = range(i+1, tokens.Length).SkipWhile(Whitespace);
+                    if (!toks.IsEmpty)
+                    {
+                        classContextStack.Push(new ClassContext{name = toks.First().Value, inBlocks = inBlocks });
+                    }
+                }
                 else
                 {
-                    if (tokens[i].Value == "{") inBlocks++;
-                    else if (tokens[i].Value == "}") inBlocks--;
+                    if (tokens[i].Value == "{")
+                    {
+                        inBlocks++;
+                    }
+                    else if (tokens[i].Value == "}")
+                    {
+                        inBlocks--;
+                        if (classContextStack.Count > 0 && classContextStack.Peek().inBlocks == inBlocks)
+                        {
+                            classContextStack.Pop();
+                        }
+                    }
                     writer.Write(tokens[i].Value);
                     outLine += tokens[i].Value.Count(c => c == '\n');
                 }

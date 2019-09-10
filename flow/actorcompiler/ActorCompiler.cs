@@ -213,7 +213,6 @@ namespace actorcompiler
         public void Write(TextWriter writer, out int lines)
         {
             lines = 0;
-            //if (isTopLevel) writer.WriteLine("namespace {");
 
             writer.WriteLine(memberIndentStr + "template<> struct Descriptor<struct {0}> {{", descr.name);
             writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return LiteralStringRef(\"{0}\"); }}", descr.name);
@@ -265,7 +264,6 @@ namespace actorcompiler
                 lines++;
             }
 
-            //if (isTopLevel) writer.WriteLine("}");  // namespace
         }
     }
 
@@ -276,7 +274,6 @@ namespace actorcompiler
         string sourceFile;
         List<StateVar> state;
         List<CallbackVar> callbacks = new List<CallbackVar>();
-        bool isTopLevel;
         const string loopDepth0 = "int loopDepth=0";
         const string loopDepth = "int loopDepth";
         const int codeIndent = +2;
@@ -287,12 +284,11 @@ namespace actorcompiler
         string This;
         bool generateProbes;
 
-        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled, bool generateProbes)
+        public ActorCompiler(Actor actor, string sourceFile, bool lineNumbersEnabled, bool generateProbes)
         {
             this.actor = actor;
             this.sourceFile = sourceFile;
-            this.isTopLevel = isTopLevel;
-            this.LineNumbersEnabled = lineNumbersEnabled;
+            this.LineNumbersEnabled = false;
             this.generateProbes = generateProbes;
 
             FindState();
@@ -302,21 +298,13 @@ namespace actorcompiler
             string fullReturnType =
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
-            if (actor.isForwardDeclaration) {
-                foreach (string attribute in actor.attributes) {
-                    writer.Write(attribute + " ");
-                }
-                if (actor.isStatic) writer.Write("static ");
-                writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
-                return;
-            }
             for (int i = 0; ; i++)
             {
                 className = string.Format("{0}{1}Actor{2}",
                     actor.name.Substring(0, 1).ToUpper(),
                     actor.name.Substring(1),
                     i!=0 ? i.ToString() : "");
-                if (usedClassNames.Add(className))
+                if (actor.isForwardDeclaration || usedClassNames.Add(className))
                     break;
             }
 
@@ -325,6 +313,18 @@ namespace actorcompiler
             This = string.Format("static_cast<{0}*>(this)", actorClassFormal.name);
             stateClassName = className + "State";
             var fullStateClassName = stateClassName + GetTemplateActuals(new VarDeclaration { type = "class", name = fullClassName });
+
+            if (actor.isForwardDeclaration) {
+                foreach (string attribute in actor.attributes) {
+                    writer.Write(attribute + " ");
+                }
+                if (actor.isStatic) writer.Write("static ");
+                writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
+                if (actor.enclosingClass.Length > 0) {
+                    writer.WriteLine("template <class> friend class {0};", stateClassName);
+                }
+                return;
+            }
 
             var body = getFunction("", "body", loopDepth0);
             var bodyContext = new Context { 
@@ -352,8 +352,6 @@ namespace actorcompiler
                 bodyContext.catchFErr.WriteLine("delete {0};", This);
             }
             bodyContext.catchFErr.WriteLine("loopDepth = 0;");
-
-            if (isTopLevel) writer.WriteLine("namespace {");
 
             // The "State" class contains all state and user code, to make sure that state names are accessible to user code but
             // inherited members of Actor, Callback etc are not.
@@ -399,7 +397,6 @@ namespace actorcompiler
             //WriteStartFunc(body, writer);
             WriteCancelFunc(writer);
             writer.WriteLine("};");
-            if (isTopLevel) writer.WriteLine("}");  // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
             foreach (string attribute in actor.attributes) {

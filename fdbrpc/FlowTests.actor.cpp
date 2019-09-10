@@ -1207,3 +1207,18 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	ASSERT( a == 1 );
 	return Void();
 }
+
+class Foo {
+public:
+	explicit Foo(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo* self);
+
+private:
+	int x;
+};
+
+ACTOR Future<int> Foo::fooActor(Foo* self) {
+	wait(Future<Void>());
+	return self->x;
+}
