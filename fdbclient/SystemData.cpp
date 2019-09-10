@@ -426,6 +426,10 @@ const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/prim
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
+// Whenever configuration changes or DD related system keyspace is changed(e.g.., serverList),
+// actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
+// This prevents concurrent write to the same system keyspace.
+// When the owner of the DD related system keyspace changes, DD will reboot
 const KeyRef moveKeysLockOwnerKey = LiteralStringRef("\xff/moveKeysLock/Owner");
 const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 
@@ -532,6 +536,7 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 
 // Apply mutations constant variables
 // \xff/applyMutationsEnd/[16-byte UID] := serialize( endVersion, Unversioned() )
+// This indicates what is the highest version the mutation log can be applied
 const KeyRangeRef applyMutationsEndRange(LiteralStringRef("\xff/applyMutationsEnd/"), LiteralStringRef("\xff/applyMutationsEnd0"));
 
 // \xff/applyMutationsBegin/[16-byte UID] := serialize( beginVersion, Unversioned() )
@@ -607,14 +612,98 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
+const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
-const Key restoreWorkerKeyFor( UID const& agentID ) {
+const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
+const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
+const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
+                                     LiteralStringRef("\xff\x02/restoreRequests0"));
+
+// Encode restore worker key for workerID
+const Key restoreWorkerKeyFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreWorkersKeys.begin );
-	wr << agentID;
+	wr << workerID;
 	return wr.toValue();
 }
 
+// Encode restore agent value
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
+	BinaryWriter wr(IncludeVersion());
+	wr << cmdInterf;
+	return wr.toValue();
+}
+
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
+	RestoreWorkerInterface s;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	return s;
+}
+
+// Encode and decode restore request value
+// restoreRequestTrigger key
+const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
+	BinaryWriter wr(IncludeVersion());
+	wr << numRequests;
+	wr << randomID;
+	return wr.toValue();
+}
+const int decodeRestoreRequestTriggerValue(ValueRef const& value) {
+	int s;
+	UID randomID;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	reader >> randomID;
+	return s;
+}
+
+// restoreRequestDone key
+const Value restoreRequestDoneVersionValue(Version readVersion) {
+	BinaryWriter wr(IncludeVersion());
+	wr << readVersion;
+	return wr.toValue();
+}
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value) {
+	Version v;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> v;
+	return v;
+}
+
+const Key restoreRequestKeyFor(int const& index) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(restoreRequestKeys.begin);
+	wr << index;
+	return wr.toValue();
+}
+
+const Value restoreRequestValue(RestoreRequest const& request) {
+	BinaryWriter wr(IncludeVersion());
+	wr << request;
+	return wr.toValue();
+}
+
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
+	RestoreRequest s;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	return s;
+}
+
+// TODO: Register restore performance data to restoreStatus key
+const Key restoreStatusKeyFor(StringRef statusType) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(restoreStatusKey);
+	wr << statusType;
+	return wr.toValue();
+}
+
+const Value restoreStatusValue(double val) {
+	BinaryWriter wr(IncludeVersion());
+	wr << StringRef(std::to_string(val));
+	return wr.toValue();
+}
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
 const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");

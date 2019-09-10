@@ -31,8 +31,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInter
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
 }
 
-ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag )
-			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), rawLength(rawLength), hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false)
+ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag )
+			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false)
 {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
@@ -44,7 +44,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
-	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, rawLength, hasMsg, poppedVersion, tag ) );
+	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag ) );
 }
 
 void ILogSystem::ServerPeekCursor::setProtocolVersion( ProtocolVersion version ) {
@@ -70,7 +70,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == -1) {
+	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
 		// A version
 		int32_t dummy;
 		Version ver;
@@ -89,31 +89,29 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		ASSERT(!rd.empty());
 	}
 
-	uint16_t tagCount;
-	rd.checkpoint();
-	rd >> messageLength >> messageVersion.sub >> tagCount;
-	tags.resize(tagCount);
-	for(int i = 0; i < tagCount; i++) {
-		rd >> tags[i];
-	}
-	rawLength = messageLength + sizeof(messageLength);
-	messageLength -= (sizeof(messageVersion.sub) + sizeof(tagCount) + tagCount*sizeof(Tag));
+	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
+	// Rewind and consume the header so that reader() starts from the message.
+	rd.rewind();
+	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
 	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessage() {
 	//TraceEvent("SPC_GetMessage", randomID);
-	return StringRef( (uint8_t const*)rd.readBytes(messageLength), messageLength);
+	StringRef message = messageAndTags.getMessageWithoutTags();
+	rd.readBytes(message.size()); // Consumes the message.
+	return message;
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
-	rd.rewind();
-	return StringRef( (uint8_t const*)rd.readBytes(rawLength), rawLength);
+	StringRef rawMessage = messageAndTags.getRawMessage();
+	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
+	return rawMessage;
 }
 
 const std::vector<Tag>& ILogSystem::ServerPeekCursor::getTags() {
-	return tags;
+	return messageAndTags.tags;
 }
 
 void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {

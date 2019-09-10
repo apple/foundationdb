@@ -32,6 +32,7 @@
 
 enum class TaskPriority {
 	Max = 1000000,
+	ASIOReactor = 20001,
 	RunCycleFunction = 20000,
 	FlushTrace = 10500,
 	WriteSocket = 10000,

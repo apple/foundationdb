@@ -1031,8 +1031,10 @@ public:
 			restorable.ranges = ranges;
 
 			// No logs needed if there is a complete key space snapshot at the target version.
-			if(snapshot.get().beginVersion == snapshot.get().endVersion && snapshot.get().endVersion == targetVersion)
+			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
+			    snapshot.get().endVersion == targetVersion) {
 				return Optional<RestorableFileSet>(restorable);
+			}
 
 			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 

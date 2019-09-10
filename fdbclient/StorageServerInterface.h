@@ -30,6 +30,20 @@
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
+// Dead code, removed in the next protocol version
+struct VersionReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	Version version;
+	VersionReply() = default;
+	explicit VersionReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;
 	enum { BUSY_ALLOWED = 0, BUSY_FORCE = 1, BUSY_LOCAL = 2 };
@@ -139,14 +153,27 @@ struct GetValueRequest : TimedRequest {
 	}
 };
 
+struct WatchValueReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	Version version;
+	WatchValueReply() = default;
+	explicit WatchValueReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
 	Key key;
 	Optional<Value> value;
 	Version version;
 	Optional<UID> debugID;
-	ReplyPromise< Version > reply;
-	
+	ReplyPromise<WatchValueReply> reply;
+
 	WatchValueRequest(){}
 	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<UID> debugID) : key(key), value(value), version(ver), debugID(debugID) {}
 	
@@ -218,6 +245,20 @@ struct GetKeyRequest : TimedRequest {
 	}
 };
 
+struct GetShardStateReply {
+	constexpr static FileIdentifier file_identifier = 0;
+
+	Version first;
+	Version second;
+	GetShardStateReply() = default;
+	GetShardStateReply(Version first, Version second) : first(first), second(second) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, first, second);
+	}
+};
+
 struct GetShardStateRequest {
 	constexpr static FileIdentifier file_identifier = 15860168;
 	enum waitMode {
@@ -228,7 +269,7 @@ struct GetShardStateRequest {
 	
 	KeyRange keys;
 	int32_t mode;
-	ReplyPromise< std::pair<Version,Version> > reply;
+	ReplyPromise<GetShardStateReply> reply;
 	GetShardStateRequest() {}
 	GetShardStateRequest( KeyRange const& keys, waitMode mode ) : keys(keys), mode(mode) {}
 

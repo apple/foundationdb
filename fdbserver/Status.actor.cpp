@@ -388,6 +388,13 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 	return machineMap;
 }
 
+JsonBuilderObject getLagObject(int64_t versions) {
+	JsonBuilderObject lag;
+	lag["versions"] = versions;
+	lag["seconds"] = versions / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+	return lag;
+}
+
 struct MachineMemoryInfo {
 	double memoryUsage;
 	double numProcesses;
@@ -474,17 +481,8 @@ struct RolesInfo {
 				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyMetrics);
 			}
 
-			JsonBuilderObject dataLag;
-			dataLag["versions"] = versionLag;
-			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-			dataLag["seconds"] = dataLagSeconds;
-
-			JsonBuilderObject durabilityLag;
-			durabilityLag["versions"] = version - durableVersion;
-			durabilityLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-
-			obj["data_lag"] = dataLag;
-			obj["durability_lag"] = durabilityLag;
+			obj["data_lag"] = getLagObject(versionLag);
+			obj["durability_lag"] = getLagObject(version - durableVersion);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
@@ -551,6 +549,11 @@ struct RolesInfo {
 	JsonBuilderObject& addRole(std::string const& role, InterfaceType& iface) {
 		return addRole(iface.address(), role, iface.id());
 	}
+	JsonBuilderObject& addCoordinatorRole(NetworkAddress addr) {
+		JsonBuilderObject obj;
+		obj["role"] = "coordinator";
+		return roles.insert(std::make_pair(addr, obj))->second;
+	}
 	JsonBuilderArray getStatusForAddress( NetworkAddress a ) {
 		JsonBuilderArray v;
 		auto it = roles.lower_bound(a);
@@ -565,10 +568,11 @@ struct RolesInfo {
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Reference<AsyncVar<struct ServerDBInfo>> db, std::vector<WorkerDetails> workers, WorkerEvents pMetrics,
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
-	WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
+    WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    Database cx, Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
+    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration, 
+    Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 
@@ -647,6 +651,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				}
 			}
 		}
+	}
+
+	for(auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+		roles.addCoordinatorRole(coordinator);
 	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
@@ -1150,8 +1158,9 @@ struct LoadConfigurationResult {
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
+	bool dataDistributionDisabled;
 
-	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false) {}
+	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
@@ -1193,12 +1202,13 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 			}
 			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
 			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored))) {
+				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
 							unreplicated++;
 						}
 					}
@@ -1206,12 +1216,23 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 					if(healthyZoneValue.get().present()) {
 						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if(healthyZone.second > tr.getReadVersion().get()) {
+						if(healthyZone.first == ignoreSSFailuresZoneString) {
+							res.healthyZone = healthyZone.first;
+						}
+						else if(healthyZone.second > tr.getReadVersion().get()) {
 							res.healthyZone = healthyZone.first;
 							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+					if (ddModeKey.get().present()) {
+						BinaryReader rd(ddModeKey.get().get(), Unversioned());
+						int currentMode;
+						rd >> currentMode;
+						if (currentMode == 0) {
+							res.dataDistributionDisabled = true;
+						}
+					}
 					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
@@ -1611,8 +1632,15 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
 			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
 			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
+
+			// TODO: These can be removed in the next release after 6.2
 			(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
 			(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
+
+			(*qos)["worst_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerVersionLag"));
+			(*qos)["limiting_data_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerVersionLag"));
+			(*qos)["worst_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("WorstStorageServerDurabilityLag"));
+			(*qos)["limiting_durability_lag_storage_server"] = getLagObject(ratekeeper.getInt64("LimitingStorageServerDurabilityLag"));
 		}
 
 		if(tlogCount > 0) {
@@ -2173,6 +2201,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (loadResult.get().rebalanceDDIgnored) {
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
 			}
+			if (loadResult.get().dataDistributionDisabled) {
+				statusObj["data_distribution_disabled"] = true;
+			}
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
@@ -2207,7 +2238,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
-
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
@@ -2293,8 +2323,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies, cx,
-		                                                            configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
+		                                                            processIssues, storageServers, tLogs, proxies, 
+		                                                            coordinators, cx, configuration, 
+		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
@@ -2304,11 +2335,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-
-		StatusObject datacenterLag;
-		datacenterLag["versions"] = datacenterVersionDifference;
-		datacenterLag["seconds"] = datacenterVersionDifference / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-		statusObj["datacenter_lag"] = datacenterLag;
+		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int totalDegraded = 0;
 		for(auto& it : workers) {

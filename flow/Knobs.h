@@ -92,6 +92,8 @@ public:
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 
+	int NETWORK_TEST_REPLY_SIZE;
+
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
@@ -194,6 +196,8 @@ public:
 	double FUTURE_VERSION_INITIAL_BACKOFF;
 	double FUTURE_VERSION_MAX_BACKOFF;
 	double FUTURE_VERSION_BACKOFF_GROWTH;
+	int LOAD_BALANCE_MAX_BAD_OPTIONS;
+	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
 	FlowKnobs(bool randomize = false, bool isSimulated = false);
 };

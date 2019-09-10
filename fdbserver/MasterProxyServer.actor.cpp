@@ -128,7 +128,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
 			*outBatchTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("BatchRate", 0).detail("Lease", "Expired");
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
@@ -156,10 +156,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				stats->txnBatchPriorityStartIn += req.transactionCount;
 
 			if (transactionQueue->empty()) {
-				if (now() - *lastGRVTime > *GRVBatchTime)
-					*lastGRVTime = now() - *GRVBatchTime;
-
-				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskPriority::ProxyGRVTimer));
+				forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
 			}
 
 			transactionQueue->push(std::make_pair(req, counter--));
@@ -1108,7 +1105,9 @@ struct TransactionRateInfo {
 	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
 
 	void reset(double elapsed) {
-		limit = std::min(0.0,limit) + std::min(rate * elapsed, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
+		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
+		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
+		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
 
 	bool canStart(int64_t numAlreadyStarted) {
@@ -1170,7 +1169,7 @@ ACTOR static Future<Void> transactionStarter(
 		waitNext(GRVTimer.getFuture());
 		// Select zero or more transactions to start
 		double t = now();
-		double elapsed = std::min<double>(now() - lastGRVTime, SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX);
+		double elapsed = now() - lastGRVTime;
 		lastGRVTime = t;
 
 		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
@@ -1466,7 +1465,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_WhiteListCheckFailed")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw transaction_not_permitted();
+			throw snap_path_not_whitelisted();
 		}
 		// db fully recovered check
 		if (commitData->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
@@ -1478,7 +1477,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_ClusterNotFullyRecovered")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw cluster_not_fully_recovered();
+			throw snap_not_fully_recovered_unsupported();
 		}
 
 		auto result =
@@ -1493,7 +1492,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_LogAnitQuorumNotSupported")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw txn_exec_log_anti_quorum();
+			throw snap_log_anti_quorum_unsupported();
 		}
 
 		// send a snap request to DD
