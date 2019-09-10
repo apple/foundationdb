@@ -833,6 +833,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					else
 						nTries++;
 				}
+				// In case we are very unlucky and didn't choose a feasible random team
+				if (randomTeams.size() == 0 && !self->zeroHealthyTeams->get()) {
+					for (auto& dest : self->teams) {
+						bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+						for(int i=0; ok && i<randomTeams.size(); i++) {
+							if (randomTeams[i].second->getServerIDs() == dest->getServerIDs()) {
+								ok = false;
+							}
+						}
+							
+						if (ok) {
+							randomTeams.push_back( std::make_pair( NONE_SHARED, dest ) );
+						}
+
+						if (randomTeams.size() >= SERVER_KNOBS->BEST_TEAM_OPTION_COUNT) {
+							break;
+						}
+					}
+				}
 
 				for( int i = 0; i < randomTeams.size(); i++ ) {
 					int64_t loadBytes = randomTeams[i].first * randomTeams[i].second->getLoadBytes(true, req.inflightPenalty);
