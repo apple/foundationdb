@@ -893,10 +893,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					}
 				}
 			}
-			// if (!bestOption.present()) {
-			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
-			// 	self->traceAllInfo(true);
-			// }
+			if (!bestOption.present()) {
+				TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
+				self->traceAllInfo(true);
+			}
 
 			req.reply.send( bestOption );
 
@@ -1305,6 +1305,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
+				.detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
