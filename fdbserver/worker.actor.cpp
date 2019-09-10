@@ -75,9 +75,21 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
+ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	loop {
+		info->set( db->get().read().client );
+		wait( db->onChange() );
+	}
+}
+
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
+}
+
+Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().read().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
 struct ErrorInfo {
@@ -725,11 +737,12 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		}
 
 		choose {
-			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
-				.detail("RatekeeperID", ni.ratekeeper.present() ? ni.ratekeeper.get().id() : UID())
-				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
-				ServerDBInfo localInfo = ni;
+			when( CachedSerialization<ServerDBInfo> ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
+				ServerDBInfo localInfo = ni.read();
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+				
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}

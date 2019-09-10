@@ -464,6 +464,100 @@ private:
 	}
 };
 
+template <class T>
+class CachedSerialization {
+public:
+	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+
+	enum class SerializeType { None, Binary, Object };
+
+	CachedSerialization() : cacheType(SerializeType::None) {}
+	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
+	
+	const T& read() const { return data; }
+
+	T& mutate() {
+		cacheType = SerializeType::None;
+		return data;
+	}
+
+	//This should only be called from the ObjectSerializer load function
+	Standalone<StringRef> getCache() const {
+		if(cacheType != SerializeType::Object) {
+			cache = ObjectWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+			cacheType = SerializeType::Object;
+		}
+		return cache;
+	}
+
+	bool operator == (CachedSerialization<T> const& rhs) const {
+		return data == rhs.data;
+	}
+	bool operator != (CachedSerialization<T> const& rhs) const {
+		return !(*this == rhs);
+	}
+	bool operator < (CachedSerialization<T> const& rhs) const {
+		return data < rhs.data;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if(Ar::isDeserializing) { 
+			cache = Standalone<StringRef>();
+			cacheType = SerializeType::None;
+			serializer(ar, data);
+		} else {
+			if(cacheType != SerializeType::Binary) {
+				cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+				cacheType = SerializeType::Binary;
+			}
+			ar.serializeBytes( const_cast<uint8_t *>(cache.begin()), cache.size() );
+		}
+	}
+
+private:
+	T data;
+	mutable SerializeType cacheType;
+	mutable Standalone<StringRef> cache; 
+};
+
+// this special case is needed - the code expects
+// Standalone<T> and T to be equivalent for serialization
+namespace detail {
+
+template <class T, class Context>
+struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
+	LoadSaveHelper(const Context& context)
+		: Context(context), helper(context) {}
+
+	void load(CachedSerialization<T>& member, const uint8_t* current) {
+		helper.load(member.mutate(), current);
+	}
+
+	template <class Writer>
+	RelativeOffset save(const CachedSerialization<T>& member, Writer& writer, const VTableSet* vtables) {
+		auto cache = member.getCache();
+		writer.write(cache.begin(), writer.current_buffer_size + cache.size(), cache.size());
+		return RelativeOffset{ writer.current_buffer_size };
+	}
+
+private:
+	LoadSaveHelper<T, Context> helper;
+};
+
+} // namespace detail
+
+template<class V>
+struct scalar_traits<CachedSerialization<V>> : std::true_type {
+	constexpr static size_t size = 0;
+	template <class Context>
+	static void save(uint8_t*, const CachedSerialization<V>&, Context&) {}
+	// Context is an arbitrary type that is plumbed by reference throughout
+	// the load call tree.
+	template <class Context>
+	static void load(const uint8_t*, CachedSerialization<V>&, Context& context) {}
+};
+
 // A known-length memory segment and an unknown-length memory segment which can be written to as a whole.
 struct SplitBuffer {
 	void write(const void* data, int length);
