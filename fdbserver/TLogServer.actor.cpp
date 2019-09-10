@@ -1027,6 +1027,8 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 		if(logData->version_sizes.empty()) {
 			nextVersion = logData->version.get();
 		} else {
+			// Double check that a running TLog wasn't wrongly affected by spilling locked SharedTLogs.
+			ASSERT_WE_THINK(self->targetVolatileBytes == SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 			Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
 			while( totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
 			       sizeItr != logData->version_sizes.end()
@@ -2601,21 +2603,10 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 	}
 }
 
-// Start the tLog role for a worker
-ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
-	state TLogInterface recruited(self->dbgid, locality);
-	recruited.initEndpoints();
-
-	DUMPTOKEN( recruited.peekMessages );
-	DUMPTOKEN( recruited.popMessages );
-	DUMPTOKEN( recruited.commit );
-	DUMPTOKEN( recruited.lock );
-	DUMPTOKEN( recruited.getQueuingMetrics );
-	DUMPTOKEN( recruited.confirmRunning );
-
+void stopAllTLogs( TLogData* self, UID newLogId ) {
 	for(auto it : self->id_data) {
 		if( !it.second->stopped ) {
-			TraceEvent("TLogStoppedByNewRecruitment", self->dbgid).detail("LogId", it.second->logId).detail("StoppedId", it.first.toString()).detail("RecruitedId", recruited.id()).detail("EndEpoch", it.second->logSystem->get().getPtr() != 0);
+			TraceEvent("TLogStoppedByNewRecruitment", self->dbgid).detail("LogId", it.second->logId).detail("StoppedId", it.first.toString()).detail("RecruitedId", newLogId).detail("EndEpoch", it.second->logSystem->get().getPtr() != 0);
 			if(!it.second->isPrimary && it.second->logSystem->get()) {
 				it.second->removed = it.second->removed && it.second->logSystem->get()->endEpoch();
 			}
@@ -2629,6 +2620,21 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		}
 		it.second->stopCommit.trigger();
 	}
+}
+
+// Start the tLog role for a worker
+ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
+	state TLogInterface recruited(self->dbgid, locality);
+	recruited.initEndpoints();
+
+	DUMPTOKEN( recruited.peekMessages );
+	DUMPTOKEN( recruited.popMessages );
+	DUMPTOKEN( recruited.commit );
+	DUMPTOKEN( recruited.lock );
+	DUMPTOKEN( recruited.getQueuingMetrics );
+	DUMPTOKEN( recruited.confirmRunning );
+
+	stopAllTLogs(self, recruited.id());
 
 	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.spillType, req.allTags) );
 	self->id_data[recruited.id()] = logData;
@@ -2750,7 +2756,10 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 	if (activeSharedTLog->get() != tlogId) {
 		// TODO: This should fully spill, but currently doing so will cause us to no longer update poppedVersion
 		// and QuietDatabase will hang thinking our TLog is behind.
+		TraceEvent("SharedTLogBeginSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
 		self->targetVolatileBytes = SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT * 2;
+	} else {
+		TraceEvent("SharedTLogSkipSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
 	}
 	return Void();
 }
@@ -2791,8 +2800,11 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 				when ( wait( error ) ) { throw internal_error(); }
 				when ( wait( activeSharedTLog->onChange() ) ) {
 					if (activeSharedTLog->get() == tlogId) {
+						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
 						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
 					} else {
+						stopAllTLogs(&self, tlogId);
+						TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
 						self.sharedActors.send( startSpillingInTenSeconds(&self, tlogId, activeSharedTLog) );
 					}
 				}

@@ -942,6 +942,7 @@ ACTOR Future<Void> workerServer(
 				tl = handleIOErrors( tl, queue, s.storeID );
 				if(!logData.actor.isValid() || logData.actor.isReady()) {
 					logData.actor = oldLog.getFuture() || tl;
+					logData.uid = s.storeID;
 				}
 				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
