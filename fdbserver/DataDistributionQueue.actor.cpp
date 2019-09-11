@@ -1204,7 +1204,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 				if (randomTeam.present()) {
 					// Destination team must be healthy and have healthyFreeSpace, otherwise, BestTeamStuck may occur
 					if (randomTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF &&
-						randomTeam.get()->hasHealthyFreeSpace()) {
+					    randomTeam.get()->hasHealthyFreeSpace()) {
 						state Optional<Reference<IDataDistributionTeam>> loadedTeam =
 						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 						        GetTeamRequest(true, true, false))));
@@ -1276,9 +1276,9 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
 					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true))));
 					if (unloadedTeam.present()) {
-						// Destination team must be healthy and have healthyFreeSpace, otherwise, BestTeamStuck may occur
+						// Destination team must be healthy and healthyFreeSpace, otherwise, BestTeamStuck may occur
 						if (unloadedTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF &&
-							unloadedTeam.get()->hasHealthyFreeSpace()) {
+						    unloadedTeam.get()->hasHealthyFreeSpace()) {
 							bool moved =
 							    wait(rebalanceTeams(self, PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
 							                        unloadedTeam.get(), teamCollectionIndex == 0));

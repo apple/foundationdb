@@ -1285,7 +1285,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-				.detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
+			    .detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}

@@ -118,7 +118,8 @@ struct GetTeamRequest {
 	std::string getDesc() {
 		std::stringstream ss;
 
-		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
+		   << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "Sources:";
 		for (auto& s : sources) {
 			ss << s.toString() << ",";
