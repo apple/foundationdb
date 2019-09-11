@@ -1110,7 +1110,7 @@ uint8_t* save(Context& context, const Root& root, FileIdentifier file_identifier
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier, context);
 	uint8_t* out = context.allocate(precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ context, precompute_size.current_buffer_size, vtable_start, out,
-		                         precompute_size.writeToOffsets.begin() };
+														precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier, context);
 	return out;
 }
@@ -1122,10 +1122,14 @@ void load(Root& root, const uint8_t* in, Context& context) {
 
 } // namespace detail
 
-template <class Context, class... Members>
-uint8_t* save_members(Context& context, FileIdentifier file_identifier, Members&... members) {
-	const auto& root = detail::fake_root(members...);
-	return detail::save(context, root, file_identifier);
+template <class Context, class FirstMember, class... Members>
+uint8_t* save_members(Context& context, FileIdentifier file_identifier, FirstMember& first, Members&... members) {
+	if constexpr (serialize_raw<FirstMember>::value) {
+		return serialize_raw<FirstMember>::save_raw(context, first);
+	} else {
+		const auto& root = detail::fake_root(first, members...);
+		return detail::save(context, root, file_identifier);
+	}
 }
 
 template <class Context, class... Members>
