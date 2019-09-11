@@ -1286,7 +1286,7 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID k
 
 	while (db->serverInfo->get().read().id == knownServerInfoID) {
 		choose {
-			when (wait( db->serverInfo->onChange() )) {}
+			when (wait( yieldedFuture(db->serverInfo->onChange()) )) {}
 			when (wait( delayJittered( 300 ) )) { break; }  // The server might be long gone!
 		}
 	}

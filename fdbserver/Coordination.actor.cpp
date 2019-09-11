@@ -220,7 +220,7 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 
 	while (db->clientInfo->get().read().id == req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
 		choose {
-			when (wait( db->clientInfo->onChange() )) {}
+			when (wait( yieldedFuture(db->clientInfo->onChange()) )) {}
 			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }  // The client might be long gone!
 		}
 	}
@@ -317,8 +317,10 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 			req.reply.send( Void() );
-			ASSERT(!hasConnectedClients->get());
-			return Void();
+			if(!hasConnectedClients->get()) {
+				return Void();
+			}
+			nextInterval = Future<Void>();
 		}
 		when ( wait(nextInterval.isValid() ? nextInterval : Never()) ) {
 			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
