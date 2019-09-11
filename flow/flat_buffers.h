@@ -1162,6 +1162,7 @@ struct EnsureTable
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (is_fb_function<Archive>) {
+			// This is only for vtable collection. Load and save use the LoadSaveHelper specialization below
 			if constexpr (detail::expect_serialize_member<T>) {
 				if constexpr (serializable_traits<T>::value) {
 					serializable_traits<T>::serialize(ar, t);
@@ -1176,7 +1177,41 @@ struct EnsureTable
 		}
 	}
 	T& asUnderlyingType() { return t; }
+	const T& asUnderlyingType() const { return t; }
 
 private:
 	T t;
 };
+
+namespace detail {
+
+// Ensure if there's a LoadSaveHelper specialization available for T it gets used.
+template <class T, class Context>
+struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
+	LoadSaveHelper(const Context& context) : Context(context), alreadyATable(context), wrapInTable(context) {}
+
+	void load(EnsureTable<T>& member, const uint8_t* current) {
+		if constexpr (expect_serialize_member<T>) {
+			alreadyATable.load(member.asUnderlyingType(), current);
+		} else {
+			FakeRoot<T> t{ member.asUnderlyingType() };
+			wrapInTable.load(t, current);
+		}
+	}
+
+	template <class Writer>
+	RelativeOffset save(const EnsureTable<T>& member, Writer& writer, const VTableSet* vtables) {
+		if constexpr (expect_serialize_member<T>) {
+			return alreadyATable.save(member.asUnderlyingType(), writer, vtables);
+		} else {
+			FakeRoot<T> t{ const_cast<T&>(member.asUnderlyingType()) };
+			return wrapInTable.save(t, writer, vtables);
+		}
+	}
+
+private:
+	LoadSaveHelper<T, Context> alreadyATable;
+	LoadSaveHelper<FakeRoot<T>, Context> wrapInTable;
+};
+
+} // namespace detail
