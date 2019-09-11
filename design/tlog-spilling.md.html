@@ -1,27 +1,5 @@
 <meta charset="utf-8">
 
-In what will be FDB 6.1, a new way for TLogs to spill will be introduced.  The
-code to this will be tricking in as a series of PRs over the next week or two.
-It's currently still undetermined if this will be left as only used for
-satellite TLogs in Multi-DC configurations (what it was originally written
-for), or set as the default for all transaction logs in 6.1.  
-
-
-I'm posting this document to:
-
-1. Make people aware of the coming changes
-2. Document how it works, for anyone changing or debugging related code
-3. Win "longest post" award.
-4. Solicit feedback on the operational side of this work.
-
-And my personal motivations are largely the last one.  I'm interested in comments on things like:
-
-1. Are all the metrics required for monitoring the new spilling method mentioned?
-2. Are all the behaviors that you'd be interested mentioned as knobs or configurable?
-3. Does this work introduce new opportunities for problems that weren't mentioned, or insufficiently mitigated.
-
----
-
 # TLog Spill-By-Reference Design
 
 ## Background
