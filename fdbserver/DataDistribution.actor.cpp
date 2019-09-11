@@ -833,6 +833,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						nTries++;
 				}
 
+				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
+				if (g_network->isSimulated() && randomTeams.empty() && !self->zeroHealthyTeams->get()) {
+					TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
+				}
+
 				for( int i = 0; i < randomTeams.size(); i++ ) {
 					int64_t loadBytes = randomTeams[i].first * randomTeams[i].second->getLoadBytes(true, req.inflightPenalty);
 					if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
