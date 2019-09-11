@@ -274,6 +274,7 @@ namespace actorcompiler
         string sourceFile;
         List<StateVar> state;
         List<CallbackVar> callbacks = new List<CallbackVar>();
+        bool isTopLevel;
         const string loopDepth0 = "int loopDepth=0";
         const string loopDepth = "int loopDepth";
         const int codeIndent = +2;
@@ -284,10 +285,11 @@ namespace actorcompiler
         string This;
         bool generateProbes;
 
-        public ActorCompiler(Actor actor, string sourceFile, bool lineNumbersEnabled, bool generateProbes)
+        public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled, bool generateProbes)
         {
             this.actor = actor;
             this.sourceFile = sourceFile;
+            this.isTopLevel = isTopLevel;
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
 
@@ -304,8 +306,8 @@ namespace actorcompiler
                     actor.name.Substring(0, 1).ToUpper(),
                     actor.name.Substring(1),
                     i != 0 ? i.ToString() : "",
-                    actor.enclosingClass != null ? actor.enclosingClass.Replace("::", "_") + "_"
-                    : actor.nameSpace != null ? actor.nameSpace.Replace("::", "_") + "_"
+                      actor.enclosingClass != null && actor.isForwardDeclaration ? actor.enclosingClass.Replace("::", "_") + "_"
+                    : actor.nameSpace != null                                    ? actor.nameSpace.Replace("::", "_") + "_"
                     : "");
                 if (actor.isForwardDeclaration || usedClassNames.Add(className))
                     break;
@@ -356,6 +358,8 @@ namespace actorcompiler
             }
             bodyContext.catchFErr.WriteLine("loopDepth = 0;");
 
+            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("namespace {");
+
             // The "State" class contains all state and user code, to make sure that state names are accessible to user code but
             // inherited members of Actor, Callback etc are not.
             writer.WriteLine("// This generated class is to be used only via {0}()", actor.name);
@@ -400,6 +404,7 @@ namespace actorcompiler
             //WriteStartFunc(body, writer);
             WriteCancelFunc(writer);
             writer.WriteLine("};");
+            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("}"); // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
             foreach (string attribute in actor.attributes) {
