@@ -54,13 +54,13 @@ class DirectoryTest(Test):
 
     def generate_layer(self):
         if random.random() < 0.7:
-            return ''
+            return b''
         else:
             choice = random.randint(0, 3)
             if choice == 0:
-                return 'partition'
+                return b'partition'
             elif choice == 1:
-                return 'test_layer'
+                return b'test_layer'
             else:
                 return self.random.random_string(random.randint(0, 5))
 
@@ -98,7 +98,7 @@ class DirectoryTest(Test):
 
         instructions.append('NEW_TRANSACTION')
 
-        default_path = unicode('default%d' % self.next_path)
+        default_path = 'default%d' % self.next_path
         self.next_path += 1
         self.dir_list = directory_util.setup_directories(instructions, default_path, self.random)
         self.root = self.dir_list[0]
@@ -114,7 +114,7 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False, is_partition=(layer=='partition'))))
+            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False, is_partition=(layer==b'partition'))))
             # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
             #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
@@ -199,7 +199,7 @@ class DirectoryTest(Test):
 
             elif root_op == 'DIRECTORY_CREATE':
                 layer = self.generate_layer()
-                is_partition = layer == 'partition'
+                is_partition = layer == b'partition'
 
                 prefix = generate_prefix(require_unique=is_partition and args.concurrency==1, is_partition=is_partition, min_length=0)
 
@@ -256,7 +256,7 @@ class DirectoryTest(Test):
                     self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
-                if dir_entry.state.is_directory and not dir_entry.state.is_subspace and old_path == (u'',):
+                if dir_entry.state.is_directory and not dir_entry.state.is_subspace and old_path == ('',):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == 'DIRECTORY_MOVE_TO':
@@ -291,7 +291,7 @@ class DirectoryTest(Test):
                 dir_entry.delete(path)
 
                 # Make sure that the default directory subspace still exists after removing the specified directory
-                if path == () or (dir_entry.state.is_directory and not dir_entry.state.is_subspace and path == (u'',)):
+                if path == () or (dir_entry.state.is_directory and not dir_entry.state.is_subspace and path == ('',)):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == 'DIRECTORY_LIST' or root_op == 'DIRECTORY_EXISTS':
@@ -392,15 +392,15 @@ def generate_path(min_length=0):
     path = ()
     for i in range(length):
         if random.random() < 0.05:
-            path = path + (u'',)
+            path = path + ('',)
         else:
-            path = path + (random.choice([u'1', u'2', u'3']),)
+            path = path + (random.choice(['1', '2', '3']),)
 
     return path
 
 
 def generate_prefix(require_unique=False, is_partition=False, min_length=1):
-    fixed_prefix = 'abcdefg'
+    fixed_prefix = b'abcdefg'
     if not require_unique and min_length == 0 and random.random() < 0.8:
         return None
     elif require_unique or is_partition or min_length > len(fixed_prefix) or random.random() < 0.5:
@@ -409,13 +409,13 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
 
         length = random.randint(min_length, min_length+5)
         if length == 0:
-            return ''
+            return b''
 
         if not is_partition:
-            first = chr(random.randint(ord('\x1d'), 255) % 255)
-            return first + ''.join(chr(random.randrange(0, 256)) for i in range(0, length - 1))
+            first = random.randint(ord('\x1d'), 255) % 255
+            return bytes([first] + [random.randrange(0, 256) for i in range(0, length - 1)])
         else:
-            return ''.join(chr(random.randrange(ord('\x02'), ord('\x14'))) for i in range(0, length))
+            return bytes([random.randrange(ord('\x02'), ord('\x14')) for i in range(0, length)])
     else:
         prefix = fixed_prefix 
         generated = prefix[0:random.randrange(min_length, len(prefix))]
