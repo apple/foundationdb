@@ -273,23 +273,27 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if(Ar::isDeserializing) { 
-			cache = Standalone<StringRef>();
-			cacheType = SerializeType::None;
-			serializer(ar, data);
+		if constexpr (is_fb_function<Ar>) {
+			// Suppress vtable collection. Save and load are implemented via the specializations below
 		} else {
-			if(cacheType != SerializeType::Binary) {
-				cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
-				cacheType = SerializeType::Binary;
+			if (Ar::isDeserializing) {
+				cache = Standalone<StringRef>();
+				cacheType = SerializeType::None;
+				serializer(ar, data);
+			} else {
+				if (cacheType != SerializeType::Binary) {
+					cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+					cacheType = SerializeType::Binary;
+				}
+				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
 			}
-			ar.serializeBytes( const_cast<uint8_t *>(cache.begin()), cache.size() );
 		}
 	}
 
 private:
 	T data;
 	mutable SerializeType cacheType;
-	mutable Standalone<StringRef> cache; 
+	mutable Standalone<StringRef> cache;
 };
 
 // this special case is needed - the code expects
@@ -319,23 +323,14 @@ private:
 template <class V>
 struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_type {
 	template <class Context>
-	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) { 
-		auto cache = obj.present() ? obj.get().getCache() : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()), AssumeVersion(currentProtocolVersion));
+	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) {
+		auto cache = obj.present() ? obj.get().asUnderlyingType().getCache()
+		                           : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()),
+		                                                   AssumeVersion(currentProtocolVersion));
 		uint8_t* out = context.allocate(cache.size());
 		memcpy(out, cache.begin(), cache.size());
 		return out;
 	}
-};
-
-template<class V>
-struct scalar_traits<CachedSerialization<V>> : std::true_type {
-	constexpr static size_t size = 0;
-	template <class Context>
-	static void save(uint8_t*, const CachedSerialization<V>&, Context&);
-	// Context is an arbitrary type that is plumbed by reference throughout
-	// the load call tree.
-	template <class Context>
-	static void load(const uint8_t*, CachedSerialization<V>&, Context& context);
 };
 
 template <class T>

@@ -1123,11 +1123,12 @@ void load(Root& root, const uint8_t* in, Context& context) {
 } // namespace detail
 
 template <class Context, class FirstMember, class... Members>
-uint8_t* save_members(Context& context, FileIdentifier file_identifier, FirstMember& first, Members&... members) {
+uint8_t* save_members(Context& context, FileIdentifier file_identifier, const FirstMember& first,
+                      const Members&... members) {
 	if constexpr (serialize_raw<FirstMember>::value) {
 		return serialize_raw<FirstMember>::save_raw(context, first);
 	} else {
-		const auto& root = detail::fake_root(first, members...);
+		const auto& root = detail::fake_root(const_cast<FirstMember&>(first), const_cast<Members&>(members)...);
 		return detail::save(context, root, file_identifier);
 	}
 }
