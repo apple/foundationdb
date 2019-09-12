@@ -890,9 +890,8 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
 	std::map<Key, ClientStats> maxSupportedProtocol;
 
-
-	for(auto iter = clientStatusMap->begin(); iter != clientStatusMap->end(); ++iter) {
-		if( now() - iter->second.first < 2*SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) {
+	for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
+		if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 			clientCount += iter->second.second.clientCount;
 			for(auto& it : iter->second.second.issues) {
 				auto& issue = issues[it.item];
@@ -909,6 +908,7 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 				protocolVersion.count += it.count;
 				protocolVersion.examples.insert(it.examples.begin(), it.examples.end());
 			}
+			++iter;
 		} else {
 			iter = clientStatusMap->erase(iter);
 		}
@@ -1926,8 +1926,8 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 	try {
 		std::map<std::string, std::pair<int, std::vector<std::string>>> deduplicatedIssues;
 
-		for( auto iter = clientStatusMap->begin(); iter != clientStatusMap->end(); ++iter) {
-			if( now() - iter->second.first < 2*SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL ) {
+		for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
+			if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 				for (auto& issue : iter->second.second.issues) {
 					auto& t = deduplicatedIssues[issue.item.toString()];
 					t.first += issue.count;
@@ -1935,6 +1935,7 @@ static JsonBuilderArray getClientIssuesAsMessages( std::map<NetworkAddress, std:
 						t.second.push_back(formatIpPort(example.first.ip, example.first.port));
 					}
 				}
+				++iter;
 			} else {
 				iter = clientStatusMap->erase(iter);
 			}

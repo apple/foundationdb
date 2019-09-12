@@ -831,10 +831,6 @@ static void printAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -920,10 +916,6 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -981,10 +973,6 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1029,10 +1017,6 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -1079,10 +1063,6 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
