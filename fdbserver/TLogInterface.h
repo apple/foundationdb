@@ -51,9 +51,9 @@ struct TLogInterface {
 
 	
 	TLogInterface() {}
-	explicit TLogInterface(LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
