@@ -32,6 +32,7 @@
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
+	std::vector<Tag> tags; // TODO: remove this.
 
 	VersionedMessage(LogMessageVersion v, StringRef m) : version(v), message(m) {}
 	const Version getVersion() const { return version.version; }
@@ -112,20 +113,32 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
-// Debug function: to be removed.
-void parseMessage(StringRef message) {
+// Returns true if the message is a mutation that should be backuped, i.e.,
+// either key is not in system key space or is not a metadataVersionKey.
+bool isBackupMessage(const VersionedMessage& msg) {
+	for (Tag tag : msg.tags) {
+		if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
+			return false; // skip Txs mutations
+		}
+	}
 	// MutationRef m = BinaryReader::fromStringRef<MutationRef>(message, AssumeVersion(currentProtocolVersion));
 	// std::cout << m.toString() << std::endl;
-	std::cout << message.printable() << " : " << message.toHexString() << std::endl;
+	// std::cout << msg.message.printable() << std::endl;
+	// std::cout << "Tags: " << describe(msg.tags) << ", Version: " << msg.version.toString() << std::endl;
+	// if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey)
+	//	return false;
+	/*
 	BinaryReader reader(message.begin(), message.size(), Unversioned());
 	if (LogProtocolMessage::isNextIn(reader)) {
-		LogProtocolMessage lpm;
-		reader >> lpm;
+	    LogProtocolMessage lpm;
+	    reader >> lpm;
 	} else {
-		MutationRef m;
-		reader >> m;
-		std::cout << m.toString() << std::endl;
+	    MutationRef m;
+	    reader >> m;
+	    std::cout << m.toString() << std::endl;
 	}
+	*/
+	return true;
 }
 
 // Uploads self->messages to cloud storage and updates poppedVersion.
@@ -160,10 +173,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				state int idx = 0;
 				for (; idx < numMsg; idx++) {
 					// TODO: Endianness for version.version & version.sub
+					if (!isBackupMessage(self->messages[idx])) continue;
 					wait(logFile->append((void*)&self->messages[idx].version.version, sizeof(Version)));
 					wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(int32_t)));
-					// parseMessage(self->messages[idx].message);
-					wait(logFile->appendStringRefWithLen(self->messages[idx].message));
+					wait(logFile->append(self->messages[idx].message.begin(), self->messages[idx].message.size()));
 				}
 
 				self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
@@ -218,7 +231,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			self->messages.emplace_back(r->version(), r->getMessage());
+			self->messages.emplace_back(r->version(), r->getMessageWithTags());
+			self->messages.back().tags = r->getTags();
 			r->nextMessage();
 		}
 
