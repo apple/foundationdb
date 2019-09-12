@@ -155,7 +155,7 @@ struct OpenDatabaseCoordRequest {
 	UID knownClientInfoID;
 	Key clusterKey;
 	vector<NetworkAddress> coordinators;
-	ReplyPromise< struct ClientDBInfo > reply;
+	ReplyPromise< CachedSerialization<struct ClientDBInfo> > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -421,7 +421,8 @@ TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	TestContext context{arena};
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
-	out = save_members(context, file_identifier);
+	Y1 y1;
+	out = save_members(context, file_identifier, y1);
 	// print_buffer(out, arena.get_size(out));
 	ASSERT(read_file_identifier(out) == file_identifier);
 	return Void();
