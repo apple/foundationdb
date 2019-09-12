@@ -135,6 +135,8 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self, TaskPriority taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
+		if( self->hasMessage() )
+			return Void();
 		wait( Future<Void>(Never()));
 		throw internal_error();
 	}
@@ -153,6 +155,9 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}
+
+			if( self->hasMessage() )
+				return Void();
 
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ? self->futureResults.front() : Never() ) ) {
@@ -236,7 +241,7 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, TaskPr
 
 Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	//TraceEvent("SPC_GetMore", randomID).detail("HasMessage", hasMessage()).detail("More", !more.isValid() || more.isReady()).detail("MessageVersion", messageVersion.toString()).detail("End", end.toString());
-	if( hasMessage() )
+	if( hasMessage() && !parallelGetMore )
 		return Void();
 	if( !more.isValid() || more.isReady() ) {
 		if (parallelGetMore || onlySpilled || futureResults.size()) {
