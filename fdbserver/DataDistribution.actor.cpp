@@ -1810,7 +1810,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// The desired machine team number is not the same with the desired server team number
 			// in notEnoughTeamsForAServer() below, because the machineTeamRemover() does not
 			// remove a machine team with the most number of machine teams.
-			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine) {
+			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine && isMachineHealthy(m.second)) {
 				return true;
 			}
 		}
@@ -1831,7 +1831,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 		ASSERT(targetTeamNumPerServer > 0);
 		for (auto& s : server_info) {
-			if (s.second->teams.size() < targetTeamNumPerServer) {
+			if (s.second->teams.size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
 				return true;
 			}
 		}
