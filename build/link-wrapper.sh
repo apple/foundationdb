@@ -43,13 +43,23 @@ case $1 in
 
 	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL \$$2_LDFLAGS -o $3" )
 
-	if echo $OPTIONS | grep -q -- -static-libstdc\+\+ ; then
-	    OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ `$CC -print-file-name=libstdc++.a`\ -lm, )
+	if [[ "${OPTIONS}" == *"-static-libstdc++"* ]]; then
+	  staticlibs=()
+	  staticpaths=''
+	  if [[ "${CC}" == *"gcc"* ]]; then
+	    staticlibs+=('libstdc++.a')
+	  elif [[ "${CXX}" == *"clang++"* ]]; then
+	    staticlibs+=('libc++.a' 'libc++abi.a')
+	  fi
+    for staticlib in "${staticlibs[@]}"; do
+	    staticpaths+="$("${CC}" -print-file-name="${staticlib}") "
+	  done
+	  OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ "${staticpaths}"\ -lm, )
 	fi
 
 	case $PLATFORM in
 	    osx)
-		if echo $OPTIONS | grep -q -- -static-libgcc ; then
+		if [[ "${OPTIONS}" == *"-static-libgcc"* ]]; then
 		    $( $CC -### $OPTIONS 2>&1 | grep '^ ' | sed -e s,^\ ,, -e s,-lgcc[^\ ]*,,g -e s,\",,g -e s,\$,\ `$CC -print-file-name=libgcc_eh.a`, -e s,10.8.2,10.6, )
 		else
 		    $CC $OPTIONS
