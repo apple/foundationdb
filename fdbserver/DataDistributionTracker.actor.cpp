@@ -201,12 +201,14 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
 				}
 				if (newReadBandwithStatus == ReadBandwithStatusNormal) {
 					TEST(true);
-					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC * 1.1;
+					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					                                 (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 					bounds.min.bytesReadPerKSecond = 0;
 				} else if (newReadBandwithStatus == ReadBandwithStatusHigh) {
 					TEST(true);
 					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC * 0.9;
+					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 				} else {
 					ASSERT(false);
 				}

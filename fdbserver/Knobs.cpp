@@ -118,6 +118,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	bool buggifySmallBandwidthSplit = randomize && BUGGIFY;
 	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 10LL*1000*1000;
 	init( SHARD_MAX_BYTES_READ_PER_KSEC,            1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_READ_PER_KSEC = 10LL*1000*1000;
+	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
 	/* 10*1MB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will be split immediately.
 		For a large shard (100MB), splitting it costs ~100MB of work or about 10MB/sec over a 10 sec sampling window.

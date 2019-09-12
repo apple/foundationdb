@@ -114,6 +114,7 @@ public:
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
 	int64_t SHARD_MAX_BYTES_READ_PER_KSEC;
+	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
