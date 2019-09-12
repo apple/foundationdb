@@ -465,7 +465,7 @@ public:
 
 	struct Counters {
 		CounterCollection cc;
-		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried, watchQueries;
+		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
 		Counter bytesInput, bytesDurable, bytesFetched,
 			mutationBytes;  // Like bytesInput but without MVCC accounting
 		Counter sampledBytesCleared;
@@ -487,6 +487,7 @@ public:
 			rowsQueried("RowsQueried", cc),
 			bytesQueried("BytesQueried", cc),
 			watchQueries("WatchQueries", cc),
+			emptyQueries("EmptyQueries", cc),
 			bytesInput("BytesInput", cc),
 			bytesDurable("BytesDurable", cc),
 			bytesFetched("BytesFetched", cc),
@@ -882,6 +883,9 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
+		}
+		else {
+			++data->counters.emptyQueries;
 		}
 
 		if( req.debugID.present() )
@@ -1441,6 +1445,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			resultSize = req.limitBytes - remainingLimitBytes;
 			data->counters.bytesQueried += resultSize;
 			data->counters.rowsQueried += r.data.size();
+			if(r.data.size() == 0) {
+				++data->counters.emptyQueries;
+			}
 		}
 	} catch (Error& e) {
 		if(!canReplyWith(e))
