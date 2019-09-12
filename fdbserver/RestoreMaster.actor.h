@@ -120,6 +120,18 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vbIter->second.logFiles.push_back(allFiles[i]);
 			}
 		}
+		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from loader to applier
+		for (auto& versionBatch : *versionBatches) {
+			sort(versionBatch.second.rangeFiles.begin(), versionBatch.second.rangeFiles.end());
+			sort(versionBatch.second.logFiles.begin(), versionBatch.second.logFiles.end());
+			int fileIndex = 0; // fileIndex in each version batch start at 0
+			for (auto& logFile : versionBatch.second.logFiles) {
+				logFile.fileIndex = fileIndex++;
+			}
+			for (auto& rangeFile : versionBatch.second.rangeFiles) {
+				rangeFile.fileIndex = fileIndex++;
+			}
+		}
 		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
 		// Sanity check
 		for (auto& versionBatch : *versionBatches) {

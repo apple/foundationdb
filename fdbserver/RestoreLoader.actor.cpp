@@ -42,7 +42,7 @@ ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRan
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self,
                                          bool isSampling = false);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
-                                          bool isRangeFile, Version startVersion, Version endVersion);
+                                          bool isRangeFile, Version startVersion, Version endVersion, int prevFileIndex, int fileIndex);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(SerializedMutationListMap* mutationMap,
                                                            std::map<Standalone<StringRef>, uint32_t>* mutationPartMap,
                                                            Reference<IBackupContainer> bc, Version version,
@@ -171,7 +171,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	}
 
 	// Send the parsed mutation to applier who will apply the mutation to DB
-	wait(sendMutationsToApplier(self, &kvOps, param.isRangeFile, param.prevVersion, param.endVersion));
+	wait(sendMutationsToApplier(self, &kvOps, param.isRangeFile, param.prevVersion, param.endVersion, param.prevFileIndex, param.fileIndex));
 
 	TraceEvent("FastRestore").detail("Loader", self->id()).detail("FinishLoadingFile", param.filename);
 
@@ -193,8 +193,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 }
 
 // TODO: This function can be revised better
+// Assume: kvOps data are from the same file; otherwise, the fileIndex should be changed at each kvOps element
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* pkvOps,
-                                          bool isRangeFile, Version startVersion, Version endVersion) {
+                                          bool isRangeFile, Version startVersion, Version endVersion,
+										  int prevFileIndex, int fileIndex) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state int kvCount = 0;
 	state int splitMutationIndex = 0;
@@ -275,14 +277,14 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		// Send the mutations to appliers for each version
 		for (auto& applierID : applierIDs) {
 			requests.push_back(std::make_pair(
-			    applierID, RestoreSendMutationVectorVersionedRequest(prevVersion, commitVersion, isRangeFile,
+			    applierID, RestoreSendMutationVectorVersionedRequest(prevVersion, commitVersion, prevFileIndex, fileIndex, isRangeFile,
 			                                                         applierMutationsBuffer[applierID])));
 			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
 			applierMutationsSize[applierID] = 0;
 		}
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
 		requests.clear();
-		ASSERT(prevVersion < commitVersion);
+		ASSERT(prevVersion < commitVersion || (prevVersion == commitVersion && prevFileIndex < fileIndex));
 		prevVersion = commitVersion;
 	} // all versions of mutations
 

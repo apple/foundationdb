@@ -87,12 +87,24 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	return Void();
 }
 
+double getNotifiedDoubleValue(Version ver, int fileIndex) {
+	return ver * SERVER_KNOBS->FASTRESTORE_MAX_FILES_IN_VB + fileIndex;
+}
+
+void getDetailsOfNotifiedDoubleValue(double val, Version &version, int &fileIndex) {
+	version = val / SERVER_KNOBS->FASTRESTORE_MAX_FILES_IN_VB;
+	fileIndex = val - version;
+	return;
+}
+
 // The actor may be invovked multiple times and executed async.
 // No race condition as long as we do not wait or yield when operate the shared data, it should be fine,
 // because all actors run on 1 thread.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
                                                           Reference<RestoreApplierData> self) {
 	state int numMutations = 0;
+	state double prevDoubleVersion = getNotifiedDoubleValue(req.prevVersion, req.prevFileIndex);
+	state double doubleVersion = getNotifiedDoubleValue(req.version, req.fileIndex);
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
@@ -101,14 +113,14 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	    .detail("Request", req.toString());
 
 	if (req.isRangeFile) {
-		wait(self->rangeVersion.whenAtLeast(req.prevVersion));
+		wait(self->rangeVersion.whenAtLeast(prevDoubleVersion));
 	} else {
-		wait(self->logVersion.whenAtLeast(req.prevVersion));
+		wait(self->logVersion.whenAtLeast(prevDoubleVersion));
 	}
 
 	// Not a duplicate (check relies on no waiting between here and self->version.set() below!)
-	if ((req.isRangeFile && self->rangeVersion.get() == req.prevVersion) ||
-	    (!req.isRangeFile && self->logVersion.get() == req.prevVersion)) { 
+	if ((req.isRangeFile && self->rangeVersion.get() == prevDoubleVersion) ||
+	    (!req.isRangeFile && self->logVersion.get() == prevDoubleVersion)) { 
 		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 		state Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
@@ -124,9 +136,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 
 		// Notify the same actor and unblock the request at the next version
 		if (req.isRangeFile) {
-			self->rangeVersion.set(req.version);
+			self->rangeVersion.set(doubleVersion);
 		} else {
-			self->logVersion.set(req.version);
+			self->logVersion.set(doubleVersion);
 		}
 	}
 

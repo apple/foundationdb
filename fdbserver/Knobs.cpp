@@ -501,6 +501,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Fast Restore
 	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
 	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
+	init( FASTRESTORE_MAX_FILES_IN_VB,                          1000 );
+	
 	// clang-format on
 
 	if(clientKnobs)

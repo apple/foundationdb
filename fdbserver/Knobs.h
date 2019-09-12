@@ -440,6 +440,7 @@ public:
 	// Fast Restore
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
+	int 	FASTRESTORE_MAX_FILES_IN_VB; // Maximum number of files in a version batch
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

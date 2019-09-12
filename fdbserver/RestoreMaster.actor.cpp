@@ -230,6 +230,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
 	Version prevVersion = versionBatch.beginVersion;
+	int prevFileIndex = 0;
 
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
@@ -239,10 +240,12 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		}
 		// Prepare loading
 		LoadingParam param;
-		param.url = request.url;
 		param.prevVersion = prevVersion;
 		param.endVersion = file.isRange ? file.version : file.endVersion;
-		prevVersion = param.endVersion;
+		param.prevFileIndex = prevFileIndex;
+		param.fileIndex = file.fileIndex;
+
+		param.url = request.url;
 		param.isRangeFile = file.isRange;
 		param.version = file.version;
 		param.filename = file.fileName;
@@ -253,6 +256,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		param.addPrefix = request.addPrefix;
 		param.removePrefix = request.removePrefix;
 		param.mutationLogPrefix = mutationLogPrefix;
+
+		prevVersion = param.endVersion;
+		prevFileIndex = file.fileIndex;
 
 		// Log file to be loaded
 		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
