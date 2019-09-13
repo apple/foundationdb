@@ -80,7 +80,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 			machineID = locality.zoneId().get();
 		} else {
 			// If locality is not set, the machine has only one server.
-			machineID = locality.processId().present() ? locality.processId().get() : "";
+			machineID = locality.processId().present() ? locality.processId().get() : StringRef("");
 		}
 	}
 
@@ -1020,16 +1020,26 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		ASSERT(locality.isValidProcesId());
 
 		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
-		if (replicationPolicyKeys.count("zoneid") && !locality.isValidZoneId()) {
-			// zoneId is used for machine_id.
-			return false;
+		for (auto& policy : replicationPolicyKeys) {
+			if (!locality.isValidLocalityValueUnderPolicy(policy)) {
+				return false;
+			}
 		}
-		if (replicationPolicyKeys.count("dcid") && !locality.isValidDcId()) {
-			return false;
-		}
-		if (replicationPolicyKeys.count("data_hall") && !locality.isValidDataHallId()) {
-			return false;
-		}
+		// if (replicationPolicyKeys.count("zoneid") && !locality.isValidZoneId()) {
+		// 	// zoneId is used for machine_id.
+		// 	return false;
+		// }
+		// if ((replicationPolicyKeys.count("dcid") || replicationPolicyKeys.count("data_center")) && !locality.isValidDcId()) {
+		// 	return false;
+		// }
+		// if (replicationPolicyKeys.count("data_hall") && !locality.isValidDataHallId()) {
+		// 	return false;
+		// }
+		// if (replicationPolicyKeys.count("machineid") && !locality.isValidMachineId()) {
+		// 	return false;
+		// }
+		// ASSERT(replicationPolicyKeys.count("rack") == 0); // Replication policy does not consider this yet.
+		
 		return true;
 	}
 

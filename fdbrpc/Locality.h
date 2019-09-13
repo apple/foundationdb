@@ -185,6 +185,9 @@ public:
 	bool isValidMachineId() const { return machineId().present(); }
 	bool isValidDcId() const { return dcId().present(); }
 	bool isValidDataHallId() const { return dataHallId().present(); }
+	bool isValidLocalityValueUnderPolicy(std::string policy) {
+		return get(policy).present();
+	}
 
 	std::string toString() const {
 		std::string	infoString;
