@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/python3 -B
 #
 # make_public.py
 #
@@ -19,14 +19,6 @@
 # limitations under the License.
 #
 
-# Select an interpreter for this script. Use python3 if it is available.
-""":"
-for cmd in python3 python; do
-    command -v > /dev/null $cmd && exec $cmd -B $0 "$@"
-done
->&2 echo "No Python interpreter found"
-exit 1
-":"""
 
 import argparse
 import platform
