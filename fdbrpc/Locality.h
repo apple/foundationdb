@@ -180,8 +180,6 @@ public:
 	Optional<Standalone<StringRef>> dcId() const { return get(keyDcId); }
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
-	bool isValidLocalityValueUnderPolicy(std::string policy) { return get(policy).present(); }
-
 	std::string toString() const {
 		std::string	infoString;
 		for (auto it = _data.rbegin(); !(it == _data.rend()); ++it) {

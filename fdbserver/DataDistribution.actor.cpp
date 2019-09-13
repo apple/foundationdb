@@ -76,12 +76,8 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 		serversOnMachine.push_back(server);
 
 		LocalityData& locality = server->lastKnownInterface.locality;
-		if (locality.zoneId().present()) {
-			machineID = locality.zoneId().get();
-		} else {
-			// If locality is not set, the machine has only one server.
-			machineID = locality.processId().present() ? locality.processId().get() : StringRef(std::string(""));
-		}
+		ASSERT(locality.zoneId().present());
+		machineID = locality.zoneId().get();
 	}
 
 	std::string getServersIDStr() {
@@ -1018,7 +1014,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
 		for (auto& policy : replicationPolicyKeys) {
-			if (!locality.isValidLocalityValueUnderPolicy(policy)) {
+			if (!locality.isPresent(policy)) {
 				return false;
 			}
 		}
@@ -1448,8 +1444,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				if (!isMachineHealthy(machine.second)) continue;
 				// Skip machine with incomplete locality
 				if (!isValidLocality(configuration.storagePolicy,
-				                     machine.second->serversOnMachine[0]->lastKnownInterface.locality))
+				                     machine.second->serversOnMachine[0]->lastKnownInterface.locality)) {
 					continue;
+				}
 
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
@@ -1634,9 +1631,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			return deterministicRandom()->randomChoice(leastUsedServers);
 		}
 		// If we cannot find a healthy server with valid locality
-		TraceEvent("NoHealthyAndValidLocalityServer")
+		TraceEvent("NoHealthyAndValidLocalityServers")
 		    .detail("Servers", server_info.size())
-		    .detail("UnhealthServers", unhealthyServers);
+		    .detail("UnhealthyServers", unhealthyServers);
 		return Reference<TCServerInfo>();
 	}
 
@@ -3172,8 +3169,9 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 	    (self->includedDCs.empty() ||
 	     std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
 	         self->includedDCs.end()) &&
-	    (self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality)))
+	    (self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality))) {
 		wait(Future<Void>(Never()));
+	}
 
 	return type;
 }
