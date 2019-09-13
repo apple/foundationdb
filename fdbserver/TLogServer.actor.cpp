@@ -519,7 +519,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
 		specialCounter(cc, "QueuePoppedVersion", [this](){ return this->queuePoppedVersion; });
 		specialCounter(cc, "MinPoppedTagVersion", [this](){ return this->minPoppedTagVersion; });
-		specialCounter(cc, "MinPoppedTag", [this](){ return this->minPoppedTag.toString(); });
+		specialCounter(cc, "MinPoppedTagLocality", [this](){ return this->minPoppedTag.locality; });
+		specialCounter(cc, "MinPoppedTagId", [this](){ return this->minPoppedTag.id; });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
