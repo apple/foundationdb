@@ -145,6 +145,7 @@ public:
 	double DEBOUNCE_RECRUITING_DELAY;
 	int REBALANCE_MAX_RETRIES;
 	int DD_OVERLAP_PENALTY;
+	bool DD_VALIDATE_LOCALITY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor

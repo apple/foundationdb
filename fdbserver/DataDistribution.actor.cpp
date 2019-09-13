@@ -1002,6 +1002,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Check if server or machine has a valid locality based on configured replication policy
 	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData &locality) {
+		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
+			// Disable the checking if locality is valid
+			return true;
+		}
 		if (!locality.isValidZoneId()) {
 			// zoneId is used for machine_id. Must have no matter what policy  is used
 			return false;
