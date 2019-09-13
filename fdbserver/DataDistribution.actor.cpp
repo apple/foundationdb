@@ -74,7 +74,14 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 		ASSERT(serversOnMachine.empty());
 		serversOnMachine.push_back(server);
-		machineID = server->lastKnownInterface.locality.zoneId().get();
+		LocalityData &locality = server->lastKnownInterface.locality;
+		if (locality.zoneId().present()) {
+			machineID = locality.zoneId().get();
+		} else {
+			// If locality is not set, the machine has only one server.
+			machineID = locality.processId().present() ? locality.processId().get() : "";
+		}
+
 	}
 
 	std::string getServersIDStr() {
