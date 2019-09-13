@@ -469,6 +469,7 @@ class Tester
             @db.options.set_transaction_retry_limit(10)
             @db.options.set_transaction_retry_limit(-1)
             @db.options.set_transaction_causal_read_risky()
+            @db.options.set_transaction_include_port_in_address()
 
             @db.transact do |tr|
               tr.options.set_priority_system_immediate
@@ -487,6 +488,7 @@ class Tester
               tr.options.set_log_transaction()
               tr.options.set_read_lock_aware()
               tr.options.set_lock_aware()
+              tr.options.set_include_port_in_address()
 
               tr.get("\xff").to_s
             end
