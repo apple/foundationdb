@@ -3,12 +3,6 @@ testTitle=CloggedConfigureDatabaseTest
     testName=ConfigureDatabase
     testDuration=30.0
 
-    clearAfterTest=false
-    testName=Cycle
-    transactionsPerSecond=1250.0
-    testDuration=30.0
-    expectedRate=0.005
-
     testName=RandomClogging
     testDuration=30.0
 
