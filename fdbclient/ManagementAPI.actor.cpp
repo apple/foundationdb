@@ -484,8 +484,9 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );

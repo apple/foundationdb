@@ -886,21 +886,10 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
-	int32_t messageLength, rawLength;
-	uint16_t tagCount;
-	uint32_t sub;
 	std::vector<TagsAndMessage> msgs;
 	while(!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
-		rd.checkpoint();
-		rd >> messageLength >> sub >> tagCount;
-		tagsAndMsg.tags.resize(tagCount);
-		for(int i = 0; i < tagCount; i++) {
-			rd >> tagsAndMsg.tags[i];
-		}
-		rawLength = messageLength + sizeof(messageLength);
-		rd.rewind();
-		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
+		tagsAndMsg.loadFromArena(&rd, nullptr);
 		msgs.push_back(std::move(tagsAndMsg));
 	}
 	commitMessages(self, logData, version, msgs);
@@ -1019,7 +1008,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			}
 
 			currentVersion = it->first;
-			messages << int32_t(-1) << currentVersion;
+			messages << VERSION_HEADER << currentVersion;
 		}
 
 		messages << it->second.toStringRef();
@@ -1163,7 +1152,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 		for (auto &kv : kvs) {
 			auto ver = decodeTagMessagesKey(kv.key);
-			messages << int32_t(-1) << ver;
+			messages << VERSION_HEADER << ver;
 			messages.serializeBytes(kv.value);
 		}
 

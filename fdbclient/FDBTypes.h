@@ -114,6 +114,41 @@ struct TagsAndMessage {
 
 	TagsAndMessage() {}
 	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+
+	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
+	// its begining position to allow the caller to rewind if needed.
+	// T can be ArenaReader or BinaryReader.
+	template <class T>
+	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
+		int32_t messageLength;
+		uint16_t tagCount;
+		uint32_t sub;
+		tags.clear();
+
+		rd->checkpoint();
+		*rd >> messageLength >> sub >> tagCount;
+		if (messageVersionSub) *messageVersionSub = sub;
+		tags.resize(tagCount);
+		for (int i = 0; i < tagCount; i++) {
+			*rd >> tags[i];
+		}
+		const int32_t rawLength = messageLength + sizeof(messageLength);
+		rd->rewind();
+		rd->checkpoint();
+		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
+	}
+
+	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
+	int32_t getHeaderSize() const {
+		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
+	}
+
+	StringRef getMessageWithoutTags() const {
+		return message.substr(getHeaderSize());
+	}
+
+	// Returns the message with the header.
+	StringRef getRawMessage() const { return message; }
 };
 
 struct KeyRangeRef;
@@ -253,6 +288,8 @@ struct KeyRangeRef {
 			return a.end < b.end;
 		}
 	};
+
+	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
 };
 
 template<>
@@ -580,6 +617,12 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	void serialize( Ar& ar ) {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+	}
 };
 
 template<>
@@ -591,7 +634,9 @@ struct Traceable<RangeResultRef> : std::true_type {
 
 struct KeyValueStoreType {
 	constexpr static FileIdentifier file_identifier = 6560359;
-	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	// These enumerated values are stored in the database configuration, so should NEVER be changed.
+	// Only add new ones just before END.
+	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
 		SSD_BTREE_V1,
 		MEMORY,
@@ -837,6 +882,8 @@ struct ClusterControllerPriorityInfo {
 		serializer(ar, processClassFitness, isExcluded, dcFitness);
 	}
 };
+
+class Database;
 
 struct HealthMetrics {
 	struct StorageStats {

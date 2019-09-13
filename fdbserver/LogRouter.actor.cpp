@@ -309,7 +309,7 @@ void peekMessagesFromMemory( LogRouterData* self, TLogPeekRequest const& req, Bi
 			}
 
 			currentVersion = it->first;
-			messages << int32_t(-1) << currentVersion;
+			messages << VERSION_HEADER << currentVersion;
 		}
 
 		messages << it->second.toStringRef();

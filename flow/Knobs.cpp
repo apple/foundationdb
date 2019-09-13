@@ -74,6 +74,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
+	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
+
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
@@ -116,6 +118,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
+	init( FLOW_TCP_NODELAY,                                      1 );
+	init( FLOW_TCP_QUICKACK,                                     0 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );

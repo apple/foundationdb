@@ -1144,21 +1144,10 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
-	int32_t messageLength, rawLength;
-	uint16_t tagCount;
-	uint32_t sub;
 	std::vector<TagsAndMessage> msgs;
 	while(!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
-		rd.checkpoint();
-		rd >> messageLength >> sub >> tagCount;
-		tagsAndMsg.tags.resize(tagCount);
-		for(int i = 0; i < tagCount; i++) {
-			rd >> tagsAndMsg.tags[i];
-		}
-		rawLength = messageLength + sizeof(messageLength);
-		rd.rewind();
-		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
+		tagsAndMsg.loadFromArena(&rd, nullptr);
 		msgs.push_back(std::move(tagsAndMsg));
 	}
 	commitMessages(self, logData, version, msgs);
@@ -1278,7 +1267,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			}
 
 			currentVersion = it->first;
-			messages << int32_t(-1) << currentVersion;
+			messages << VERSION_HEADER << currentVersion;
 		}
 
 		messages << it->second.toStringRef();
@@ -1290,31 +1279,17 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, 
 	state std::vector<StringRef> relevantMessages;
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
-		uint32_t messageLength = 0;
-		uint32_t subsequence = 0;
-		uint16_t tagCount = 0;
-		rd >> messageLength;
-		rd.checkpoint();
-		rd >> subsequence >> tagCount;
-		Tag msgtag;
-		bool match = false;
-		for (int i = 0; i < tagCount; i++) {
-			rd >> msgtag;
-			if (msgtag == tag) {
-				match = true;
-				break;
-			} else if (tag.locality == tagLocalityLogRouter && msgtag.locality == tagLocalityLogRouter &&
-			           msgtag.id % logRouters == tag.id) {
+		TagsAndMessage tagsAndMessage;
+		tagsAndMessage.loadFromArena(&rd, nullptr);
+		for (Tag t : tagsAndMessage.tags) {
+			if (t == tag || (tag.locality == tagLocalityLogRouter && t.locality == tagLocalityLogRouter &&
+			                 t.id % logRouters == tag.id)) {
 				// Mutations that are in the partially durable span between known comitted version and
 				// recovery version get copied to the new log generation.  These commits might have had more
 				// log router tags than what now exist, so we mod them down to what we have.
-				match = true;
+				relevantMessages.push_back(tagsAndMessage.getRawMessage());
+				break;
 			}
-		}
-		rd.rewind();
-		const void* begin = rd.readBytes(messageLength);
-		if (match) {
-			relevantMessages.push_back( StringRef((uint8_t*)begin, messageLength) );
 		}
 		wait(yield());
 	}
@@ -1458,7 +1433,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 			for (auto &kv : kvs) {
 				auto ver = decodeTagMessagesKey(kv.key);
-				messages << int32_t(-1) << ver;
+				messages << VERSION_HEADER << ver;
 				messages.serializeBytes(kv.value);
 			}
 
@@ -1530,11 +1505,12 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				ASSERT( valid == 0x01 );
 				ASSERT( length + sizeof(valid) == queueEntryData.size() );
 
-				messages << int32_t(-1) << entry.version;
+				messages << VERSION_HEADER << entry.version;
 
-				std::vector<StringRef> parsedMessages = wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
-				for (StringRef msg : parsedMessages) {
-					messages << msg;
+				std::vector<StringRef> rawMessages =
+				    wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
+				for (const StringRef& msg : rawMessages) {
+					messages.serializeBytes(msg);
 				}
 
 				lastRefMessageVersion = entry.version;
@@ -2589,6 +2565,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 	}
 }
 
+// Start the tLog role for a worker
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
 	state TLogInterface recruited(self->dbgid, locality);
 	recruited.initEndpoints();

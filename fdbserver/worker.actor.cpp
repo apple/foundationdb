@@ -563,7 +563,6 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		recruited.locality = locality;
 		recruited.initEndpoints();
 
-		DUMPTOKEN(recruited.getVersion);
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
@@ -840,7 +839,6 @@ ACTOR Future<Void> workerServer(
 				details["StorageEngine"] = s.storeType.toString();
 				startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored" );
 
-				DUMPTOKEN(recruited.getVersion);
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
 				DUMPTOKEN(recruited.getKeyValues);
@@ -1067,7 +1065,6 @@ ACTOR Future<Void> workerServer(
 					details["StorageEngine"] = req.storeType.toString();
 					startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details );
 
-					DUMPTOKEN(recruited.getVersion);
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
 					DUMPTOKEN(recruited.getKeyValues);

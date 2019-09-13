@@ -81,7 +81,7 @@ static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_laten
 Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *cx, StorageServerInterface const& ssi, LocalityData const& locality ) {
 	auto it = cx->server_interf.find( ssi.id() );
 	if( it != cx->server_interf.end() ) {
-		if(it->second->interf.getVersion.getEndpoint().token != ssi.getVersion.getEndpoint().token) {
+		if(it->second->interf.getValue.getEndpoint().token != ssi.getValue.getEndpoint().token) {
 			if(it->second->interf.locality == ssi.locality) {
 				//FIXME: load balance holds pointers to individual members of the interface, and this assignment will swap out the object they are
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load balance to take an AsyncVar<Reference<Interface>>

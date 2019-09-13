@@ -695,10 +695,15 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
 		TraceEvent("CheckingResults");
+
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
+
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
+
+		printf("checking tests DONE num_workloads:%d\n", workloads.size());
+
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
@@ -796,6 +801,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, spec );
 		if( spec.timeout > 0 ) {
+			printf("[INFO] TestSpec, timeout:%d\n", spec.timeout);
 			fTestResults = timeoutError( fTestResults, spec.timeout );
 		}
 		DistributedTestResults _testResults = wait( fTestResults );
@@ -1083,7 +1089,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
+		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
+		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
 

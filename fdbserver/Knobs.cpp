@@ -196,6 +196,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TR_REMOVE_SERVER_TEAM_DELAY,                          60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
 	init( TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,                     5.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_EXTRA_DELAY =  deterministicRandom()->random01() * 10.0;
 
+	init( DD_REMOVE_STORE_ENGINE_DELAY,                         60.0 ); if( randomize && BUGGIFY ) DD_REMOVE_STORE_ENGINE_DELAY =  deterministicRandom()->random01() * 60.0;
+
 	// Redwood Storage Engine
 	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
 	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                     0 );
@@ -496,6 +498,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TIME_KEEPER_DELAY,                                      10 );
 	init( TIME_KEEPER_MAX_ENTRIES,                              3600 * 24 * 30 * 6); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
+	// Fast Restore
+	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
+	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
 	// clang-format on
 
 	if(clientKnobs)

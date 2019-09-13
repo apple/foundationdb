@@ -31,6 +31,25 @@ void forceLinkFlowTests() {}
 
 using std::vector;
 
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;

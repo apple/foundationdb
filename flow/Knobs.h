@@ -92,6 +92,8 @@ public:
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 
+	int NETWORK_TEST_REPLY_SIZE;
+
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
@@ -137,6 +139,8 @@ public:
 	int MAX_PACKET_SEND_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
 	int MIN_PACKET_BUFFER_FREE_BYTES;
+	int FLOW_TCP_NODELAY;
+	int FLOW_TCP_QUICKACK;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out
