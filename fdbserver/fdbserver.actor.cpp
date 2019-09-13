@@ -1488,8 +1488,8 @@ int main(int argc, char* argv[]) {
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
-		if (memLimit < FLOW_KNOBS->PAGE_CACHE_4K + (2LL<<30)) {
-			fprintf(stderr, "ERROR: --memory has to be at least 2GiB larger than --cache_memory\n");
+		if (memLimit < FLOW_KNOBS->PAGE_CACHE_4K) {
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
