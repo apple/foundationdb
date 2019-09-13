@@ -487,7 +487,7 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 }
 
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
-                         LogPushData* toCommit, Version commitVersion) {
+                                      LogPushData* toCommit, Version commitVersion) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
