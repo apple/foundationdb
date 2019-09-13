@@ -1007,6 +1007,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Check if server or machine has a valid locality based on configured replication policy
 	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData& locality) {
+		// Future: Once we add simulation test that misconfigure a cluster, such as not setting some locality entries,
+		// DD_VALIDATE_LOCALITY should always be true. Otherwise, simulation test may fail.
 		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
 			// Disable the checking if locality is valid
 			return true;
