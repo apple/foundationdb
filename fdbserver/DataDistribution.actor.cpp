@@ -74,6 +74,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 		ASSERT(serversOnMachine.empty());
 		serversOnMachine.push_back(server);
+
 		LocalityData &locality = server->lastKnownInterface.locality;
 		if (locality.zoneId().present()) {
 			machineID = locality.zoneId().get();
@@ -1013,11 +1014,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Disable the checking if locality is valid
 			return true;
 		}
-		if (!locality.isValidZoneId()) {
-			// zoneId is used for machine_id. Must have no matter what policy  is used
+
+		// Assume processId is always configured
+		ASSERT(locality.isValidProcesId());
+
+		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
+		if (replicationPolicyKeys.count("zoneid") && !locality.isValidZoneId()) {
+			// zoneId is used for machine_id.
 			return false;
 		}
-		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
 		if (replicationPolicyKeys.count("dcid") && !locality.isValidDcId()) {
 			return false;
 		}

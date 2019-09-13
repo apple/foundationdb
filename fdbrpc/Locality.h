@@ -181,19 +181,19 @@ public:
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
 	bool isValidProcesId() const {
-		return processId().present() && processId().get().size() > 0;
+		return processId().present();
 	}
 	bool isValidZoneId() const {
-		return zoneId().present() && zoneId().get().size() > 0;
+		return zoneId().present();
 	}
 	bool isValidMachineId() const {
-		return machineId().present() && machineId().get().size() > 0;
+		return machineId().present();
 	}
 	bool isValidDcId() const {
-		return dcId().present() && dcId().get().size() > 0;
+		return dcId().present();
 	}
 	bool isValidDataHallId() const {
-		return dataHallId().present() && dataHallId().get().size() > 0;
+		return dataHallId().present();
 	}
 
 	std::string toString() const {
