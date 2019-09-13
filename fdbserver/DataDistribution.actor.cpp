@@ -983,6 +983,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// we preferentially mark the least used server as undesirable?
 		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
 			if (self->shouldHandleServer(i->first)) {
+				if (!self->isValidLocality(i->first.locality)) {
+					TraceEvent(SevWarnAlways, "MissingLocality").detail("Server", i->first.uniqueID).detail("Locality", i->first.locality.toString());
+				}
 				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0);
 			}
 		}
@@ -995,6 +998,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		return Void();
+	}
+
+	bool isValidLocality(LocalityData &locality) {
+		return locality.isValidProcesId() && locality.isValidMachineId() &&
+				locality.isValidZoneId() && locality.isValidDcId() &&
+				locality.isValidDataHallId();
 	}
 
 	void evaluateTeamQuality() {
@@ -1374,6 +1383,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 			Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
 			auto& locality = representativeServer->lastKnownInterface.locality;
+			if (!isValidLocality(locality)) {
+				TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
+				    .detail("Machine", machine->second->machineID.toString())
+				    .detail("InvalidLocality", locality.toString());
+				continue;
+			}
 			const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
 			machine->second->localityEntry = localityEntry;
 			++numHealthyMachine;
@@ -1411,6 +1426,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->id) != server_info.end());
 				// Skip unhealthy machines
 				if (!isMachineHealthy(machine.second)) continue;
+				// Skip machine with incomplete locality
+				if (!isValidLocality(machine.second->serversOnMachine[0]->lastKnownInterface.locality))continue;
 
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
@@ -1580,6 +1597,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto& server : server_info) {
 			// Only pick healthy server, which is not failed or excluded.
 			if (server_status.get(server.first).isUnhealthy()) continue;
+			if (!isValidLocality(server.second->lastKnownInterface.locality)) continue;
 
 			int numTeams = server.second->teams.size();
 			if (numTeams < minTeams) {
@@ -1590,8 +1608,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				leastUsedServers.push_back(server.second);
 			}
 		}
-
-		return deterministicRandom()->randomChoice(leastUsedServers);
+		if (!leastUsedServers.empty()) {
+			return deterministicRandom()->randomChoice(leastUsedServers);
+		}
+		// If we cannot find a healthy server with valid locality
+		TraceEvent("NoHealthyAndValidLocalityServer")
+		    .detail("Servers", server_info.size())
+			.detail("UnhealthServers", unhealthyServers);
+		return Reference<TCServerInfo>();
 	}
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
@@ -1882,6 +1906,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			for (int i = 0; i < maxAttempts && i < 100; ++i) {
 				// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
 				Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
+				if (!chosenServer.isValid()) {
+					break; // We cannot find a valid server
+				}
 				// Note: To avoid creating correlation of picked machine teams, we simply choose a random machine team
 				// instead of choosing the least used machine team.
 				// The correlation happens, for example, when we add two new machines, we may always choose the machine
@@ -3119,7 +3146,8 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskPriority::DataDistribution)));
-	if(type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) )
+	if(type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) 
+		&& (self->isValidLocality(server->lastKnownInterface.locality)) )
 		wait(Future<Void>(Never()));
 
 	return type;
@@ -3467,7 +3495,8 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent("KeyValueStoreTypeChanged", self->distributorId)
 						.detail("ServerID", server->id)
 						.detail("StoreType", type.toString())
-						.detail("DesiredType", self->configuration.storageServerStoreType.toString());
+						.detail("DesiredType", self->configuration.storageServerStoreType.toString())
+						.detail("IsValidLocality", self->isValidLocality(server->lastKnownInterface.locality));
 					TEST(true); //KeyValueStore type changed
 
 					storeTracker = Never();
