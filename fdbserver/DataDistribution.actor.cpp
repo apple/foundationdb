@@ -75,14 +75,13 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 		ASSERT(serversOnMachine.empty());
 		serversOnMachine.push_back(server);
 
-		LocalityData &locality = server->lastKnownInterface.locality;
+		LocalityData& locality = server->lastKnownInterface.locality;
 		if (locality.zoneId().present()) {
 			machineID = locality.zoneId().get();
 		} else {
 			// If locality is not set, the machine has only one server.
 			machineID = locality.processId().present() ? locality.processId().get() : "";
 		}
-
 	}
 
 	std::string getServersIDStr() {
@@ -992,7 +991,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
 			if (self->shouldHandleServer(i->first)) {
 				if (!self->isValidLocality(self->configuration.storagePolicy, i->first.locality)) {
-					TraceEvent(SevWarnAlways, "MissingLocality").detail("Server", i->first.uniqueID).detail("Locality", i->first.locality.toString());
+					TraceEvent(SevWarnAlways, "MissingLocality")
+					    .detail("Server", i->first.uniqueID)
+					    .detail("Locality", i->first.locality.toString());
 				}
 				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0);
 			}
@@ -1009,7 +1010,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Check if server or machine has a valid locality based on configured replication policy
-	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData &locality) {
+	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData& locality) {
 		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
 			// Disable the checking if locality is valid
 			return true;
@@ -1453,7 +1454,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Skip unhealthy machines
 				if (!isMachineHealthy(machine.second)) continue;
 				// Skip machine with incomplete locality
-				if (!isValidLocality(configuration.storagePolicy, machine.second->serversOnMachine[0]->lastKnownInterface.locality))continue;
+				if (!isValidLocality(configuration.storagePolicy,
+				                     machine.second->serversOnMachine[0]->lastKnownInterface.locality))
+					continue;
 
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
@@ -1640,7 +1643,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// If we cannot find a healthy server with valid locality
 		TraceEvent("NoHealthyAndValidLocalityServer")
 		    .detail("Servers", server_info.size())
-			.detail("UnhealthServers", unhealthyServers);
+		    .detail("UnhealthServers", unhealthyServers);
 		return Reference<TCServerInfo>();
 	}
 
@@ -3172,8 +3175,11 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskPriority::DataDistribution)));
-	if(type == self->configuration.storageServerStoreType && (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end()) 
-		&& (self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality)) )
+	if (type == self->configuration.storageServerStoreType &&
+	    (self->includedDCs.empty() ||
+	     std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
+	         self->includedDCs.end()) &&
+	    (self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality)))
 		wait(Future<Void>(Never()));
 
 	return type;
@@ -3519,10 +3525,11 @@ ACTOR Future<Void> storageServerTracker(
 				}
 				when( KeyValueStoreType type = wait( storeTracker ) ) {
 					TraceEvent("KeyValueStoreTypeChanged", self->distributorId)
-						.detail("ServerID", server->id)
-						.detail("StoreType", type.toString())
-						.detail("DesiredType", self->configuration.storageServerStoreType.toString())
-						.detail("IsValidLocality", self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality));
+					    .detail("ServerID", server->id)
+					    .detail("StoreType", type.toString())
+					    .detail("DesiredType", self->configuration.storageServerStoreType.toString())
+					    .detail("IsValidLocality", self->isValidLocality(self->configuration.storagePolicy,
+					                                                     server->lastKnownInterface.locality));
 					TEST(true); //KeyValueStore type changed
 
 					storeTracker = Never();

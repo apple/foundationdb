@@ -180,21 +180,11 @@ public:
 	Optional<Standalone<StringRef>> dcId() const { return get(keyDcId); }
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
-	bool isValidProcesId() const {
-		return processId().present();
-	}
-	bool isValidZoneId() const {
-		return zoneId().present();
-	}
-	bool isValidMachineId() const {
-		return machineId().present();
-	}
-	bool isValidDcId() const {
-		return dcId().present();
-	}
-	bool isValidDataHallId() const {
-		return dataHallId().present();
-	}
+	bool isValidProcesId() const { return processId().present(); }
+	bool isValidZoneId() const { return zoneId().present(); }
+	bool isValidMachineId() const { return machineId().present(); }
+	bool isValidDcId() const { return dcId().present(); }
+	bool isValidDataHallId() const { return dataHallId().present(); }
 
 	std::string toString() const {
 		std::string	infoString;
