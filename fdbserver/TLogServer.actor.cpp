@@ -434,6 +434,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
 	Version queuePoppedVersion;
+	Version minPoppedTagVersion;
+	Tag minPoppedTag;
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; //tag.locality | tag.id
@@ -498,6 +500,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, int txsTags, UID recruitmentID, ProtocolVersion protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
+			minPoppedTagVersion(0), minPoppedTag(invalidTag),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false)
@@ -515,6 +518,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
 		specialCounter(cc, "QueuePoppedVersion", [this](){ return this->queuePoppedVersion; });
+		specialCounter(cc, "MinPoppedTagVersion", [this](){ return this->minPoppedTagVersion; });
+		specialCounter(cc, "MinPoppedTag", [this](){ return this->minPoppedTag.toString(); });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
@@ -733,12 +738,20 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 		minLocation = locationIter->value.first;
 		minVersion = locationIter->key;
 	}
+	logData->minPoppedTagVersion = std::numeric_limits<Version>::max();
+
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData && tagData->tag.locality != tagLocalityTxs && tagData->tag != txsTag && !tagData->nothingPersistent) {
-				minLocation = std::min(minLocation, tagData->poppedLocation);
-				minVersion = std::min(minVersion, tagData->popped);
+			if (tagData && tagData->tag.locality != tagLocalityTxs && tagData->tag != txsTag) {
+				if(!tagData->nothingPersistent) {
+					minLocation = std::min(minLocation, tagData->poppedLocation);
+					minVersion = std::min(minVersion, tagData->popped);
+				}
+				if((!tagData->nothingPersistent || tagData->versionMessages.size()) && tagData->popped < logData->minPoppedTagVersion) {
+					logData->minPoppedTagVersion = tagData->popped;
+					logData->minPoppedTag = tagData->tag;
+				}
 			}
 		}
 	}

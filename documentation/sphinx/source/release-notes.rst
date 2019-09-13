@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.3
+6.2.4
 =====
 
 Performance
@@ -73,7 +73,8 @@ Bindings
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Finalizers could run too early leading to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
 * Added a transaction option to control the field length of keys and values in debug transaction logging in order to avoid truncation. `(PR #1844) <https://github.com/apple/foundationdb/pull/1844>`_.
-* Added a transaction option to control the whether ``get_addresses_for_key`` includes a port in the address. This will be deprecated in api version 700, and addresses will include ports by default. `(PR #2060) <https://github.com/apple/foundationdb/pull/2060>`_.
+* Added a transaction option to control the whether ``get_addresses_for_key`` includes a port in the address. This will be deprecated in api version 700, and addresses will include ports by default. [6.2.4] `(PR #2060) <https://github.com/apple/foundationdb/pull/2060>`_.
+* Python: ``Versionstamp`` comparisons didn't work in Python 3. [6.2.4] `(PR #2089) <https://github.com/apple/foundationdb/pull/2089>`_.
 
 Other Changes
 -------------
@@ -94,6 +95,7 @@ Other Changes
 * Added a ``no_wait`` option to the ``fdbcli`` exclude command to avoid blocking. `(PR #1852) <https://github.com/apple/foundationdb/pull/1852>`_.
 * Idle clusters will fsync much less frequently. `(PR #1697) <https://github.com/apple/foundationdb/pull/1697>`_.
 * CMake is now the official build system. The Makefile based build system is deprecated.
+* The incompatible client list in status (``cluster.incompatible_connections``) may now spuriously include clients that use the multi-version API to try connecting to the cluster at multiple versions.
 
 Fixes only impacting 6.2.0+
 ---------------------------

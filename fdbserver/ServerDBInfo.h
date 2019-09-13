@@ -67,7 +67,7 @@ struct GetServerDBInfoRequest {
 	UID knownServerInfoID;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
-	ReplyPromise< struct ServerDBInfo > reply;
+	ReplyPromise< CachedSerialization<struct ServerDBInfo> > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
