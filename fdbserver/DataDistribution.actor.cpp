@@ -3575,6 +3575,16 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 }
 
 ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageReply candidateWorker ) {
+	// Exclude the worker that has invalid locality
+	if (!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
+		TraceEvent(SevWarn, "DDRecruiting").detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
+			.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Addr", candidateWorker.worker.address());
+		auto addr = candidateWorker.worker.address();
+		self->excludedServers.set(AddressExclusion(addr.ip, addr.port), true);
+		self->restartRecruiting.trigger();
+		return Void();
+	}
+
 	// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 	self->recruitingStream.set(self->recruitingStream.get()+1);
 
