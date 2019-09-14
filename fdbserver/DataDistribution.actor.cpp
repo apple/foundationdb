@@ -597,6 +597,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<bool> zeroOptimalTeams;
 
 	AsyncMap< AddressExclusion, bool > excludedServers;  // true if an address is in the excluded list in the database.  Updated asynchronously (eventually)
+	std::set<AddressExclusion> invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
 
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
@@ -608,6 +609,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> badTeamRemover;
 	Future<Void> redundantMachineTeamRemover;
 	Future<Void> redundantServerTeamRemover;
+	Future<Void> checkInvalidLocalities;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -648,9 +650,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
-	    badTeamRemover(Void()), redundantMachineTeamRemover(Void()), redundantServerTeamRemover(Void()),
-	    configuration(configuration), readyToStart(readyToStart), clearHealthyZoneFuture(true),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
+	    teamBuilder(Void()), badTeamRemover(Void()), redundantMachineTeamRemover(Void()),
+	    redundantServerTeamRemover(Void()), checkInvalidLocalities(Void()), configuration(configuration),
+	    readyToStart(readyToStart), clearHealthyZoneFuture(true),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
@@ -1006,7 +1009,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Check if server or machine has a valid locality based on configured replication policy
-	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData& locality) {
+	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) {
 		// Future: Once we add simulation test that misconfigure a cluster, such as not setting some locality entries,
 		// DD_VALIDATE_LOCALITY should always be true. Otherwise, simulation test may fail.
 		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
@@ -3574,13 +3577,73 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	}
 }
 
+ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
+	state int checkCount = 0;
+	state Transaction tr(self->cx);
+
+	loop {
+		try {
+			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY));
+
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
+			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
+			Future<vector<ProcessData>> workers = getWorkers(&tr);
+			std::set<AddressExclusion> existingAddrs;
+			for (int i = 0; i < workers.get().size(); i++) {
+				const ProcessData& workerData = workers.get()[i];
+				AddressExclusion addr(workerData.address.ip, workerData.address.port);
+				existingAddrs.insert(addr);
+				if (self->invalidLocalityAddr.count(addr) &&
+				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
+					// The locality info on the addr has been corrected
+					self->invalidLocalityAddr.erase(addr);
+				}
+			}
+
+			// In case system operator permanently excludes workers on the address with invalid locality
+			for (auto addr = self->invalidLocalityAddr.begin(); addr != self->invalidLocalityAddr.end();) {
+				if (!existingAddrs.count(*addr)) {
+					// The address no longer has a worker
+					self->invalidLocalityAddr.erase(addr++);
+				} else {
+					++addr;
+				}
+			}
+
+			if (self->invalidLocalityAddr.empty()) {
+				break;
+			}
+
+			checkCount++;
+			if (checkCount > 100) {
+				// The incorrect locality info is not properly correctly on time
+				TraceEvent(SevWarn, "InvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId);
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageReply candidateWorker ) {
 	// Exclude the worker that has invalid locality
 	if (!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
-		TraceEvent(SevWarn, "DDRecruiting").detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
-			.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Addr", candidateWorker.worker.address());
+		TraceEvent(SevWarn, "DDRecruiting")
+		    .detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
+		    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
+		    .detail("Addr", candidateWorker.worker.address());
 		auto addr = candidateWorker.worker.address();
-		self->excludedServers.set(AddressExclusion(addr.ip, addr.port), true);
+		self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
+		if (self->checkInvalidLocalities.isReady()) {
+			self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
+			self->addActor.send(self->checkInvalidLocalities);
+		}
 		self->restartRecruiting.trigger();
 		return Void();
 	}
@@ -3650,11 +3713,19 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			}
 
 			auto excl = self->excludedServers.getKeys();
-			for(auto& s : excl)
+			for (auto& s : excl) {
 				if (self->excludedServers.get(s)) {
 					TraceEvent(SevDebug, "DDRecruitExcl2").detail("Excluding", s.toString());
 					exclusions.insert( s );
 				}
+			}
+
+			// Exclude workers that have invalid locality
+			for (auto& addr : self->invalidLocalityAddr) {
+				TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
+				exclusions.insert(addr);
+			}
+
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
 			for(auto it : exclusions) {
 				rsr.excludeAddresses.push_back(it);
