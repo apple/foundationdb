@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.4
+6.2.5
 =====
 
 Performance
@@ -46,6 +46,7 @@ Fixes
 * The ``fileconfigure`` command in ``fdbcli`` could fail with an unknown error if the file did not contain a valid JSON object. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
 * Configuring regions would fail with an internal error if the cluster contained storage servers that didn't set a datacenter ID. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
 * Clients no longer prefer reading from servers with the same zone ID, because it could create hot shards. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
+* Data distribution no longer gets stuck when storage servers' localities are misconfigured and later corrected. [6.2.5] `(PR #2110) <https://github.com/apple/foundationdb/pull/2110>`_.
 
 Status
 ------
