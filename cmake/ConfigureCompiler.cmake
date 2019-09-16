@@ -68,6 +68,13 @@ if (USE_CCACHE)
 	endif()
 endif()
 
+if ((NOT USE_LIBCXX) AND (NOT "$ENV{USE_LIBCXX}" STREQUAL ""))
+	string(TOUPPER "$ENV{USE_LIBCXX}" USE_LIBCXXENV)
+	if (("${USE_LIBCXXENV}" STREQUAL "ON") OR ("${USE_LIBCXXENV}" STREQUAL "1") OR ("${USE_LIBCXXENV}" STREQUAL "YES"))
+		set(USE_LIBCXX ON)
+	endif()
+endif()
+
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
@@ -161,16 +168,19 @@ else()
     -mmmx
     -mavx
     -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
+
+  set(CMAKE_CXX_STANDARD 17)
+#  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
   if (CLANG)
+    add_compile_options()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-lc++abi -Wl,-build-id=sha1)
+        add_link_options(-lc++ -lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
     add_compile_options(
@@ -183,7 +193,12 @@ else()
       -Wno-undefined-var-template
       -Wno-unused-value
       -Wno-tautological-pointer-compare
+      -Wno-register
       -Wno-format)
+    if (USE_CCACHE)
+      add_compile_options(
+        -Wno-error=unused-command-line-argument)
+    endif()
   endif()
   if (CMAKE_GENERATOR STREQUAL Xcode)
   else()
