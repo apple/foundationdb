@@ -3644,7 +3644,8 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageReply candidateWorker ) {
 	// Exclude the worker that has invalid locality
-	if (!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
+	if (SERVER_KNOBS->DD_VALIDATE_LOCALITY &&
+		!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
 		TraceEvent(SevWarn, "DDRecruiting")
 		    .detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
 		    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
@@ -3732,10 +3733,13 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			}
 
 			// Exclude workers that have invalid locality
-			for (auto& addr : self->invalidLocalityAddr) {
-				TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
-				exclusions.insert(addr);
+			if (SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
+				for (auto& addr : self->invalidLocalityAddr) {
+					TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
+					exclusions.insert(addr);
+				}
 			}
+			
 
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
 			for(auto it : exclusions) {
