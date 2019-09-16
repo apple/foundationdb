@@ -32,9 +32,11 @@
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
-	std::vector<Tag> tags; // TODO: remove this.
+	std::vector<Tag> tags;
+	Arena arena; // Keep a reference to the memory containing the message
 
-	VersionedMessage(LogMessageVersion v, StringRef m) : version(v), message(m) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const std::vector<Tag>& t, const Arena& a)
+	  : version(v), message(m), tags(t), arena(a) {}
 	const Version getVersion() const { return version.version; }
 	const uint32_t getSubVersion() const { return version.sub; }
 };
@@ -121,6 +123,8 @@ bool isBackupMessage(const VersionedMessage& msg) {
 			return false; // skip Txs mutations
 		}
 	}
+	// check for metadataVersionKey and special metadata mutations
+
 	// MutationRef m = BinaryReader::fromStringRef<MutationRef>(message, AssumeVersion(currentProtocolVersion));
 	// std::cout << m.toString() << std::endl;
 	// std::cout << msg.message.printable() << std::endl;
@@ -231,8 +235,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			self->messages.emplace_back(r->version(), r->getMessageWithTags());
-			self->messages.back().tags = r->getTags();
+			self->messages.emplace_back(r->version(), r->getMessageWithTags(), r->getTags(), r->arena());
 			r->nextMessage();
 		}
 
