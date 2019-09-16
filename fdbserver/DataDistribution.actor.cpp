@@ -553,6 +553,7 @@ Future<Void> teamTracker(struct DDTeamCollection* const& self, Reference<TCTeamI
 struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	enum { REQUESTING_WORKER = 0, GETTING_WORKER = 1, GETTING_STORAGE = 2 };
 
+	// clang-format off
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
@@ -617,6 +618,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+	// clang-format on
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -3635,7 +3637,8 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
-			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("InvalidAddrs", self->invalidLocalityAddr.size());
+			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId)
+			    .detail("InvalidAddrs", self->invalidLocalityAddr.size());
 		}
 	}
 
@@ -3645,7 +3648,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageReply candidateWorker ) {
 	// Exclude the worker that has invalid locality
 	if (SERVER_KNOBS->DD_VALIDATE_LOCALITY &&
-		!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
+	    !self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
 		TraceEvent(SevWarn, "DDRecruiting")
 		    .detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
 		    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
@@ -3739,7 +3742,6 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					exclusions.insert(addr);
 				}
 			}
-			
 
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
 			for(auto it : exclusions) {

@@ -192,7 +192,7 @@ enum AgentMode {
 	AgentAddition = 2
 };
 
-ACTOR Future<Void> rebootToCorrectLocality(ISimulator::ProcessInfo* process ,ISimulator::KillType rebootType) {
+ACTOR Future<Void> rebootToCorrectLocality(ISimulator::ProcessInfo* process, ISimulator::KillType rebootType) {
 	while (process->rebooting) {
 		wait(delay(10));
 	}
@@ -232,12 +232,14 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 		state ISimulator::ProcessInfo* process = NULL;
 		if ((prevShutdownReason == ISimulator::Reboot || prevShutdownReason == ISimulator::RebootProcess) &&
-			!misconfigLocality && processClass == ProcessClass::StorageClass) {
-			// Because only DD considered the misconfigured locality situation, we only test misconfig StorageClass for now.
+		    !misconfigLocality && processClass == ProcessClass::StorageClass) {
+			// Because only DD considered the misconfigured locality situation, we only test misconfig StorageClass
+			// SOMEDAY: Test all types of processClass
 			if (deterministicRandom()->random01() < 0.5) {
 				// Misconfigure the locality
-				state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
-			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+				state LocalityData misConfLocalities(
+				    Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
+				    Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
 				// Must set keyProcessId, machineId, and zoneId which have assert() in code base already
 				misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
 				misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
@@ -249,20 +251,20 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					}
 				}
 				// Set the incorrect locality
-				TraceEvent("SimulatedFDBDRebooterMisconfigLocality").detail("InvalidLocality", misConfLocalities.toString());
+				TraceEvent("SimulatedFDBDRebooterMisconfigLocality")
+				    .detail("InvalidLocality", misConfLocalities.toString());
 				misconfigLocality = true;
-				process = g_simulator.newProcess("Server", ip, port, listenPerProcess, misConfLocalities, processClass, dataFolder->c_str(), coordFolder->c_str());
+				process = g_simulator.newProcess("Server", ip, port, listenPerProcess, misConfLocalities, processClass,
+				                                 dataFolder->c_str(), coordFolder->c_str());
 				// Wait for a while to reboot the process to correct the locality
 				rebootDueToInvalidLocality = rebootToCorrectLocality(process, prevShutdownReason);
 			} else {
-				process =
-		    		g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
-		                           coordFolder->c_str());
+				process = g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass,
+				                                 dataFolder->c_str(), coordFolder->c_str());
 			}
 		} else {
-			process =
-		    	g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
-		                           coordFolder->c_str());
+			process = g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass,
+			                                 dataFolder->c_str(), coordFolder->c_str());
 		}
 
 		wait(g_simulator.onProcess(process,
@@ -507,10 +509,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				// 	                                          &coordFolders[i], baseFolder, connStr, useSeedFile,
 				// 	                                          agentMode, whitelistBinPaths));
 				// }
-				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort,
-															listenPerProcess, localities, processClass, &myFolders[i],
-															&coordFolders[i], baseFolder, connStr, useSeedFile,
-															agentMode, whitelistBinPaths));
+				processes.push_back(simulatedFDBDRebooter(
+				    clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass,
+				    &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
