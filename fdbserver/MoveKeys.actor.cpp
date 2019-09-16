@@ -943,7 +943,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKey
 				    wait(krmGetRanges(&tr, keyServersPrefix, KeyRangeRef(begin, allKeys.end),
 				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
-				for (auto it : keyServers) {
+				for (int i = 0; i < keyServers.size() - 1; ++i) {
+					auto it = keyServers[i];
 					vector<UID> src;
 					vector<UID> dest;
 					decodeKeyServersValue(it.value, src, dest);
@@ -958,17 +959,28 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKey
 					// Dest is usually empty, but keep this in case there is parallel data movement
 					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
 					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+					TraceEvent(SevDebug, "FailedServerSetKey", serverID)
+						.detail("Key", it.key)
+						.detail("ValueSrc", describe(src))
+						.detail("ValueDest", describe(dest));
 					tr.set(keyServersKey(it.key), keyServersValue(src, dest));
 				}
 
 				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
+				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end);
 				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
 				wait(tr.commit());
+				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end)
+					.detail("CommitVersion", tr.getCommittedVersion());
 				// Update beginning of next iteration's range
 				begin = currentKeys.end;
 				break;
 			} catch (Error& e) {
-				TraceEvent("FailedServerError").error(e);
+				TraceEvent("FailedServerError", serverID).error(e);
 				wait(tr.onError(e));
 			}
 		}
