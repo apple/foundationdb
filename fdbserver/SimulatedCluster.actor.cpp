@@ -231,7 +231,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		wait( delay( waitTime ) );
 
 		state ISimulator::ProcessInfo* process = NULL;
-		if (prevShutdownReason == ISimulator::Reboot && !misconfigLocality) {
+		if ((prevShutdownReason == ISimulator::Reboot || prevShutdownReason == ISimulator::RebootProcess) &&
+			!misconfigLocality && processClass == ProcessClass::StorageClass) {
+			// Because only DD considered the misconfigured locality situation, we only test misconfig StorageClass for now.
 			if (deterministicRandom()->random01() < 0.5) {
 				// Misconfigure the locality
 				state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
@@ -251,7 +253,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				misconfigLocality = true;
 				process = g_simulator.newProcess("Server", ip, port, listenPerProcess, misConfLocalities, processClass, dataFolder->c_str(), coordFolder->c_str());
 				// Wait for a while to reboot the process to correct the locality
-				rebootDueToInvalidLocality = rebootToCorrectLocality(process, ISimulator::Reboot);
+				rebootDueToInvalidLocality = rebootToCorrectLocality(process, prevShutdownReason);
 			} else {
 				process =
 		    		g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
