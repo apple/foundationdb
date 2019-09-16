@@ -369,9 +369,10 @@ ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(
 			// ProcessId is unset on purpose because it will be set based on data filename
 			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
 			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
-			// Must set keyProcessId and machineId
+			// Must set keyProcessId, machineId, and zoneId which have assert() in code base already
 			misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
 			misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
+			misConfLocalities.set(LocalityData::keyZoneId, localities.get(LocalityData::keyZoneId));
 			for (int i = 0; i < localities.size(); i++) {
 				if (deterministicRandom()->random01() < 0.2) {
 					std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
