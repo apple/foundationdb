@@ -350,25 +350,25 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 	}
 }
 
-ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(Reference<ClusterConnectionFile> connFile, IPAddress ip,
-                                                         bool sslEnabled, Reference<TLSOptions> tlsOptions,
-                                                         uint16_t port, uint16_t listenPerProcess,
-                                                         LocalityData localities, ProcessClass processClass,
-                                                         std::string* dataFolder, std::string* coordFolder,
-                                                         std::string baseFolder, ClusterConnectionString connStr,
-                                                         bool useSeedFile, AgentMode runBackupAgents,
-                                                         std::string whitelistBinPaths) {
-    state int numReboots = deterministicRandom()->random01() * 5;
+ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(
+    Reference<ClusterConnectionFile> connFile, IPAddress ip, bool sslEnabled, Reference<TLSOptions> tlsOptions,
+    uint16_t port, uint16_t listenPerProcess, LocalityData localities, ProcessClass processClass,
+    std::string* dataFolder, std::string* coordFolder, std::string baseFolder, ClusterConnectionString connStr,
+    bool useSeedFile, AgentMode runBackupAgents, std::string whitelistBinPaths) {
+	state int numReboots = deterministicRandom()->random01() * 5;
 	state int curReboot = 0;
-	//state ISimulator::KillType ret = ISimulator::KillType::None;
+	// state ISimulator::KillType ret = ISimulator::KillType::None;
 	loop {
 		if (curReboot == numReboots) {
-			ISimulator::KillType ret = wait(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder, coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
+			ISimulator::KillType ret = wait(simulatedFDBDRebooter(
+			    connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder,
+			    coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
 			return ret;
 		} else if (curReboot < numReboots) {
 			// Simulate the case when operators try to misconfig localities multiple times
 			// ProcessId is unset on purpose because it will be set based on data filename
-			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
+			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
 			// Must set keyProcessId and machineId
 			misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
 			misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
@@ -379,7 +379,9 @@ ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(Referenc
 				}
 			}
 			// Set the incorrect locality
-			wait(success(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, misConfLocalities, processClass, dataFolder, coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths)));
+			wait(success(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess,
+			                                   misConfLocalities, processClass, dataFolder, coordFolder, baseFolder,
+			                                   connStr, useSeedFile, runBackupAgents, whitelistBinPaths)));
 			++curReboot;
 		}
 	}
@@ -446,9 +448,15 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				AgentMode agentMode = runBackupAgents == AgentOnly ? ( i == ips.size()-1 ? AgentOnly : AgentNone ) : runBackupAgents;
 				if (processClass == ProcessClass::StorageClass) {
 					// Test if locality is misconfigured for storage process
-					processes.push_back(simulatedInvalidLocalityFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+					processes.push_back(simulatedInvalidLocalityFDBDRebooter(
+					    clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities,
+					    processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode,
+					    whitelistBinPaths));
 				} else {
-					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort,
+					                                          listenPerProcess, localities, processClass, &myFolders[i],
+					                                          &coordFolders[i], baseFolder, connStr, useSeedFile,
+					                                          agentMode, whitelistBinPaths));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
@@ -745,7 +753,6 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 				}
 			}
 
-			// TODO: change locality here
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
