@@ -366,8 +366,12 @@ ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(Referenc
 			ISimulator::KillType ret = wait(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder, coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
 			return ret;
 		} else if (curReboot < numReboots) {
+			// Simulate the case when operators try to misconfig localities multiple times
 			// ProcessId is unset on purpose because it will be set based on data filename
 			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+			// Must set keyProcessId and machineId
+			misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
+			misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
 			for (int i = 0; i < localities.size(); i++) {
 				if (deterministicRandom()->random01() < 0.2) {
 					std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
