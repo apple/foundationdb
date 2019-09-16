@@ -3591,6 +3591,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
 			Future<vector<ProcessData>> workers = getWorkers(&tr);
+			wait(success(workers));
 			std::set<AddressExclusion> existingAddrs;
 			for (int i = 0; i < workers.get().size(); i++) {
 				const ProcessData& workerData = workers.get()[i];
