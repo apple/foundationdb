@@ -192,6 +192,16 @@ enum AgentMode {
 	AgentAddition = 2
 };
 
+ACTOR Future<Void> rebootToCorrectLocality(ISimulator::ProcessInfo* process ,ISimulator::KillType rebootType) {
+	while (process->rebooting) {
+		wait(delay(10));
+	}
+	wait(delay(10));
+	g_simulator.rebootProcess(process, rebootType);
+
+	return Void();
+}
+
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
 //  takes care of house-keeping such as context switching and file closing.
@@ -206,6 +216,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 	state ISimulator::ProcessInfo *simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
+	state ISimulator::KillType prevShutdownReason = ISimulator::None;
+	state bool misconfigLocality = false;
+	state Future<Void> rebootDueToInvalidLocality;
 
 	loop {
 		auto waitTime = SERVER_KNOBS->MIN_REBOOT_TIME + (SERVER_KNOBS->MAX_REBOOT_TIME - SERVER_KNOBS->MIN_REBOOT_TIME) * deterministicRandom()->random01();
@@ -217,9 +230,39 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 		wait( delay( waitTime ) );
 
-		state ISimulator::ProcessInfo* process =
-		    g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
+		state ISimulator::ProcessInfo* process = NULL;
+		if (prevShutdownReason == ISimulator::Reboot && !misconfigLocality) {
+			if (deterministicRandom()->random01() < 0.5) {
+				// Misconfigure the locality
+				state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
+			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+				// Must set keyProcessId, machineId, and zoneId which have assert() in code base already
+				misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
+				misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
+				misConfLocalities.set(LocalityData::keyZoneId, localities.get(LocalityData::keyZoneId));
+				for (int i = 0; i < localities.size(); i++) {
+					if (deterministicRandom()->random01() < 0.2) {
+						std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
+						misConfLocalities.set(entry.first.contents(), entry.second);
+					}
+				}
+				// Set the incorrect locality
+				TraceEvent("SimulatedFDBDRebooterMisconfigLocality").detail("InvalidLocality", misConfLocalities.toString());
+				misconfigLocality = true;
+				process = g_simulator.newProcess("Server", ip, port, listenPerProcess, misConfLocalities, processClass, dataFolder->c_str(), coordFolder->c_str());
+				// Wait for a while to reboot the process to correct the locality
+				rebootDueToInvalidLocality = rebootToCorrectLocality(process, ISimulator::Reboot);
+			} else {
+				process =
+		    		g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
 		                           coordFolder->c_str());
+			}
+		} else {
+			process =
+		    	g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
+		                           coordFolder->c_str());
+		}
+
 		wait(g_simulator.onProcess(process,
 		                           TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
@@ -309,6 +352,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		g_simulator.destroyProcess( process );  // Leak memory here; the process may be used in other parts of the simulation
 
 		auto shutdownResult = onShutdown.get();
+		prevShutdownReason = shutdownResult;
 		TraceEvent("SimulatedFDBDShutdown").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("Address", process->address)
 			.detail("Excluded", process->excluded)
@@ -350,43 +394,45 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 	}
 }
 
-ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(
-    Reference<ClusterConnectionFile> connFile, IPAddress ip, bool sslEnabled, Reference<TLSOptions> tlsOptions,
-    uint16_t port, uint16_t listenPerProcess, LocalityData localities, ProcessClass processClass,
-    std::string* dataFolder, std::string* coordFolder, std::string baseFolder, ClusterConnectionString connStr,
-    bool useSeedFile, AgentMode runBackupAgents, std::string whitelistBinPaths) {
-	state int numReboots = deterministicRandom()->random01() * 5;
-	state int curReboot = 0;
-	// state ISimulator::KillType ret = ISimulator::KillType::None;
-	loop {
-		if (curReboot == numReboots) {
-			ISimulator::KillType ret = wait(simulatedFDBDRebooter(
-			    connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder,
-			    coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
-			return ret;
-		} else if (curReboot < numReboots) {
-			// Simulate the case when operators try to misconfig localities multiple times
-			// ProcessId is unset on purpose because it will be set based on data filename
-			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
-			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
-			// Must set keyProcessId, machineId, and zoneId which have assert() in code base already
-			misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
-			misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
-			misConfLocalities.set(LocalityData::keyZoneId, localities.get(LocalityData::keyZoneId));
-			for (int i = 0; i < localities.size(); i++) {
-				if (deterministicRandom()->random01() < 0.2) {
-					std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
-					misConfLocalities.set(entry.first.contents(), entry.second);
-				}
-			}
-			// Set the incorrect locality
-			wait(success(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess,
-			                                   misConfLocalities, processClass, dataFolder, coordFolder, baseFolder,
-			                                   connStr, useSeedFile, runBackupAgents, whitelistBinPaths)));
-			++curReboot;
-		}
-	}
-}
+// ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(
+//     Reference<ClusterConnectionFile> connFile, IPAddress ip, bool sslEnabled, Reference<TLSOptions> tlsOptions,
+//     uint16_t port, uint16_t listenPerProcess, LocalityData localities, ProcessClass processClass,
+//     std::string* dataFolder, std::string* coordFolder, std::string baseFolder, ClusterConnectionString connStr,
+//     bool useSeedFile, AgentMode runBackupAgents, std::string whitelistBinPaths) {
+// 	state int numReboots = deterministicRandom()->random01() * 5;
+// 	state int curReboot = 0;
+// 	// state ISimulator::KillType ret = ISimulator::KillType::None;
+// 	loop {
+// 		if (curReboot == numReboots) {
+// 			TraceEvent("SimulatedInvalidLocalityFDBDRebooter").detail("ValidLocality", localities.toString());
+// 			ISimulator::KillType ret = wait(simulatedFDBDRebooter(
+// 			    connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder,
+// 			    coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
+// 			return ret;
+// 		} else if (curReboot < numReboots) {
+// 			// Simulate the case when operators try to misconfig localities multiple times
+// 			// ProcessId is unset on purpose because it will be set based on data filename
+// 			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(),
+// 			                                     Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+// 			// Must set keyProcessId, machineId, and zoneId which have assert() in code base already
+// 			misConfLocalities.set(LocalityData::keyProcessId, localities.get(LocalityData::keyProcessId));
+// 			misConfLocalities.set(LocalityData::keyMachineId, localities.get(LocalityData::keyMachineId));
+// 			misConfLocalities.set(LocalityData::keyZoneId, localities.get(LocalityData::keyZoneId));
+// 			for (int i = 0; i < localities.size(); i++) {
+// 				if (deterministicRandom()->random01() < 0.2) {
+// 					std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
+// 					misConfLocalities.set(entry.first.contents(), entry.second);
+// 				}
+// 			}
+// 			// Set the incorrect locality
+// 			TraceEvent("SimulatedInvalidLocalityFDBDRebooter").detail("InvalidLocality", misConfLocalities.toString());
+// 			wait(success(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess,
+// 			                                   misConfLocalities, processClass, dataFolder, coordFolder, baseFolder,
+// 			                                   connStr, useSeedFile, runBackupAgents, whitelistBinPaths)));
+// 			++curReboot;
+// 		}
+// 	}
+// }
 
 template<>
 std::string describe(bool const& val) {
@@ -447,18 +493,22 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				const int listenPort = i*listenPerProcess + 1;
 				AgentMode agentMode = runBackupAgents == AgentOnly ? ( i == ips.size()-1 ? AgentOnly : AgentNone ) : runBackupAgents;
-				if (processClass == ProcessClass::StorageClass) {
-					// Test if locality is misconfigured for storage process
-					processes.push_back(simulatedInvalidLocalityFDBDRebooter(
-					    clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities,
-					    processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode,
-					    whitelistBinPaths));
-				} else {
-					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort,
-					                                          listenPerProcess, localities, processClass, &myFolders[i],
-					                                          &coordFolders[i], baseFolder, connStr, useSeedFile,
-					                                          agentMode, whitelistBinPaths));
-				}
+				// if (processClass == ProcessClass::StorageClass) {
+				// 	// Test if locality is misconfigured for storage process
+				// 	processes.push_back(simulatedInvalidLocalityFDBDRebooter(
+				// 	    clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities,
+				// 	    processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode,
+				// 	    whitelistBinPaths));
+				// } else {
+				// 	processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort,
+				// 	                                          listenPerProcess, localities, processClass, &myFolders[i],
+				// 	                                          &coordFolders[i], baseFolder, connStr, useSeedFile,
+				// 	                                          agentMode, whitelistBinPaths));
+				// }
+				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort,
+															listenPerProcess, localities, processClass, &myFolders[i],
+															&coordFolders[i], baseFolder, connStr, useSeedFile,
+															agentMode, whitelistBinPaths));
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 

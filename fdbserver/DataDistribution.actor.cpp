@@ -3580,6 +3580,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 	state int checkCount = 0;
 	state Transaction tr(self->cx);
+	state bool hasCorrectedLocality = false;
 
 	loop {
 		try {
@@ -3590,7 +3591,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
-			Future<vector<ProcessData>> workers = getWorkers(&tr);
+			state Future<vector<ProcessData>> workers = getWorkers(&tr);
 			wait(success(workers));
 			std::set<AddressExclusion> existingAddrs;
 			for (int i = 0; i < workers.get().size(); i++) {
@@ -3601,6 +3602,8 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
 					// The locality info on the addr has been corrected
 					self->invalidLocalityAddr.erase(addr);
+					TraceEvent("AddrBecomesValid").detail("Addr", addr.toString());
+					hasCorrectedLocality = true;
 				}
 			}
 
@@ -3609,9 +3612,16 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				if (!existingAddrs.count(*addr)) {
 					// The address no longer has a worker
 					self->invalidLocalityAddr.erase(addr++);
+					TraceEvent("AddrBecomesValid").detail("Addr", addr->toString());
+					hasCorrectedLocality = true;
 				} else {
 					++addr;
 				}
+			}
+
+			if (hasCorrectedLocality) {
+				hasCorrectedLocality = false;
+				self->restartRecruiting.trigger();
 			}
 
 			if (self->invalidLocalityAddr.empty()) {
@@ -3619,13 +3629,13 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 			}
 
 			checkCount++;
-			if (checkCount > 100) {
+			if (checkCount > 10) {
 				// The incorrect locality info is not properly correctly on time
 				TraceEvent(SevWarn, "InvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
-			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId);
+			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("InvalidAddrs", self->invalidLocalityAddr.size());
 		}
 	}
 
