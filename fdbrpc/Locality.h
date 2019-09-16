@@ -157,6 +157,16 @@ public:
 		_data[key] = value;
 	}
 
+	int size() const { return _data.size(); }
+	std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> getItem(int i) {
+		ASSERT(i < _data.size());
+		std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>>::iterator iter = _data.begin();
+		while (i-- > 0) {
+			iter++;
+		}
+		return *iter;
+	}
+
 	bool	isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
 	bool	isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {
 		auto pos = _data.find(key);

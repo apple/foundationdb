@@ -350,6 +350,37 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 	}
 }
 
+ACTOR Future<ISimulator::KillType> simulatedInvalidLocalityFDBDRebooter(Reference<ClusterConnectionFile> connFile, IPAddress ip,
+                                                         bool sslEnabled, Reference<TLSOptions> tlsOptions,
+                                                         uint16_t port, uint16_t listenPerProcess,
+                                                         LocalityData localities, ProcessClass processClass,
+                                                         std::string* dataFolder, std::string* coordFolder,
+                                                         std::string baseFolder, ClusterConnectionString connStr,
+                                                         bool useSeedFile, AgentMode runBackupAgents,
+                                                         std::string whitelistBinPaths) {
+    state int numReboots = deterministicRandom()->random01() * 5;
+	state int curReboot = 0;
+	//state ISimulator::KillType ret = ISimulator::KillType::None;
+	loop {
+		if (curReboot == numReboots) {
+			ISimulator::KillType ret = wait(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, localities, processClass, dataFolder, coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths));
+			return ret;
+		} else if (curReboot < numReboots) {
+			// ProcessId is unset on purpose because it will be set based on data filename
+			state LocalityData misConfLocalities(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+			for (int i = 0; i < localities.size(); i++) {
+				if (deterministicRandom()->random01() < 0.2) {
+					std::pair<Standalone<StringRef>, Optional<Standalone<StringRef>>> entry = localities.getItem(i);
+					misConfLocalities.set(entry.first.contents(), entry.second);
+				}
+			}
+			// Set the incorrect locality
+			wait(success(simulatedFDBDRebooter(connFile, ip, sslEnabled, tlsOptions, port, listenPerProcess, misConfLocalities, processClass, dataFolder, coordFolder, baseFolder, connStr, useSeedFile, runBackupAgents, whitelistBinPaths)));
+			++curReboot;
+		}
+	}
+}
+
 template<>
 std::string describe(bool const& val) {
 	return val ? "true" : "false";
@@ -409,7 +440,12 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				const int listenPort = i*listenPerProcess + 1;
 				AgentMode agentMode = runBackupAgents == AgentOnly ? ( i == ips.size()-1 ? AgentOnly : AgentNone ) : runBackupAgents;
-				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+				if (processClass == ProcessClass::StorageClass) {
+					// Test if locality is misconfigured for storage process
+					processes.push_back(simulatedInvalidLocalityFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+				} else {
+					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+				}
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
@@ -705,6 +741,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 				}
 			}
 
+			// TODO: change locality here
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
