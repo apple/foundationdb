@@ -518,7 +518,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 		if(!iter->ifa_addr)
 			continue;
 		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
-			uint32_t ip = ntohl(((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr);
+			uint32_t ip = ntohl((((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr));
 			if (ip == _ip.toV4()) {
 				ifa_name = iter->ifa_name;
 				break;
