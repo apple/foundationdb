@@ -57,7 +57,6 @@
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
-#include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -1510,7 +1509,6 @@ private:
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
-		initSignalSafeUnwind();
 
 #ifdef ALLOC_INSTRUMENTATION
 		g_extra_memory = new uint8_t[1000000];
