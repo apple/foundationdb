@@ -193,10 +193,10 @@ else()
       -Wno-undefined-var-template
       -Wno-unused-value
       -Wno-tautological-pointer-compare
-      -Wno-register
       -Wno-format)
     if (USE_CCACHE)
       add_compile_options(
+        -Wno-register
         -Wno-error=unused-command-line-argument)
     endif()
   endif()
