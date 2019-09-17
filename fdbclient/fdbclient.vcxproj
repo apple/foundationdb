@@ -98,6 +98,7 @@
     </ActorCompiler>
     <ClInclude Include="VersionedMap.h" />
     <ClInclude Include="WriteMap.h" />
+    <ClInclude Include="zipf.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
@@ -132,6 +133,7 @@
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
     <ClCompile Include="JsonBuilder.cpp" />
+    <ClCompile Include="zipf.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>
