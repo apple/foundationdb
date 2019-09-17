@@ -197,4 +197,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
+
+	init( VALIDATE_LOCALITY,						1 ); if( randomize && BUGGIFY ) VALIDATE_LOCALITY = 0;
 }

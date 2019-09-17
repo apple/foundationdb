@@ -166,6 +166,22 @@ public:
 		}
 		return *iter;
 	}
+	bool isValidLocality(std::set<std::string> replicationPolicyKeys) {
+		// Future: Once we add simulation test that misconfigure a cluster, such as not setting some locality entries,
+		// VALIDATE_LOCALITY should always be true. Otherwise, simulation test may fail.
+		// if (!CLIENT_KNOBS->VALIDATE_LOCALITY) {
+		// 	// Disable the checking if locality is valid
+		// 	return true;
+		// }
+
+		for (auto& policy : replicationPolicyKeys) {
+			if (!isPresent(policy)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
 
 	bool	isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
 	bool	isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {

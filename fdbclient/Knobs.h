@@ -188,6 +188,8 @@ public:
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 
+	int VALIDATE_LOCALITY;
+
 	ClientKnobs(bool randomize = false);
 };
 

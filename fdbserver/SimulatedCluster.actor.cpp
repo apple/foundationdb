@@ -196,7 +196,7 @@ ACTOR Future<Void> rebootToCorrectLocality(ISimulator::ProcessInfo* process, ISi
 	while (process->rebooting) {
 		wait(delay(10));
 	}
-	wait(delay(10));
+	wait(delay(60)); // Let DD catch the invalid locality machines
 	g_simulator.rebootProcess(process, rebootType);
 
 	return Void();
@@ -232,8 +232,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 		state ISimulator::ProcessInfo* process = NULL;
 		if ((prevShutdownReason == ISimulator::Reboot || prevShutdownReason == ISimulator::RebootProcess) &&
-		    !misconfigLocality && processClass == ProcessClass::StorageClass) {
+		    !misconfigLocality && processClass == ProcessClass::StorageClass ) {
+			//&& g_simulator.getRoles(process->address).find("log") == std::string::npos
 			// Because only DD considered the misconfigured locality situation, we only test misconfig StorageClass
+			// tlogs are not tolerate to misconfigured localities
 			// SOMEDAY: Test all types of processClass
 			if (deterministicRandom()->random01() < 0.5) {
 				// Misconfigure the locality

@@ -254,7 +254,10 @@ public:
 
 		for( auto& it : fitness_workers ) {
 			for (auto& worker : it.second ) {
-				logServerMap->add(worker.interf.locality, &worker);
+				if (worker.interf.locality.isValidLocality(conf.tLogPolicy->attributeKeys())) {
+					// In case worker locality is misconfigured
+					logServerMap->add(worker.interf.locality, &worker);
+				}
 			}
 
 			std::vector<LocalityEntry> bestSet;

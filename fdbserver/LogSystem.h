@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -57,6 +58,22 @@ public:
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 	LogSet(const TLogSet& tlogSet);
 	LogSet(const CoreTLogSet& coreSet);
+
+	bool isValidLocality(LocalityData locality) {
+		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
+			// Disable the checking if locality is valid
+			return true;
+		}
+
+		std::set<std::string> replicationPolicyKeys = tLogPolicy->attributeKeys();
+		for (auto& policy : replicationPolicyKeys) {
+			if (!locality.isPresent(policy)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
 
 	std::string logRouterString() {
 		std::string result;
@@ -96,6 +113,9 @@ public:
 		std::map<int,int> server_usedBest;
 		std::set<std::pair<int,int>> used_servers;
 		for(int i = 0; i < tLogLocalities.size(); i++) {
+			if (!isValidLocality(tLogLocalities[i])) {
+				continue;
+			}
 			used_servers.insert(std::make_pair(0,i));
 		}
 
@@ -270,8 +290,10 @@ public:
 
 		// Convert locations to the also servers
 		for (auto location : newLocations) {
-			locations.push_back(locationOffset + location);
-			alsoServers.push_back(logEntryArray[location]);
+			if (isValidLocality(tLogLocalities[location])) {
+				locations.push_back(locationOffset + location);
+				alsoServers.push_back(logEntryArray[location]);
+			}
 		}
 
 		// Run the policy, assert if unable to satify
