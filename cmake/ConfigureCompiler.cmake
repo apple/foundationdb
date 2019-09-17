@@ -78,12 +78,13 @@ endif()
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
+set(CMAKE_CXX_STANDARD 17)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
   # this sets the windows target version to Windows 7
   set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
+  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
   set(GCC NO)
@@ -169,8 +170,6 @@ else()
     -mavx
     -msse4.2)
 
-  set(CMAKE_CXX_STANDARD 17)
-#  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
