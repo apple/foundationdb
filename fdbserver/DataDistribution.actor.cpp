@@ -42,6 +42,8 @@ class TCTeamInfo;
 struct TCMachineInfo;
 class TCMachineTeamInfo;
 
+ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
+
 struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	UID id;
 	StorageServerInterface lastKnownInterface;
@@ -993,6 +995,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					TraceEvent(SevWarnAlways, "MissingLocality")
 					    .detail("Server", i->first.uniqueID)
 					    .detail("Locality", i->first.locality.toString());
+					auto addr = i->first.address();
+					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
+					if (self->checkInvalidLocalities.isReady()) {
+						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
+						self->addActor.send(self->checkInvalidLocalities);
+					}
 				}
 				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0);
 			}
@@ -3578,7 +3586,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 }
 
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
-	state int checkCount = 0;
+	state double start = now();
 	state Transaction tr(self->cx);
 
 	loop {
@@ -3590,10 +3598,10 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
-			Future<vector<ProcessData>> workers = getWorkers(&tr);
-			std::set<AddressExclusion> existingAddrs;
-			for (int i = 0; i < workers.get().size(); i++) {
-				const ProcessData& workerData = workers.get()[i];
+			state vector<ProcessData> workers = wait(getWorkers(&tr));
+			state std::set<AddressExclusion> existingAddrs;
+			for (int i = 0; i < workers.size(); i++) {
+				const ProcessData& workerData = workers[i];
 				AddressExclusion addr(workerData.address.ip, workerData.address.port);
 				existingAddrs.insert(addr);
 				if (self->invalidLocalityAddr.count(addr) &&
@@ -3602,6 +3610,8 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 					self->invalidLocalityAddr.erase(addr);
 				}
 			}
+
+			wait(yield(TaskPriority::DataDistribution));
 
 			// In case system operator permanently excludes workers on the address with invalid locality
 			for (auto addr = self->invalidLocalityAddr.begin(); addr != self->invalidLocalityAddr.end();) {
@@ -3617,10 +3627,9 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				break;
 			}
 
-			checkCount++;
-			if (checkCount > 100) {
-				// The incorrect locality info is not properly correctly on time
-				TraceEvent(SevWarn, "InvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
+			if (now() - start > 300) { // Report warning if invalid locality is not corrected within 300 seconds
+				// The incorrect locality info has not been properly corrected in a reasonable time
+				TraceEvent(SevWarn, "PersistentInvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
