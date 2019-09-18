@@ -3587,18 +3587,14 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 	state double start = now();
-	state Transaction tr(self->cx);
 
 	loop {
 		try {
 			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY));
 
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
-			state vector<ProcessData> workers = wait(getWorkers(&tr));
+			state vector<ProcessData> workers = wait(getWorkers(self->cx));
 			state std::set<AddressExclusion> existingAddrs;
 			for (int i = 0; i < workers.size(); i++) {
 				const ProcessData& workerData = workers[i];
@@ -3608,6 +3604,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
 					// The locality info on the addr has been corrected
 					self->invalidLocalityAddr.erase(addr);
+					TraceEvent("InvalidLocalityCorrected").detail("Addr", addr.toString());
 				}
 			}
 
@@ -3618,6 +3615,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				if (!existingAddrs.count(*addr)) {
 					// The address no longer has a worker
 					addr = self->invalidLocalityAddr.erase(addr);
+					TraceEvent("InvalidLocalityNoLongerExisted").detail("Addr", addr->toString());
 				} else {
 					++addr;
 				}
@@ -3630,10 +3628,10 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 			if (now() - start > 300) { // Report warning if invalid locality is not corrected within 300 seconds
 				// The incorrect locality info has not been properly corrected in a reasonable time
 				TraceEvent(SevWarn, "PersistentInvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
+				start = now();
 			}
 		} catch (Error& e) {
-			wait(tr.onError(e));
-			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId);
+			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
 		}
 	}
 
@@ -3644,7 +3642,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 	// Exclude the worker that has invalid locality
 	if (!self->isValidLocality(self->configuration.storagePolicy, candidateWorker.worker.locality)) {
 		TraceEvent(SevWarn, "DDRecruiting")
-		    .detail("ExcludeWorkWithInvalidLocality", candidateWorker.worker.id())
+		    .detail("ExcludeWorkerWithInvalidLocality", candidateWorker.worker.id())
 		    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
 		    .detail("Addr", candidateWorker.worker.address());
 		auto addr = candidateWorker.worker.address();
