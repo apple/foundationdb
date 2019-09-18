@@ -12,7 +12,7 @@
 if [ "$1" = upgrade ]; then
     invoke-rc.d foundationdb stop || :
     # old versions could leave this behind
-    rm -f /usr/lib/foundationdb/argparse.pyc
+    rm -f /usr/lib/foundationdb/argparse.py /usr/lib/foundationdb/argparse.pyc
 fi
 
 if dpkg-query -s foundationdb >/dev/null 2>&1 ; then
