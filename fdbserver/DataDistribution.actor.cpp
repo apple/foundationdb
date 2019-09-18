@@ -3615,7 +3615,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				if (!existingAddrs.count(*addr)) {
 					// The address no longer has a worker
 					addr = self->invalidLocalityAddr.erase(addr);
-					TraceEvent("InvalidLocalityNoLongerExisted").detail("Addr", addr->toString());
+					TraceEvent("InvalidLocalityNoLongerExists").detail("Addr", addr->toString());
 				} else {
 					++addr;
 				}
