@@ -123,25 +123,24 @@ bool isBackupMessage(const VersionedMessage& msg) {
 			return false; // skip Txs mutations
 		}
 	}
-	// check for metadataVersionKey and special metadata mutations
 
-	// MutationRef m = BinaryReader::fromStringRef<MutationRef>(message, AssumeVersion(currentProtocolVersion));
 	// std::cout << m.toString() << std::endl;
 	// std::cout << msg.message.printable() << std::endl;
 	// std::cout << "Tags: " << describe(msg.tags) << ", Version: " << msg.version.toString() << std::endl;
-	// if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey)
-	//	return false;
-	/*
-	BinaryReader reader(message.begin(), message.size(), Unversioned());
-	if (LogProtocolMessage::isNextIn(reader)) {
-	    LogProtocolMessage lpm;
-	    reader >> lpm;
-	} else {
-	    MutationRef m;
-	    reader >> m;
-	    std::cout << m.toString() << std::endl;
+	BinaryReader reader(msg.message.begin(), msg.message.size(), AssumeVersion(currentProtocolVersion));
+
+	// Return false for LogProtocolMessage.
+	if (LogProtocolMessage::isNextIn(reader)) return false;
+
+	MutationRef m;
+	reader >> m;
+	// std::cout << m.toString() << std::endl;
+
+	// check for metadataVersionKey and special metadata mutations
+	if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey) {
+		return false;
 	}
-	*/
+
 	return true;
 }
 
@@ -235,7 +234,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			self->messages.emplace_back(r->version(), r->getMessageWithTags(), r->getTags(), r->arena());
+			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			r->nextMessage();
 		}
 
