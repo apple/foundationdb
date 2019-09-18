@@ -26,6 +26,11 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.h"
+
+struct RestoreLoaderInterface;
+struct RestoreApplierInterface;
+struct RestoreMasterInterface;
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -282,10 +287,25 @@ extern const KeyRef mustContainSystemMutationsKey;
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 
+// Fast restore
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
-
-const Key restoreWorkerKeyFor( UID const& agentID );
+extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
+extern const KeyRef restoreRequestTriggerKey;
+extern const KeyRef restoreRequestDoneKey;
+extern const KeyRangeRef restoreRequestKeys;
+const Key restoreWorkerKeyFor(UID const& workerID);
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
+const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
+const int decodeRestoreRequestTriggerValue(ValueRef const& value);
+const Value restoreRequestDoneVersionValue(Version readVersion);
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
+const Key restoreRequestKeyFor(int const& index);
+const Value restoreRequestValue(RestoreRequest const& server);
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
+const Key restoreStatusKeyFor(StringRef statusType);
+const Value restoreStatusValue(double val);
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;

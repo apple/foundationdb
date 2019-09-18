@@ -177,7 +177,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
 	init( DD_SHARD_SIZE_GRANULARITY_SIM,                      500000 ); if( randomize && BUGGIFY ) DD_SHARD_SIZE_GRANULARITY_SIM = 0;
-	init( DD_MOVE_KEYS_PARALLELISM,                               20 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
+	init( DD_MOVE_KEYS_PARALLELISM,                               15 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
 	init( DD_MERGE_LIMIT,                                       2000 ); if( randomize && BUGGIFY ) DD_MERGE_LIMIT = 2;
 	init( DD_SHARD_METRICS_TIMEOUT,                             60.0 ); if( randomize && BUGGIFY ) DD_SHARD_METRICS_TIMEOUT = 0.1;
 	init( DD_LOCATION_CACHE_SIZE,                            2000000 ); if( randomize && BUGGIFY ) DD_LOCATION_CACHE_SIZE = 3;
@@ -195,6 +195,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	TR_FLAG_DISABLE_SERVER_TEAM_REMOVER =                        false; if( randomize && BUGGIFY ) TR_FLAG_DISABLE_SERVER_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
 	init( TR_REMOVE_SERVER_TEAM_DELAY,                          60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
 	init( TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,                     5.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_EXTRA_DELAY =  deterministicRandom()->random01() * 10.0;
+
+	init( DD_REMOVE_STORE_ENGINE_DELAY,                         60.0 ); if( randomize && BUGGIFY ) DD_REMOVE_STORE_ENGINE_DELAY =  deterministicRandom()->random01() * 60.0;
 
 	// Redwood Storage Engine
 	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
@@ -349,8 +351,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
-	init( COORDINATOR_REGISTER_INTERVAL,                        30.0 );
-	init( CLIENT_REGISTER_INTERVAL,                            300.0 );
+	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
+	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,             ProcessClass::UnsetFit );
@@ -417,8 +419,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	init( MAX_TPS_HISTORY_SAMPLES,                               600 );
 	init( NEEDED_TPS_HISTORY_SAMPLES,                            200 );
-	init( TARGET_DURABILITY_LAG_VERSIONS,                      200e6 );
-	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                100e6 );
+	init( TARGET_DURABILITY_LAG_VERSIONS,                      350e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
+	init( TARGET_DURABILITY_LAG_VERSIONS_BATCH,                250e6 ); // Should be larger than STORAGE_DURABILITY_LAG_SOFT_MAX
 	init( DURABILITY_LAG_UNLIMITED_THRESHOLD,                   50e6 );
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
@@ -496,6 +498,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TIME_KEEPER_DELAY,                                      10 );
 	init( TIME_KEEPER_MAX_ENTRIES,                              3600 * 24 * 30 * 6); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
+	// Fast Restore
+	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
+	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
 	// clang-format on
 
 	if(clientKnobs)

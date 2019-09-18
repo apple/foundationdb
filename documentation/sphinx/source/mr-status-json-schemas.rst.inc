@@ -66,7 +66,8 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "router"
+                        "router",
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,
@@ -264,7 +265,23 @@
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0
+         "worst_version_lag_storage_server":0,
+         "limiting_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "limiting_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         }
       },
       "incompatible_connections":[
       ],
@@ -274,7 +291,10 @@
       },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state":{
+         "locked":true,
+         "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
+      }
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
@@ -460,6 +480,9 @@
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
+      "data_distribution_disabled_for_ss_failures":true,
+      "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled":true,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,

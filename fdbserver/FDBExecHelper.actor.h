@@ -27,7 +27,6 @@ public: // ctor & dtor
 public: // interfaces
 	StringRef getBinaryPath();
 	VectorRef<StringRef> getBinaryArgs();
-	StringRef getBinaryArgValue(StringRef key);
 	void setCmdValueString(StringRef cmdValueString);
 	StringRef getCmdValueString(void);
 
@@ -41,7 +40,6 @@ private: // data
 	Standalone<StringRef> cmdValueString;
 	Standalone<VectorRef<StringRef>> binaryArgs;
 	StringRef binaryPath;
-	std::map<StringRef, StringRef> keyValueMap;
 };
 
 // FIXME: move this function to a common location
@@ -52,7 +50,7 @@ private: // data
 ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime);
 
 // helper to run all the work related to running the exec command
-ACTOR Future<int> execHelper(ExecCmdValueString* execArg, std::string folder, std::string role);
+ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role);
 
 // returns true if the execUID op is in progress
 bool isExecOpInProgress(UID execUID);

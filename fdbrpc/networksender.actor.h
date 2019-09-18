@@ -35,7 +35,7 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 	try {
 		T value = wait(input);
 		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint);
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
 		} else {
 			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
 		}
@@ -43,7 +43,7 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 		// if (err.code() == error_code_broken_promise) return;
 		ASSERT(err.code() != error_code_actor_cancelled);
 		if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint);
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
 		} else {
 			FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);
 		}

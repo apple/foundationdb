@@ -137,7 +137,9 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("WriteProbes", netData.countWriteProbes - statState->networkState.countWriteProbes)
 				.detail("PacketsRead", netData.countPacketsReceived - statState->networkState.countPacketsReceived)
 				.detail("PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
-				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
+				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock)
+				.detail("LaunchTime", netData.countLaunchTime - statState->networkState.countLaunchTime)
+				.detail("ReactTime", netData.countReactTime - statState->networkState.countReactTime);
 
 			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++) {
 				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {

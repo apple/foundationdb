@@ -96,6 +96,12 @@ struct serializable_traits : std::false_type {
 	static void serialize(Archiver& ar, T& v);
 };
 
+template <class T>
+struct serialize_raw : std::false_type {
+	template <class Context>
+	static uint8_t* save_raw(Context& context, const T& obj);
+};
+
 template <class VectorLike>
 struct vector_like_traits : std::false_type {
 	// Write this at the beginning of the buffer

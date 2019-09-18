@@ -34,7 +34,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RestoreInterface.h"
+#include "fdbserver/RestoreWorkerInterface.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -57,7 +57,6 @@
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
-#include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -574,6 +573,9 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Delete the oldest log file when the total size of all log\n"
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
+	printf("  --loggroup LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace_format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported.\n");
@@ -1507,7 +1509,6 @@ private:
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
-		initSignalSafeUnwind();
 
 #ifdef ALLOC_INSTRUMENTATION
 		g_extra_memory = new uint8_t[1000000];

@@ -4549,13 +4549,13 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
     MemPage *pPage = pCur->apPage[pCur->iPage];
     int c;
 
-    /* pPage->nCell must be greater than zero. If this is the root-page
-    ** the cursor would have been INVALID above and this for(;;) loop
-    ** not run. If this is not the root-page, then the moveToChild() routine
-    ** would have already detected db corruption. Similarly, pPage must
-    ** be the right kind (index or table) of b-tree page. Otherwise
-    ** a moveToChild() or moveToRoot() call would have detected corruption.  */
-    assert( pPage->nCell>0 );
+	/* pPage->nCell must be greater than zero. If this is the root-page
+	** the cursor would have been Invalid above and this for(;;) loop
+	** not run. If this is not the root-page, then the moveToChild() routine
+	** would have already detected db corruption. Similarly, pPage must
+	** be the right kind (index or table) of b-tree page. Otherwise
+	** a moveToChild() or moveToRoot() call would have detected corruption.  */
+	assert( pPage->nCell>0 );
     assert( pPage->intKey==(pIdxKey==0) );
     lwr = 0;
     upr = pPage->nCell-1;

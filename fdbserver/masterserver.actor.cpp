@@ -545,6 +545,10 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
+			TraceEvent(SevWarn, "MasterRecoveryInvalidConfiguration", self->dbgid)
+				.setMaxEventLength(11000)
+				.setMaxFieldLength(10000)
+				.detail("Conf", self->configuration.toString());
 			status = RecoveryStatus::configuration_invalid;
 		} else if (!self->cstate.prevDBState.tLogs.size()) {
 			status = RecoveryStatus::configuration_never_created;
@@ -665,7 +669,12 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
-	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("Conf", self->configuration.toString()).trackLatest("RecoveredConfig");
+
+	TraceEvent("MasterRecoveredConfig", self->dbgid)
+		.setMaxEventLength(11000)
+		.setMaxFieldLength(10000)
+		.detail("Conf", self->configuration.toString())
+		.trackLatest("RecoveredConfig");
 
 	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
 	self->dcId_locality.clear();
@@ -797,7 +806,10 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 		regionJSON["regions"] = self->configuration.getRegionJSON();
 		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion()).toString()));
 		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation 
-		TraceEvent("ForcedRecoveryConfigChange", self->dbgid).detail("Conf", self->configuration.toString());
+		TraceEvent("ForcedRecoveryConfigChange", self->dbgid)
+			.setMaxEventLength(11000)
+			.setMaxFieldLength(10000)
+			.detail("Conf", self->configuration.toString());
 	}
 	initialConfChanges->push_back(regionCommit);
 }
@@ -1018,7 +1030,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
 		while(self->resolverChanges.get().size())
 			wait(self->resolverChanges.onChange());
-		state std::vector<Future<int64_t>> futures;
+		state std::vector<Future<ResolutionMetricsReply>> futures;
 		for (auto& p : self->resolvers)
 			futures.push_back(brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
 		wait( waitForAll(futures) );
@@ -1026,8 +1038,8 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 
 		int64_t total = 0;
 		for (int i = 0; i < futures.size(); i++) {
-			total += futures[i].get();
-			metrics.insert(std::make_pair(futures[i].get(), i), NoMetric());
+			total += futures[i].get().value;
+			metrics.insert(std::make_pair(futures[i].get().value, i), NoMetric());
 			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
 		}
 		if( metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE ) {

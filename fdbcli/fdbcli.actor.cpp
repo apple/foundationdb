@@ -32,7 +32,6 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "flow/SignalSafeUnwind.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
@@ -417,10 +416,6 @@ static void printProgramUsage(const char* name) {
 	       "  --trace_format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
-	       "  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
@@ -501,6 +496,10 @@ void initHelp() {
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
 	helpMap["waitopen"] = CommandHelp();
+	helpMap["sleep"] = CommandHelp(
+		"sleep <SECONDS>",
+		"sleep for a period of time",
+		"");
 	helpMap["get"] = CommandHelp(
 		"get <KEY>",
 		"fetch the value for a given key",
@@ -1496,6 +1495,17 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n\nWARNING: A single process is both a transaction log and a storage server.\n  For best performance use dedicated disks for the transaction logs by setting process classes.";
 			}
 
+			if (statusObjCluster.has("data_distribution_disabled")) {
+				outputString += "\n\nWARNING: Data distribution is off.";
+			} else {
+				if (statusObjCluster.has("data_distribution_disabled_for_ss_failures")) {
+					outputString += "\n\nWARNING: Data distribution is currently turned on but disabled for all storage server failures.";
+				}
+				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
+					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is currently disabled.";
+				}
+			}
+
 			printf("%s\n", outputString.c_str());
 		}
 
@@ -1778,6 +1788,10 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	json_spirit::mValue config;
 	if(!json_spirit::read_string( contents, config )) {
 		printf("ERROR: Invalid JSON\n");
+		return true;
+	}
+	if(config.type() != json_spirit::obj_type) {
+		printf("ERROR: Configuration file must contain a JSON object\n");
 		return true;
 	}
 	StatusObject configJSON = config.get_obj();
@@ -2213,7 +2227,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 	}
 }
 
-ACTOR Future<bool> createSnapshot(Database db, StringRef snapCmd) {
+ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
+	state Standalone<StringRef> snapCmd;
+	for ( int i = 1; i < tokens.size(); i++) {
+		snapCmd = snapCmd.withSuffix(tokens[i]);
+		if (i != tokens.size() - 1) {
+			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+		}
+	}
 	try {
 		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
 		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
@@ -2607,8 +2628,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
 			Future<Void> checkStatusF = checkStatus(Void(), db->getConnectionFile());
-			Future<Void> checkDDStatusF = checkDataDistributionStatus(db, true);
-			wait(makeInterruptable(success(checkStatusF) && success(checkDDStatusF)));
+			wait(makeInterruptable(success(checkStatusF)));
 		}
 		else {
 			printf("\n");
@@ -2754,6 +2774,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if( tokencmp(tokens[0], "sleep")) {
+					if(tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						double v;
+						int n=0;
+						if (sscanf(tokens[1].toString().c_str(), "%lf%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(delay(v));
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "status")) {
 					// Warn at 7 seconds since status will spend as long as 5 seconds trying to read/write from the database
 					warn = timeWarning( 7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n" );
@@ -2829,11 +2866,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					if (tokens.size() != 2) {
+					if (tokens.size() < 2) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait(createSnapshot(db, tokens[1]));
+						bool err = wait(createSnapshot(db, tokens));
 						if (err) is_error = true;
 					}
 					continue;
@@ -3444,13 +3481,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "datadistribution")) {
 					if (tokens.size() != 2 && tokens.size() != 3) {
-						printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+						printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 						       "<ssfailure|rebalance>>\n");
 						is_error = true;
 					} else {
-						if (tokencmp(tokens[1], "status")) {
-							wait(makeInterruptable(checkDataDistributionStatus(db)));
-						} else if (tokencmp(tokens[1], "on")) {
+						if (tokencmp(tokens[1], "on")) {
 							wait(success(setDDMode(db, 1)));
 							printf("Data distribution is turned on.\n");
 						} else if (tokencmp(tokens[1], "off")) {
@@ -3464,7 +3499,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
 								printf("Data distribution is disabled for rebalance.\n");
 							} else {
-								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 								       "<ssfailure|rebalance>>\n");
 								is_error = true;
 							}
@@ -3476,12 +3511,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
 								printf("Data distribution is enabled for rebalance.\n");
 							} else {
-								printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+								printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 								       "<ssfailure|rebalance>>\n");
 								is_error = true;
 							}
 						} else {
-							printf("Usage: datadistribution <status|on|off|disable <ssfailure|rebalance>|enable "
+							printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 							       "<ssfailure|rebalance>>\n");
 							is_error = true;
 						}
@@ -3611,7 +3646,6 @@ ACTOR Future<Void> timeExit(double duration) {
 
 int main(int argc, char **argv) {
 	platformInit();
-	initSignalSafeUnwind();
 	Error::init();
 	std::set_new_handler( &platform::outOfMemory );
 	uint64_t memLimit = 8LL << 30;

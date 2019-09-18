@@ -3418,7 +3418,6 @@ namespace fileBackup {
 						++nFiles;
 					}
 
-					// Increment counts
 					restore.fileCount().atomicOp(tr, nFiles, MutationRef::Type::AddValue);
 					restore.fileBlockCount().atomicOp(tr, nFileBlocks, MutationRef::Type::AddValue);
 
@@ -3755,7 +3754,8 @@ public:
 				Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 				if(!current.present()) {
 					if(verbose)
-						printf("Tag: %s  State: %s\n", tagName.toString().c_str(), FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
+						printf("waitRestore: Tag: %s  State: %s\n", tagName.toString().c_str(),
+						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
 					return ERestoreState::UNITIALIZED;
 				}
 

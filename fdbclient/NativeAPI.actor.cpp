@@ -81,7 +81,7 @@ static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_laten
 Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *cx, StorageServerInterface const& ssi, LocalityData const& locality ) {
 	auto it = cx->server_interf.find( ssi.id() );
 	if( it != cx->server_interf.end() ) {
-		if(it->second->interf.getVersion.getEndpoint().token != ssi.getVersion.getEndpoint().token) {
+		if(it->second->interf.getValue.getEndpoint().token != ssi.getValue.getEndpoint().token) {
 			if(it->second->interf.locality == ssi.locality) {
 				//FIXME: load balance holds pointers to individual members of the interface, and this assignment will swap out the object they are
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load balance to take an AsyncVar<Reference<Interface>>
@@ -519,7 +519,7 @@ DatabaseContext::DatabaseContext(
 	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
 	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
 	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), outstandingWatches(0),
+	transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
 {
@@ -548,7 +548,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
 	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
 	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), transactionWaitsForFullRecovery("WaitsForFullRecovery", cc), latencies(1000), readLatencies(1000), commitLatencies(1000), 
+	transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
 	internal(false) {}
 
@@ -1474,11 +1474,11 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			state Version resp;
+			state WatchValueReply resp;
 			choose {
-				when(Version r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
-				                                  WatchValueRequest(key, value, ver, watchValueID),
-				                                  TaskPriority::DefaultPromiseEndpoint))) {
+				when(WatchValueReply r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
+				                                          WatchValueRequest(key, value, ver, watchValueID),
+				                                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
 				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
@@ -1489,12 +1489,13 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 			//FIXME: wait for known committed version on the storage server before replying,
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
-			Version v = wait( waitForCommittedVersion( cx, resp ) );
+			Version v = wait(waitForCommittedVersion(cx, resp.version));
 
-			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp).detail("Key",  key ).detail("Value", value);
+			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
 
-			if( v - resp < 50000000 ) // False if there is a master failure between getting the response and getting the committed version, Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
-				return Void();
+			// False if there is a master failure between getting the response and getting the committed version,
+			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
+			if (v - resp.version < 50000000) return Void();
 			ver = v;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -2136,7 +2137,9 @@ Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	return ::watch(watch, cx, this);
 }
 
-ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key key, Future<Version> ver, Database cx, TransactionInfo info ) {
+ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key, Future<Version> ver, Database cx,
+                                                                         TransactionInfo info,
+                                                                         TransactionOptions options) {
 	state vector<StorageServerInterface> ssi;
 
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our serverInterfaces vector being empty, which will cause us to return an empty addresses list.
@@ -2157,7 +2160,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 
 	Standalone<VectorRef<const char*>> addresses;
 	for (auto i : ssi) {
-		std::string ipString = i.address().ip.toString();
+		std::string ipString = options.includePort ? i.address().toString() : i.address().ip.toString();
 		char* c_string = new (addresses.arena()) char[ipString.length()+1];
 		strcpy(c_string, ipString.c_str());
 		addresses.push_back(addresses.arena(), c_string);
@@ -2169,7 +2172,7 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 	++cx->transactionLogicalReads;
 	auto ver = getReadVersion();
 
-	return getAddressesForKeyActor(key, ver, cx, info);
+	return getAddressesForKeyActor(key, ver, cx, info, options);
 }
 
 ACTOR Future< Key > getKeyAndConflictRange(
@@ -2705,10 +2708,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
-				&& e.code() != error_code_proxy_memory_limit_exceeded
-				&& e.code() != error_code_transaction_not_permitted
-				&& e.code() != error_code_cluster_not_fully_recovered
-				&& e.code() != error_code_txn_exec_log_anti_quorum)
+				&& e.code() != error_code_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2970,6 +2970,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			info.useProvisionalProxies = true;
 			break;
 
+		case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
+			validateOptionValue(value, false);
+			options.includePort = true;
+			break;
+
 		default:
 			break;
 	}
@@ -3115,8 +3120,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind ||
-		e.code() == error_code_cluster_not_fully_recovered)
+		e.code() == error_code_process_behind)
 	{
 		if(e.code() == error_code_not_committed)
 			++cx->transactionsNotCommitted;
@@ -3126,9 +3130,6 @@ Future<Void> Transaction::onError( Error const& e ) {
 			++cx->transactionsResourceConstrained;
 		if (e.code() == error_code_process_behind)
 			++cx->transactionsProcessBehind;
-		if (e.code() == error_code_cluster_not_fully_recovered) {
-			++cx->transactionWaitsForFullRecovery;
-		}
 
 		double backoff = getBackoff(e.code());
 		reset();
@@ -3348,54 +3349,22 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
 }
 
-ACTOR Future<Void> snapshotDatabase(Reference<DatabaseContext> cx, StringRef snapPayload, UID snapUID, Optional<UID> debugID) {
-	TraceEvent("SnapshotDatabaseEnter")
-		.detail("SnapPayload", snapPayload)
-		.detail("SnapUID", snapUID);
-	try {
-		if (debugID.present()) {
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.snapshotDatabase.Before");
-		}
-
-		choose {
-			when(wait(cx->onMasterProxiesChanged())) { throw operation_failed(); }
-			when(wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapPayload, snapUID, debugID), cx->taskID, true /*atmostOnce*/ ))) {
-				if (debugID.present())
-					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
-											"NativeAPI.SnapshotDatabase.After");
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent("SnapshotDatabaseError")
-			.error(e)
-			.detail("SnapPayload", snapPayload)
-			.detail("SnapUID", snapUID);
-		throw;
-	}
-	return Void();
-}
-
-ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
-	// remember the client ID before the snap operation
-	state UID preSnapClientUID = cx->clientInfo->get().id;
-
+ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter")
 	    .detail("SnapCmd", snapCmd.toString())
-	    .detail("UID", snapUID)
-	    .detail("PreSnapClientUID", preSnapClientUID);
-
-	StringRef snapCmdArgs = snapCmd;
-	StringRef snapCmdPart = snapCmdArgs.eat(":");
-	Standalone<StringRef> snapUIDRef(snapUID.toString());
-	Standalone<StringRef> snapPayloadRef = snapCmdPart
-		.withSuffix(LiteralStringRef(":uid="))
-		.withSuffix(snapUIDRef)
-		.withSuffix(LiteralStringRef(","))
-		.withSuffix(snapCmdArgs);
-
+	    .detail("UID", snapUID);
 	try {
-		Future<Void> exec = snapshotDatabase(Reference<DatabaseContext>::addRef(cx.getPtr()), snapPayloadRef, snapUID, snapUID);
-		wait(exec);
+		loop {
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {}
+				when(wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
+					TraceEvent("SnapCreateExit")
+						.detail("SnapCmd", snapCmd.toString())
+						.detail("UID", snapUID);
+					return Void();
+				}
+			}
+		}
 	} catch (Error& e) {
 		TraceEvent("SnapCreateError")
 			.detail("SnapCmd", snapCmd.toString())
@@ -3403,21 +3372,6 @@ ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID) {
 			.error(e);
 		throw;
 	}
-
-	UID postSnapClientUID = cx->clientInfo->get().id;
-	if (preSnapClientUID != postSnapClientUID) {
-		// if the client IDs changed then we fail the snapshot
-		TraceEvent("SnapCreateUIDMismatch")
-		    .detail("SnapPreSnapClientUID", preSnapClientUID)
-		    .detail("SnapPostSnapClientUID", postSnapClientUID);
-		throw coordinators_changed();
-	}
-
-	TraceEvent("SnapCreateExit")
-	    .detail("SnapCmd", snapCmd.toString())
-	    .detail("UID", snapUID)
-	    .detail("PreSnapClientUID", preSnapClientUID);
-	return Void();
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
