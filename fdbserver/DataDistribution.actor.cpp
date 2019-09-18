@@ -4518,12 +4518,13 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
                                           Reference<DataDistributorData> self, Database cx) {
 	TraceEvent("DDExclusionSafetyCheckBegin");
 	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
+	DistributorExclusionSafetyCheckReply reply(true);
 	if (!self->teamCollection) {
 		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid");
-		req.reply.send(false);
+		reply.safe = false;
+		req.reply.send(reply);
 		return Void();
 	}
-	bool safe = true;
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
 	for (const auto &ssi : ssis) {
@@ -4543,12 +4544,12 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 			.detail("Existing", describe(teamServerIDs));
 		// If excluding set completely contains team, it is unsafe to remove these servers
 		if (std::includes(excludeServerIDs.begin(), excludeServerIDs.end(), teamServerIDs.begin(), teamServerIDs.end())) {
-			safe = false;
+			reply.safe = false;
 			break;
 		}
 	}
 	TraceEvent("DDExclusionSafetyCheckFinish");
-	req.reply.send(safe);
+	req.reply.send(reply);
 	return Void();
 }
 

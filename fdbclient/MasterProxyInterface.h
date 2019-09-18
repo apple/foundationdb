@@ -343,11 +343,25 @@ struct ProxySnapRequest
 	}
 };
 
+struct ExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 459034028;
+	bool safe;
+
+	ExclusionSafetyCheckReply() : safe(false) {}
+	explicit ExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
 struct ExclusionSafetyCheckRequest
 {
 	constexpr static FileIdentifier file_identifier = 13852702;
 	vector<AddressExclusion> exclusions;
-	ReplyPromise<bool> reply;
+	ReplyPromise<ExclusionSafetyCheckReply> reply;
 
 	ExclusionSafetyCheckRequest() {}
 	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}

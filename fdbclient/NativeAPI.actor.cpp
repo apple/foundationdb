@@ -3383,9 +3383,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	loop {
 		choose {
 			when(wait(cx->onMasterProxiesChanged())) {}
-			when(bool _ddCheck = wait(loadBalance(cx->getMasterProxies(false),
-			                                      &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID))) {
-				ddCheck = _ddCheck;
+			when(ExclusionSafetyCheckReply _ddCheck = wait(loadBalance(
+			         cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID))) {
+				ddCheck = _ddCheck.safe;
 				break;
 			}
 		}

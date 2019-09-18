@@ -1536,17 +1536,18 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 
 ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
 	TraceEvent("SafetyCheckMasterProxyBegin");
+	state ExclusionSafetyCheckReply reply(false);
 	if (!db->get().distributor.present()) {
 		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
-		req.reply.send(false);
+		req.reply.send(reply);
 		return Void();
 	}
-	state bool safe = false;
 	try {
-		state Future<ErrorOr<bool>> safeFuture = db->get().distributor.get().distributorExclCheckReq.tryGetReply(
-			DistributorExclusionSafetyCheckRequest(req.exclusions));
-		bool _safe = wait(throwErrorOr(safeFuture));
-		safe = _safe;
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
+		        DistributorExclusionSafetyCheckRequest(req.exclusions));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		reply.safe = _reply.safe;
 	} catch (Error& e) {
 		TraceEvent("SafetyCheckMasterProxy.DDSafetyCheckResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
@@ -1557,7 +1558,7 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 		}
 	}
 	TraceEvent("SafetyCheckMasterProxyFinish");
-	req.reply.send(safe);
+	req.reply.send(reply);
 	return Void();
 }
 
