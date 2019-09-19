@@ -1948,7 +1948,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	state double startTime = now();
 	loop {
-		wait(delay(600));
+		wait(delay(g_network->isSimulated() ? 5 : 600));
 		TraceEvent(SevWarnAlways, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
 	}
 }
