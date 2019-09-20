@@ -567,9 +567,11 @@ public:
 		ASSERT( !newShard->keys.empty() );
 		newShard->changeCounter = ++shardChangeCounter;
 		//TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State", newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
-		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
-		for(auto i = affected.begin(); i != affected.end(); ++i)
-			shards.insert( *i, Reference<ShardInfo>() );*/
+		// auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
+		// for(auto i = affected.begin(); i != affected.end(); ++i) {
+		// 	TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", i->begin).detail("KeyEnd", i->end).detail("State", "Cancelled");
+		// 	shards.insert( *i, Reference<ShardInfo>() ); // Destroy the prev shards' reference so that their actors can be canceled
+		// }
 		shards.insert( newShard->keys, Reference<ShardInfo>(newShard) );
 	}
 	void addMutation(Version version, MutationRef const& mutation, KeyRangeRef const& shard, UpdateEagerReadInfo* eagerReads );
@@ -1945,18 +1947,18 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		ASSERT(false);  // Unknown mutation type in splitMutations
 }
 
-ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
+ACTOR Future<Void> logFetchKeysWarning(KeyRange keys, AddingShard::Phase phase) {
 	state double startTime = now();
 	loop {
-		wait(delay(g_network->isSimulated() ? 5 : 600));
-		TraceEvent(SevWarnAlways, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
+		wait(delay(g_network->isSimulated() ? 1 + deterministicRandom()->random01() * 600 : 600));
+		TraceEvent(SevWarnAlways, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", phase).detail("Begin", keys.begin.printable()).detail("End", keys.end.printable());
 	}
 }
 
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
-	state Future<Void> warningLogger = logFetchKeysWarning(shard);
+	state Future<Void> warningLogger = logFetchKeysWarning(shard->keys, shard->phase);
 	state double startt = now();
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
 
@@ -2067,7 +2069,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+						shard = data->shards.rangeContaining( keys.begin ).value()->adding; //adding is the one created by addingSplitLeft above
 						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 
