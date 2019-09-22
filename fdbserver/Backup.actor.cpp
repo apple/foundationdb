@@ -68,6 +68,7 @@ struct BackupData {
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
+		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 		if (g_network->isSimulated()) {
@@ -92,6 +93,18 @@ struct BackupData {
 		}
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
+	}
+
+	void eraseMessagesAfterEndVersion() {
+		ASSERT(endVersion.present());
+		const Version ver = endVersion.get();
+		while (!messages.empty()) {
+			if (messages.back().getVersion() > ver) {
+				messages.pop_back();
+			} else {
+				return;
+			}
+		}
 	}
 };
 
@@ -167,7 +180,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	return Void();
 }
 
-// Uploads self->messages to cloud storage and updates poppedVersion.
+// Uploads self->messages to cloud storage and updates savedVersion.
 ACTOR Future<Void> uploadData(BackupData* self) {
 	state Version popVersion = invalidVersion;
 
@@ -197,6 +210,11 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				wait(saveMutationsToFile(self, popVersion, numMsg));
 			}
 		}
+		if (self->pullFinished.get() && self->messages.empty()) {
+			// Advance popVersion to the endVersion to avoid gap between last
+			// message version and the endVersion.
+			popVersion = self->endVersion.get();
+		}
 
 		if (popVersion > self->savedVersion) {
 			wait(saveProgress(self, popVersion));
@@ -207,7 +225,9 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			self->pop();
 		}
 
-		wait(uploadDelay || self->pullFinished.onChange());
+		if (!self->pullFinished.get()) {
+			wait(uploadDelay || self->pullFinished.onChange());
+		}
 	}
 }
 
@@ -245,6 +265,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		self->lastSeenVersion = std::max(tagAt, self->lastSeenVersion);
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (self->endVersion.present() && tagAt > self->endVersion.get()) {
+			self->eraseMessagesAfterEndVersion();
 			TraceEvent("BackupWorkerFinishPull", self->myId)
 			    .detail("VersionGot", tagAt)
 			    .detail("EndVersion", self->endVersion.get())
@@ -312,7 +333,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
 				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.endVersion.get()))));
+				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
 			}
 			when(wait(error)) {}
