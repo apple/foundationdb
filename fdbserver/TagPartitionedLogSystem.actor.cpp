@@ -105,10 +105,7 @@ LogSet::LogSet(const CoreTLogSet& coreSet) :
 	for (const auto& log : coreSet.tLogs) {
 		logServers.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(log)));
 	}
-	for (const auto& worker : coreSet.backupWorkers) {
-		backupWorkers.emplace_back(
-		    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(worker)));
-	}
+	// Do NOT recover coreSet.backupWorkers, because master will recruit new ones.
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
 }
@@ -152,9 +149,7 @@ CoreTLogSet::CoreTLogSet(const LogSet& logset) :
 	for (const auto &log : logset.logServers) {
 		tLogs.push_back(log->get().id());
 	}
-	for (const auto& worker : logset.backupWorkers) {
-		backupWorkers.push_back(worker->get().id());
-	}
+	// Do NOT store logset.backupWorkers, because master will recruit new ones.
 }
 
 OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
@@ -1406,7 +1401,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::string msg("BackupWorkerNotFound");
 		if (logset.isValid()) {
 			for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
-				if (it->getPtr()->get().present() && it->getPtr()->get().interf().id() == req.workerUID) {
+				if (it->getPtr()->get().interf().id() == req.workerUID) {
 					msg = "BackupWorkerRemoved";
 					logset->backupWorkers.erase(it);
 					removed = true;
