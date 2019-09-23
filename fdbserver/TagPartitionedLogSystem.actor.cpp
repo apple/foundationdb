@@ -446,6 +446,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
+			// Monitor changes of backup workers for old epochs.
+			for (const auto& old : self->oldLogData) {
+				for (const auto& worker : old.tLogs[0]->backupWorkers) {
+					if (worker->get().present()) {
+						backupFailed.push_back(waitFailureClient(
+						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
+						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+					} else {
+						changes.push_back(worker->onChange());
+					}
+				}
+			}
+
 			if(!self->recoveryCompleteWrittenToCoreState.get()) {
 				for(auto& old : self->oldLogData) {
 					for(auto& it : old.tLogs) {
@@ -1393,7 +1406,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::string msg("BackupWorkerNotFound");
 		if (logset.isValid()) {
 			for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
-				if (it->getPtr()->get().interf().id() == req.workerUID) {
+				if (it->getPtr()->get().present() && it->getPtr()->get().interf().id() == req.workerUID) {
 					msg = "BackupWorkerRemoved";
 					logset->backupWorkers.erase(it);
 					removed = true;

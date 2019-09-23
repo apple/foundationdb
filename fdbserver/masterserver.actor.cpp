@@ -1366,7 +1366,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	}
 
 	std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
-	state std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
+	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	for (const auto& interf : newRecruits) {
 		backupWorkers.emplace_back(
 		    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
