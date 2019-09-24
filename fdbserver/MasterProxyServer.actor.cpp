@@ -1549,7 +1549,7 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
 		reply.safe = _reply.safe;
 	} catch (Error& e) {
-		TraceEvent("SafetyCheckMasterProxy.DDSafetyCheckResponseError").error(e);
+		TraceEvent("SafetyCheckMasterProxyResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
 			req.reply.sendError(e);
 			return Void();

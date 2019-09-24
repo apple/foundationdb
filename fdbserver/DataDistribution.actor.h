@@ -62,6 +62,8 @@ enum {
 
 	PRIORITY_TEAM_1_LEFT     = 900,
 
+	PRIORITY_TEAM_FAILED     = 950,
+
 	PRIORITY_TEAM_0_LEFT     = 999
 };
 

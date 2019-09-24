@@ -564,6 +564,7 @@ Future<Void> teamTracker(struct DDTeamCollection* const& self, Reference<TCTeamI
 struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// clang-format off
 	enum { REQUESTING_WORKER = 0, GETTING_WORKER = 1, GETTING_STORAGE = 2 };
+	enum class Status { NONE = 0, EXCLUDED = 1, FAILED = 2 };
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
@@ -608,8 +609,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int optimalTeamCount;
 	AsyncVar<bool> zeroOptimalTeams;
 
-	AsyncMap< AddressExclusion, bool > excludedServers;  // true if an address is in the excluded list in the database.  Updated asynchronously (eventually)
-	std::set< AddressExclusion > failedServers;
+	// EXCLUDED if an address is in the excluded list in the database.
+	// FAILED if an address is permanently failed.
+	// NONE by default.  Updated asynchronously (eventually)
+	AsyncMap< AddressExclusion, Status > excludedServers;
 
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
@@ -2764,7 +2767,8 @@ bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team
 	for (const auto &ssi : ssis) {
 		AddressExclusion addr(ssi.address().ip, ssi.address().port);
 		AddressExclusion ipaddr(ssi.address().ip);
-		if (self->failedServers.count(addr) || self->failedServers.count(ipaddr)) {
+		if (self->excludedServers.get(addr) == DDTeamCollection::Status::FAILED ||
+		    self->excludedServers.get(ipaddr) == DDTeamCollection::Status::FAILED) {
 			return true;
 		}
 	}
@@ -2945,16 +2949,17 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
-				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) ||
-				    teamContainsFailedServer(self, team)) {
+				bool containsFailed = teamContainsFailedServer(self, team);
+				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed) {
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
 
 					for(int i=0; i<shards.size(); i++) {
 						// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
-						int maxPriority = teamContainsFailedServer(self, team) ? PRIORITY_TEAM_0_LEFT : team->getPriority();
+						int maxPriority = containsFailed ? PRIORITY_TEAM_FAILED : team->getPriority();
 						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 						// so we need to recalculate the shard's priority
-						if (maxPriority < PRIORITY_TEAM_0_LEFT) { // Q: When will maxPriority >= PRIORITY_TEAM_0_LEFT
+						if (maxPriority < PRIORITY_TEAM_FAILED) { // Q: When will maxPriority >=
+							                                      // PRIORITY_TEAM_FAILED/PRIORITY_TEAM_0_LEFT
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
@@ -3059,6 +3064,7 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 				ASSERT( !failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY );
 
 				std::set<AddressExclusion> excluded;
+				std::set<AddressExclusion> failed;
 				for(auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
 					AddressExclusion addr = decodeExcludedServersKey(r->key);
 					if (addr.isValid()) {
@@ -3069,8 +3075,26 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 					AddressExclusion addr = decodeFailedServersKey(r->key);
 					if (addr.isValid()) {
 						excluded.insert( addr );
-						self->failedServers.insert(addr);
+						failed.insert(addr);
 					}
+				}
+
+				// Reset and reassign self->excludedServers based on excluded, but we only
+				// want to trigger entries that are different
+				auto old = self->excludedServers.getKeys();
+				for (auto& o : old) {
+					if (!excluded.count(o)) {
+						self->excludedServers.set(o, DDTeamCollection::Status::NONE);
+					}
+				}
+				for (auto& n : excluded) {
+					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
+				}
+
+				// Servers can be marked failed AND excluded, but being failed should take precedence.
+				// Hence, we use this ordering.
+				for (auto& f : failed) {
+					self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
 				}
 
 				TraceEvent("DDExcludedServersChanged", self->distributorId)
@@ -3078,14 +3102,6 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 					.detail("RowsExcludedPermanently", failedResults.size())
 					.detail("TotalExclusions", excluded.size());
 
-				// Reset and reassign self->excludedServers based on excluded, but we only
-				// want to trigger entries that are different
-				auto old = self->excludedServers.getKeys();
-				for(auto& o : old)
-					if (!excluded.count(o))
-						self->excludedServers.set(o, false);
-				for(auto& n : excluded)
-					self->excludedServers.set(n, true);
 				self->restartRecruiting.trigger();
 				break;
 			} catch (Error& e) {
@@ -3457,17 +3473,23 @@ ACTOR Future<Void> storageServerTracker(
 			NetworkAddress a = server->lastKnownInterface.address();
 			state AddressExclusion addr( a.ip, a.port );
 			state AddressExclusion ipaddr( a.ip );
-			if (self->excludedServers.get( addr ) || self->excludedServers.get( ipaddr )) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
-					.detail("Excluded", self->excludedServers.get( addr ) ? addr.toString() : ipaddr.toString());
+			state DDTeamCollection::Status addrStatus = self->excludedServers.get(addr);
+			state DDTeamCollection::Status ipaddrStatus = self->excludedServers.get(ipaddr);
+			if (addrStatus != DDTeamCollection::Status::NONE || ipaddrStatus != DDTeamCollection::Status::NONE) {
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
+				    .detail("Server", server->id)
+				    .detail("Excluded",
+				            ipaddrStatus == DDTeamCollection::Status::NONE ? addr.toString() : ipaddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
-				if (self->failedServers.find(addr) != self->failedServers.end() || self->failedServers.find(ipaddr) != self->failedServers.end()) {
+				if (addrStatus == DDTeamCollection::Status::FAILED ||
+				    ipaddrStatus == DDTeamCollection::Status::FAILED) {
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Address", addr.toString())
 					    .detail("ServerID", server->id);
-					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
 					self->shardsAffectedByTeamFailure->eraseServer(server->id);
+					if (BUGGIFY) wait(delay(5.0));
+					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
 				}
 			}
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
@@ -3782,7 +3804,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 
 			auto excl = self->excludedServers.getKeys();
 			for(auto& s : excl)
-				if (self->excludedServers.get(s)) {
+				if (self->excludedServers.get(s) != DDTeamCollection::Status::NONE) {
 					TraceEvent(SevDebug, "DDRecruitExcl2")
 					    .detail("Primary", self->primary)
 					    .detail("Excluding", s.toString());
@@ -4527,11 +4549,10 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	}
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
-	for (const auto &ssi : ssis) {
-		for (AddressExclusion excl : req.exclusions) {
+	for (const AddressExclusion& excl : req.exclusions) {
+		for (const auto& ssi : ssis) {
 			if (excl.excludes(ssi.address())) {
 				excludeServerIDs.push_back(ssi.id());
-				break;
 			}
 		}
 	}
@@ -4542,8 +4563,12 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		TraceEvent("DDExclusionSafetyCheck")
 			.detail("Excluding", describe(excludeServerIDs))
 			.detail("Existing", describe(teamServerIDs));
-		// If excluding set completely contains team, it is unsafe to remove these servers
-		if (std::includes(excludeServerIDs.begin(), excludeServerIDs.end(), teamServerIDs.begin(), teamServerIDs.end())) {
+		// Find size of set intersection of both vectors and see if the leftover team is valid
+		vector<UID> intersectSet(teamServerIDs.size());
+		auto it = std::set_intersection(excludeServerIDs.begin(), excludeServerIDs.end(), teamServerIDs.begin(),
+		                                teamServerIDs.end(), intersectSet.begin());
+		intersectSet.resize(it - intersectSet.begin());
+		if (teamServerIDs.size() - intersectSet.size() < SERVER_KNOBS->DD_EXCLUDE_MIN_REPLICAS) {
 			reply.safe = false;
 			break;
 		}

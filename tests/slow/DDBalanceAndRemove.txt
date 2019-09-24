@@ -40,5 +40,3 @@ testTitle=DDBalance_test
     maxDelay=100
     kill1Timeout=30
     kill2Timeout=6000
-
-minimumReplication=2

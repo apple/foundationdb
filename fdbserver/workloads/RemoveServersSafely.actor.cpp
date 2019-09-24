@@ -300,11 +300,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL, false), self->kill1Timeout ) );
 
 		bClearedFirst = result.present();
-		// killProcArray is always empty here so why are we tracing it? is it meant to be something else or is a step missing somewhere?
 		TraceEvent("RemoveAndKill").detail("Step", "excluded list first").detail("Excluderesult", bClearedFirst ? "succeeded" : "failed").detail("KillTotal", toKill1.size()).detail("Processes", killProcArray.size()).detail("ToKill1", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 
-		// this is never unset after this, is this line supposed to be here? below conditionals could all just be hard-coded instead if intentional
-		// bClearedFirst=false;
 		// Include the servers, if unable to exclude
 		if (!bClearedFirst) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
@@ -388,8 +385,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killProcArray;
 	}
 
-	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs, bool safeKillSet)
-	{
+	ACTOR static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self, Database cx,
+	                                        std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs,
+	                                        bool markExcludeAsFailed) {
 		state UID functionId = nondeterministicRandom()->randomUniqueID();
 
 		// First clear the exclusion list and exclude the given list
@@ -407,7 +405,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
-		if (safeKillSet) {
+		if (markExcludeAsFailed) {
 			state int timeouts = 0;
 			loop {
 				state bool safe = false;
@@ -442,7 +440,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
-		if (safeKillSet) {
+		if (markExcludeAsFailed) {
 			wait( excludeServers( cx, toKillMarkFailedArray, true ) );
 		}
 		wait( excludeServers( cx, toKillArray ) );

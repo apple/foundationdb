@@ -1196,7 +1196,7 @@ struct AutoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
-ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers, bool permanent ) {
+ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
@@ -1207,22 +1207,20 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
-			auto serversVersionKey = permanent ? failedServersVersionKey : excludedServersVersionKey;
+			auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
 			tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( serversVersionKey, excludeVersionKey );
 			for(auto& s : servers) {
-				if (permanent) {
+				if (failed) {
 					tr.set( encodeFailedServersKey(s), StringRef() );
 				} else {
 					tr.set( encodeExcludedServersKey(s), StringRef() );
 				}
 			}
 
-			TraceEvent("ExcludeServersCommit")
-				.detail("Servers", describe(servers))
-				.detail("PermanentExclude", permanent);
+			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
 			return Void();

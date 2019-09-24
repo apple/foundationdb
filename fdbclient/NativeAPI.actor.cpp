@@ -3380,15 +3380,24 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	    .detail("Exclusions", describe(exclusions));
 	state ExclusionSafetyCheckRequest req(exclusions);
 	state bool ddCheck;
-	loop {
-		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
-			when(ExclusionSafetyCheckReply _ddCheck = wait(loadBalance(
-			         cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq, req, cx->taskID))) {
-				ddCheck = _ddCheck.safe;
-				break;
+	try {
+		loop {
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {}
+				when(ExclusionSafetyCheckReply _ddCheck =
+				         wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
+				                          req, cx->taskID))) {
+					ddCheck = _ddCheck.safe;
+					break;
+				}
 			}
 		}
+	} catch (Error& e) {
+		TraceEvent("ExclusionSafetyCheckError")
+		    .detail("NumExclusion", exclusions.size())
+		    .detail("Exclusions", describe(exclusions))
+		    .error(e);
+		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators");
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
