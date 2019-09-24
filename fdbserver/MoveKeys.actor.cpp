@@ -67,12 +67,11 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 	loop {
 		try {
 			state MoveKeysLock lock;
+			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
-				UID id(deterministicRandom()->randomUniqueID());
-				TraceEvent("TakeMoveKeysLockTransaction", ddId)
-					.detail("TransactionUID", id);
-				tr.debugTransaction( id );
+				txnId = deterministicRandom()->randomUniqueID();
+				tr.debugTransaction(txnId);
 			}
 			{
 				Optional<Value> readVal = wait( tr.get( moveKeysLockOwnerKey ) );
@@ -83,6 +82,11 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
 			lock.myOwner = deterministicRandom()->randomUniqueID();
+			TraceEvent("TakeMoveKeysLockTransaction", ddId)
+			    .detail("TransactionUID", txnId)
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString());
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			wait(tr.commit());
 			return lock;
@@ -111,11 +115,19 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		}
 
 		// Take the lock
-		if(isWrite) {
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
-			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << deterministicRandom()->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
+		if (isWrite) {
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << lock.myOwner;
+			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			UID lastWriter = deterministicRandom()->randomUniqueID();
+			wrLastWrite << lastWriter;
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			TraceEvent("CheckMoveKeysLock")
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("Writer", lastWriter.toString());
 		}
 
 		return Void();
