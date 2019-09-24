@@ -144,10 +144,12 @@ struct TransactionInfo {
 	bool useProvisionalProxies;
 	bool useReadProxies;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {
+	explicit TransactionInfo(TaskPriority taskID)
+	  : taskID(taskID), useProvisionalProxies(false), useReadProxies(false) {
 		if (CLIENT_BUGGIFY_WITH_PROB(0.10)) {
 			useReadProxies = true;
 		}
+		useReadProxies = true;
 	}
 };
 

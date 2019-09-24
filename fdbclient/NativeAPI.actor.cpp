@@ -1865,10 +1865,11 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
-	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-	TransactionInfo info )
-{
+ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, Reference<TransactionLogInfo> trLogInfo,
+                                                                   Future<Version> fVersion, KeySelector begin,
+                                                                   KeySelector end, GetRangeLimits limits,
+                                                                   Promise<std::pair<Key, Key>> conflictRange,
+                                                                   bool snapshot, bool reverse, TransactionInfo info) {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
@@ -1879,8 +1880,10 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 		cx->validateVersion(version);
 
 		state double startTime = now();
-		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the version that the first one completed
-											 // FIXME: Is this really right?  Weaken this and see if there is a problem; if so maybe there is a much subtler problem even with this.
+		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the
+		                                     // version that the first one completed
+		                                     // FIXME: Is this really right?  Weaken this and see if there is a problem;
+		                                     // if so maybe there is a much subtler problem even with this.
 
 		if( begin.getKey() == allKeys.begin && begin.offset < 1 ) {
 			output.readToBegin = true;
@@ -1891,6 +1894,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 		ASSERT( (!limits.hasRowLimit() || limits.rows >= limits.minRows) && limits.minRows >= 0 );
 
 		loop {
+			state bool usingReadProxy = false;
+
 			if( end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual()) ) {
 				getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 				return output;
@@ -1898,8 +1903,18 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
-			state pair<KeyRange, Reference<LocationInfo>> beginServer =
-			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
+			state pair<KeyRange, Reference<LocationInfo>> beginServer;
+			if (cx->readProxiesEnabled() && info.useReadProxies && reverse == false) {
+				pair<KeyRange, Reference<LocationInfo>> _beginServer = wait(
+				    getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
+				beginServer = _beginServer;
+				usingReadProxy = true;
+			} else {
+				pair<KeyRange, Reference<LocationInfo>> _beginServer = wait(
+				    getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
+				beginServer = _beginServer;
+				usingReadProxy = false;
+			}
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
@@ -1952,7 +1967,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 				state GetKeyValuesReply rep;
 
-				if (cx->readProxiesEnabled() && info.useReadProxies) {
+				if (usingReadProxy) ASSERT(cx->readProxiesEnabled() && info.useReadProxies);
+				if (usingReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
 					choose {
 						when(GetKeyValuesReply _rep =
 						         wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKeyValues, req,
