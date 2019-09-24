@@ -3587,6 +3587,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 	state double start = now();
+	state bool hasCorrectedLocality = false;
 
 	loop {
 		try {
@@ -3604,6 +3605,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
 					// The locality info on the addr has been corrected
 					self->invalidLocalityAddr.erase(addr);
+					hasCorrectedLocality = true;
 					TraceEvent("InvalidLocalityCorrected").detail("Addr", addr.toString());
 				}
 			}
@@ -3615,10 +3617,17 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 				if (!existingAddrs.count(*addr)) {
 					// The address no longer has a worker
 					addr = self->invalidLocalityAddr.erase(addr);
+					hasCorrectedLocality = true;
 					TraceEvent("InvalidLocalityNoLongerExists").detail("Addr", addr->toString());
 				} else {
 					++addr;
 				}
+			}
+
+			if (hasCorrectedLocality) {
+				// Recruit on address who locality has been corrected
+				self->restartRecruiting.trigger();
+				hasCorrectedLocality = false;
 			}
 
 			if (self->invalidLocalityAddr.empty()) {
