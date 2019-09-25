@@ -445,7 +445,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
                         Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
-												Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
@@ -469,7 +469,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
                         Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
-												Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;
