@@ -82,13 +82,13 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
 			lock.myOwner = deterministicRandom()->randomUniqueID();
+			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
+			wait(tr.commit());
 			TraceEvent("TakeMoveKeysLockTransaction", ddId)
 			    .detail("TransactionUID", txnId)
 			    .detail("PrevOwner", lock.prevOwner.toString())
 			    .detail("PrevWrite", lock.prevWrite.toString())
 			    .detail("MyOwner", lock.myOwner.toString());
-			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
-			wait(tr.commit());
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
