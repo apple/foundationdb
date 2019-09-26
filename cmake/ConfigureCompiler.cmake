@@ -217,7 +217,13 @@ else()
   else()
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas)
+
+    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
+    add_compile_options(-Wno-attributes)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated
