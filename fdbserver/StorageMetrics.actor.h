@@ -184,9 +184,10 @@ private:
 struct StorageServerMetrics {
 	KeyRangeMap< vector< PromiseStream< StorageMetrics > > > waitMetricsMap;
 	StorageMetricSample byteSample;
-	TransientStorageMetricSample iopsSample, bandwidthSample,
-	    bytesReadSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
+	TransientStorageMetricSample iopsSample,
+	    bandwidthSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
 	                     // currently used by data distribution
+	TransientStorageMetricSample bytesReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
