@@ -354,7 +354,7 @@ void writePage(IPager *pager, Reference<IPage> page, LogicalPageID pageID, Versi
 
 ACTOR Future<Void> commit(IPager *pager) {
 	static int commitNum = 1;
-	state int myCommit = commitNum++;
+	state [[maybe_unused]] int myCommit = commitNum++;
 
 	debug_printf("Commit%d\n", myCommit);
 	wait(pager->commit());
@@ -364,7 +364,7 @@ ACTOR Future<Void> commit(IPager *pager) {
 
 ACTOR Future<Void> read(IPager *pager, LogicalPageID pageID, Version version, Version expectedVersion=-1) {
 	static int readNum = 1;
-	state int myRead = readNum++;
+	state [[maybe_unused]] int myRead = readNum++;
 	state Reference<IPagerSnapshot> readSnapshot = pager->getReadSnapshot(version);
 	debug_printf("Read%d\n", myRead);
 	Reference<const IPage> readPage = wait(readSnapshot->getPhysicalPage(pageID, true));

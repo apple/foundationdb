@@ -26,7 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;

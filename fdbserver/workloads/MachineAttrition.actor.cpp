@@ -40,7 +40,7 @@ static std::set<int> const& normalAttritionErrors() {
 ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	// duration doesn't matter since this won't timeout
 	TraceEvent("IgnoreSSFailureStart");
-	bool _ = wait(setHealthyZone(cx, ignoreSSFailuresZoneString, 0));
+	wait(success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)));
 	TraceEvent("IgnoreSSFailureWait");
 	wait(delay(duration));
 	TraceEvent("IgnoreSSFailureClear");
@@ -306,8 +306,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				state LocalityData targetMachine = self->machines.back();
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
-					bool _ =
-					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
+					wait(success(
+					    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
 					TEST(true); // Disable DD for all storage server failures
 					self->ignoreSSFailures =

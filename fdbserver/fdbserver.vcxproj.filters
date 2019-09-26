@@ -330,7 +330,7 @@
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
-    <ClInclude Include="RestoreWorkerInterface.h" />
+    <ClInclude Include="RestoreWorkerInterface.actor.h" />
     <ClInclude Include="RestoreCommon.actor.h" />
     <ClInclude Include="WaitFailure.h" />
     <ClInclude Include="TesterInterface.actor.h" />

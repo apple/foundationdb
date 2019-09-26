@@ -23,7 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
@@ -251,23 +251,19 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state int retryCount = 0;
 		loop {
 			try {
-				tr.reset();
-				state Version v = wait(tr.getReadVersion());
 				state Standalone<RangeResultRef> data = wait(
 				    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)),
 				                firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
 				printf("dump DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
 				       data.size(), data.contents().toString().c_str());
 				dumpDBKVs(data, self);
-				break;
+				return Void();
 			} catch (Error& e) {
 				retryCount++;
 				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "dumpDBError").error(e);
 				wait(tr.onError(e));
 			}
 		}
-
-		return Void();
 	}
 
 	virtual std::string description() { return "BackupAndParallelRestoreCorrectness"; }
@@ -754,15 +750,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
 					state int64_t taskCount = wait(backupAgent.getTaskCount(tr));
 					state int waitCycles = 0;
-
-					if ((taskCount) && (0)) {
-						TraceEvent("BARW_EndingNonzeroTaskCount", randomID)
-						    .detail("BackupTag", printable(self->backupTag))
-						    .detail("TaskCount", taskCount)
-						    .detail("WaitCycles", waitCycles);
-						printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-						wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
-					}
 
 					loop {
 						waitCycles++;

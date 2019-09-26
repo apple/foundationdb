@@ -35,7 +35,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 
 #include "flow/actorcompiler.h" // has to be last include

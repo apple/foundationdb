@@ -142,7 +142,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 #endif
 
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
-	state Standalone<StringRef> uidStr = snapUID.toString();
+	state Standalone<StringRef> uidStr = Standalone<StringRef>(snapUID.toString());
 	state int err = 0;
 	state Future<int> cmdErr;
 	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;

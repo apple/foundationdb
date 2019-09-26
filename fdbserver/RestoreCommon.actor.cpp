@@ -32,6 +32,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
@@ -268,7 +269,6 @@ ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreC
 	state Future<std::string> progress = restore->getProgress(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	state UID uid = restore->getUid();
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) &&
 		 success(url) && success(restoreVersion) && success(progress));
 
