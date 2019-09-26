@@ -410,6 +410,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			loop {
 				state bool safe = false;
 				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
+				// Exclude a coordinator under buggify, but only if fault tolerance is > 0
+				if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
+					vector<ISimulator::ProcessInfo*> coordinators = getCoordinators();
+					auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
+					failSet.insert(AddressExclusion(randomCoordinator->address.ip, randomCoordinator->address.port));
+				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
 				TraceEvent("RemoveAndKill", functionId)
@@ -482,9 +488,22 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	static vector<ISimulator::ProcessInfo*> getServers() {
 		vector<ISimulator::ProcessInfo*> machines;
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
-		for(int i = 0; i < all.size(); i++)
-			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass())
+		for (int i = 0; i < all.size(); i++) {
+			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) {
 				machines.push_back( all[i] );
+			}
+		}
+		return machines;
+	}
+
+	static vector<ISimulator::ProcessInfo*> getCoordinators() {
+		vector<ISimulator::ProcessInfo*> machines;
+		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+		for (int i = 0; i < all.size(); i++) {
+			if (all[i]->name == std::string("Coordinator") && all[i]->isAvailableClass()) {
+				machines.push_back( all[i] );
+			}
+		}
 		return machines;
 	}
 
