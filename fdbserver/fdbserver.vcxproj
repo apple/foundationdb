@@ -220,6 +220,9 @@
     <ActorCompiler Include="RestoreWorker.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ActorCompiler Include="RestoreRoleCommon.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
