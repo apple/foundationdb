@@ -34,7 +34,7 @@
 #include <cstdint>
 #include <cstdarg>
 
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"

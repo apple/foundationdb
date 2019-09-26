@@ -34,7 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 

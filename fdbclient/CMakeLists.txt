@@ -48,6 +48,7 @@ set(FDBCLIENT_SRCS
   Notified.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
+  RestoreWorkerInterface.actor.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h

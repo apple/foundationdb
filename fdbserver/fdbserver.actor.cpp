@@ -34,7 +34,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
