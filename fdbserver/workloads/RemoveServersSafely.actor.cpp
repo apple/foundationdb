@@ -413,8 +413,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				// Exclude a coordinator under buggify, but only if fault tolerance is > 0
 				if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
 					vector<ISimulator::ProcessInfo*> coordinators = getCoordinators();
-					auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
-					failSet.insert(AddressExclusion(randomCoordinator->address.ip, randomCoordinator->address.port));
+					// why would this be empty?
+					TraceEvent(SevDebug, "Checkpoint").detail("CoordinatorsSize", coordinators.size());
+					if (coordinators.size()) {
+						auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
+						failSet.insert(
+						    AddressExclusion(randomCoordinator->address.ip, randomCoordinator->address.port));
+					}
 				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
@@ -500,7 +505,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		vector<ISimulator::ProcessInfo*> machines;
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
-			if (all[i]->name == std::string("Coordinator") && all[i]->isAvailableClass()) {
+			if (all[i]->startingClass._class == ProcessClass::CoordinatorClass) {
 				machines.push_back( all[i] );
 			}
 		}
