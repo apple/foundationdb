@@ -22,8 +22,8 @@
 // which are RestoreMaster, RestoreLoader, and RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
-	#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
+	#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
 	#include "fdbserver/RestoreWorkerInterface.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
 	#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
