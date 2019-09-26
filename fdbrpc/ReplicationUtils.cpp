@@ -26,6 +26,12 @@
 #include "fdbrpc/Replication.h"
 
 
+/**
+ * ratePolicy takes localitySet and ReplicationPolicy as arguments.
+ * localitySet is used for setting the logServerSet defining using WorkerDetails.
+ * Iterating nTestTotal number of times the replication is performed for the items.
+ */
+
 double ratePolicy(
 	Reference<LocalitySet> &					localitySet,
 	Reference<IReplicationPolicy>	const&			policy,
@@ -81,6 +87,12 @@ double ratePolicy(
 
 	return rating;
 }
+
+/**
+ * findBestPolicySet takes bestResults, localitySet, ReplicationPolicy, number of Min Iterms
+ * number of Select Test and number of Policy Tests as arguments and find the best
+ * from a locality set defined. The bestRate has value less than 0.0
+ **/
 
 bool findBestPolicySet(
 	std::vector<LocalityEntry>&	bestResults,
@@ -157,6 +169,11 @@ bool findBestPolicySet(
 
 	return bSucceeded;
 }
+
+/**
+ * findBestUniquePolicySet takes mainluy localityUniquenessKey. Random unique items
+ * are compared with results, the output is returned.
+ **/
 
 bool findBestUniquePolicySet(
 	std::vector<LocalityEntry>&	bestResults,
