@@ -893,7 +893,6 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		metrics.bytesReadPerKSecond = v.present() ? std::max((int64_t)(req.key.size() + v.get().size()),
 		                                                     SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE)
 		                                          : SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
-		metrics.iosPerKSecond = 1;
 		data->metrics.notify(req.key, metrics);
 
 		if( req.debugID.present() )
