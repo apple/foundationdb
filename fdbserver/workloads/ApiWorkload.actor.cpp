@@ -227,6 +227,7 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data, int minKeyLengt
 		//Don't allow the first character of the key to be 0xff
 		if(keyBuffer[0] == '\xff')
 			keyBuffer[0] = deterministicRandom()->randomInt(0, 255);
+		ASSERT(keyBuffer[0] != '\xff');
 	}
 
 	keyBuffer[keyLength] = '\0';
