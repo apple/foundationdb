@@ -3393,10 +3393,12 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("ExclusionSafetyCheckError")
-		    .detail("NumExclusion", exclusions.size())
-		    .detail("Exclusions", describe(exclusions))
-		    .error(e);
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent("ExclusionSafetyCheckError")
+			    .detail("NumExclusion", exclusions.size())
+			    .detail("Exclusions", describe(exclusions))
+			    .error(e);
+		}
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators");

@@ -3081,18 +3081,19 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 
 				// Reset and reassign self->excludedServers based on excluded, but we only
 				// want to trigger entries that are different
+				// Do not retrigger and double-overwrite failed servers
 				auto old = self->excludedServers.getKeys();
 				for (auto& o : old) {
-					if (!excluded.count(o)) {
+					if (!excluded.count(o) && failed.find(o) == failed.end()) {
 						self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 					}
 				}
 				for (auto& n : excluded) {
-					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
+					if (failed.find(n) == failed.end()) {
+						self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
+					}
 				}
 
-				// Servers can be marked failed AND excluded, but being failed should take precedence.
-				// Hence, we use this ordering.
 				for (auto& f : failed) {
 					self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
 				}
@@ -3487,9 +3488,9 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 					    .detail("Address", addr.toString())
 					    .detail("ServerID", server->id);
-					self->shardsAffectedByTeamFailure->eraseServer(server->id);
-					if (BUGGIFY) wait(delay(5.0));
 					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
+					if (BUGGIFY) wait(delay(5.0));
+					self->shardsAffectedByTeamFailure->eraseServer(server->id);
 				}
 			}
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
