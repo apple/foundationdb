@@ -475,7 +475,7 @@ public:
 
 	Version oldestVersion, latestVersion;
 
-    // This deque keeps track of PTree root nodes at various versions. Since the
+	// This deque keeps track of PTree root nodes at various versions. Since the
 	// versions increase monotonically, the deque is implicitly sorted and hence
 	// binary-searchable.
 	std::deque<std::pair<Version, Tree>> roots;
