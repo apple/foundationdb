@@ -515,7 +515,7 @@ public:
 	Version getLatestVersion() const { return latestVersion; }
 	Version getOldestVersion() const { return oldestVersion; }
 
-    //front element should be the oldest version in the deque, hence the next oldest should be at index 1
+	//front element should be the oldest version in the deque, hence the next oldest should be at index 1
 	Version getNextOldestVersion() const { return roots[1]->first; }
 
 	void forgetVersionsBefore(Version newOldestVersion) {
