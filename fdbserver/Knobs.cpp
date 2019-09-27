@@ -187,7 +187,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
 	init( REBALANCE_MAX_RETRIES,                                 100 );
 	init( DD_OVERLAP_PENALTY,                                  10000 );
-	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 ); if( randomize && BUGGIFY ) DD_EXCLUDE_MIN_REPLICAS = 2;
+	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 );
 
 	// TeamRemover
 	TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER =                       false; if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
