@@ -492,7 +492,7 @@ public:
 	};
 
 	Tree const& getRoot( Version v ) const {
-		auto r = upper_bound(roots.begin(), roots.end(), v, compare());
+		auto r = upper_bound(roots.begin(), roots.end(), v, rootsComparator());
 		--r;
 		return r->second;
 	}
