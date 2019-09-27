@@ -214,7 +214,6 @@ fdb_error_t fdb_future_get_error_v22( FDBFuture* f, const char** description ) {
 	return TSAVB(f)->error.code();
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_version_v619( FDBFuture* f, int64_t* out_version ) {
 	CATCH_AND_RETURN( *out_version = TSAV(Version, f)->get(); );
 }
