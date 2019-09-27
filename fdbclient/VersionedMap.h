@@ -480,7 +480,7 @@ public:
 	// binary-searchable.
 	std::deque<std::pair<Version, Tree>> roots;
 
-	struct compare {
+	struct rootsComparator {
 		bool operator()(const std::pair<Version, Tree>& value, const Version& key)
 		{
 			return (value.first < key);
