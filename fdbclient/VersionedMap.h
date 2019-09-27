@@ -474,11 +474,25 @@ public:
 	typedef Reference< PTreeT > Tree;
 
 	Version oldestVersion, latestVersion;
-	std::map<Version, Tree> roots;
-	Tree *latestRoot;
+
+	// This deque keeps track of PTree root nodes at various versions. Since the
+	// versions increase monotonically, the deque is implicitly sorted and hence
+	// binary-searchable.
+	std::deque<std::pair<Version, Tree>> roots;
+
+	struct rootsComparator {
+		bool operator()(const std::pair<Version, Tree>& value, const Version& key)
+		{
+			return (value.first < key);
+		}
+		bool operator()(const Version& key, const std::pair<Version, Tree>& value)
+		{
+			return (key < value.first);
+		}
+	};
 
 	Tree const& getRoot( Version v ) const {
-		auto r = roots.upper_bound(v);
+		auto r = upper_bound(roots.begin(), roots.end(), v, rootsComparator());
 		--r;
 		return r->second;
 	}
@@ -488,36 +502,54 @@ public:
 	struct iterator;
 
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
-		latestRoot = &roots[0];
+		roots.emplace_back(0, Tree());
 	}
 	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
-		latestRoot = &roots[latestVersion];
 	}
 	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);
-		latestRoot = &roots[latestVersion];
 	}
 
 	Version getLatestVersion() const { return latestVersion; }
 	Version getOldestVersion() const { return oldestVersion; }
-	Version getNextOldestVersion() const { return roots.upper_bound(oldestVersion)->first; }
+
+	//front element should be the oldest version in the deque, hence the next oldest should be at index 1
+	Version getNextOldestVersion() const { return roots[1]->first; }
 
 	void forgetVersionsBefore(Version newOldestVersion) {
 		ASSERT( newOldestVersion <= latestVersion );
-		roots[newOldestVersion] = getRoot(newOldestVersion);
-		roots.erase(roots.begin(), roots.lower_bound(newOldestVersion));
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
+		auto upper = r;
+		--r;
+		// if the specified newOldestVersion does not exist, insert a new
+		// entry-pair with newOldestVersion and the root from next lower version
+		if (r->first != newOldestVersion) {
+			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
+		}
+
+		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
+		roots.erase(roots.begin(), r);
 		oldestVersion = newOldestVersion;
 	}
 
 	Future<Void> forgetVersionsBeforeAsync( Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield ) {
 		ASSERT( newOldestVersion <= latestVersion );
-		roots[newOldestVersion] = getRoot(newOldestVersion);
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
+		auto upper = r;
+		--r;
+		// if the specified newOldestVersion does not exist, insert a new
+		// entry-pair with newOldestVersion and the root from next lower version
+		if (r->first != newOldestVersion) {
+			r = roots.emplace(upper, newOldestVersion, getRoot(newOldestVersion));
+		}
+
+		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
 
 		vector<Tree> toFree;
 		toFree.reserve(10000);
-		auto newBegin = roots.lower_bound(newOldestVersion);
+		auto newBegin = r;
 		Tree *lastRoot = nullptr;
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second) {
@@ -541,8 +573,7 @@ public:
 		if (version > latestVersion) {
 			latestVersion = version;
 			Tree r = getRoot(version);
-			latestRoot = &roots[version];
-			*latestRoot = r;
+			roots.emplace_back(version, r);
 		} else ASSERT( version == latestVersion );
 	}
 
@@ -551,14 +582,14 @@ public:
 		insert( k, t, latestVersion );
 	}
 	void insert(const K& k, const T& t, Version insertAt) {
-		if (PTreeImpl::contains( *latestRoot, latestVersion, k )) PTreeImpl::remove( *latestRoot, latestVersion, k ); // FIXME: Make PTreeImpl::insert do this automatically  (see also WriteMap.h FIXME)
-		PTreeImpl::insert( *latestRoot, latestVersion, MapPair<K,std::pair<T,Version>>(k,std::make_pair(t,insertAt)) );
+		if (PTreeImpl::contains(roots.back().second, latestVersion, k )) PTreeImpl::remove( roots.back().second, latestVersion, k ); // FIXME: Make PTreeImpl::insert do this automatically  (see also WriteMap.h FIXME)
+		PTreeImpl::insert( roots.back().second, latestVersion, MapPair<K,std::pair<T,Version>>(k,std::make_pair(t,insertAt)) );
 	}
 	void erase(const K& begin, const K& end) {
-		PTreeImpl::remove( *latestRoot, latestVersion, begin, end );
+		PTreeImpl::remove( roots.back().second, latestVersion, begin, end );
 	}
 	void erase(const K& key ) {  // key must be present
-		PTreeImpl::remove( *latestRoot, latestVersion, key );
+		PTreeImpl::remove( roots.back().second, latestVersion, key );
 	}
 	void erase(iterator const& item) {  // iterator must be in latest version!
 		// SOMEDAY: Optimize to use item.finger and avoid repeated search
@@ -653,7 +684,7 @@ public:
 	};
 
 	ViewAtVersion at( Version v ) const { return ViewAtVersion(getRoot(v), v); }
-	ViewAtVersion atLatest() const { return ViewAtVersion(*latestRoot, latestVersion); }
+	ViewAtVersion atLatest() const { return ViewAtVersion(roots.back().second, latestVersion); }
 
 	// TODO: getHistory?
 
