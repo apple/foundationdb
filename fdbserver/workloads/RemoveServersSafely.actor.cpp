@@ -409,17 +409,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			state int timeouts = 0;
 			loop {
 				state bool safe = false;
-				auto failSet = random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
+				state std::set<AddressExclusion> failSet =
+				    random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
 				// Exclude a coordinator under buggify, but only if fault tolerance is > 0
 				if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
-					vector<ISimulator::ProcessInfo*> coordinators = getCoordinators();
-					// why would this be empty?
-					TraceEvent(SevDebug, "Checkpoint").detail("CoordinatorsSize", coordinators.size());
-					if (coordinators.size()) {
-						auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
-						failSet.insert(
-						    AddressExclusion(randomCoordinator->address.ip, randomCoordinator->address.port));
-					}
+					std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
+					auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
+					failSet.insert(AddressExclusion(randomCoordinator.ip, randomCoordinator.port));
 				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
@@ -495,17 +491,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) {
-				machines.push_back( all[i] );
-			}
-		}
-		return machines;
-	}
-
-	static vector<ISimulator::ProcessInfo*> getCoordinators() {
-		vector<ISimulator::ProcessInfo*> machines;
-		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
-		for (int i = 0; i < all.size(); i++) {
-			if (all[i]->startingClass._class == ProcessClass::CoordinatorClass) {
 				machines.push_back( all[i] );
 			}
 		}
