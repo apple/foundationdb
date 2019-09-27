@@ -108,7 +108,7 @@ IndirectShadowPagerSnapshot::IndirectShadowPagerSnapshot(IndirectShadowPager *pa
 {
 }
 
-Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(LogicalPageID pageID) {
+Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(LogicalPageID pageID, bool cacheable) {
 	if(pagerError.isReady())
 		pagerError.get();
 	return pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version);

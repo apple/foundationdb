@@ -33,10 +33,15 @@
 
 #define debug_printf_noop(...)
 
-#if REDWOOD_DEBUG
-  #define debug_printf debug_printf_always
+#if defined(NO_INTELLISENSE)
+	#if REDWOOD_DEBUG
+		#define debug_printf debug_printf_always
+	#else
+		#define debug_printf debug_printf_noop
+	#endif
 #else
-#define debug_printf debug_printf_noop
+	// To get error-checking on debug_printf statements in IDE
+	#define debug_printf printf
 #endif
 
 #define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
@@ -79,7 +84,7 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) = 0;
+	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable) = 0;
 	virtual Version getVersion() const = 0;
 
 	virtual Key getMetaKey() const {
@@ -165,25 +170,28 @@ public:
 	// regardless of whether or not it was written to.
 	virtual Future<LogicalPageID> newPageID() = 0;
 
-	// Replace the contents of a page with new data.  Existing holders of a page reference for pageID
-	// will see the effects of this write.
+	// Replace the contents of a page with new data across *all* versions.
+	// Existing holders of a page reference for pageID, read from any version,
+	// may see the effects of this write.
 	virtual void updatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
 
-	// Try to atomically update the contents of a page as of the next successful commit()
-	// If the pager is unable to do this at this time, it may choose to write the data to a new page,
-	// call freePage(pageID), and return the new page id.  Otherwise the pageID argument will be returned.
-	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
+	// Try to atomically update the contents of a page as of version v in the next commit.
+	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
+	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
+	// If a new page ID is returned, the old page ID will be freed as of version v
+	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data, Version v) = 0;
 
-	// Free pageID to be used again after version v is durable
+	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
-	// Returns the data for a page by LogicalPageID
+	// Returns the latest data (regardless of version) for a page by LogicalPageID
 	// The data returned will be the later of
-	//   - the most recent committed atomic write
+	//   - the most recent committed atomic
 	//   - the most recent non-atomic write
-	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID) = 0;
+	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable) = 0;
 
 	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
+	// Note that snapshots at any version may still see the results of updatePage() calls.
 	// The snapshot shall be usable until setOldVersion() is called with a version > v.
 	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
 

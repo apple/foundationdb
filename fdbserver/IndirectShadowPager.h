@@ -70,7 +70,7 @@ class IndirectShadowPagerSnapshot : public IPagerSnapshot, ReferenceCounted<Indi
 public:
 	IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version);
 
-	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
+	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable);
 
 	virtual Version getVersion() const {
 		return version;
