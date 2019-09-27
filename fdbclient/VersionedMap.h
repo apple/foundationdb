@@ -520,7 +520,7 @@ public:
 
 	void forgetVersionsBefore(Version newOldestVersion) {
 		ASSERT( newOldestVersion <= latestVersion );
-		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, compare());
+		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		auto upper = r;
 		--r;
 		// if the specified newOldestVersion does not exist, insert a new
