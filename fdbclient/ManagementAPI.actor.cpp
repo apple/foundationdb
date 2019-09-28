@@ -1208,8 +1208,6 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 			for(auto& s : servers)
 				tr.set( encodeExcludedServersKey(s), StringRef() );
@@ -1240,9 +1238,6 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 
 			for(auto& s : servers ) {
