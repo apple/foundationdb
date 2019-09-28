@@ -603,6 +603,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0,
+         "system_kv_size_bytes":0,
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,
