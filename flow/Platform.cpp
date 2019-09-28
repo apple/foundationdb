@@ -518,13 +518,13 @@ const char* getInterfaceName(const IPAddress& _ip) {
 		if(!iter->ifa_addr)
 			continue;
 		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
-			uint32_t ip = ntohl(((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr);
+			uint32_t ip = ntohl((reinterpret_cast<struct sockaddr_in*>(iter->ifa_addr))->sin_addr.s_addr);
 			if (ip == _ip.toV4()) {
 				ifa_name = iter->ifa_name;
 				break;
 			}
 		} else if (iter->ifa_addr->sa_family == AF_INET6 && _ip.isV6()) {
-			struct sockaddr_in6* ifa_addr = (struct sockaddr_in6*)iter->ifa_addr;
+			struct sockaddr_in6* ifa_addr = reinterpret_cast<struct sockaddr_in6*>(iter->ifa_addr);
 			if (memcmp(_ip.toV6().data(), &ifa_addr->sin6_addr, 16) == 0) {
 				ifa_name = iter->ifa_name;
 				break;

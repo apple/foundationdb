@@ -1527,12 +1527,11 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd) {
-	state UID snapUID = deterministicRandom()->randomUniqueID();
+ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	try {
 		wait(snapCreate(cx, snapCmd, snapUID));
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-		return snapUID;
+		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
 		throw;
