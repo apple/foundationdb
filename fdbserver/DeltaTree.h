@@ -342,7 +342,7 @@ public:
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
-			nodeBytes = build(root(), begin, end, prev, next);
+			nodeBytes = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
 		}
 		else {
 			nodeBytes = 0;
@@ -351,7 +351,7 @@ public:
 	}
 
 private:
-	static OffsetT build(Node &root, const T *begin, const T *end, const T *prev, const T *next) {
+	static OffsetT build(Node &root, const T *begin, const T *end, const T *prev, const T *next, int subtreeCommon) {
 		//printf("build: %s to %s\n", begin->toString().c_str(), (end - 1)->toString().c_str());
 		//printf("build: root at %p  sizeof(Node) %d  delta at %p  \n", &root, sizeof(Node), &root.delta());
 		ASSERT(end != begin);
@@ -361,12 +361,8 @@ private:
 		int mid = perfectSubtreeSplitPointCached(count);
 		const T &item = begin[mid];
 
-		// Get the common prefix length between next and prev
-		// Since mid is between them, we can skip that length to determine the common prefix length
-		// between mid and prev and between mid and next.
-		int nextPrevCommon = prev->getCommonPrefixLen(*next, 0);
-		int commonWithPrev = item.getCommonPrefixLen(*prev, nextPrevCommon);
-		int commonWithNext = item.getCommonPrefixLen(*next, nextPrevCommon);
+		int commonWithPrev = item.getCommonPrefixLen(*prev, subtreeCommon);
+		int commonWithNext = item.getCommonPrefixLen(*next, subtreeCommon);
 
 		bool prefixSourcePrev;
 		int commonPrefix;
@@ -391,7 +387,7 @@ private:
 
 		// Serialize left child
 		if(count > 1) {
-			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item);
+			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item, commonWithPrev);
 			root.leftChildOffset = deltaSize;
 		}
 		else {
@@ -401,7 +397,7 @@ private:
 		// Serialize right child
 		if(count > 2) {
 			root.rightChildOffset = wptr - (uint8_t *)&root.delta();
-			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next);
+			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next, commonWithNext);
 		}
 		else {
 			root.rightChildOffset = 0;
