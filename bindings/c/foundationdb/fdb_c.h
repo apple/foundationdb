@@ -120,11 +120,6 @@ extern "C" {
     fdb_future_get_error( FDBFuture* f );
 #endif
 
-#if FDB_API_VERSION < 620
-    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
-#endif
-
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_int64( FDBFuture* f, int64_t* out );
 
@@ -264,6 +259,13 @@ extern "C" {
     DLLEXPORT const char* fdb_get_client_version();
 
     /* LEGACY API VERSIONS */
+
+#if FDB_API_VERSION < 620
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
+#else
+    #define fdb_future_get_version(f, ov) FDB_REMOVED_FUNCTION
+#endif
 
 #if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
     typedef struct FDB_cluster FDBCluster;
