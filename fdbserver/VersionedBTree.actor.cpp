@@ -683,6 +683,16 @@ public:
 	ObjectCache(int sizeLimit = 0) : sizeLimit(sizeLimit) {
 	}
 
+	// Get the object for i if it exists, else return nullptr.
+	// If the object exists, its eviction order will NOT change as this is not a cache hit.
+	ObjectType * getIfExists(const IndexType &index) {
+		auto i = cache.find(index);
+		if(i != cache.end()) {
+			return &i->second.item;
+		}
+		return nullptr;
+	}
+
 	// Get the object for i or create a new one.
 	// After a get(), the object for i is the last in evictionOrder.
 	ObjectType & get(const IndexType &index) {
@@ -1068,9 +1078,15 @@ public:
 
 	// Reads the most recent version of pageID either committed or written using updatePage()
 	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable) override {
+		// Use cached page if present, without triggering a cache hit.
+		// Otherwise, read the page and return it but don't add it to the cache
 		if(!cacheable) {
-			// TODO: use cached page if present, otherwise read the page and return it but don't add it to the cache
-			ASSERT(false);
+			PageCacheEntry *pCacheEntry = pageCache.getIfExists(pageID);
+			if(pCacheEntry != nullptr) {
+				return pCacheEntry->page;
+			}
+
+			return forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 		}
 
 		PageCacheEntry &cacheEntry = pageCache.get(pageID);
