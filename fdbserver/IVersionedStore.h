@@ -37,10 +37,7 @@ public:
 
 	virtual bool isValid() = 0;
 	virtual KeyRef getKey() = 0;
-	//virtual StringRef getCompressedKey() = 0;
 	virtual ValueRef getValue() = 0;
-
-	virtual void invalidateReturnedStrings() = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

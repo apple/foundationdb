@@ -1434,7 +1434,6 @@ public:
 	Key metaKey;
 };
 
-// TODO: Add version parameter and search snapshots for result
 Reference<IPagerSnapshot> COWPager::getReadSnapshot(Version v) {
 	ASSERT(!snapshots.empty());
 
@@ -1691,7 +1690,7 @@ struct RedwoodRecordRef {
 	Version version;
 	struct {
 		uint32_t total;
-		// TODO:  Change start to chunk number.
+		// TODO:  Change start to chunk number?
 		uint32_t start;
 	} chunk;
 
@@ -2528,8 +2527,7 @@ public:
 	// If readAtVersion() is called on the *current* write version, the given read cursor MAY reflect subsequent writes at the same
 	//   write version, OR it may represent a snapshot as of the call to readAtVersion().
 	virtual Reference<IStoreCursor> readAtVersion(Version v) {
-		// TODO: Use the buffer to return uncommitted data
-		// For now, only committed versions can be read.
+		// Only committed versions can be read.
 		Version recordVersion = singleVersion ? 0 : v;
 		ASSERT(v <= m_lastCommittedVersion);
 		if(singleVersion) {
@@ -2881,7 +2879,6 @@ private:
 	}
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
-	// TODO:  Maybe refactor this as an accumulator you add sorted keys to which precomputes adjacent common prefixes and makes pages.
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree *self, bool minimalBoundaries, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound, VectorRef<RedwoodRecordRef> entries, uint8_t newFlags, int height, Version v, BTreePageID previousID) {
 		ASSERT(entries.size() > 0);
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
@@ -3185,8 +3182,7 @@ private:
 		}
 	}
 
-	// Returns list of (version, list of (lower_bound, list of children) )
-	// TODO:  Probably should pass prev/next records by pointer in many places
+	// Returns list of (version, internal page records, required upper bound)
 	ACTOR static Future<Standalone<VersionedChildrenT>> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, BTreePageID rootID, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound, const RedwoodRecordRef *decodeLowerBound, const RedwoodRecordRef *decodeUpperBound) {
 		state std::string context;
 		if(REDWOOD_DEBUG) {
@@ -3584,7 +3580,6 @@ private:
 			self->printMutationBuffer(mutations);
 		}
 
-		// TODO:  Support root page as a BTreePageID in the header instead of just a LogicalPageID
 		state Standalone<BTreePageID> rootPageID = self->m_header.root.get();
 		state RedwoodRecordRef lowerBound = dbBegin.withPageID(rootPageID);
 		Standalone<VersionedChildrenT> versionedRoots = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), rootPageID, &lowerBound, &dbEnd, &lowerBound, &dbEnd));
@@ -3964,14 +3959,8 @@ private:
 			return m_kv.get().key;
 		}
 
-		//virtual StringRef getCompressedKey() = 0;
 		virtual ValueRef getValue() {
 			return m_kv.get().value;
-		}
-
-		// TODO: Either remove this method or change the contract so that key and value strings returned are still valid after the cursor is
-		// moved and allocate them in some arena that this method resets.
-		virtual void invalidateReturnedStrings() {
 		}
 
 		std::string toString() const {
