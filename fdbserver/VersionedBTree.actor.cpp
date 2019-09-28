@@ -1098,25 +1098,28 @@ public:
 	};
 
 	ACTOR static Future<Void> commit_impl(COWPager *self) {
-		state int addFront = 10 * deterministicRandom()->randomInt(0, 10);
-		state int addBack = 10 * deterministicRandom()->randomInt(0, 10);
-		state int remove = 10 * deterministicRandom()->randomInt(0, 20);
-		state int i;
+		// TODO:  Remove this once the free list is in normal use
+		if(g_network->isSimulated()) {
+			state int addFront = 10 * deterministicRandom()->randomInt(0, 10);
+			state int addBack = 10 * deterministicRandom()->randomInt(0, 10);
+			state int remove = 10 * deterministicRandom()->randomInt(0, 20);
+			state int i;
 
-		for(i = 0; i < addBack; ++i) {
-			LogicalPageID id = wait(self->newPageID());
-			self->freeList.pushBack(id);
-		}
+			for(i = 0; i < addBack; ++i) {
+				LogicalPageID id = wait(self->newPageID());
+				self->freeList.pushBack(id);
+			}
 
-		for(i = 0; i < addFront; ++i) {
-			LogicalPageID id = wait(self->newPageID());
-			self->freeList.pushFront(id);
-		}
+			for(i = 0; i < addFront; ++i) {
+				LogicalPageID id = wait(self->newPageID());
+				self->freeList.pushFront(id);
+			}
 
-		for(i = 0; i < remove; ++i) {
-			Optional<LogicalPageID> id = wait(self->freeList.pop());
-			if(!id.present()) {
-				break;
+			for(i = 0; i < remove; ++i) {
+				Optional<LogicalPageID> id = wait(self->freeList.pop());
+				if(!id.present()) {
+					break;
+				}
 			}
 		}
 
@@ -1675,9 +1678,6 @@ struct RedwoodRecordRef {
 		// TODO:  Change start to chunk number.
 		uint32_t start;
 	} chunk;
-
-	// If the value is a single page ID it will be stored here
-	uint8_t bigEndianPageIDSpace[sizeof(LogicalPageID)];
 
 	int expectedSize() const {
 		return key.expectedSize() + value.expectedSize();
@@ -3060,7 +3060,6 @@ private:
 			}
 		}
 
-		//debug_printf("buildPages: returning pages.size %lu, kvpairs %lu\n", pages.size(), kvPairs.size());
 		return records;
 	}
 
