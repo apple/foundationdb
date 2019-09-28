@@ -105,7 +105,7 @@ struct AddingShard : NonCopyable {
 	struct StorageServer* server;
 	Version transferredVersion;
 
-	enum Phase { WaitPrevious, Fetching, Waiting };
+	enum Phase { WaitPrevious, Fetching, Waiting }; 
 	Phase phase;
 
 	AddingShard( StorageServer* server, KeyRangeRef const& keys );
@@ -2068,6 +2068,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
 						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+						warningLogger = logFetchKeysWarning(shard);
 						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 
