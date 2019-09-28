@@ -89,7 +89,7 @@ class ClusterControllerData {
 public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
-		Reference<AsyncVar<ServerDBInfo>> serverInfo;
+		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> serverInfo;
 		ProcessIssuesMap workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		AsyncTrigger forceMasterFailure;
@@ -105,34 +105,37 @@ public:
 
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
-			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
+			serverInfo( new AsyncVar<CachedSerialization<ServerDBInfo>>( CachedSerialization<ServerDBInfo>() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
 		}
 
 		void setDistributor(const DataDistributorInterface& interf) {
-			ServerDBInfo newInfo = serverInfo->get();
+			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
+			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.distributor = interf;
-			serverInfo->set( newInfo );
+			serverInfo->set( newInfoCache );
 		}
 
 		void setRatekeeper(const RatekeeperInterface& interf) {
-			ServerDBInfo newInfo = serverInfo->get();
+			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
+			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.ratekeeper = interf;
-			serverInfo->set( newInfo );
+			serverInfo->set( newInfoCache );
 		}
 
 		void clearInterf(ProcessClass::ClassType t) {
-			ServerDBInfo newInfo = serverInfo->get();
+			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
+			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			}
-			serverInfo->set( newInfo );
+			serverInfo->set( newInfoCache );
 		}
 	};
 
@@ -444,8 +447,8 @@ public:
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fitness < unacceptableFitness && it.second.details.interf.locality.dcId()==dcId ) {
-				if ((db.serverInfo->get().distributor.present() && db.serverInfo->get().distributor.get().locality.processId() == it.first) ||
-				    (db.serverInfo->get().ratekeeper.present() && db.serverInfo->get().ratekeeper.get().locality.processId() == it.first)) {
+				if ((db.serverInfo->get().read().distributor.present() && db.serverInfo->get().read().distributor.get().locality.processId() == it.first) ||
+				    (db.serverInfo->get().read().ratekeeper.present() && db.serverInfo->get().read().ratekeeper.get().locality.processId() == it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
 				} else {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].first.push_back(it.second.details);
@@ -477,8 +480,8 @@ public:
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
 			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && it.second.details.interf.locality.dcId() == dcId &&
 			  ( !minWorker.present() || ( it.second.details.interf.id() != minWorker.get().worker.interf.id() && ( fitness < minWorker.get().fitness || (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used ) ) ) ) ) {
-				if ((db.serverInfo->get().distributor.present() && db.serverInfo->get().distributor.get().locality.processId() == it.first) ||
-				    (db.serverInfo->get().ratekeeper.present() && db.serverInfo->get().ratekeeper.get().locality.processId() == it.first)) {
+				if ((db.serverInfo->get().read().distributor.present() && db.serverInfo->get().read().distributor.get().locality.processId() == it.first) ||
+				    (db.serverInfo->get().read().ratekeeper.present() && db.serverInfo->get().read().ratekeeper.get().locality.processId() == it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
 				} else {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].first.push_back(it.second.details);
@@ -877,7 +880,7 @@ public:
 	}
 
 	void checkRecoveryStalled() {
-		if( (db.serverInfo->get().recoveryState == RecoveryState::RECRUITING || db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS || db.serverInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED) && db.recoveryStalled ) {
+		if( (db.serverInfo->get().read().recoveryState == RecoveryState::RECRUITING || db.serverInfo->get().read().recoveryState == RecoveryState::ACCEPTING_COMMITS || db.serverInfo->get().read().recoveryState == RecoveryState::ALL_LOGS_RECRUITED) && db.recoveryStalled ) {
 			if (db.config.regions.size() > 1) {
 				auto regions = db.config.regions;
 				if(clusterControllerDcId.get() == regions[0].dcId) {
@@ -891,7 +894,7 @@ public:
 
 	//FIXME: determine when to fail the cluster controller when a primaryDC has not been set
 	bool betterMasterExists() {
-		ServerDBInfo dbi = db.serverInfo->get();
+		const ServerDBInfo dbi = db.serverInfo->get().read();
 
 		if(dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			return false;
@@ -1086,7 +1089,7 @@ public:
 		ASSERT(masterProcessId.present());
 		if (processId == masterProcessId) return false;
 
-		auto& dbInfo = db.serverInfo->get();
+		auto& dbInfo = db.serverInfo->get().read();
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
 		}
@@ -1109,7 +1112,7 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
 		updateKnownIds(&idUsed);
 
-		auto& dbInfo = db.serverInfo->get();
+		auto& dbInfo = db.serverInfo->get().read();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
@@ -1164,12 +1167,13 @@ public:
 			gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0),
 			versionDifferenceUpdated(false), recruitingDistributor(false), recruitRatekeeper(false)
 	{
-		auto serverInfo = db.serverInfo->get();
+		CachedSerialization<ServerDBInfo> newInfoCache = db.serverInfo->get();
+		auto& serverInfo = newInfoCache.mutate();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		db.serverInfo->set( serverInfo );
+		db.serverInfo->set( newInfoCache );
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
 	}
 
@@ -1204,7 +1208,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				continue;
 			}
 			RecruitMasterRequest rmq;
-			rmq.lifetime = db->serverInfo->get().masterLifetime;
+			rmq.lifetime = db->serverInfo->get().read().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
 
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
@@ -1224,17 +1228,19 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
 
-				auto dbInfo = ServerDBInfo();
+				auto cachedInfo = CachedSerialization<ServerDBInfo>();
+				auto& dbInfo = cachedInfo.mutate();
+
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
-				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
+				dbInfo.masterLifetime = db->serverInfo->get().read().masterLifetime;
 				++dbInfo.masterLifetime;
-				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
-				dbInfo.distributor = db->serverInfo->get().distributor;
-				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
+				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
+				dbInfo.distributor = db->serverInfo->get().read().distributor;
+				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
-				db->serverInfo->set( dbInfo );
+				db->serverInfo->set( cachedInfo );
 
 				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
@@ -1271,16 +1277,16 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID knownServerInfoID,
                                         Standalone<VectorRef<StringRef>> issues,
                                         std::vector<NetworkAddress> incompatiblePeers,
-                                        ReplyPromise<ServerDBInfo> reply) {
+                                        ReplyPromise<CachedSerialization<ServerDBInfo>> reply) {
 	state Optional<UID> issueID;
 	setIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
 
-	while (db->serverInfo->get().id == knownServerInfoID) {
+	while (db->serverInfo->get().read().id == knownServerInfoID) {
 		choose {
-			when (wait( db->serverInfo->onChange() )) {}
+			when (wait( yieldedFuture(db->serverInfo->onChange()) )) {}
 			when (wait( delayJittered( 300 ) )) { break; }  // The server might be long gone!
 		}
 	}
@@ -1372,11 +1378,11 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 }
 
 void checkBetterDDOrRK(ClusterControllerData* self) {
-	if (!self->masterProcessId.present() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+	if (!self->masterProcessId.present() || self->db.serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
 	}
 
-	const ServerDBInfo& db = self->db.serverInfo->get();
+	auto& db = self->db.serverInfo->get().read();
 	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
 
@@ -1422,7 +1428,7 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 		self->checkRecoveryStalled();
 		if (self->betterMasterExists()) {
 			self->db.forceMasterFailure.trigger();
-			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
+			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().read().master.id());
 		}
 	} catch( Error &e ) {
 		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
@@ -1719,8 +1725,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
-	if ( db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
-		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
+	if ( db->serverInfo->get().read().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
+		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().read().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
 		return;
 	}
 
@@ -1753,7 +1759,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	bool isChanged = false;
-	auto dbInfo = self->db.serverInfo->get();
+	auto cachedInfo = self->db.serverInfo->get();
+	auto& dbInfo = cachedInfo.mutate();
 
 	if (dbInfo.recoveryState != req.recoveryState) {
 		dbInfo.recoveryState = req.recoveryState;
@@ -1794,7 +1801,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 	if( isChanged ) {
 		dbInfo.id = deterministicRandom()->randomUniqueID();
-		self->db.serverInfo->set( dbInfo );
+		self->db.serverInfo->set( cachedInfo );
 	}
 
 	checkOutstandingRequests(self);
@@ -1855,7 +1862,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded );
-		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
+		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().read().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
 		checkOutstandingRequests( self );
@@ -1879,7 +1886,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		TEST(true); // Received an old worker registration request.
 	}
 
-	if (req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() &&
+	if (req.distributorInterf.present() && !self->db.serverInfo->get().read().distributor.present() &&
 			self->clusterControllerDcId == req.distributorInterf.get().locality.dcId() &&
 			!self->recruitingDistributor) {
 		const DataDistributorInterface& di = req.distributorInterf.get();
@@ -1896,7 +1903,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 		} else if(!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
-			const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+			const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;
 			TraceEvent("CCRegisterRatekeeper", self->id).detail("RKID", rki.id());
 			if (ratekeeper.present() && ratekeeper.get().id() != rki.id() && self->id_worker.count(ratekeeper.get().locality.processId())) {
 				TraceEvent("CCHaltPreviousRatekeeper", self->id).detail("RKID", ratekeeper.get().id())
@@ -2165,12 +2172,13 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 					config = LatencyBandConfig::parse(configVal.get());
 				}
 
-				ServerDBInfo serverInfo = db->serverInfo->get();
+				auto cachedInfo = db->serverInfo->get();
+				auto& serverInfo = cachedInfo.mutate();
 				if(config != serverInfo.latencyBandConfig) {
 					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
 					serverInfo.id = deterministicRandom()->randomUniqueID();
 					serverInfo.latencyBandConfig = config;
-					db->serverInfo->set(serverInfo);
+					db->serverInfo->set(cachedInfo);
 				}
 
 				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
@@ -2324,7 +2332,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	state double lastLogTime = 0;
 	loop {
 		self->versionDifferenceUpdated = false;
-		if(self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && self->db.config.usableRegions == 1) {
+		if(self->db.serverInfo->get().read().recoveryState >= RecoveryState::ACCEPTING_COMMITS && self->db.config.usableRegions == 1) {
 			bool oldDifferenceTooLarge = !self->versionDifferenceUpdated || self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = 0;
@@ -2339,8 +2347,8 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 		state Optional<TLogInterface> primaryLog;
 		state Optional<TLogInterface> remoteLog;
-		if(self->db.serverInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-			for(auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
+		if(self->db.serverInfo->get().read().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
+			for(auto& logSet : self->db.serverInfo->get().read().logSystemConfig.tLogs) {
 				if(logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 					for(auto& tLog : logSet.tLogs) {
 						if(tLog.present()) {
@@ -2441,12 +2449,12 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 	TraceEvent("CCStartDataDistributor", self->id);
 	loop {
 		try {
-			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
-			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			state bool no_distributor = !self->db.serverInfo->get().read().distributor.present();
+			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().read().master.locality.processId() || self->db.serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
-			if (no_distributor && self->db.serverInfo->get().distributor.present()) {
-				return self->db.serverInfo->get().distributor.get();
+			if (no_distributor && self->db.serverInfo->get().read().distributor.present()) {
+				return self->db.serverInfo->get().read().distributor.get();
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2476,15 +2484,15 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 }
 
 ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
-	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+	while(self->db.serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
 
 	loop {
-		if ( self->db.serverInfo->get().distributor.present() ) {
-			wait( waitFailureClient( self->db.serverInfo->get().distributor.get().waitFailure, SERVER_KNOBS->DD_FAILURE_TIME ) );
+		if ( self->db.serverInfo->get().read().distributor.present() ) {
+			wait( waitFailureClient( self->db.serverInfo->get().read().distributor.get().waitFailure, SERVER_KNOBS->DD_FAILURE_TIME ) );
 			TraceEvent("CCDataDistributorDied", self->id)
-			.detail("DistributorId", self->db.serverInfo->get().distributor.get().id());
+			.detail("DistributorId", self->db.serverInfo->get().read().distributor.get().id());
 			self->db.clearInterf(ProcessClass::DataDistributorClass);
 		} else {
 			self->recruitingDistributor = true;
@@ -2501,11 +2509,11 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 	TraceEvent("CCStartRatekeeper", self->id);
 	loop {
 		try {
-			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
-			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			state bool no_ratekeeper = !self->db.serverInfo->get().read().ratekeeper.present();
+			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().read().master.locality.processId() || self->db.serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
-			if (no_ratekeeper && self->db.serverInfo->get().ratekeeper.present()) {
+			if (no_ratekeeper && self->db.serverInfo->get().read().ratekeeper.present()) {
 				// Existing ratekeeper registers while waiting, so skip.
 				return Void();
 			}
@@ -2525,7 +2533,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			if (interf.present()) {
 				self->recruitRatekeeper.set(false);
 				self->recruitingRatekeeperID = interf.get().id();
-				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;
 				TraceEvent("CCRatekeeperRecruited", self->id).detail("Addr", worker.interf.address()).detail("RKID", interf.get().id());
 				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() && self->id_worker.count(ratekeeper.get().locality.processId())) {
 					TraceEvent("CCHaltRatekeeperAfterRecruit", self->id).detail("RKID", ratekeeper.get().id())
@@ -2550,16 +2558,16 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
-	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+	while(self->db.serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
 
 	loop {
-		if ( self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get() ) {
+		if ( self->db.serverInfo->get().read().ratekeeper.present() && !self->recruitRatekeeper.get() ) {
 			choose {
-				when(wait(waitFailureClient( self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME )))  {
+				when(wait(waitFailureClient( self->db.serverInfo->get().read().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME )))  {
 					TraceEvent("CCRatekeeperDied", self->id)
-					.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+					.detail("RKID", self->db.serverInfo->get().read().ratekeeper.get().id());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
 				}
 				when(wait(self->recruitRatekeeper.onChange())) {}

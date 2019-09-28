@@ -30,12 +30,12 @@
 #include "fdbserver/RecoveryState.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Version>> replies) {
+ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
 	wait(f);
 	Version minVersion = std::numeric_limits<Version>::max();
 	for(auto& reply : replies) {
 		if(reply.isReady() && !reply.isError()) {
-			minVersion = std::min(minVersion, reply.get());
+			minVersion = std::min(minVersion, reply.get().version);
 		}
 	}
 	return minVersion;
@@ -429,7 +429,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
-		vector<Future<Version>> allReplies;
+		vector<Future<TLogCommitReply>> allReplies;
 		int location = 0;
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
@@ -2271,7 +2271,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	ACTOR static Future<Void> trackRejoins( UID dbgid, std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers, FutureStream< struct TLogRejoinRequest > rejoinRequests ) {
-		state std::map<UID,ReplyPromise<bool>> lastReply;
+		state std::map<UID, ReplyPromise<TLogRejoinReply>> lastReply;
 
 		try {
 			loop {
@@ -2287,7 +2287,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					TraceEvent("TLogJoinedMe", dbgid).detail("TLog", req.myInterface.id()).detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
 					if( !logServers[pos]->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos]->get().interf().commit.getEndpoint())
 						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(req.myInterface) );
-					lastReply[req.myInterface.id()].send(false);
+					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
 					lastReply[req.myInterface.id()] = req.reply;
 				}
 				else {
@@ -2296,8 +2296,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 		} catch (...) {
-			for( auto it = lastReply.begin(); it != lastReply.end(); ++it)
-				it->second.send(true);
+			for (auto it = lastReply.begin(); it != lastReply.end(); ++it) it->second.send(TLogRejoinReply{ true });
 			throw;
 		}
 	}

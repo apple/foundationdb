@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -272,6 +273,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			state int randomChoice = deterministicRandom()->randomInt(0, 7);
 			if( randomChoice == 0 ) {
+				wait( success(
+						runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+							{
+								return tr->get(LiteralStringRef("This read is only to ensure that the database recovered"));
+							})));
+				wait( delay( 20 + 10 * deterministicRandom()->random01() ) );
+			}
+			else if( randomChoice < 3 ) {
 				double waitDuration = 3.0 * deterministicRandom()->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
 				wait( delay( waitDuration ) );

@@ -1119,11 +1119,11 @@ namespace oldTLog_4_6 {
 					req.myInterface = tli;
 					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
 					choose {
-						when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
-							if (success)
-								lastMasterID = self->dbInfo->get().master.id();
-						}
-						when ( wait( self->dbInfo->onChange() ) ) { }
+					    when(TLogRejoinReply rep =
+					             wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+						    if (rep.masterIsRecovered) lastMasterID = self->dbInfo->get().master.id();
+					    }
+					    when ( wait( self->dbInfo->onChange() ) ) { }
 					}
 				} else {
 					wait( self->dbInfo->onChange() );

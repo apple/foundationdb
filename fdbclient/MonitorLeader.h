@@ -42,11 +42,11 @@ struct ClientStatusInfo {
 
 struct ClientData {
 	std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
-	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	Reference<AsyncVar<CachedSerialization<ClientDBInfo>>> clientInfo;
 
 	OpenDatabaseRequest getRequest();
 
-	ClientData() : clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ) {}
+	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
 };
 
 template <class LeaderInterface>

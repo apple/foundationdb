@@ -879,6 +879,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	state bool allHealthy = true;
 	state bool anyWithSource = false;
 	state std::vector<std::pair<Reference<IDataDistributionTeam>,bool>> bestTeams;
+	state double startTime = now();
+	state std::vector<UID> destIds;
 
 	try {
 		if(now() - self->lastInterval < 1.0) {
@@ -955,7 +957,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch ) );
 			}
 
-			state std::vector<UID> destIds;
+			destIds.clear();
 			state std::vector<UID> healthyIds;
 			state std::vector<UID> extraIds;
 			state std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams;
@@ -1066,7 +1068,10 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 				// onFinished.send( rs );
 				if( !error.code() ) {
-					TraceEvent(relocateShardInterval.end(), distributorId).detail("Result","Success");
+					TraceEvent(relocateShardInterval.end(), distributorId).detail("Duration", now() - startTime).detail("Result","Success");
+					if(now() - startTime > 600) {
+						TraceEvent(SevWarnAlways, "RelocateShardTooLong").detail("Duration", now() - startTime).detail("Dest", describe(destIds)).detail("Src", describe(rd.src));
+					}
 					if(rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys").detail("Dest", describe(destIds)).trackLatest("MovedKeyServers");
 					}
@@ -1090,7 +1095,10 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(relocateShardInterval.end(), distributorId).error(e, true);
+		TraceEvent(relocateShardInterval.end(), distributorId).error(e, true).detail("Duration", now() - startTime);
+		if(now() - startTime > 600) {
+			TraceEvent(SevWarnAlways, "RelocateShardTooLong").error(e, true).detail("Duration", now() - startTime).detail("Dest", describe(destIds)).detail("Src", describe(rd.src));
+		}
 		if( !signalledTransferComplete )
 			dataTransferComplete.send( rd );
 

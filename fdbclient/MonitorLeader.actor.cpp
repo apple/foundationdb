@@ -541,6 +541,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 	std::map<StringRef, ClientStatusStats> issueMap;
 	std::map<ClientVersionRef, ClientStatusStats> versionMap;
 	std::map<StringRef, ClientStatusStats> maxProtocolMap;
+	int clientCount = 0;
 
 	//SOMEDAY: add a yield in this loop
 	for(auto& ci : clientStatusInfoMap) {
@@ -551,19 +552,28 @@ OpenDatabaseRequest ClientData::getRequest() {
 				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 			}
 		}
-		StringRef maxProtocol;
-		for(auto& it : ci.second.versions) {
-			maxProtocol = std::max(maxProtocol, it.protocolVersion);
-			auto& entry = versionMap[it];
+		if(ci.second.versions.size()) {
+			clientCount++;
+			StringRef maxProtocol;
+			for(auto& it : ci.second.versions) {
+				maxProtocol = std::max(maxProtocol, it.protocolVersion);
+				auto& entry = versionMap[it];
+				entry.count++;
+				if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+					entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+				}
+			}
+			auto& maxEntry = maxProtocolMap[maxProtocol];
+			maxEntry.count++;
+			if(maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
+				maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
+			}
+		} else {
+			auto& entry = versionMap[ClientVersionRef()];
 			entry.count++;
 			if(entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
 				entry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 			}
-		}
-		auto& maxEntry = maxProtocolMap[maxProtocol];
-		maxEntry.count++;
-		if(maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-			maxEntry.examples.push_back(std::make_pair(ci.first, ci.second.traceLogGroup));
 		}
 	}
 
@@ -579,7 +589,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 	for(auto& it : maxProtocolMap) {
 		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
 	}
-	req.clientCount = clientStatusInfoMap.size();
+	req.clientCount = clientCount;
 
 	return req;
 }
@@ -599,11 +609,11 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		} else {
 			resetReply(req);
 		}
-		req.knownClientInfoID = clientData->clientInfo->get().id;
+		req.knownClientInfoID = clientData->clientInfo->get().read().id;
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
-				clientData->clientInfo->set(ni);
+				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
 			when( wait( knownLeader->onChange() ) ) {}
 		}
@@ -639,7 +649,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				ClientDBInfo outInfo;
 				outInfo.id = deterministicRandom()->randomUniqueID();
 				outInfo.forward = leader.get().first.serializedInfo;
-				clientData->clientInfo->set(outInfo);
+				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 				TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString());
 				return Void();
 			}
@@ -699,11 +709,11 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<ClientDBInfo> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
 		if (rep.present()) {
-			if( rep.get().forward.present() ) {
-				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(rep.get().forward.get().toString())));
+			if( rep.get().read().forward.present() ) {
+				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().read().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(rep.get().read().forward.get().toString())));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -719,7 +729,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			info.hasConnected = true;
 			connFile->notifyConnected();
 
-			auto& ni = rep.get();
+			auto& ni = rep.get().mutate();
 			if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
 				std::vector<UID> proxyUIDs;
 				for(auto& proxy : ni.proxies) {
@@ -737,7 +747,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 				ni.proxies = lastProxies;
 			}
 
-			clientInfo->set( rep.get() );
+			clientInfo->set( rep.get().read() );
 			successIdx = idx;
 		} else if(idx == successIdx) {
 			wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
