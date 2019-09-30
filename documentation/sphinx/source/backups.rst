@@ -380,6 +380,24 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
 
+.. program:: fdbbackup cleanup
+
+``cleanup``
+------------
+
+The ``cleanup`` subcommand will list orphaned backups and DRs and optionally remove their mutations.
+
+::
+
+   user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C <CLUSTER_FILE>] 
+
+``--delete_data``
+  This flag will cause ``cleanup`` to remove mutations for the most stale backup or DR.
+
+``--min_cleanup_seconds``
+  Specifies the amount of time a backup or DR needs to be stale before ``cleanup`` will remove mutations for it. By default this is set to one hour.
+
+
 ``fdbrestore`` command line tool
 ================================
 
