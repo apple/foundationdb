@@ -402,7 +402,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		state std::vector<ISimulator::ProcessInfo*>	killProcArray;
 		state std::vector<AddressExclusion>	toKillArray;
 		state std::vector<AddressExclusion>	toKillMarkFailedArray;
-
+		state AddressExclusion coordExcl;
+		// Exclude a coordinator under buggify, but only if fault tolerance is > 0
+		if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
+			std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
+			auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
+			coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
+			toKill.insert(coordExcl);
+		}
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
 		if (markExcludeAsFailed) {
@@ -411,11 +418,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				state bool safe = false;
 				state std::set<AddressExclusion> failSet =
 				    random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
-				// Exclude a coordinator under buggify, but only if fault tolerance is > 0
-				if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
-					std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
-					auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
-					failSet.insert(AddressExclusion(randomCoordinator.ip, randomCoordinator.port));
+				if (coordExcl.isValid()) {
+					failSet.insert(coordExcl);
 				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
