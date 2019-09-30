@@ -9,7 +9,7 @@ Fixes
 -----
 
 * Loading a 6.1 or newer ``fdb_c`` library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
-* Using functions that were removed in API version 610 now results in a compilation error. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
 
 6.1.12
 ======
