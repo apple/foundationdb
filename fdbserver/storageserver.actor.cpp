@@ -105,7 +105,8 @@ struct AddingShard : NonCopyable {
 	struct StorageServer* server;
 	Version transferredVersion;
 
-	enum Phase { WaitPrevious, Fetching, Waiting }; 
+	enum Phase { WaitPrevious, Fetching, Waiting };
+
 	Phase phase;
 
 	AddingShard( StorageServer* server, KeyRangeRef const& keys );
