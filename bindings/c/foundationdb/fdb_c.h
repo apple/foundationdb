@@ -280,6 +280,13 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
                                  int db_name_length );
+#else
+    #define fdb_future_get_cluster(f, oc) FDB_REMOVED_FUNCTION
+    #define fdb_future_get_database(f, od) FDB_REMOVED_FUNCTION
+    #define fdb_create_cluster(cfp) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_destroy(c) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_set_option(c, o, v, vl) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_create_database(c, dn, dnl) FDB_REMOVED_FUNCTION
 #endif
 
 #if FDB_API_VERSION < 23
