@@ -869,7 +869,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				wait(eraseLogData(tr, minVersionLogUid, destUidValue));
 				wait(tr->commit());
 				printf("\nSuccessfully removed the tag which was %.4f hours behind.\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-			} else if(removingLogUid.present() && minVersionLogUid != removingLogUid.get())) { 
+			} else if(removingLogUid.present() && minVersionLogUid != removingLogUid.get()) { 
 				printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete_data' to check.\n");
 			} else if( deleteData ) {
 				printf("\nWARNING: Did not delete data because the tag was not at least %.4f hours behind. Change `--min_cleanup_seconds' to adjust this threshold.\n", CLIENT_KNOBS->MIN_CLEANUP_SECONDS/3600.0);
