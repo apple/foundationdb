@@ -716,8 +716,8 @@ struct ILogSystem {
 
 	virtual Version getStartVersion() const = 0; // Returns the start version of current epoch.
 
-	// Returns end versions for old epochs that this log system is aware of, excluding the current epoch.
-	virtual std::map<LogEpoch, Version> getEpochEndVersions() const = 0;
+	// Returns (tags, endVersion) pair for old epochs that this log system is aware of, excluding the current epoch.
+	virtual std::map<LogEpoch, std::pair<int32_t, Version>> getOldEpochTagsAndEndVersions() const = 0;
 
 	virtual Future<Reference<ILogSystem>> newEpoch( struct RecruitFromConfigurationReply const& recr, Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config,
 		LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> const& allTags, Reference<AsyncVar<bool>> const& recruitmentStalled ) = 0;

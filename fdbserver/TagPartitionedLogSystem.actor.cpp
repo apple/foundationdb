@@ -441,19 +441,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
-			// Monitor changes of backup workers for old epochs.
-			for (const auto& old : self->oldLogData) {
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(waitFailureClient(
-						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
-						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
-					} else {
-						changes.push_back(worker->onChange());
-					}
-				}
-			}
-
 			if(!self->recoveryCompleteWrittenToCoreState.get()) {
 				for(auto& old : self->oldLogData) {
 					for(auto& it : old.tLogs) {
@@ -463,6 +450,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 							} else {
 								changes.push_back(t->onChange());
 							}
+						}
+					}
+					// Monitor changes of backup workers for old epochs.
+					for (const auto& worker : old.tLogs[0]->backupWorkers) {
+						if (worker->get().present()) {
+							backupFailed.push_back(waitFailureClient(
+							    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
+							    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+						} else {
+							changes.push_back(worker->onChange());
 						}
 					}
 				}
@@ -1359,13 +1356,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return tLogs[0]->startVersion;
 	}
 
-	std::map<LogEpoch, Version> getEpochEndVersions() const override {
-		std::map<LogEpoch, Version> epochEndVersion;
+	std::map<LogEpoch, std::pair<int32_t, Version>> getOldEpochTagsAndEndVersions() const override {
+		std::map<LogEpoch, std::pair<int32_t, Version>> epochTagsVersions;
 		for (const auto& old : oldLogData) {
-			epochEndVersion[old.epoch] = old.epochEnd;
-			TraceEvent("BW", dbgid).detail("Epoch", old.epoch).detail("EndVersion", old.epochEnd);
+			epochTagsVersions[old.epoch] = { old.logRouterTags, old.epochEnd };
+			TraceEvent("OldEpochTagsVersions", dbgid)
+			    .detail("Epoch", old.epoch)
+			    .detail("Tags", old.logRouterTags)
+			    .detail("EndVersion", old.epochEnd);
 		}
-		return epochEndVersion;
+		return epochTagsVersions;
 	}
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const {

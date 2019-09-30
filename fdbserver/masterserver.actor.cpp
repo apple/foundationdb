@@ -29,6 +29,7 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
 #include <iterator>
+#include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1234,103 +1235,34 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 	}
 }
 
-void addBackupStatus(std::map<LogEpoch, std::map<Tag, Version>>& progress, const WorkerBackupStatus& status) {
-	auto& it = progress[status.epoch];
-	auto lb = it.lower_bound(status.tag);
-	if (lb != it.end() && status.tag == lb->first) {
-		if (lb->second < status.version) {
-			lb->second = status.version;
-		}
-	} else {
-		it.insert(lb, { status.tag, status.version });
-	}
-}
-
-ACTOR Future<std::map<LogEpoch, std::map<Tag, Version>>> getBackupProgress(Reference<MasterData> self) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
-	state Transaction tr(cx);
-
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-
-			state std::map<LogEpoch, std::map<Tag, Version>> progress;
-			for (auto& it : results) {
-				const UID workerID = decodeBackupProgressKey(it.key);
-				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
-				addBackupStatus(progress, status);
-				TraceEvent("GotBackupProgress", self->dbgid)
-				    .detail("W", workerID)
-				    .detail("Epoch", status.epoch)
-				    .detail("Version", status.version)
-				    .detail("Tag", status.tag.toString());
-			}
-			return progress;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// for each old epoch:
-//    if savedVersion < epochEnd - 1 = knownCommittedVersion
-//        recover/backup [savedVersion + 1, epochEnd - 1]
-//
-// Returns a map of pair<Epoch, EpochEndVersion> : map<tag, savedVersion>, so that
-// the backup range should be [savedVersion + 1, EpochEndVersion).
-std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup(
-    const UID dbgid, const std::map<LogEpoch, std::map<Tag, Version>>& progress,
-    const std::map<LogEpoch, Version>& epochEndVersions) {
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit;
-
-	for (const auto& [epoch, value] : progress) {
-		auto versionIt = epochEndVersions.find(epoch);
-		if (versionIt != epochEndVersions.end()) {
-			const Version endVersion = versionIt->second;
-			std::map<Tag, Version> tagVersions;
-			for (const auto& [tag, version] : value) {
-				if (version < endVersion - 1) {
-					tagVersions.insert({ tag, version });
-					TraceEvent("BW", dbgid)
-					    .detail("OldEpoch", epoch)
-					    .detail("Tag", tag.toString())
-					    .detail("Version", version)
-					    .detail("EpochEndVersion", endVersion);
-				}
-			}
-			if (!tagVersions.empty()) {
-				toRecruit[{ epoch, endVersion }] = tagVersions;
-			}
-		} else {
-			TraceEvent("BW", dbgid).detail("SkipEpoch", epoch);
-		}
-	}
-	return toRecruit;
-}
-
 ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	if (self->backupWorkers.size() == 0) return Void();
 
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	state Future<std::map<LogEpoch, std::map<Tag, Version>>> backupProgress = getBackupProgress(self);
-	state std::map<LogEpoch, Version> epochEndVersions = self->logSystem->getEpochEndVersions();
-
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	state Reference<BackupProgress> backupProgress(
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsAndEndVersions()));
+	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
 	state std::vector<Future<BackupInterface>> initializationReplies;
-	const int logRouterTags = self->logSystem->getLogRouterTags();
+
+	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
+	state int logRouterTags = self->logSystem->getLogRouterTags();
+	for (int i = 0; i < logRouterTags; i++) {
+		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityLogRouter, i));
+	}
+	// wait(setInitialBackupProgress(self, cx, idsTags));
+
 	const Version startVersion = self->logSystem->getStartVersion();
 	state int i = 0;
 	for (; i < logRouterTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
-		InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
+		InitializeBackupRequest req(idsTags[i].first);
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
-		req.routerTag = Tag(tagLocalityLogRouter, i);
+		req.routerTag = idsTags[i].second;
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
-		    .detail("WorkerID", worker.id())
+		    .detail("BKID", req.reqId)
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
@@ -1340,9 +1272,8 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		                    master_backup_worker_failed()));
 	}
 
-	std::map<LogEpoch, std::map<Tag, Version>> progress = wait(backupProgress);
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit =
-	    getUnfinishedBackup(self->dbgid, progress, epochEndVersions);
+	wait(gotProgress);
+	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit = backupProgress->getUnfinishedBackup();
 	for (const auto& [epochVersion, tagVersions] : toRecruit) {
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
@@ -1354,7 +1285,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = epochVersion.second - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
-			    .detail("WorkerID", worker.id())
+			    .detail("BKID", req.reqId)
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)
 			    .detail("StartVersion", req.startVersion);

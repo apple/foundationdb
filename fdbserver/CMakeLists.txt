@@ -3,6 +3,8 @@ set(FDBSERVER_SRCS
   ApplyMetadataMutation.cpp
   Backup.actor.cpp
   BackupInterface.h
+  BackupProgress.actor.cpp
+  BackupProgress.actor.h
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
