@@ -2558,7 +2558,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		}
 
 		// To avoid removing machine teams too fast, which is unlikely happen though
-		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
+		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution) );
 
 		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
@@ -2681,7 +2681,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			removeServerTeamDelay = removeServerTeamDelay / 100;
 		}
 		// To avoid removing server teams too fast, which is unlikely happen though
-		wait(delay(removeServerTeamDelay));
+		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
 		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between
@@ -3064,7 +3064,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 }
 
 ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state bool isFetchingResults = false;
 	state Transaction tr(self->cx);
@@ -3102,7 +3102,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Vo
 					}
 
 					tr = Transaction(self->cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 				}
 				when( waitNext( serverRemoved ) ) {
 					if( isFetchingResults ) {
@@ -3136,7 +3136,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 					healthyZoneTimeout = Never();
 				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-					healthyZoneTimeout = delay(timeoutSeconds);
+					healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
 					if(self->healthyZone.get() != p.first) {
 						TraceEvent("MaintenanceZoneStart", self->distributorId).detail("ZoneID", printable(p.first)).detail("EndVersion", p.second).detail("Duration", timeoutSeconds);
 						self->healthyZone.set(p.first);
@@ -3591,7 +3591,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 	loop {
 		try {
-			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY));
+			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY, TaskPriority::DataDistribution));
 
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
@@ -3770,7 +3770,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				}
 				when( wait( self->restartRecruiting.onTrigger() ) ) {}
 			}
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::DataDistribution) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				throw;
@@ -3830,7 +3830,7 @@ ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db 
 
 ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
 	loop choose {
-		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY) : Never()) ) {
+		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistribution) : Never()) ) {
 			self->doBuildTeams = true;
 			wait( DDTeamCollection::checkBuildTeams(self) );
 		}

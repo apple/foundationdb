@@ -485,7 +485,7 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
+Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
@@ -503,6 +503,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key removePrefix, Version beginVersion,
                                   Version* endVersion, RequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
+ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
 
 typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
