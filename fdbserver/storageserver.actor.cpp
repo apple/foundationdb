@@ -771,35 +771,48 @@ updateProcessStats(StorageServer* self)
 
 ///////////////////////////////////// Queries /////////////////////////////////
 #pragma region Queries
-ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
-	// This could become an Actor transparently, but for now it just does the lookup
-	if (version == latestVersion)
-		version = std::max(Version(1), data->version.get());
-	if (version < data->oldestVersion.get() || version <= 0) throw transaction_too_old();
-	else if (version <= data->version.get())
-		return version;
 
-	if(data->behind && version > data->version.get()) {
-		throw process_behind();
-	}
-
-	if(deterministicRandom()->random01() < 0.001)
-		TraceEvent("WaitForVersion1000x");
+ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, Future<Void> f) {
 	choose {
-		when ( wait( data->version.whenAtLeast(version) ) ) {
-			//FIXME: A bunch of these can block with or without the following delay 0.
-			//wait( delay(0) );  // don't do a whole bunch of these at once
-			if (version < data->oldestVersion.get()) throw transaction_too_old();  // just in case
+		when(wait(f)) {
+			// FIXME: A bunch of these can block with or without the following delay 0.
+			// wait( delay(0) );  // don't do a whole bunch of these at once
+			if (version < data->oldestVersion.get()) throw transaction_too_old(); // just in case
 			return version;
 		}
-		when ( wait( delay( SERVER_KNOBS->FUTURE_VERSION_DELAY ) ) ) {
-			if(deterministicRandom()->random01() < 0.001)
+		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
+			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
-					.detail("Version", version)
-					.detail("MyVersion", data->version.get())
-					.detail("ServerID", data->thisServerID);
+				    .detail("Version", version)
+				    .detail("MyVersion", data->version.get())
+				    .detail("ServerID", data->thisServerID);
 			throw future_version();
 		}
+	}
+}
+
+Future<Version> waitForVersion(StorageServer* data, Version version) {
+	try {
+		if (version == latestVersion) version = std::max(Version(1), data->version.get());
+		if (version < data->oldestVersion.get() || version <= 0)
+			throw transaction_too_old();
+		else if (version <= data->version.get())
+			return version;
+
+		if (data->behind && version > data->version.get()) {
+			throw process_behind();
+		}
+
+		if (deterministicRandom()->random01() < 0.001) TraceEvent("WaitForVersion1000x");
+		auto f = data->version.whenAtLeast(version);
+		if (f.isReady()) {
+			f.get();
+			if (version < data->oldestVersion.get()) throw transaction_too_old(); // just in case
+			return version;
+		}
+		return waitForVersionActor(data, version, f);
+	} catch (Error& e) {
+		return Future<Version>(e);
 	}
 }
 
