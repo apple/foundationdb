@@ -1988,6 +1988,7 @@ namespace fileBackup {
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
+	//This task stopped being used in 6.2, however the code remains here to handle upgrades.
 	struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;

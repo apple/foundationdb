@@ -823,6 +823,9 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Optional<Key> removingLogUid;
+	state std::set<Key> loggedLogUids;
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -833,6 +836,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 
 			state Version minVersion = std::numeric_limits<Version>::max();
 			state Key minVersionLogUid;
+			
 			state int backupIdx = 0;
 			for (; backupIdx < backupVersions.size(); backupIdx++) {
 				state Version currVersion = BinaryReader::fromStringRef<Version>(backupVersions[backupIdx].value, Unversioned());
@@ -842,27 +846,33 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					minVersion = currVersion;
 				}
 
-				state Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(currLogUid).pack(DatabaseBackupAgent::keyStateStatus));
-				state Future<Optional<Value>> foundBackupKey = tr->get(Subspace(currLogUid.withPrefix(LiteralStringRef("uid->config/")).withPrefix(fileBackupPrefixRange.begin)).pack(LiteralStringRef("stateEnum")));
-				wait(success(foundDRKey) && success(foundBackupKey));
+				if(!loggedLogUids.count(currLogUid)) {
+					state Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(currLogUid).pack(DatabaseBackupAgent::keyStateStatus));
+					state Future<Optional<Value>> foundBackupKey = tr->get(Subspace(currLogUid.withPrefix(LiteralStringRef("uid->config/")).withPrefix(fileBackupPrefixRange.begin)).pack(LiteralStringRef("stateEnum")));
+					wait(success(foundDRKey) && success(foundBackupKey));
 
-				if(foundDRKey.get().present() && foundBackupKey.get().present()) {
-						printf("WARNING: Found a tag which looks like both a backup and a DR. This tag was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-				} else if(foundDRKey.get().present() && !foundBackupKey.get().present()) {
-						printf("Found a DR which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-				} else if(!foundDRKey.get().present() && foundBackupKey.get().present()) {
-						printf("Found a Backup which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-				} else {
-					printf("WARNING: Found a unknown tag which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+					if(foundDRKey.get().present() && foundBackupKey.get().present()) {
+							printf("WARNING: Found a tag which looks like both a backup and a DR. This tag was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+					} else if(foundDRKey.get().present() && !foundBackupKey.get().present()) {
+							printf("Found a DR which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+					} else if(!foundDRKey.get().present() && foundBackupKey.get().present()) {
+							printf("Found a Backup which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+					} else {
+						printf("WARNING: Found a unknown tag which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+					}
+					loggedLogUids.insert(currLogUid);
 				}
 			}
 
-			if( readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS*CLIENT_KNOBS->CORE_VERSIONSPERSECOND && deleteData ) {
+			if( readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS*CLIENT_KNOBS->CORE_VERSIONSPERSECOND && deleteData && (!removingLogUid.present() || minVersionLogUid == removingLogUid.get()) ) {
+				removingLogUid = minVersionLogUid;
 				wait(eraseLogData(tr, minVersionLogUid, destUidValue));
 				wait(tr->commit());
 				printf("\nSuccessfully removed the tag which was %.4f hours behind.\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			} else if(removingLogUid.present() && minVersionLogUid != removingLogUid.get())) { 
+				printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete_data' to check.\n");
 			} else if( deleteData ) {
-				printf("\nWARNING: Did not delete data because the tag was not at least %.4f hours behind. Change MIN_CLEANUP_SECONDS to adjust this threshold.\n", CLIENT_KNOBS->MIN_CLEANUP_SECONDS/3600.0);
+				printf("\nWARNING: Did not delete data because the tag was not at least %.4f hours behind. Change `--min_cleanup_seconds' to adjust this threshold.\n", CLIENT_KNOBS->MIN_CLEANUP_SECONDS/3600.0);
 			} else {
 				printf("\nPassing `--delete_data' would delete the tag which was %.4f hours behind.\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			}
