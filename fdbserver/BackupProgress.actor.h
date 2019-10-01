@@ -30,7 +30,7 @@
 #include "flow/FastRef.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
+class BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
 public:
 	BackupProgress(UID id, const std::map<LogEpoch, std::pair<int, Version>>& epochTagsEndVersions)
 	  : dbgid(id), epochTagsEndVersions(epochTagsEndVersions) {}
@@ -50,6 +50,10 @@ public:
 	//        savedVersion = tag's_savedVersion
 	//    backup [savedVersion + 1, endVersion)
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
+
+	void addref() override { ReferenceCounted<BackupProgress>::addref(); }
+
+	void delref() override { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
 	// Returns the previous epoch's EndVersion. Note epoch is not continuous, and
