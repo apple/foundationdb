@@ -209,5 +209,5 @@ add_fdb_test(TEST_FILES status/separate_no_database.txt)
 add_fdb_test(TEST_FILES status/separate_no_servers.txt)
 add_fdb_test(TEST_FILES status/separate_not_enough_servers.txt)
 add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
-
+add_fdb_test(TEST_FILES SwizzledApiCorrectness.txt IGNORE)
 verify_testing()
