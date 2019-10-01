@@ -26,14 +26,15 @@
 
 #include <map>
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
 public:
-	BackupProgress(UID id, const std::map<LogEpoch, std::pair<int, Version>>& epochTagsEndVersions)
-	  : dbgid(id), epochTagsEndVersions(epochTagsEndVersions) {}
+	BackupProgress(UID id, const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo>& infos)
+	  : dbgid(id), epochInfos(infos) {}
 	~BackupProgress() {}
 
 	// Adds a backup status. If the tag already has an entry, then the max of
@@ -43,12 +44,11 @@ public:
 	// Returns a map of pair<Epoch, endVersion> : map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
-	// for each old epoch:
+	// Specifically, the backup ranges for each old epoch are:
 	//    if tag in tags_without_backup_progress:
-	//        savedVersion = last epoch's endVersion - 1 (First epoch's startVersion = 1)
+	//        backup [epochBegin, endVersion)
 	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
-	//        savedVersion = tag's_savedVersion
-	//    backup [savedVersion + 1, endVersion)
+	//        backup [savedVersion + 1, endVersion)
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
 
 	void addref() override { ReferenceCounted<BackupProgress>::addref(); }
@@ -56,12 +56,6 @@ public:
 	void delref() override { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
-	// Returns the previous epoch's EndVersion. Note epoch is not continuous, and
-	// we often has previous epoch N and current epoch N + 2. In case of consecutive
-	// recovery, more gaps are possible. The idea here is to find the last epoch whose
-	// epoch number most close to "epoch", and return the max(savedVersion) + 1.
-	Version getLastEpochEndVersion(LogEpoch epoch);
-
 	std::set<Tag> enumerateLogRouterTags(int logRouterTags) {
 		std::set<Tag> tags;
 		for (int i = 0; i < logRouterTags; i++) {
@@ -72,12 +66,12 @@ private:
 
 	const UID dbgid;
 
-	// Note this should be iterated in ascending order.
-	const std::map<LogEpoch, std::pair<int, Version>> epochTagsEndVersions;
+	// Note this MUST be iterated in ascending order.
+	const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
 
 	// Backup progress saved in the system keyspace. Note there can be multiple
 	// progress status for a tag in an epoch due to later epoch trying to fill
-	// the gap. "progress" should be iterated in ascending order.
+	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
 };
 

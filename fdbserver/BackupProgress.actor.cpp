@@ -20,63 +20,36 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup() {
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit;
 
-	Version lastEpochEndVersion = invalidVersion;
-	for (const auto& [epoch, tagsAndEndVersion] : epochTagsEndVersions) {
-		if (lastEpochEndVersion == invalidVersion) {
-			lastEpochEndVersion = getLastEpochEndVersion(epoch);
-			TraceEvent("BW", dbgid).detail("Epoch", epoch).detail("LastEndVersion", lastEpochEndVersion);
-		}
-		std::set<Tag> tags = enumerateLogRouterTags(tagsAndEndVersion.first);
-		const Version& endVersion = tagsAndEndVersion.second;
+	for (const auto& [epoch, info] : epochInfos) {
+		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
 		std::map<Tag, Version> tagVersions;
 		auto progressIt = progress.find(epoch);
 		if (progressIt != progress.end()) {
 			for (const auto& [tag, savedVersion] : progressIt->second) {
 				tags.erase(tag);
-				if (savedVersion < endVersion - 1) {
+				if (savedVersion < info.epochEnd - 1) {
 					tagVersions.insert({ tag, savedVersion });
 					TraceEvent("BW", dbgid)
 					    .detail("OldEpoch", epoch)
 					    .detail("Tag", tag.toString())
-					    .detail("Version", savedVersion)
-					    .detail("EpochEndVersion", endVersion);
+					    .detail("BeginVersion", savedVersion)
+					    .detail("EndVersion", info.epochEnd);
 				}
 			}
 		}
 		for (const Tag tag : tags) { // tags without progress data
-			tagVersions.insert({ tag, lastEpochEndVersion });
+			tagVersions.insert({ tag, info.epochBegin - 1 });
 			TraceEvent("BW", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
-			    .detail("Version", lastEpochEndVersion)
-			    .detail("EpochEndVersion", endVersion);
+			    .detail("BeginVersion", info.epochBegin - 1)
+			    .detail("EndVersion", info.epochEnd);
 		}
 		if (!tagVersions.empty()) {
-			toRecruit[{ epoch, endVersion }] = tagVersions;
+			toRecruit[{ epoch, info.epochEnd }] = tagVersions;
 		}
-		lastEpochEndVersion = tagsAndEndVersion.second;
 	}
 	return toRecruit;
-}
-
-Version BackupProgress::getLastEpochEndVersion(LogEpoch epoch) {
-	auto it = progress.lower_bound(epoch);
-	if (it != progress.end()) {
-		if (it == progress.begin()) {
-			it = progress.end();
-		} else {
-			it--;
-		}
-	} else if (!progress.empty()) {
-		it = --progress.end();
-	}
-	if (it == progress.end()) return 1;
-
-	Version v = 0;
-	for (const auto& [tag, savedVersion] : it->second) {
-		v = std::max(v, savedVersion);
-	}
-	return v + 1;
 }
 
 // Returns each tag's savedVersion for all epochs.
@@ -108,19 +81,19 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 }
 
 TEST_CASE("/BackupProgress/Unfinished") {
-	std::map<LogEpoch, std::pair<int, Version>> epochTagsEndVersions;
+	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
 
-	const int epoch1 = 2, end1 = 100;
+	const int epoch1 = 2, begin1 = 1, end1 = 100;
 	const Tag tag1(tagLocalityLogRouter, 0);
-	epochTagsEndVersions.insert({ epoch1, { 1, end1 } });
-	BackupProgress progress(UID(0, 0), epochTagsEndVersions);
+	epochInfos.insert({ epoch1, ILogSystem::EpochTagsVersionsInfo(1, begin1, end1) });
+	BackupProgress progress(UID(0, 0), epochInfos);
 
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
 
 	ASSERT(unfinished.size() == 1);
 	for (const auto [epochVersion, tagVersion] : unfinished) {
 		ASSERT(epochVersion.first == epoch1 && epochVersion.second == end1);
-		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == 1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1 - 1);
 	}
 
 	const int saved1 = 50;

@@ -1357,16 +1357,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return tLogs[0]->startVersion;
 	}
 
-	std::map<LogEpoch, std::pair<int32_t, Version>> getOldEpochTagsAndEndVersions() const override {
-		std::map<LogEpoch, std::pair<int32_t, Version>> epochTagsVersions;
+	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override {
+		std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 		for (const auto& old : oldLogData) {
-			epochTagsVersions[old.epoch] = { old.logRouterTags, old.epochEnd };
+			epochInfos.insert(
+			    { old.epoch, ILogSystem::EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
 			TraceEvent("OldEpochTagsVersions", dbgid)
 			    .detail("Epoch", old.epoch)
 			    .detail("Tags", old.logRouterTags)
+			    .detail("BeginVersion", old.epochBegin)
 			    .detail("EndVersion", old.epochEnd);
 		}
-		return epochTagsVersions;
+		return epochInfos;
 	}
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const {

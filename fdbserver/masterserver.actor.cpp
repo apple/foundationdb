@@ -1241,7 +1241,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsAndEndVersions()));
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
 	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
 	state std::vector<Future<BackupInterface>> initializationReplies;
 
