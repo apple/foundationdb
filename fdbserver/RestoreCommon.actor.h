@@ -217,7 +217,7 @@ struct RestoreFileFR {
 		return r;
 	}
 
-	bool operator<(const RestoreFileFR& rhs) const { return beginVersion < rhs.beginVersion && (beginVersion == rhs.beginVersion && endVersion < rhs.endVersion) ||
+	bool operator<(const RestoreFileFR& rhs) const { return beginVersion < rhs.beginVersion || (beginVersion == rhs.beginVersion && endVersion < rhs.endVersion) ||
 															(beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && fileIndex < rhs.fileIndex); }
 
 	RestoreFileFR()
@@ -234,8 +234,8 @@ struct RestoreFileFR {
 		std::stringstream ss;
 		ss << "version:" << std::to_string(version) << " fileName:" << fileName
 		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
-		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
-		   << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor) << " fileIndex:" << std::to_string(fileIndex);
+		   << " fileSize:" << std::to_string(fileSize)  << " beginVersion:" << std::to_string(beginVersion)
+		   << " endVersion:" << std::to_string(endVersion) << " cursor:" << std::to_string(cursor) << " fileIndex:" << std::to_string(fileIndex);
 		return ss.str();
 	}
 };

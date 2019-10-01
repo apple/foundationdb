@@ -121,28 +121,36 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 		}
 		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from loader to applier
-		for (auto& versionBatch : *versionBatches) {
-			sort(versionBatch.second.rangeFiles.begin(), versionBatch.second.rangeFiles.end());
-			sort(versionBatch.second.logFiles.begin(), versionBatch.second.logFiles.end());
+		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
+			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
+			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
 			int fileIndex = 0; // fileIndex in each version batch start at 0
-			for (auto& logFile : versionBatch.second.logFiles) {
+			for (auto& logFile : versionBatch->second.logFiles) {
 				logFile.fileIndex = fileIndex++;
 			}
-			for (auto& rangeFile : versionBatch.second.rangeFiles) {
+			for (auto& rangeFile : versionBatch->second.rangeFiles) {
 				rangeFile.fileIndex = fileIndex++;
 			}
 		}
 		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
 		// Sanity check
 		for (auto& versionBatch : *versionBatches) {
+			Version prevVersion = 0;
 			for (auto& logFile : versionBatch.second.logFiles) {
+				TraceEvent("FastRestore_Debug").detail("PrevVersion", prevVersion).detail("LogFile", logFile.toString());
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
+				ASSERT(prevVersion <= logFile.beginVersion);
+				prevVersion = logFile.endVersion;
 			}
+			prevVersion = 0;
 			for (auto& rangeFile : versionBatch.second.rangeFiles) {
+				TraceEvent("FastRestore_Debug").detail("PrevVersion", prevVersion).detail("RangeFile", rangeFile.toString());
 				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
 				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
+				ASSERT(prevVersion <= rangeFile.beginVersion);
+				prevVersion = rangeFile.beginVersion;
 			}
 		}
 	}
