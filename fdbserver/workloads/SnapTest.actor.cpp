@@ -211,7 +211,7 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
@@ -298,12 +298,12 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered ||
-						e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
+						e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
-					if (e.code() == error_code_transaction_not_permitted) {
+					if (e.code() == error_code_snap_path_not_whitelisted) {
 						testedFailure = true;
 						break;
 					}

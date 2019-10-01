@@ -567,4 +567,7 @@ enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern thread_local trace_clock_t g_trace_clock;
 extern TraceBatch g_traceBatch;
 
+#define DUMPTOKEN(name)                                                                                                \
+	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
+
 #endif

@@ -128,7 +128,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
 			*outBatchTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("BatchRate", 0).detail("Lease", "Expired");
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
@@ -156,10 +156,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				stats->txnBatchPriorityStartIn += req.transactionCount;
 
 			if (transactionQueue->empty()) {
-				if (now() - *lastGRVTime > *GRVBatchTime)
-					*lastGRVTime = now() - *GRVBatchTime;
-
-				forwardPromise(GRVTimer, delayJittered(*GRVBatchTime - (now() - *lastGRVTime), TaskPriority::ProxyGRVTimer));
+				forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
 			}
 
 			transactionQueue->push(std::make_pair(req, counter--));
@@ -453,6 +450,66 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
+void adddBackupMutations(ProxyCommitData* self, const std::map<Key, MutationListRef>& logRangeMutations,
+                         LogPushData* toCommit, Version commitVersion) {
+	Key val;
+	MutationRef backupMutation;
+	uint32_t* partBuffer = NULL;
+	const int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+
+	// Serialize the log range mutations within the map
+	for (const auto& logRangeMutation : logRangeMutations) {
+		BinaryWriter wr(Unversioned());
+
+		// Serialize the log destination
+		wr.serializeBytes(logRangeMutation.first);
+
+		// Write the log keys and version information
+		wr << (uint8_t)hashlittle(&version, sizeof(version), 0);
+		wr << bigEndian64(commitVersion);
+
+		backupMutation.type = MutationRef::SetValue;
+		partBuffer = NULL;
+
+		val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
+
+		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
+			// Assign the second parameter as the part
+			backupMutation.param2 = val.substr(
+			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
+			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
+
+			// Write the last part of the mutation to the serialization, if the buffer is not defined
+			if (!partBuffer) {
+				// Serialize the part to the writer
+				wr << bigEndian32(part);
+
+				// Define the last buffer part
+				partBuffer = (uint32_t*)((char*)wr.getData() + wr.getLength() - sizeof(uint32_t));
+			} else {
+				*partBuffer = bigEndian32(part);
+			}
+
+			// Define the mutation type and and location
+			backupMutation.param1 = wr.toValue();
+			ASSERT(backupMutation.param1.startsWith(
+			    logRangeMutation.first)); // We are writing into the configured destination
+
+			auto& tags = self->tagsForKey(backupMutation.param1);
+			toCommit->addTags(tags);
+			toCommit->addTypedMessage(backupMutation);
+
+			//				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
+			//					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
+			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 						.detail("BackupMutationSize",
+			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+			//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
+			//backupMutation.param1);
+			//				}
+		}
+	}
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -709,7 +766,6 @@ ACTOR Future<Void> commitBatch(
 	
 	state std::map<Key, MutationListRef> logRangeMutations;
 	state Arena logRangeMutationsArena;
-	state uint32_t v = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int transactionNum = 0;
 	state int yieldBytes = 0;
 
@@ -813,61 +869,7 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-
-		Key			val;
-		MutationRef backupMutation;
-		uint32_t*	partBuffer = NULL;
-
-		// Serialize the log range mutations within the map
-		for (auto& logRangeMutation : logRangeMutations)
-		{
-			BinaryWriter wr(Unversioned());
-
-			// Serialize the log destination
-			wr.serializeBytes( logRangeMutation.first );
-
-			// Write the log keys and version information
-			wr << (uint8_t)hashlittle(&v, sizeof(v), 0);
-			wr << bigEndian64(commitVersion);
-
-			backupMutation.type = MutationRef::SetValue;
-			partBuffer = NULL;
-
-			val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
-
-			for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
-
-				// Assign the second parameter as the part
-				backupMutation.param2 = val.substr(part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-					std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
-
-				// Write the last part of the mutation to the serialization, if the buffer is not defined
-				if (!partBuffer) {
-					// Serialize the part to the writer
-					wr << bigEndian32(part);
-
-					// Define the last buffer part
-					partBuffer = (uint32_t*) ((char*) wr.getData() + wr.getLength() - sizeof(uint32_t));
-				}
-				else {
-					*partBuffer = bigEndian32(part);
-				}
-
-				// Define the mutation type and and location
-				backupMutation.param1 = wr.toValue();
-				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
-					
-				auto& tags = self->tagsForKey(backupMutation.param1);
-				toCommit.addTags(tags);
-				toCommit.addTypedMessage(backupMutation);
-
-//				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
-//					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
-//						.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
-//				}
-			}
-		}
+		adddBackupMutations(self, logRangeMutations, &toCommit, commitVersion);
 	}
 
 	self->stats.mutations += mutationCount;
@@ -1108,7 +1110,9 @@ struct TransactionRateInfo {
 	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
 
 	void reset(double elapsed) {
-		limit = std::min(0.0,limit) + std::min(rate * elapsed, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
+		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
+		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
+		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
 
 	bool canStart(int64_t numAlreadyStarted) {
@@ -1170,7 +1174,7 @@ ACTOR static Future<Void> transactionStarter(
 		waitNext(GRVTimer.getFuture());
 		// Select zero or more transactions to start
 		double t = now();
-		double elapsed = std::min<double>(now() - lastGRVTime, SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX);
+		double elapsed = now() - lastGRVTime;
 		lastGRVTime = t;
 
 		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
@@ -1466,7 +1470,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_WhiteListCheckFailed")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw transaction_not_permitted();
+			throw snap_path_not_whitelisted();
 		}
 		// db fully recovered check
 		if (commitData->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
@@ -1478,7 +1482,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_ClusterNotFullyRecovered")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw cluster_not_fully_recovered();
+			throw snap_not_fully_recovered_unsupported();
 		}
 
 		auto result =
@@ -1493,7 +1497,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			TraceEvent("SnapMasterProxy_LogAnitQuorumNotSupported")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			throw txn_exec_log_anti_quorum();
+			throw snap_log_anti_quorum_unsupported();
 		}
 
 		// send a snap request to DD

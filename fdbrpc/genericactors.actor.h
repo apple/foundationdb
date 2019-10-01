@@ -152,9 +152,24 @@ ACTOR template <class T> Future<Void> incrementalBroadcast( Future<T> input, std
 // Needed for the call to endpointNotFound()
 #include "fdbrpc/FailureMonitor.h"
 
+struct PeerHolder {
+	Reference<Peer> peer;
+	explicit PeerHolder(Reference<Peer> peer) : peer(peer) {
+		if(peer) {
+			peer->outstandingReplies++;
+		}
+	}
+	~PeerHolder() {
+		if(peer) {
+			peer->outstandingReplies--;
+		}
+	}
+};
+
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>
-Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endpoint endpoint, ReplyPromise<X> holdme = ReplyPromise<X>() ) {
+Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endpoint endpoint, ReplyPromise<X> holdme = ReplyPromise<X>(), Reference<Peer> peer = Reference<Peer>() ) {
+	state PeerHolder holder = PeerHolder(peer);
 	loop {
 		try {
 			choose {
@@ -185,7 +200,7 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 }
 
 ACTOR template <class T> 
-Future<T> sendCanceler( ReplyPromise<T> reply, PacketID send, Endpoint endpoint ) {
+Future<T> sendCanceler( ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint ) {
 	try {
 		T t = wait( reply.getFuture() );
 		FlowTransport::transport().cancelReliable(send);

@@ -62,8 +62,21 @@ set(FDBSERVER_SRCS
   RatekeeperInterface.h
   ReadProxyServer.actor.cpp
   RecoveryState.h
-  Restore.actor.cpp
-  RestoreInterface.h
+  RestoreCommon.actor.h
+  RestoreCommon.actor.cpp
+  RestoreUtil.h
+  RestoreUtil.actor.cpp
+  RestoreRoleCommon.actor.h
+  RestoreRoleCommon.actor.cpp
+  RestoreMaster.actor.h
+  RestoreMaster.actor.cpp
+  RestoreApplier.actor.h
+  RestoreApplier.actor.cpp
+  RestoreLoader.actor.h
+  RestoreLoader.actor.cpp
+  RestoreWorker.actor.h
+  RestoreWorker.actor.cpp
+  RestoreWorkerInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h
@@ -101,6 +114,8 @@ set(FDBSERVER_SRCS
   workloads/AtomicSwitchover.actor.cpp
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
+  workloads/BackupAndParallelRestoreCorrectness.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp

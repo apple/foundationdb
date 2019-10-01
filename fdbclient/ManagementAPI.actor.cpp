@@ -423,11 +423,11 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						for(auto& it : newConfig.regions) {
 							newDcIds.insert(it.dcId);
 						}
-						std::set<Key> missingDcIds;
+						std::set<Optional<Key>> missingDcIds;
 						for(auto& s : serverList) {
 							auto ssi = decodeServerListValue( s.value );
 							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
-								missingDcIds.insert(ssi.locality.dcId().get());
+								missingDcIds.insert(ssi.locality.dcId());
 							}
 						}
 						if(missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
@@ -484,8 +484,9 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
@@ -1356,61 +1357,17 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	}
 }
 
-ACTOR Future<Void> checkDataDistributionStatus(Database cx, bool printWarningOnly) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Future<Optional<Value>> overallSwitchF = tr.get(dataDistributionModeKey);
-			state Future<Optional<Value>> healthyZoneValueF = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnoreValueF = tr.get(rebalanceDDIgnoreKey);
-			wait(success(overallSwitchF) && success(healthyZoneValueF) && success(rebalanceDDIgnoreValueF));
-			if (overallSwitchF.get().present()) {
-				BinaryReader rd(overallSwitchF.get().get(), Unversioned());
-				int currentMode;
-				rd >> currentMode;
-				if (currentMode == 0) {
-					printf("WARNING: Data distribution is off.\n");
-					return Void();
-				}
-			}
-			if (!printWarningOnly) {
-				printf("Data distribution is on.\n");
-			}
-			if (healthyZoneValueF.get().present()) {
-				auto healthyZoneKV = decodeHealthyZoneValue(healthyZoneValueF.get().get());
-				if (healthyZoneKV.first == ignoreSSFailuresZoneString) {
-					printf("WARNING: Data distribution is currently turned on but disabled for all storage server "
-					       "failures.\n");
-				} else {
-					printf("WARNING: Data distribution is currently turned on but zone %s is under maintenance and "
-					       "will continue for %" PRId64 " seconds.\n",
-					       healthyZoneKV.first.toString().c_str(),
-					       (healthyZoneKV.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-				}
-			}
-			if (rebalanceDDIgnoreValueF.get().present()) {
-				printf("WARNING: Data distribution is currently turned on but shard size balancing is currently "
-				       "disabled.\n");
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> printHealthyZone( Database cx ) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait( tr.get(healthyZoneKey) );
-			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
-				printf("No ongoing maintenance.\n");
-			} else if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
 				       "maintenance mode is not active.\n");
+			} else if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
+				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
 				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
@@ -1593,7 +1550,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd) {
+ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd) {
 	state UID snapUID = deterministicRandom()->randomUniqueID();
 	try {
 		wait(snapCreate(cx, snapCmd, snapUID));

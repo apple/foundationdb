@@ -870,14 +870,19 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
 
   /* enable knobs if specified */
   if (args->knobs[0] != '\0') {
-    if (args->verbose >= VERBOSE_DEBUG) {
-      printf("DEBUG: Setting client konbs: %s\n", args->knobs);
-    }
-    err = fdb_network_set_option(FDB_NET_OPTION_KNOB, (uint8_t *)args->knobs,
-                                 strlen(args->knobs));
-    if (err) {
-      fprintf(stderr, "ERROR: fdb_network_set_option: %s\n",
-              fdb_get_error(err));
+    char delim[] = ", ";
+    char *knob = strtok(args->knobs, delim);
+    while (knob != NULL) {
+      if (args->verbose >= VERBOSE_DEBUG) {
+        printf("DEBUG: Setting client knobs: %s\n", knob);
+      }
+      err = fdb_network_set_option(FDB_NET_OPTION_KNOB, (uint8_t *)knob,
+                                   strlen(knob));
+      if (err) {
+        fprintf(stderr, "ERROR: fdb_network_set_option: %s\n",
+                fdb_get_error(err));
+      }
+      knob = strtok(NULL, delim);
     }
   }
 

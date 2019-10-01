@@ -1396,6 +1396,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int extraDB = 0;
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
+	state float timeout = 5400; // old default is 5400 seconds
+	state float buggify_timeout = 36000.0; // old default is 36000 seconds
 	checkExtraDB(testFile, extraDB, minimumReplication, minimumRegions);
 
 	// TODO (IPv6) Use IPv6?

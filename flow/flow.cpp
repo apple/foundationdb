@@ -249,10 +249,24 @@ void enableBuggify(bool enabled, BuggifyType type) {
 	buggifyActivated[int(type)] = enabled;
 }
 
+namespace {
+// Simple message for flatbuffers unittests
+struct Int {
+	constexpr static FileIdentifier file_identifier = 12345;
+	uint32_t value;
+	Int() = default;
+	Int(uint32_t value) : value(value) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+} // namespace
+
 TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 	{
-		ErrorOr<int> in(worker_removed());
-		ErrorOr<int> out;
+		ErrorOr<Int> in(worker_removed());
+		ErrorOr<Int> out;
 		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
@@ -262,23 +276,23 @@ TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 		ASSERT(out.getError().code() == in.getError().code());
 	}
 	{
-		ErrorOr<uint32_t> in(deterministicRandom()->randomUInt32());
-		ErrorOr<uint32_t> out;
+		ErrorOr<Int> in(deterministicRandom()->randomUInt32());
+		ErrorOr<Int> out;
 		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
 		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(!out.isError());
-		ASSERT(out.get() == in.get());
+		ASSERT(out.get().value == in.get().value);
 	}
 	return Void();
 }
 
 TEST_CASE("/flow/FlatBuffers/Optional") {
 	{
-		Optional<int> in;
-		Optional<int> out;
+		Optional<Int> in;
+		Optional<Int> out;
 		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
@@ -287,15 +301,15 @@ TEST_CASE("/flow/FlatBuffers/Optional") {
 		ASSERT(!out.present());
 	}
 	{
-		Optional<uint32_t> in(deterministicRandom()->randomUInt32());
-		Optional<uint32_t> out;
+		Optional<Int> in(deterministicRandom()->randomUInt32());
+		Optional<Int> out;
 		ObjectWriter writer(Unversioned());
 		writer.serialize(in);
 		Standalone<StringRef> copy = writer.toStringRef();
 		ArenaObjectReader reader(copy.arena(), copy, Unversioned());
 		reader.deserialize(out);
 		ASSERT(out.present());
-		ASSERT(out.get() == in.get());
+		ASSERT(out.get().value == in.get().value);
 	}
 	return Void();
 }
