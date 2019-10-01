@@ -54,7 +54,7 @@ if(NOT WIN32)
   list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
 endif()
 
-add_library(thirdparty ${FDBRPC_THIRD_PARTY_SRCS})
+add_library(thirdparty STATIC ${FDBRPC_THIRD_PARTY_SRCS})
 if(NOT WIN32)
   target_compile_options(thirdparty BEFORE PRIVATE -w) # disable warnings for third party
 endif()
