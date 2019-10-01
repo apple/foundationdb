@@ -459,8 +459,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 }
 
 ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
-											   AsyncTrigger* masterProxyTriggerVar,
-											   AsyncTrigger* readProxyTriggerVar) {
+                                               AsyncTrigger* masterProxyTriggerVar, AsyncTrigger* readProxyTriggerVar) {
 	state vector<MasterProxyInterface> curProxies;
 	state vector<ReadProxyInterface> curReadProxies;
 	curProxies = clientDBInfo->get().proxies;

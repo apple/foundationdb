@@ -29,7 +29,6 @@
 struct ReadProxyInterface {
 	constexpr static FileIdentifier file_identifier = 9348383; // FIXME: Fix this
 
-	RequestStream<ReplyPromise<Version>> getVersion;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
@@ -38,11 +37,10 @@ struct ReadProxyInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getVersion, getValue, getKey, getKeyValues, waitFailure);
+		serializer(ar, getValue, getKey, getKeyValues, waitFailure);
 	}
 
 	void initEndpoints() {
-		getVersion.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
@@ -52,7 +50,7 @@ struct ReadProxyInterface {
 	std::string toString() const { return id().shortString(); }
 	bool operator == (ReadProxyInterface const& r) const { return id() == r.id(); }
 	bool operator != (ReadProxyInterface const& r) const { return id() != r.id(); }
-	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 };
 
 #endif // FDBCLIENT_READPROXYINTERFACE_H
