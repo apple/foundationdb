@@ -172,22 +172,23 @@ struct TLogSet {
 struct OldTLogConf {
 	constexpr static FileIdentifier file_identifier = 16233772;
 	std::vector<TLogSet> tLogs;
-	Version epochEnd;
+	Version epochBegin, epochEnd;
 	int32_t logRouterTags;
 	int32_t txsTags;
 	std::set<int8_t> pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
 	LogEpoch epoch;
 
-	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldTLogConf() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 	explicit OldTLogConf(const OldLogData&);
 
 	std::string toString() const {
 		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
 	}
 
-	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags &&
-		       txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+	bool operator==(const OldTLogConf& rhs) const {
+		return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
+		       logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+		       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -204,7 +205,7 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch);
+		serializer(ar, tLogs, epochBegin, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch);
 	}
 };
 

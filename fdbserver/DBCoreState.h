@@ -80,16 +80,17 @@ struct OldTLogCoreData {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
 	int32_t txsTags;
-	Version epochEnd;
+	Version epochBegin, epochEnd;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldTLogCoreData() : epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldTLogCoreData() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator==(const OldTLogCoreData& rhs) const {
 		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
-		       epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+		       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities &&
+		       epoch == rhs.epoch;
 	}
 
 	template <class Archive>
@@ -109,7 +110,7 @@ struct OldTLogCoreData {
 			serializer(ar, txsTags);
 		}
 		if (ar.protocolVersion().hasBackupWorker()) {
-			serializer(ar, epoch);
+			serializer(ar, epoch, epochBegin);
 		}
 	}
 };
