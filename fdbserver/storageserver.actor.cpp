@@ -772,6 +772,9 @@ updateProcessStats(StorageServer* self)
 ///////////////////////////////////// Queries /////////////////////////////////
 #pragma region Queries
 
+// TODO(atn34): Reverse this optimization after https://github.com/apple/foundationdb/issues/2146 is resolved.  The
+// actor compiler should be doing this transformation. That way we can keep the previous, more readable version and
+// still have better performance.
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, Future<Void> f) {
 	choose {
 		when(wait(f)) {
