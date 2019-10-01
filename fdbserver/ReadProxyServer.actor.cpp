@@ -190,11 +190,10 @@ ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 	state GetKeyValuesReply finalReply;
 
 	try {
-		state Version version = _req.version;
-		cx->validateVersion(version);
+		cx->validateVersion(_req.version);
 
 		state double startTime = now();
-		state Version readVersion = version;
+		state Version readVersion = _req.version;
 
 		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
@@ -222,6 +221,7 @@ ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 
 			req.isFetchKeys = _req.isFetchKeys;
 			req.version = readVersion;
+			req.debugID = _req.debugID;
 
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
@@ -244,10 +244,10 @@ ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 
 			try {
 				++cx->transactionPhysicalReads;
-				if (CLIENT_BUGGIFY) {
-					_req.reply.sendError(deterministicRandom()->randomChoice(
-					    std::vector<Error>{ transaction_too_old(), future_version() }));
-				}
+				// if (CLIENT_BUGGIFY) {
+				// 	_req.reply.sendError(deterministicRandom()->randomChoice(
+				// 	    std::vector<Error>{ transaction_too_old(), future_version() }));
+				// }
 
 				state GetKeyValuesReply rep =
 				    wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req,

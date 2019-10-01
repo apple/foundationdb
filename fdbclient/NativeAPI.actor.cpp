@@ -1874,6 +1874,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state Standalone<RangeResultRef> output;
+	state bool enabledReadProxy = true;
 
 	try {
 		state Version version = wait( fVersion );
@@ -1904,7 +1905,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
 			state pair<KeyRange, Reference<LocationInfo>> beginServer;
-			if (cx->readProxiesEnabled() && info.useReadProxies && reverse == false) {
+			if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
 				pair<KeyRange, Reference<LocationInfo>> _beginServer = wait(
 				    getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
 				beginServer = _beginServer;
@@ -2077,8 +2078,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-					(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
-				{
+				    (e.code() == error_code_transaction_too_old &&
+				     (readVersion == latestVersion || usingReadProxy == true))) {
+					enabledReadProxy = false;
 					cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
 
 					if (e.code() == error_code_wrong_shard_server) {
@@ -2103,6 +2105,20 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 		}
 
 		throw;
+	}
+}
+
+
+Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
+                                            Future<Version> fVersion, KeySelector begin, KeySelector end,
+                                            GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
+                                            bool snapshot, bool reverse, TransactionInfo info) {
+
+	if (false && cx->readProxiesEnabled() && info.useReadProxies) {
+		return getRangeFromProxy(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse, info);
+	} else {
+		return getRangeFromStorageServer(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse,
+		                                 info);
 	}
 }
 
