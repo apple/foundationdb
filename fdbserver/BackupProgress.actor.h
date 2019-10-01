@@ -51,9 +51,9 @@ public:
 	//        backup [savedVersion + 1, endVersion)
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
 
-	void addref() override { ReferenceCounted<BackupProgress>::addref(); }
+	void addref() { ReferenceCounted<BackupProgress>::addref(); }
 
-	void delref() override { ReferenceCounted<BackupProgress>::delref(); }
+	void delref() { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
 	std::set<Tag> enumerateLogRouterTags(int logRouterTags) {
