@@ -43,7 +43,6 @@ struct OldLogData;
 //   ensure durability of locking and recovery is therefore tLogWriteAntiQuorum + 1.
 struct CoreTLogSet {
 	std::vector<UID> tLogs;
-	std::vector<UID> backupWorkers;
 	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
 	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different from the current configuration
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
@@ -58,10 +57,10 @@ struct CoreTLogSet {
 	explicit CoreTLogSet(const LogSet& logset);
 
 	bool operator==(CoreTLogSet const& rhs) const {
-		return tLogs == rhs.tLogs && backupWorkers == rhs.backupWorkers &&
-		       tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor &&
-		       isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
-		       locality == rhs.locality && startVersion == rhs.startVersion &&
+		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum &&
+		       tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal &&
+		       satelliteTagLocations == rhs.satelliteTagLocations && locality == rhs.locality &&
+		       startVersion == rhs.startVersion &&
 		       ((!tLogPolicy && !rhs.tLogPolicy) ||
 		        (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info())));
 	}
@@ -73,9 +72,6 @@ struct CoreTLogSet {
 			tLogVersion = TLogVersion::V2;
 		} else {
 			serializer(ar, tLogVersion);
-		}
-		if (ar.protocolVersion().hasBackupWorker()) {
-			serializer(ar, backupWorkers);
 		}
 	}
 };
