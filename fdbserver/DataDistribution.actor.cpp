@@ -3596,17 +3596,12 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
 			state vector<ProcessData> workers = wait(getWorkers(self->cx));
-			state std::set<AddressExclusion> existingAddrs;
+			state std::set<AddressExclusion> existingInvalidAddrs;
 			for (int i = 0; i < workers.size(); i++) {
 				const ProcessData& workerData = workers[i];
 				AddressExclusion addr(workerData.address.ip, workerData.address.port);
-				existingAddrs.insert(addr);
-				if (self->invalidLocalityAddr.count(addr) &&
-				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
-					// The locality info on the addr has been corrected
-					self->invalidLocalityAddr.erase(addr);
-					hasCorrectedLocality = true;
-					TraceEvent("InvalidLocalityCorrected").detail("Addr", addr.toString());
+				if (!self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
+					existingInvalidAddrs.insert(addr);
 				}
 			}
 
@@ -3614,8 +3609,8 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 			// In case system operator permanently excludes workers on the address with invalid locality
 			for (auto addr = self->invalidLocalityAddr.begin(); addr != self->invalidLocalityAddr.end();) {
-				if (!existingAddrs.count(*addr)) {
-					// The address no longer has a worker
+				if (!existingInvalidAddrs.count(*addr)) {
+					// The address no longer has an invalid worker: the worker address is corrected or destroyed
 					addr = self->invalidLocalityAddr.erase(addr);
 					hasCorrectedLocality = true;
 					TraceEvent("InvalidLocalityNoLongerExists").detail("Addr", addr->toString());
