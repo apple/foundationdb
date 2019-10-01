@@ -1865,11 +1865,10 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, Reference<TransactionLogInfo> trLogInfo,
-                                                                   Future<Version> fVersion, KeySelector begin,
-                                                                   KeySelector end, GetRangeLimits limits,
-                                                                   Promise<std::pair<Key, Key>> conflictRange,
-                                                                   bool snapshot, bool reverse, TransactionInfo info) {
+ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
+                                                  Future<Version> fVersion, KeySelector begin, KeySelector end,
+                                                  GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
+                                                  bool snapshot, bool reverse, TransactionInfo info) {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
@@ -1906,9 +1905,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
 			state pair<KeyRange, Reference<LocationInfo>> beginServer;
 			if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
-				pair<KeyRange, Reference<LocationInfo>> _beginServer = wait(
-				    getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
-				beginServer = _beginServer;
+				beginServer.first = allKeys;
 				usingReadProxy = true;
 			} else {
 				pair<KeyRange, Reference<LocationInfo>> _beginServer = wait(
@@ -2077,25 +2074,31 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Error");
 					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 				}
-				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    (e.code() == error_code_transaction_too_old &&
-				     (readVersion == latestVersion || usingReadProxy == true))) {
+
+				if (e.code() == error_code_transaction_too_old && usingReadProxy == true) {
+					TraceEvent("ReadProxyRequestGetRangeFailed").error(e);
 					enabledReadProxy = false;
-					cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
+				} else if (e.code() == error_code_wrong_shard_server ||
+				           e.code() == error_code_all_alternatives_failed ||
+				           (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
+					cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
+					                    reverse ? (end - 1).isBackward() : begin.isBackward());
 
 					if (e.code() == error_code_wrong_shard_server) {
-						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
-						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						Standalone<RangeResultRef> result = wait(
+						    getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info));
+						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange,
+						                 reverse, result);
 						return result;
 					}
-
-					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 				} else {
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
-
+						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()),
+						                                                         begin.getKey(), end.getKey()));
 					throw e;
 				}
+
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			}
 		}
 	}
@@ -2105,20 +2108,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeFromStorageServer(Database cx, 
 		}
 
 		throw;
-	}
-}
-
-
-Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
-                                            Future<Version> fVersion, KeySelector begin, KeySelector end,
-                                            GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
-                                            bool snapshot, bool reverse, TransactionInfo info) {
-
-	if (false && cx->readProxiesEnabled() && info.useReadProxies) {
-		return getRangeFromProxy(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse, info);
-	} else {
-		return getRangeFromStorageServer(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse,
-		                                 info);
 	}
 }
 

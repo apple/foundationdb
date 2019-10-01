@@ -179,10 +179,8 @@ static void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValu
 ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 	state KeySelector begin = _req.begin;
 	state KeySelector end = _req.end;
-	state GetRangeLimits limits; // TODO (Vishesh): Default to unlimited for now.
+	state GetRangeLimits limits(abs(_req.limit), _req.limitBytes);
 	state bool reverse = _req.limit < 0;
-	limits.rows = abs(_req.limit);
-	limits.bytes = _req.limitBytes;
 
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
