@@ -2,6 +2,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
@@ -106,33 +107,31 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 	}
 }
 
-// Set the progress to "startVersion - 1" so that if backup worker later
-// doesn't update the progress, the next master can know. Otherwise, the next
-// master didn't see the progress and assumes the work is done, thus losing
-// some mutations in the backup.
-/*
-ACTOR Future<Void> setInitialBackupProgress(Reference<MasterData> self, Database cx, std::vector<std::pair<UID, Tag>>
-idsTags) { state Transaction tr(cx);
+TEST_CASE("/BackupProgress/Unfinished") {
+	std::map<LogEpoch, std::pair<int, Version>> epochTagsEndVersions;
 
-    loop {
-        try {
-            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-            tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-            tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	const int epoch1 = 2, end1 = 100;
+	const Tag tag1(tagLocalityLogRouter, 0);
+	epochTagsEndVersions.insert({ epoch1, { 1, end1 } });
+	BackupProgress progress(UID(0, 0), epochTagsEndVersions);
 
-            const Version startVersion = self->logSystem->getStartVersion() - 1;
-            const LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-            for (int i = 0; i < idsTags.size(); i++) {
-                Key key = backupProgressKeyFor(idsTags[i].first);
-                WorkerBackupStatus status(epoch, startVersion, idsTags[i].second);
-                tr.set(key, backupProgressValue(status));
-                tr.addReadConflictRange(singleKeyRange(key));
-            }
-            wait(tr.commit());
-            return Void();
-        } catch (Error& e) {
-            wait(tr.onError(e));
-        }
-    }
+	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
+
+	ASSERT(unfinished.size() == 1);
+	for (const auto [epochVersion, tagVersion] : unfinished) {
+		ASSERT(epochVersion.first == epoch1 && epochVersion.second == end1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == 1);
+	}
+
+	const int saved1 = 50;
+	WorkerBackupStatus status1(epoch1, 50, tag1);
+	progress.addBackupStatus(status1);
+	unfinished = progress.getUnfinishedBackup();
+	ASSERT(unfinished.size() == 1);
+	for (const auto [epochVersion, tagVersion] : unfinished) {
+		ASSERT(epochVersion.first == epoch1 && epochVersion.second == end1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1);
+	}
+
+	return Void();
 }
-*/
