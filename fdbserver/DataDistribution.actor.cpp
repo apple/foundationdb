@@ -2581,11 +2581,10 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
-// Is correct DC and correct locality
-bool isCorrectLocality(DDTeamCollection* self, TCServerInfo* server) {
+bool isCorrectDC(DDTeamCollection* self, TCServerInfo* server) {
 	return (self->includedDCs.empty() ||
 	        std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
-	            self->includedDCs.end()) && (self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality));
+	            self->includedDCs.end());
 }
 
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
@@ -3409,14 +3408,18 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
-	state bool hasWrongDCOrLocality = !isCorrectLocality(self, server);
+	state bool hasWrongDC = !isCorrectDC(self, server);
+	state bool hasInvalidLocality =
+	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 
 	try {
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
-			hasWrongDCOrLocality = !isCorrectLocality(self, server);
+			hasWrongDC = !isCorrectDC(self, server);
+			hasInvalidLocality =
+			    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually
 			// be eliminated. This samAddress checking must be redo whenever the server's state (e.g., storeType,
@@ -3474,10 +3477,11 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
-			if (hasWrongDCOrLocality) {
+			if (hasWrongDC || hasInvalidLocality) {
 				TraceEvent(SevWarn, "UndesiredDCOrLocality", self->distributorId)
 				    .detail("Server", server->id)
-				    .detail("WrongDC", "?");
+				    .detail("WrongDC", hasWrongDC)
+				    .detail("InvalidLocality", hasInvalidLocality);
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
@@ -3504,7 +3508,9 @@ ACTOR Future<Void> storageServerTracker(
 
 			failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
 			//We need to recruit new storage servers if the key value store type has changed
-			if (hasWrongDCOrLocality || server->wrongStoreTypeToRemove.get()) self->restartRecruiting.trigger();
+			if (hasWrongDC || hasInvalidLocality || server->wrongStoreTypeToRemove.get()) {
+				self->restartRecruiting.trigger();
+			}
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
 			    ( server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
@@ -3638,7 +3644,9 @@ ACTOR Future<Void> storageServerTracker(
 					// Restart the storeTracker for the new interface. This will cancel the previous
 					// keyValueStoreTypeTracker
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
-					hasWrongDCOrLocality = !isCorrectLocality(self, server);
+					hasWrongDC = !isCorrectDC(self, server);
+					hasInvalidLocality =
+					    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 					self->restartTeamBuilder.trigger();
 
 					if(restartRecruiting)
