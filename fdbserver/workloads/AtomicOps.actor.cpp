@@ -153,12 +153,13 @@ struct AtomicOpsWorkload : TestWorkload {
 					tr.set(self->logKey(group), val);
 					int nodeIndex = deterministicRandom()->randomInt(0,self->nodeCount/100);
 					tr.atomicOp(StringRef(format("ops%08x%08x",group,nodeIndex)), val, self->opType);
+					TraceEvent(SevDebug, "AtomicOpWorker").detail("LogKey", self->logKey(group)).detail("Value", val);
+					TraceEvent(SevDebug, "AtomicOpWorker").detail("OpKey", format("ops%08x%08x",group,nodeIndex)).detail("Value", val).detail("AtomicOp", self->opType);
 					wait( tr.commit() );
-					// TraceEvent(SevDebug, "AtomicOpWorker").detail("LogKey", self->logKey(group)).detail("Value", val);
-					// TraceEvent(SevDebug, "AtomicOpWorker").detail("OpKey", format("ops%08x%08x",group,nodeIndex)).detail("Value", val).detail("AtomicOp", self->opType);
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
+					self->opNum--;
 				}
 			}
 		}
