@@ -448,6 +448,7 @@ void _parseSerializedMutation(VersionedMutationsMap* pkvOps, SerializedMutationL
 			const uint8_t* v = vReader.consume(vLen);
 
 			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
+			TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", commitVersion).detail("ParsedMutation", mutation.toString());
 			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
 			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
@@ -529,7 +530,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
-	TraceEvent("FastRestore").detail("DecodedLogFile", fileName).detail("DataSize", data.contents().size());
+	TraceEvent("FastRestore").detail("DecodedLogFile", fileName).detail("Offset", readOffset).detail("Length", readLen).detail("DataSize", data.contents().size());
 
 	state int start = 0;
 	state int end = data.size();

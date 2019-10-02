@@ -93,7 +93,7 @@ double getNotifiedDoubleValue(Version ver, int fileIndex) {
 
 void getDetailsOfNotifiedDoubleValue(double val, Version &version, int &fileIndex) {
 	version = val / SERVER_KNOBS->FASTRESTORE_MAX_FILES_IN_VB;
-	fileIndex = val - version;
+	fileIndex = val - version * SERVER_KNOBS->FASTRESTORE_MAX_FILES_IN_VB;
 	return;
 }
 
@@ -105,11 +105,17 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	state int numMutations = 0;
 	state double prevDoubleVersion = getNotifiedDoubleValue(req.prevVersion, req.prevFileIndex);
 	state double doubleVersion = getNotifiedDoubleValue(req.version, req.fileIndex);
+	state Version logVersion, rangeVersion;
+	state int logFileIndex, rangeFileIndex;
+	getDetailsOfNotifiedDoubleValue(self->logVersion.get(), logVersion, logFileIndex);
+	getDetailsOfNotifiedDoubleValue(self->rangeVersion.get(), rangeVersion, rangeFileIndex);
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
-	    .detail("LogVersion", self->logVersion.get())
-	    .detail("RangeVersion", self->rangeVersion.get())
+	    .detail("LogVersion", logVersion)
+		.detail("LogFileIndex", logFileIndex)
+	    .detail("RangeVersion", rangeVersion)
+		.detail("RangeFileIndex", rangeFileIndex)
 	    .detail("Request", req.toString());
 
 	if (req.isRangeFile) {
@@ -197,6 +203,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						KeyRangeRef mutationRange(m.param1, m.param2);
 						tr->clear(mutationRange);
 					} else if (isAtomicOp((MutationRef::Type)m.type)) {
+						TraceEvent(SevDebug, "FastRestore_Debug").detail("Version", it->first).detail("AtomicOp", m.toString());
 						tr->atomicOp(m.param1, m.param2, m.type);
 					} else {
 						TraceEvent(SevError, "FastRestore")

@@ -102,10 +102,10 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-		for(int c=0; c<actorCount; c++)
-		clients.push_back(
-			timeout(
-				atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+		for(int c=0; c<actorCount; c++) {
+			clients.push_back(timeout(atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+		}
+		
 		return delay(testDuration);
 	}
 
@@ -151,8 +151,11 @@ struct AtomicOpsWorkload : TestWorkload {
 					uint64_t intValue = deterministicRandom()->randomInt( 0, 10000000 );
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
-					tr.atomicOp(StringRef(format("ops%08x%08x",group,deterministicRandom()->randomInt(0,self->nodeCount/100))), val, self->opType);
+					int nodeIndex = deterministicRandom()->randomInt(0,self->nodeCount/100);
+					tr.atomicOp(StringRef(format("ops%08x%08x",group,nodeIndex)), val, self->opType);
 					wait( tr.commit() );
+					// TraceEvent(SevDebug, "AtomicOpWorker").detail("LogKey", self->logKey(group)).detail("Value", val);
+					// TraceEvent(SevDebug, "AtomicOpWorker").detail("OpKey", format("ops%08x%08x",group,nodeIndex)).detail("Value", val).detail("AtomicOp", self->opType);
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
@@ -170,6 +173,7 @@ struct AtomicOpsWorkload : TestWorkload {
 			loop {
 				try {
 					{
+						// Calculate the accumulated value n the log keyspace done at the group g
 						Key begin(format("log%08x", g));
 						Standalone<RangeResultRef> log_ = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 						log = log_;
@@ -179,10 +183,12 @@ struct AtomicOpsWorkload : TestWorkload {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
 							tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
+							TraceEvent(SevDebug, "AtomicOpsWorkload_XlogResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
 						}
 					}
 
 					{
+						// Calculate the accumulated value in the ops keyspace done at the group g
 						Key begin(format("ops%08x", g));
 						Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 						uint64_t zeroValue = 0;
@@ -191,10 +197,11 @@ struct AtomicOpsWorkload : TestWorkload {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
 							tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
+							TraceEvent(SevDebug, "AtomicOpsWorkload_XopsResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
 						}
 
 						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-							TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+							TraceEvent(SevError, "LogMismatch").detail("Index", format("log%08x", g)).detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
 						}
 
 						if( self->opType == MutationRef::AddValue ) {
