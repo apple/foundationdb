@@ -741,7 +741,7 @@ struct TLogSpillType {
 	operator SpillType() const { return SpillType(type); }
 
 	template <class Ar>
-	void serialize(Ar& ar) { serializer(ar, type); }
+	void serialize_unversioned(Ar& ar) { serializer(ar, type); }
 
 	std::string toString() const {
 		switch( type ) {
@@ -759,8 +759,30 @@ struct TLogSpillType {
 		return default_error_or();
 	}
 
-private:
 	uint32_t type;
+};
+
+template <class Ar> void load( Ar& ar, TLogSpillType& logSpillType ) { logSpillType.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, TLogSpillType const& logSpillType ) { const_cast<TLogSpillType&>(logSpillType).serialize_unversioned(ar); }
+
+template <>
+struct struct_like_traits<TLogSpillType> : std::true_type {
+	using Member = TLogSpillType;
+	using types = pack<uint32_t>;
+
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member& m, Context&) {
+		if constexpr (i == 0) {
+			return m.type;
+		}
+	}
+
+	template <int i, class Type, class Context>
+	static const void assign(Member& m, const Type& t, Context&) {
+		if constexpr (i == 0) {
+			m = static_cast<TLogSpillType::SpillType>(t);
+		}
+	}
 };
 
 //Contains the amount of free and total space for a storage server, in bytes
