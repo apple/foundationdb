@@ -43,7 +43,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
                                          bool isSampling = false);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
                                           bool isRangeFile, Version startVersion, Version endVersion, int prevFileIndex, int fileIndex);
-ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(SerializedMutationListMap* mutationMap,
+ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion *pProcessedFileOffset,
+														   SerializedMutationListMap* mutationMap,
                                                            std::map<Standalone<StringRef>, uint32_t>* mutationPartMap,
                                                            Reference<IBackupContainer> bc, Version version,
                                                            std::string fileName, int64_t readOffset, int64_t readLen,
@@ -147,6 +148,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	// mutationMap: Key is the unique identifier for a batch of mutation logs at the same version
 	state SerializedMutationListMap mutationMap;
 	state std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Sanity check the data parsing is correct
+	state NotifiedVersion processedFileOffset(0);
 	state std::vector<Future<Void>> fileParserFutures;
 
 	state int64_t j;
@@ -159,7 +161,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
 			    &kvOps, self->bc, param.version, param.filename, readOffset, readLen, param.restoreRange));
 		} else {
-			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(
+			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset,
 			    &mutationMap, &mutationPartMap, self->bc, param.version, param.filename, readOffset, readLen,
 			    param.restoreRange, param.addPrefix, param.removePrefix, param.mutationLogPrefix));
 		}
@@ -522,6 +524,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 // version encoded in pair.first Step 1: decodeLogFileBlock into <string, string> pairs Step 2: Concatenate the
 // pair.second of pairs with the same pair.first.
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
+	NotifiedVersion *pProcessedFileOffset,
     std::map<Standalone<StringRef>, Standalone<StringRef>>* pMutationMap,
     std::map<Standalone<StringRef>, uint32_t>* pMutationPartMap, Reference<IBackupContainer> bc, Version version,
     std::string fileName, int64_t readOffset, int64_t readLen, KeyRange restoreRange, Key addPrefix, Key removePrefix,
@@ -532,16 +535,22 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
 	TraceEvent("FastRestore").detail("DecodedLogFile", fileName).detail("Offset", readOffset).detail("Length", readLen).detail("DataSize", data.contents().size());
 
-	state int start = 0;
-	state int end = data.size();
-	state int numConcatenated = 0;
-	for (int i = start; i < end; ++i) {
-		//Key k = data[i].key.withPrefix(mutationLogPrefix);
-		//ValueRef v = data[i].value;
-		// Concatenate the backuped param1 and param2 (KV) at the same version.
-		bool concatenated =
-		    concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value);
-		numConcatenated += (concatenated ? 1 : 0);
+	// TODO: Ensure the ordering of using data
+	wait(pProcessedFileOffset->whenAtLeast(readOffset));
+
+	if (pProcessedFileOffset->get() == readOffset) {
+		state int start = 0;
+		state int end = data.size();
+		state int numConcatenated = 0;
+		for (int i = start; i < end; ++i) {
+			//Key k = data[i].key.withPrefix(mutationLogPrefix);
+			//ValueRef v = data[i].value;
+			// Concatenate the backuped param1 and param2 (KV) at the same version.
+			bool concatenated =
+				concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value);
+			numConcatenated += (concatenated ? 1 : 0);
+		}
+		pProcessedFileOffset->set(readOffset+readLen);
 	}
 
 	return Void();
