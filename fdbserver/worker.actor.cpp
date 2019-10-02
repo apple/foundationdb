@@ -309,7 +309,7 @@ TLogFn tLogFnForOptions( TLogOptions options ) {
 			ASSERT(false);
 		case TLogVersion::V3:
 		case TLogVersion::V4:
-			return tLog;
+			return oldTLog_6_2::tLog;
 		default:
 			ASSERT(false);
 		}
