@@ -34,8 +34,8 @@
     <ActorCompiler Include="worker.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ActorCompiler Include="Backup.actor.cpp" />
     <ActorCompiler Include="BackupProgress.actor.cpp" />
+    <ActorCompiler Include="BackupWorker.actor.cpp" />
     <ActorCompiler Include="VersionedBTree.actor.cpp" />
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
