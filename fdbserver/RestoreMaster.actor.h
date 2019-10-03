@@ -124,7 +124,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from loader to applier
 		// Assumption: fileIndex starts at 1. Each loader's initized fileIndex (NotifiedVersion type) starts at 0
-		int fileIndex = 0; // fileIndex continuously increase across verstionBatches
+		int fileIndex = 0; // fileIndex must be unique; ideally it continuously increase across verstionBatches for easier progress tracking
 		int beginFileIndex = fileIndex;
 		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
 			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
@@ -141,6 +141,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
 		// Sanity check
+		std::set<uint32_t> fIndexSet;
 		for (auto& versionBatch : *versionBatches) {
 			Version prevVersion = 0;
 			for (auto& logFile : versionBatch.second.logFiles) {
@@ -149,6 +150,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
 				ASSERT(prevVersion <= logFile.beginVersion);
 				prevVersion = logFile.endVersion;
+				ASSERT(fIndexSet.find(logFile.fileIndex) == fIndexSet.end());
+				fIndexSet.insert(logFile.fileIndex);
 			}
 			prevVersion = 0;
 			for (auto& rangeFile : versionBatch.second.rangeFiles) {
@@ -158,6 +161,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
 				ASSERT(prevVersion <= rangeFile.beginVersion);
 				prevVersion = rangeFile.beginVersion;
+				ASSERT(fIndexSet.find(rangeFile.fileIndex) == fIndexSet.end());
+				fIndexSet.insert(rangeFile.fileIndex);
 			}
 		}
 	}

@@ -281,7 +281,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		// Send the mutations to appliers for each version
 		for (auto& applierID : applierIDs) {
 			requests.push_back(std::make_pair(
-			    applierID, RestoreSendMutationVectorVersionedRequest(prevVersion, commitVersion, prevFileIndex, fileIndex, isRangeFile,
+			    applierID, RestoreSendMutationVectorVersionedRequest(fileIndex, prevVersion, commitVersion, prevFileIndex, fileIndex, isRangeFile,
 			                                                         applierMutationsBuffer[applierID])));
 			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
 			applierMutationsSize[applierID] = 0;

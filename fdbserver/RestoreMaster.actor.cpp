@@ -229,9 +229,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
-	ASSERT(files->size() > 0); // files should not be empty
+	//ASSERT(files->size() > 0); // files should not be empty
 
-	Version prevVersion = versionBatch.beginVersion;
+	Version prevVersion = 0; //versionBatch.beginVersion;
 	int prevFileIndex = versionBatch.beginFileIndex;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
@@ -241,7 +241,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		}
 		// Prepare loading
 		LoadingParam param;
-		param.prevVersion = prevVersion;
+		param.prevVersion = 0; //prevVersion;
 		param.endVersion = file.isRange ? file.version : file.endVersion;
 		param.prevFileIndex = prevFileIndex;
 		param.fileIndex = file.fileIndex;

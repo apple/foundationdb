@@ -344,23 +344,27 @@ struct RestoreLoadFileRequest : TimedRequest {
 struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
+	uint64_t fileUID; // Unique index of the file that produces the mutations
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
+
+	// TODO: delete this block
 	int prevFileIndex, fileIndex; // fileIndex is the file with the fileIndex that produces the mutation vector
 	bool isRangeFile;
+
 	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(Version prevVersion, Version version, 
+	explicit RestoreSendMutationVectorVersionedRequest(uint64_t fileUID, Version prevVersion, Version version, 
 														int prevFileIndex, int fileIndex,
 														bool isRangeFile,
 	                                                   VectorRef<MutationRef> mutations)
-	  : prevVersion(prevVersion), version(version), prevFileIndex(prevFileIndex), fileIndex(fileIndex), isRangeFile(isRangeFile), mutations(mutations) {}
+	  : fileUID(fileUID), prevVersion(prevVersion), version(version), prevFileIndex(prevFileIndex), fileIndex(fileIndex), isRangeFile(isRangeFile), mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "prevVersion:" << prevVersion << " version:" << version
+		ss << "fileUID:" << fileUID << " prevVersion:" << prevVersion << " version:" << version
 		<< " prevFileIndex:" << prevFileIndex << " fileIndex:" << fileIndex
 		<< " isRangeFile:" << isRangeFile
 		<< " mutations.size:" << mutations.size();
@@ -369,7 +373,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prevVersion, version, prevFileIndex, fileIndex, isRangeFile, mutations, reply);
+		serializer(ar, fileUID, prevVersion, version, prevFileIndex, fileIndex, isRangeFile, mutations, reply);
 	}
 };
 

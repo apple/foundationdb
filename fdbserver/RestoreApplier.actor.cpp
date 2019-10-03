@@ -112,21 +112,21 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
+		.detail("FileUID", req.fileUID)
 	    .detail("LogVersion", logVersion)
 		.detail("LogFileIndex", logFileIndex)
 	    .detail("RangeVersion", rangeVersion)
 		.detail("RangeFileIndex", rangeFileIndex)
 	    .detail("Request", req.toString());
 
-	if (req.isRangeFile) {
-		wait(self->rangeVersion.whenAtLeast(prevDoubleVersion));
-	} else {
-		wait(self->logVersion.whenAtLeast(prevDoubleVersion));
+	if (self->processedFileState.find(req.fileUID) == self->processedFileState.end()) {
+		self->processedFileState.insert(std::make_pair(req.fileUID, NotifiedVersion(0)));
 	}
 
-	// Not a duplicate (check relies on no waiting between here and self->version.set() below!)
-	if ((req.isRangeFile && self->rangeVersion.get() == prevDoubleVersion) ||
-	    (!req.isRangeFile && self->logVersion.get() == prevDoubleVersion)) { 
+	state std::map<uint32_t, NotifiedVersion>::iterator curFileState = self->processedFileState.find(req.fileUID);
+	wait(curFileState->second.whenAtLeast(req.prevVersion));
+
+	if (curFileState->second.get() == req.prevVersion) {
 		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 		state Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
@@ -139,14 +139,38 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 			numMutations++;
 		}
-
-		// Notify the same actor and unblock the request at the next version
-		if (req.isRangeFile) {
-			self->rangeVersion.set(doubleVersion);
-		} else {
-			self->logVersion.set(doubleVersion);
-		}
+		curFileState->second.set(req.version);
 	}
+
+	// if (req.isRangeFile) {
+	// 	wait(self->rangeVersion.whenAtLeast(prevDoubleVersion));
+	// } else {
+	// 	wait(self->logVersion.whenAtLeast(prevDoubleVersion));
+	// }
+
+	// // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+	// if ((req.isRangeFile && self->rangeVersion.get() == prevDoubleVersion) ||
+	//     (!req.isRangeFile && self->logVersion.get() == prevDoubleVersion)) { 
+	// 	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+	// 	state Version commitVersion = req.version;
+	// 	VectorRef<MutationRef> mutations(req.mutations);
+	// 	if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
+	// 		self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+	// 	}
+	// 	state int mIndex = 0;
+	// 	for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+	// 		MutationRef mutation = mutations[mIndex];
+	// 		self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
+	// 		numMutations++;
+	// 	}
+
+	// 	// Notify the same actor and unblock the request at the next version
+	// 	if (req.isRangeFile) {
+	// 		self->rangeVersion.set(doubleVersion);
+	// 	} else {
+	// 		self->logVersion.set(doubleVersion);
+	// 	}
+	// }
 
 	req.reply.send(RestoreCommonReply(self->id()));
 	return Void();
