@@ -2424,7 +2424,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
-		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, Unversioned() );
+		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, AssumeVersion(protocolVersion) );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), protocolVersion, logSpillType, std::vector<Tag>()) );
