@@ -229,12 +229,10 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
-	Version prevVersion = versionBatch.beginVersion;
 	ASSERT(files->size() > 0); // files should not be empty
-	// Assumption 1: First file's fileIndex in each batch = the largest fileIndex in previous batch + 1
-	// Assumption 2: fileIndex starts at 1 in the first version batch
-	int prevFileIndex = files->at(0).fileIndex - 1;
 
+	Version prevVersion = versionBatch.beginVersion;
+	int prevFileIndex = versionBatch.beginFileIndex;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
 		// drive applier's NotifiedVersion (e.g., logVersion and rangeVersion)

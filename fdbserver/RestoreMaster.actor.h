@@ -43,8 +43,10 @@
 extern int restoreStatusIndex;
 
 struct VersionBatch {
-	Version beginVersion; // Inclusive
-	Version endVersion; // Exclusive
+	Version beginVersion; // Exclusive
+	Version endVersion; // Inclusive if it has log files, exclusive if it has only range file
+	Version beginFileIndex; // Exclusive: The fileIndex processed in the previous versionBatch
+	Version endFileIndex; // Inclusive
 	std::vector<RestoreFileFR> logFiles;
 	std::vector<RestoreFileFR> rangeFiles;
 
@@ -122,16 +124,20 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from loader to applier
 		// Assumption: fileIndex starts at 1. Each loader's initized fileIndex (NotifiedVersion type) starts at 0
-		int fileIndex = 1; // fileIndex continuously increase across verstionBatches
+		int fileIndex = 0; // fileIndex continuously increase across verstionBatches
+		int beginFileIndex = fileIndex;
 		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
 			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
 			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
+			versionBatch->second.beginFileIndex = beginFileIndex;
 			for (auto& logFile : versionBatch->second.logFiles) {
-				logFile.fileIndex = fileIndex++;
+				logFile.fileIndex = (++fileIndex);
 			}
 			for (auto& rangeFile : versionBatch->second.rangeFiles) {
-				rangeFile.fileIndex = fileIndex++;
+				rangeFile.fileIndex = (++fileIndex);
 			}
+			beginFileIndex = fileIndex;
+			versionBatch->second.endFileIndex = fileIndex;
 		}
 		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
 		// Sanity check

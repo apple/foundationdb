@@ -286,12 +286,15 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
 			applierMutationsSize[applierID] = 0;
 		}
+		TraceEvent(SevDebug, "FastRestore_Debug").detail("Loader", self->id()).detail("PrevVersion", prevVersion).detail("CommitVersion", commitVersion).detail("PrevFileIndex", prevFileIndex).detail("FileIndex", fileIndex);
+		ASSERT(prevVersion < commitVersion || (prevVersion == commitVersion && prevFileIndex < fileIndex));
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
 		requests.clear();
-		TraceEvent(SevDebug, "FastRestore_Debug").detail("PrevVersion", prevVersion).detail("CommitVersion", commitVersion).detail("PrevFileIndex", prevFileIndex).detail("FileIndex", fileIndex);
-		ASSERT(prevVersion < commitVersion || (prevVersion == commitVersion && prevFileIndex < fileIndex));
+		prevFileIndex = fileIndex;
 		prevVersion = commitVersion;
-	} // all versions of mutations
+	} // all versions of mutations in the file
+
+
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
 	return Void();
