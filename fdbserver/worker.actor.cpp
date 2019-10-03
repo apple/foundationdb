@@ -252,7 +252,7 @@ struct TLogOptions {
 	TLogOptions( TLogVersion v, TLogSpillType s ) : version(v), spillType(s) {}
 
 	TLogVersion version = TLogVersion::DEFAULT;
-	TLogSpillType spillType = TLogSpillType::DEFAULT;
+	TLogSpillType spillType = TLogSpillType::UNSET;
 
 	static ErrorOr<TLogOptions> FromStringRef( StringRef s ) {
 		TLogOptions options;
@@ -277,15 +277,27 @@ struct TLogOptions {
 	}
 
 	bool operator == ( const TLogOptions& o ) {
-		return version == o.version && spillType == o.spillType;
+		return version == o.version &&
+			(spillType == o.spillType || version >= TLogVersion::V5);
 	}
 
 	std::string toPrefix() const {
-		if (version == TLogVersion::V2) return "";
-
-		std::string toReturn =
-			"V_" + boost::lexical_cast<std::string>(version) +
-			"_LS_" + boost::lexical_cast<std::string>(spillType);
+		std::string toReturn = "";
+		switch (version) {
+		case TLogVersion::UNSET:
+			ASSERT(false);
+		case TLogVersion::V2:
+			return "";
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			toReturn =
+				"V_" + boost::lexical_cast<std::string>(version) +
+				"_LS_" + boost::lexical_cast<std::string>(spillType);
+			break;
+		case TLogVersion::V5:
+			toReturn = "V_" + boost::lexical_cast<std::string>(version);
+			break;
+		}
 		ASSERT_WE_THINK( FromStringRef( toReturn ).get() == *this );
 		return toReturn + "-";
 	}
@@ -746,6 +758,26 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
+class SharedLogsKey {
+	TLogVersion logVersion;
+	TLogSpillType spillType;
+	KeyValueStoreType storeType;
+
+public:
+	SharedLogsKey( const TLogOptions& options, KeyValueStoreType kvst ) {
+		logVersion = options.version;
+		spillType = options.spillType;
+		storeType = kvst;
+		if (logVersion >= TLogVersion::V5)
+			spillType = TLogSpillType::UNSET;
+	}
+
+	bool operator<(const SharedLogsKey& other) const {
+		return std::tie(logVersion, spillType, storeType) <
+			std::tie(other.logVersion, other.spillType, other.storeType);
+	}
+};
+
 ACTOR Future<Void> workerServer(
 		Reference<ClusterConnectionFile> connFile,
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
@@ -773,7 +805,7 @@ ACTOR Future<Void> workerServer(
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
+	state std::map<SharedLogsKey,
 	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 	state std::string coordFolder = abspath(_coordFolder);
 
@@ -888,7 +920,7 @@ ACTOR Future<Void> workerServer(
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
+				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
 				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded );
@@ -1036,7 +1068,7 @@ ACTOR Future<Void> workerServer(
 				}
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
+				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
 				logData.second.send(req);
 				if(!logData.first.isValid() || logData.first.isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();
