@@ -69,6 +69,7 @@ struct DataDistributionTracker {
 	KeyRangeMap< ShardTrackedData > shards;
 	ActorCollection sizeChanges;
 
+	int64_t systemSizeEstimate;
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
@@ -81,7 +82,7 @@ struct DataDistributionTracker {
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
 	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
-		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ),
+		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ), systemSizeEstimate(0),
 			maxShardSize( new AsyncVar<Optional<int64_t>>() ),
 			sizeChanges(false), readyToStart(readyToStart), output( output ), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
 
@@ -138,8 +139,7 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 ACTOR Future<Void> trackShardBytes(
 		DataDistributionTracker* self,
 		KeyRange keys,
-		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize,
-		bool addToSizeEstimate = true)
+		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize)
 {
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
@@ -203,8 +203,12 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 				.detail("TrackerID", trackerID);*/
 
-			if( shardSize->get().present() && addToSizeEstimate )
+			if( shardSize->get().present() ) {
 				self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.bytes - shardSize->get().get().bytes );
+				if(keys.begin >= systemKeys.begin) {
+					self->systemSizeEstimate += metrics.bytes - shardSize->get().get().bytes;
+				}
+			}
 
 			shardSize->set( metrics );
 		}
@@ -256,8 +260,13 @@ ACTOR Future<int64_t> getFirstSize( Reference<AsyncVar<Optional<StorageMetrics>>
 
 ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys, int64_t oldShardsEndingSize ) {
 	state vector<Future<int64_t>> sizes;
+	state vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards.intersectingRanges(keys) ) {
-		sizes.push_back( getFirstSize( it->value().stats ) );
+		Future<int64_t> thisSize = getFirstSize( it->value().stats );
+		sizes.push_back( thisSize );
+		if(it->range().begin >= systemKeys.begin) {
+			systemSizes.push_back( thisSize );
+		}
 	}
 
 	wait( waitForAll( sizes ) );
@@ -267,12 +276,20 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys,
 	for ( int i = 0; i < sizes.size(); i++ )
 		newShardsStartingSize += sizes[i].get();
 
+	int64_t newSystemShardsStartingSize = 0;
+	for ( int i = 0; i < systemSizes.size(); i++ )
+		newSystemShardsStartingSize += systemSizes[i].get();
+
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
 	/*TraceEvent("TrackerChangeSizes")
 		.detail("TotalSizeEstimate", totalSizeEstimate)
 		.detail("EndSizeOfOldShards", oldShardsEndingSize)
 		.detail("StartingSizeOfNewShards", newShardsStartingSize);*/
 	self->dbSizeEstimate->set( totalSizeEstimate + newShardsStartingSize - oldShardsEndingSize );
+	self->systemSizeEstimate += newSystemShardsStartingSize;
+	if(keys.begin >= systemKeys.begin) {
+		self->systemSizeEstimate -= oldShardsEndingSize;
+	}
 	return Void();
 }
 
@@ -641,7 +658,7 @@ ACTOR Future<Void> fetchShardMetrics_impl( DataDistributionTracker* self, GetMet
 ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsRequest req ) {
 	choose {
 		when( wait( fetchShardMetrics_impl( self, req ) ) ) {}
-		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT ) ) ) {
+		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution ) ) ) {
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
 			largeMetrics.bytes = SERVER_KNOBS->MAX_SHARD_BYTES;
@@ -676,6 +693,7 @@ ACTOR Future<Void> dataDistributionTracker(
 				TraceEvent("DDTrackerStats", self.distributorId)
 					.detail("Shards", self.shards.size())
 					.detail("TotalSizeBytes", self.dbSizeEstimate->get())
+					.detail("SystemSizeBytes", self.systemSizeEstimate)
 					.trackLatest( "DDTrackerStats" );
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
