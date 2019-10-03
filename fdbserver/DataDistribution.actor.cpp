@@ -3103,9 +3103,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 	// Fetch the list of excluded servers
 	state ReadYourWritesTransaction tr(self->cx);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state Future<Standalone<RangeResultRef>> fresultsExclude =
 			    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Standalone<RangeResultRef>> fresultsFailed =
