@@ -273,14 +273,14 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 				timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT));
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 			for (auto& request : requests) {
 				TraceEvent(SevWarn, "FastRestore")
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());
 			}
+			if (e.code() == error_code_operation_cancelled) break;
+			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 		}
 	}
 

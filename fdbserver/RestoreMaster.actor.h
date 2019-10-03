@@ -121,10 +121,11 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 		}
 		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from loader to applier
+		// Assumption: fileIndex starts at 1. Each loader's initized fileIndex (NotifiedVersion type) starts at 0
+		int fileIndex = 1; // fileIndex continuously increase across verstionBatches
 		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
 			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
 			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
-			int fileIndex = 0; // fileIndex in each version batch start at 0
 			for (auto& logFile : versionBatch->second.logFiles) {
 				logFile.fileIndex = fileIndex++;
 			}
