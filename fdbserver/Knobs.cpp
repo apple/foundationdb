@@ -485,6 +485,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
+	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );

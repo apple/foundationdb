@@ -1299,7 +1299,7 @@ namespace dbBackup {
 						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 						bool found = false;
 						for(auto it : existingDestUidValues) {
-							if( BinaryReader::fromStringRef<KeyRangeRef>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
 								if(destUidValue != it.value) {
 									// existing backup/DR is running
 									return Void();
@@ -1475,7 +1475,7 @@ namespace dbBackup {
 						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 						bool found = false;
 						for(auto it : existingDestUidValues) {
-							if( BinaryReader::fromStringRef<KeyRangeRef>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
 								destUidValue = it.value;
 								found = true;
 								break;

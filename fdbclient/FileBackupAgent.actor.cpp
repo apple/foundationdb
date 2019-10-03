@@ -3622,7 +3622,7 @@ public:
 			Standalone<RangeResultRef> existingDestUidValues = wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			for(auto it : existingDestUidValues) {
-				if( BinaryReader::fromStringRef<KeyRangeRef>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == normalizedRanges[0] ) {
+				if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == normalizedRanges[0] ) {
 					destUidValue = it.value;
 					found = true;
 					break;
