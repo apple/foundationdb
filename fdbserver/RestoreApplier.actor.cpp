@@ -177,12 +177,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int numVersion = 0;
 	state double transactionSize = 0;
+	state int numAtomicOp = 0;
 	loop {
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			transactionSize = 0;
+			numAtomicOp = 0;
 
 			for (; it != self->kvOps.end(); ++it) {
 				numVersion++;
@@ -197,14 +199,15 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
+					TraceEvent(SevDebug, "FastRestore_Debug").detail("Applier", self->describeNode()).detail("Version", it->first).detail("Mutation", m.toString());
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
 						KeyRangeRef mutationRange(m.param1, m.param2);
 						tr->clear(mutationRange);
 					} else if (isAtomicOp((MutationRef::Type)m.type)) {
-						TraceEvent(SevDebug, "FastRestore_Debug").detail("Version", it->first).detail("AtomicOp", m.toString());
 						tr->atomicOp(m.param1, m.param2, m.type);
+						numAtomicOp++;
 					} else {
 						TraceEvent(SevError, "FastRestore")
 						    .detail("UnhandledMutationType", m.type)
@@ -221,6 +224,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						prevIt = it;
 						prevIndex = index;
 						transactionSize = 0;
+						numAtomicOp = 0;
 					}
 				}
 
@@ -232,6 +236,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					prevIt = it;
 					prevIndex = index;
 					transactionSize = 0;
+					numAtomicOp = 0;
 				}
 				index = 0;
 			}
@@ -245,6 +250,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			it = prevIt;
 			index = prevIndex;
 			transactionSize = 0;
+			TraceEvent(SevError, "FastRestoreError").detail("Reason", "Apply to DB Transaction with atomicOps failed").detail("ApplierApplyToDB", self->id()).detail("NumIncludedAtomicOps", numAtomicOp);
 		}
 	}
 

@@ -159,7 +159,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
-					self->opNum--;
+					//self->opNum--;
 				}
 			}
 		}
