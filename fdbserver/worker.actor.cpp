@@ -292,12 +292,12 @@ struct TLogOptions {
 };
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
-	auto tLogFn = tLog;
 	if ( options.spillType == TLogSpillType::VALUE ) {
 		switch (options.version) {
 		case TLogVersion::V2:
 		case TLogVersion::V3:
 		case TLogVersion::V4:
+		case TLogVersion::V5:
 			return oldTLog_6_0::tLog;
 		default:
 			ASSERT(false);
@@ -310,12 +310,14 @@ TLogFn tLogFnForOptions( TLogOptions options ) {
 		case TLogVersion::V3:
 		case TLogVersion::V4:
 			return oldTLog_6_2::tLog;
+		case TLogVersion::V5:
+			return tLog;
 		default:
 			ASSERT(false);
 		}
 	}
 	ASSERT(false);
-	return tLogFn;
+	return tLog;
 }
 
 struct DiskStore {
