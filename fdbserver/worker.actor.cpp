@@ -292,31 +292,22 @@ struct TLogOptions {
 };
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
-	if ( options.spillType == TLogSpillType::VALUE ) {
-		switch (options.version) {
+	switch (options.version) {
 		case TLogVersion::V2:
-		case TLogVersion::V3:
-		case TLogVersion::V4:
-		case TLogVersion::V5:
+			if (options.spillType == TLogSpillType::REFERENCE)
+				ASSERT(false);
 			return oldTLog_6_0::tLog;
-		default:
-			ASSERT(false);
-		}
-	}
-	if ( options.spillType == TLogSpillType::REFERENCE ) {
-		switch (options.version) {
-		case TLogVersion::V2:
-			ASSERT(false);
 		case TLogVersion::V3:
 		case TLogVersion::V4:
-			return oldTLog_6_2::tLog;
+			if (options.spillType == TLogSpillType::VALUE)
+				return oldTLog_6_0::tLog;
+			else
+				return oldTLog_6_2::tLog;
 		case TLogVersion::V5:
 			return tLog;
 		default:
 			ASSERT(false);
-		}
 	}
-	ASSERT(false);
 	return tLog;
 }
 

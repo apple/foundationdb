@@ -584,6 +584,21 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	LogEpoch epoch() const { return recoveryCount; }
+
+	bool shouldSpillByValue( Tag t ) {
+		switch (logSpillType) {
+		case TLogSpillType::VALUE:
+			return true;
+		case TLogSpillType::REFERENCE:
+			return t.locality == tagLocalityTxs || t == txsTag;
+		default:
+			ASSERT(false);
+			return false;
+		}
+	}
+	bool shouldSpillByReference( Tag t ) {
+		return !shouldSpillByValue( t );
+	}
 };
 
 template <class T>
@@ -666,7 +681,7 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 
 	if (data->nothingPersistent) return;
 
-	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
+	if (logData->shouldSpillByValue(data->tag)) {
 		self->persistentData->clear( KeyRangeRef(
 					persistTagMessagesKey( logData->logId, data->tag, Version(0) ),
 					persistTagMessagesKey( logData->logId, data->tag, data->popped ) ) );
@@ -682,8 +697,8 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 }
 
 ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data ) {
-	// txsTag is spilled by value, so we do not need to track its popped location.
-	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
+	// For anything spilled by value, we do not need to track its popped location.
+	if (logData->shouldSpillByValue(data->tag)) {
 		return Void();
 	}
 
@@ -755,7 +770,7 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData && tagData->tag.locality != tagLocalityTxs && tagData->tag != txsTag) {
+			if (tagData && logData->shouldSpillByReference(tagData->tag)) {
 				if(!tagData->nothingPersistent) {
 					minLocation = std::min(minLocation, tagData->poppedLocation);
 					minVersion = std::min(minVersion, tagData->popped);
@@ -820,8 +835,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					anyData = true;
 					tagData->nothingPersistent = false;
 
-					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
-						// spill txsTag by value
+					if (logData->shouldSpillByValue(tagData->tag)) {
 						wr = BinaryWriter( Unversioned() );
 						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 							wr << msg->second.toStringRef();
@@ -926,7 +940,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 			for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 				Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
 				if (tagData) {
-					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
+					if (logData->shouldSpillByValue(tagData->tag)) {
 						minVersion = std::min(minVersion, newPersistentDataVersion);
 					} else {
 						minVersion = std::min(minVersion, tagData->popped);
@@ -1442,7 +1456,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 		}
 
-		if (req.tag.locality == tagLocalityTxs || req.tag == txsTag) {
+		if ( logData->shouldSpillByValue(req.tag) ) {
 			Standalone<VectorRef<KeyValueRef>> kvs = wait(
 					self->persistentData->readRange(KeyRangeRef(
 							persistTagMessagesKey(logData->logId, req.tag, req.begin),
