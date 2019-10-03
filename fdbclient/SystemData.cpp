@@ -619,6 +619,17 @@ const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDo
 const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
                                      LiteralStringRef("\xff\x02/restoreRequests0"));
 
+const KeyRef restoreApplierKey = LiteralStringRef("\xff\x02/restoreApplier/");
+const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
+
+// restoreApplierKey: track atomic transaction progress to ensure applying atomicOp exactly once
+const Key restoreApplierKeyFor(UID const& applierID, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreWorkersKeys.begin );
+	wr << applierID << version;
+	return wr.toValue();
+}
+
 // Encode restore worker key for workerID
 const Key restoreWorkerKeyFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());

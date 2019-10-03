@@ -178,11 +178,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state int numVersion = 0;
 	state double transactionSize = 0;
 	state int numAtomicOp = 0;
+	state Version txnIndex = 0; // Monotonically increase for each successful transaction
 	loop {
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			txnIndex++;
+			tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
 			transactionSize = 0;
 			numAtomicOp = 0;
 
@@ -221,6 +224,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						txnIndex++;
+						tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
 						prevIt = it;
 						prevIndex = index;
 						transactionSize = 0;
@@ -233,6 +238,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					txnIndex++;
+					tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
 					prevIt = it;
 					prevIndex = index;
 					transactionSize = 0;
@@ -247,10 +254,28 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
-			it = prevIt;
-			index = prevIndex;
-			transactionSize = 0;
-			TraceEvent(SevError, "FastRestoreError").detail("Reason", "Apply to DB Transaction with atomicOps failed").detail("ApplierApplyToDB", self->id()).detail("NumIncludedAtomicOps", numAtomicOp);
+			// Check if the transaction succeeds
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> txnSucceeded = wait(tr->get(restoreApplierKeyFor(self->id(), txnIndex)));
+			if (!txnSucceeded.present()) {
+				it = prevIt;
+				index = prevIndex;
+				transactionSize = 0;
+				TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatus", "Failed").detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("NumIncludedAtomicOps", numAtomicOp);
+			} else {
+				TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatus", "Succeeded").detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("NumIncludedAtomicOps", numAtomicOp);
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				txnIndex++;
+				tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
+				prevIt = it;
+				prevIndex = index;
+				transactionSize = 0;
+				numAtomicOp = 0;
+			}
 		}
 	}
 
