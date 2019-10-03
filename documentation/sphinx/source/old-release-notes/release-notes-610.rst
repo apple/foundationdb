@@ -2,6 +2,13 @@
 Release Notes
 #############
 
+6.1.13
+======
+
+* Loading a 6.1 or newer ``fdb_c`` library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* ``fdbrestore`` commands other than ``start`` required a default cluster file to be found but did not actually use it. `(PR #1912) <https://github.com/apple/foundationdb/pull/1912>`_.
+
 6.1.12
 ======
 

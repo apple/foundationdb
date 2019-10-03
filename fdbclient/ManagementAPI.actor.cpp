@@ -1209,8 +1209,6 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 			for(auto& s : servers)
 				tr.set( encodeExcludedServersKey(s), StringRef() );
@@ -1241,9 +1239,6 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 
 			for(auto& s : servers ) {
@@ -1533,12 +1528,11 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	return inProgressExclusion;
 }
 
-ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd) {
-	state UID snapUID = deterministicRandom()->randomUniqueID();
+ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	try {
 		wait(snapCreate(cx, snapCmd, snapUID));
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-		return snapUID;
+		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
 		throw;
