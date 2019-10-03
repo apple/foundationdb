@@ -3101,70 +3101,71 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 }
 
 ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
+	// Fetch the list of excluded servers
+	state ReadYourWritesTransaction tr(self->cx);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	loop {
-		// Fetch the list of excluded servers
-		state Transaction tr(self->cx);
-		loop {
-			try {
-				state Future<Standalone<RangeResultRef>> fresultsExclude = tr.getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY );
-				state Future<Standalone<RangeResultRef>> fresultsFailed = tr.getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY );
-				wait( success(fresultsExclude) && success(fresultsFailed) );
+		try {
+			state Future<Standalone<RangeResultRef>> fresultsExclude =
+			    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<Standalone<RangeResultRef>> fresultsFailed =
+			    tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
+			wait(success(fresultsExclude) && success(fresultsFailed));
 
-				Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
-				ASSERT( !excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY );
+			Standalone<RangeResultRef> excludedResults = fresultsExclude.get();
+			ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-				Standalone<RangeResultRef> failedResults = fresultsFailed.get();
-				ASSERT( !failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY );
+			Standalone<RangeResultRef> failedResults = fresultsFailed.get();
+			ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::set<AddressExclusion> excluded;
-				std::set<AddressExclusion> failed;
-				for(auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
-					AddressExclusion addr = decodeExcludedServersKey(r->key);
-					if (addr.isValid()) {
-						excluded.insert( addr );
-					}
+			std::set<AddressExclusion> excluded;
+			std::set<AddressExclusion> failed;
+			for (auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
+				AddressExclusion addr = decodeExcludedServersKey(r->key);
+				if (addr.isValid()) {
+					excluded.insert(addr);
 				}
-				for(auto r = failedResults.begin(); r != failedResults.end(); ++r) {
-					AddressExclusion addr = decodeFailedServersKey(r->key);
-					if (addr.isValid()) {
-						excluded.insert( addr );
-						failed.insert(addr);
-					}
-				}
-
-				// Reset and reassign self->excludedServers based on excluded, but we only
-				// want to trigger entries that are different
-				// Do not retrigger and double-overwrite failed servers
-				auto old = self->excludedServers.getKeys();
-				for (auto& o : old) {
-					if (!excluded.count(o) && failed.find(o) == failed.end()) {
-						self->excludedServers.set(o, DDTeamCollection::Status::NONE);
-					}
-				}
-				for (auto& n : excluded) {
-					if (failed.find(n) == failed.end()) {
-						self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
-					}
-				}
-
-				for (auto& f : failed) {
-					self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
-				}
-
-				TraceEvent("DDExcludedServersChanged", self->distributorId)
-					.detail("RowsExcluded", excludedResults.size())
-					.detail("RowsExcludedPermanently", failedResults.size())
-					.detail("TotalExclusions", excluded.size());
-
-				self->restartRecruiting.trigger();
-				break;
-			} catch (Error& e) {
-				wait( tr.onError(e) );
 			}
+			for (auto r = failedResults.begin(); r != failedResults.end(); ++r) {
+				AddressExclusion addr = decodeFailedServersKey(r->key);
+				if (addr.isValid()) {
+					excluded.insert(addr);
+					failed.insert(addr);
+				}
+			}
+
+			// Reset and reassign self->excludedServers based on excluded, but we only
+			// want to trigger entries that are different
+			// Do not retrigger and double-overwrite failed servers
+			auto old = self->excludedServers.getKeys();
+			for (auto& o : old) {
+				if (!excluded.count(o) && failed.find(o) == failed.end()) {
+					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
+				}
+			}
+			for (auto& n : excluded) {
+				if (failed.find(n) == failed.end()) {
+					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
+				}
+			}
+
+			for (auto& f : failed) {
+				self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
+			}
+
+			TraceEvent("DDExcludedServersChanged", self->distributorId)
+			    .detail("RowsExcluded", excludedResults.size())
+			    .detail("RowsExcludedPermanently", failedResults.size())
+			    .detail("TotalExclusions", excluded.size());
+
+			self->restartRecruiting.trigger();
+			state Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
+			wait(tr.commit());
+			wait(watchFuture);
+			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
-		state Future<Void> excludedWatch = tr.watch(Reference<Watch>(new Watch(excludedServersVersionKey)));
-		state Future<Void> failedWatch = tr.watch(Reference<Watch>(new Watch(failedServersVersionKey)));
-		wait(excludedWatch || failedWatch);
 	}
 }
 
