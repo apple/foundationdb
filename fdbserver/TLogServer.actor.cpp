@@ -585,7 +585,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	LogEpoch epoch() const { return recoveryCount; }
 
-	bool shouldSpillByValue( Tag t ) {
+	bool shouldSpillByValue( Tag t ) const {
+
 		switch (logSpillType) {
 		case TLogSpillType::VALUE:
 			return true;
@@ -596,7 +597,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			return false;
 		}
 	}
-	bool shouldSpillByReference( Tag t ) {
+	bool shouldSpillByReference( Tag t ) const {
+
 		return !shouldSpillByValue( t );
 	}
 };
