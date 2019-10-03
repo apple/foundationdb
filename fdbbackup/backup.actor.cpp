@@ -2186,7 +2186,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
                                        std::string removePrefix) {
 	try {
 		state FileBackupAgent backupAgent;
-		state int64_t restoreVersion = -1;
+		state Version restoreVersion = invalidVersion;
 
 		if (ranges.size() > 1) {
 			fprintf(stderr, "Currently only a single restore range is supported!\n");
@@ -2228,20 +2228,20 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 "\n", restoreVersion);
 				throw restore_invalid_version();
 			}
 
 			// Display the restore information, if requested
 			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long)restoreVersion);
+				printf("[DRY RUN] Restoring backup to version: %" PRId64 "\n", restoreVersion);
 				printf("%s\n", description.toString().c_str());
 			}
 		}
 
 		if (waitForDone && verbose) {
 			// If restore completed then report version restored
-			printf("Restored to version %lld%s\n", (long long)restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+			printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) throw;
