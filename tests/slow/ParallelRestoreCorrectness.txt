@@ -44,6 +44,8 @@ testTitle=BackupAndRestore
     clearAfterTest=false
     simBackupAgents=BackupToFile
     backupRangesCount=-1
+; TODO: Support abortAndRestartAfter test by commenting it out
+    abortAndRestartAfter=0
 
     testName=RandomClogging
     testDuration=90.0

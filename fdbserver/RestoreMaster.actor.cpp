@@ -157,6 +157,16 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 
 	// lock DB for restore
 	wait(lockDatabase(cx, randomUID));
+	try {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		wait(checkDatabaseLock(tr, randomUID));
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestoreMayFail").detail("Reason", "DB is not properly locked").detail("ExpectedLockID", randomUID);
+	}
+
 	wait(clearDB(cx));
 
 	// Step: Perform the restore requests

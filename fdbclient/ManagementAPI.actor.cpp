@@ -1707,7 +1707,7 @@ ACTOR Future<Void> checkDatabaseLock( Transaction* tr, UID id ) {
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 
@@ -1720,13 +1720,15 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present()) {
+		TraceEvent("DBA_CheckLock").detail("Locked", id);
 		printf("DB is locked at uid:%s\n", id.toString().c_str());
 	} else {
+		TraceEvent("DBA_CheckLock").detail("Unlocked", id);
 		printf("DB is not locked!\n");
 	}
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 
