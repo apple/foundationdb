@@ -153,13 +153,13 @@ struct AtomicOpsWorkload : TestWorkload {
 					tr.set(self->logKey(group), val);
 					int nodeIndex = deterministicRandom()->randomInt(0,self->nodeCount/100);
 					tr.atomicOp(StringRef(format("ops%08x%08x",group,nodeIndex)), val, self->opType);
-					TraceEvent(SevDebug, "AtomicOpWorker").detail("LogKey", self->logKey(group)).detail("Value", val);
-					TraceEvent(SevDebug, "AtomicOpWorker").detail("OpKey", format("ops%08x%08x",group,nodeIndex)).detail("Value", val).detail("AtomicOp", self->opType);
+					TraceEvent(SevDebug, "AtomicOpWorker").detail("LogKey", self->logKey(group)).detail("Value", val).detail("ValueInt", intValue);
+					TraceEvent(SevDebug, "AtomicOpWorker").detail("OpKey", format("ops%08x%08x",group,nodeIndex)).detail("Value", val).detail("ValueInt", intValue).detail("AtomicOp", self->opType);
 					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
-					//self->opNum--;
+					self->opNum--;
 				}
 			}
 		}
@@ -202,7 +202,15 @@ struct AtomicOpsWorkload : TestWorkload {
 						}
 
 						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-							TraceEvent(SevError, "LogMismatch").detail("Index", format("log%08x", g)).detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+							Optional<Standalone<StringRef>> logResult = tr.get(LiteralStringRef("xlogResult")).get();
+							Optional<Standalone<StringRef>> opsResult = tr.get(LiteralStringRef("xopsResult")).get();
+							ASSERT(logResult.present());
+							ASSERT(opsResult.present());
+							TraceEvent(SevError, "LogMismatch").detail("Index", format("log%08x", g))
+								.detail("LogResult", printable(logResult))
+								.detail("OpsResult",  printable(opsResult));
+								//.detail("LogResultInt", std::stoi(logResult.get().toString()))
+								//.detail("OpsResultInt", std::stoi(opsResult.get().toString()));
 						}
 
 						if( self->opType == MutationRef::AddValue ) {
