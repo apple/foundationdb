@@ -70,15 +70,23 @@ if (USE_CCACHE)
 	endif()
 endif()
 
+if ((NOT USE_LIBCXX) AND (NOT "$ENV{USE_LIBCXX}" STREQUAL ""))
+	string(TOUPPER "$ENV{USE_LIBCXX}" USE_LIBCXXENV)
+	if (("${USE_LIBCXXENV}" STREQUAL "ON") OR ("${USE_LIBCXXENV}" STREQUAL "1") OR ("${USE_LIBCXXENV}" STREQUAL "YES"))
+		set(USE_LIBCXX ON)
+	endif()
+endif()
+
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
+set(CMAKE_CXX_STANDARD 17)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
   # this sets the windows target version to Windows 7
   set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
+  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
   set(GCC NO)
@@ -172,16 +180,17 @@ else()
     -mmmx
     -mavx
     -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
+
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
   if (CLANG)
+    add_compile_options()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-lc++abi -Wl,-build-id=sha1)
+        add_link_options(-lc++ -lc++abi -Wl,-build-id=sha1)
       endif()
     endif()
     if (OPEN_FOR_IDE)
@@ -198,6 +207,11 @@ else()
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
       -Wno-format)
+    if (USE_CCACHE)
+      add_compile_options(
+        -Wno-register
+        -Wno-error=unused-command-line-argument)
+    endif()
   endif()
   if (CMAKE_GENERATOR STREQUAL Xcode)
   else()
