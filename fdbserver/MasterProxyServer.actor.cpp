@@ -638,8 +638,9 @@ ACTOR Future<Void> commitBatch(
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
-	TEST(self->latestLocalCommitBatchResolving.get() <
-	     localBatchNumber - 1); // Queuing pre-resolution commit processing
+
+	// Queuing pre-resolution commit processing
+	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
@@ -1185,7 +1186,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
-		// printf("getLiveCommittedVersion [%d] got version! going to reply... \n", debugID.get().first());
 	}
 
 	commitData->stats.txnStartOut += transactionCount;
@@ -1338,7 +1338,8 @@ ACTOR static Future<Void> transactionStarter(
 		.detail("NumTransactionsStarted", transactionsStarted[0] + transactionsStarted[1])
 		.detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
 		.detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] -
-		systemTransactionsStarted[0] - systemTransactionsStarted[1]) .detail("TransactionBudget", transactionBudget)
+		systemTransactionsStarted[0] - systemTransactionsStarted[1])
+		.detail("TransactionBudget", transactionBudget)
 		.detail("BatchTransactionBudget", batchTransactionBudget);*/
 
 		transactionCount += transactionsStarted[0] + transactionsStarted[1];

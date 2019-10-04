@@ -559,6 +559,19 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
+		it->second->notifyContextDestroyed();
+	ASSERT_ABORT( server_interf.empty() );
+	locationCache.insert( allKeys, Reference<LocationInfo>() );
+}
+
+pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
+	if( isBackward ) {
+		auto range = locationCache.rangeContainingKeyBefore(key);
+		return std::make_pair(range->range(), range->value());
+	}
+	else {
+		auto range = locationCache.rangeContaining(key);
+		return std::make_pair(range->range(), range->value());
 	}
 }
 
