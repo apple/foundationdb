@@ -764,10 +764,8 @@ class SharedLogsKey {
 	KeyValueStoreType storeType;
 
 public:
-	SharedLogsKey( const TLogOptions& options, KeyValueStoreType kvst ) {
-		logVersion = options.version;
-		spillType = options.spillType;
-		storeType = kvst;
+	SharedLogsKey( const TLogOptions& options, KeyValueStoreType kvst )
+			: logVersion(options.version), spillType(options.spillType), storeType(kvst) {
 		if (logVersion >= TLogVersion::V5)
 			spillType = TLogSpillType::UNSET;
 	}
