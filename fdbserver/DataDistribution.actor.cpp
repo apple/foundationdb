@@ -819,7 +819,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			else {
 				int nTries = 0;
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
-					// If unhealthy team is majority, we may not find an ok desk in this while loop
+					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
