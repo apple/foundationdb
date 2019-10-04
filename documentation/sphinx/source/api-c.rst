@@ -642,6 +642,9 @@ Applications must provide error handling and an appropriate retry loop around th
 
     An enumeration of available opcodes to be passed to :func:`fdb_transaction_atomic_op()`
 
+    A information line for `atomic-add`, the result overflows according to the width
+    of param2.
+
     ``FDB_MUTATION_TYPE_ADD``
 
     |atomic-add1|
