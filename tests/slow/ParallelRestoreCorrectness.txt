@@ -1,7 +1,7 @@
 testTitle=BackupAndRestore
     testName=Cycle
 ;    nodeCount=30000
-    nodeCount=4
+    nodeCount=1000
     transactionsPerSecond=500.0
 ;    transactionsPerSecond=2500.0
     testDuration=30.0
