@@ -269,8 +269,9 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
 			// getReply will automatically keep retrying for you.
 			// Alex: you probably do NOT need the timeoutError.
-			std::vector<REPLY_TYPE(Request)> reps = wait(
-				timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT));
+			// std::vector<REPLY_TYPE(Request)> reps = wait(
+			// 	timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT));
+			std::vector<REPLY_TYPE(Request)> reps = wait(getAll(cmdReplies));
 			break;
 		} catch (Error& e) {
 			for (auto& request : requests) {
@@ -280,7 +281,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 				    .detail("Request", request.second.toString());
 			}
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			fprintf(stdout, "sendBatchRequests requests:%d Error code:%d, error message:%s\n", requests.size(), e.code(), e.what());
 		}
 	}
 
@@ -307,13 +308,20 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 
 			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
 			// getReply will automatically keep retrying for you.
-			std::vector<REPLY_TYPE(Request)> reps = wait(
-			    timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)); 
+			// std::vector<REPLY_TYPE(Request)> reps = wait(
+			//     timeoutError(getAll(cmdReplies), SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)); 
+			std::vector<REPLY_TYPE(Request)> reps = wait(getAll(cmdReplies)); 
 			*replies = reps;
 			break;
 		} catch (Error& e) {
+			for (auto& request : requests) {
+				TraceEvent(SevWarn, "FastRestore")
+				    .detail("GetBatchReplies", requests.size())
+				    .detail("RequestID", request.first)
+				    .detail("Request", request.second.toString());
+			}
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "getBatchReplies Error code:%d, error message:%s\n", e.code(), e.what());
+			fprintf(stdout, "getBatchReplies requests:%d Error code:%d, error message:%s\n", requests.size(), e.code(), e.what());
 		}
 	}
 
