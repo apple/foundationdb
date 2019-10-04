@@ -2889,7 +2889,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			bool healthy = !badTeam && !anyUndesired && serversLeft == self->configuration.storageTeamSize;
 			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
-			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
+			bool containsFailed = teamContainsFailedServer(self, team);
+			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 			// TraceEvent("TeamHealthChangeDetected", self->distributorId)
 			//     .detail("Team", team->getDesc())
 			//     .detail("ServersLeft", serversLeft)
@@ -3002,7 +3003,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
-				bool containsFailed = teamContainsFailedServer(self, team);
 				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed) {
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
 
@@ -3129,7 +3129,6 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 			for (auto r = failedResults.begin(); r != failedResults.end(); ++r) {
 				AddressExclusion addr = decodeFailedServersKey(r->key);
 				if (addr.isValid()) {
-					excluded.insert(addr);
 					failed.insert(addr);
 				}
 			}
@@ -3139,12 +3138,12 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 			// Do not retrigger and double-overwrite failed servers
 			auto old = self->excludedServers.getKeys();
 			for (auto& o : old) {
-				if (!excluded.count(o) && failed.find(o) == failed.end()) {
+				if (!excluded.count(o) && !failed.count(o)) {
 					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 				}
 			}
 			for (auto& n : excluded) {
-				if (failed.find(n) == failed.end()) {
+				if (!failed.count(n)) {
 					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
 				}
 			}
