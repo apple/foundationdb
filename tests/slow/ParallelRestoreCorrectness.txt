@@ -7,7 +7,7 @@ testTitle=BackupAndRestore
     testDuration=30.0
     expectedRate=0
     clearAfterTest=false
-	keyPrefix=!
+;	keyPrefix=!
 
 ;    testName=Cycle
 ;;    nodeCount=1000
@@ -43,6 +43,7 @@ testTitle=BackupAndRestore
     restoreAfter=60.0
     clearAfterTest=false
     simBackupAgents=BackupToFile
+; backupRangesCount<0 means backup the entire normal keyspace
     backupRangesCount=-1
 ; TODO: Support abortAndRestartAfter test by commenting it out
     abortAndRestartAfter=0

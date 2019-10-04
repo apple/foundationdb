@@ -219,28 +219,29 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> checkDB(Database cx, std::string when,
 	                                  BackupAndParallelRestoreCorrectnessWorkload* self) {
 
+		//return Void();
+
+		state Key keyPrefix = LiteralStringRef("");
+		//              int numPrint = 20; //number of entries in the front and end to print out.
+		state Transaction tr(cx);
+		state int retryCount = 0;
+		loop {
+			try {
+				state Version v = wait( tr.getReadVersion() );
+				state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
+				TraceEvent("FastRestore").detail("CheckDBAt", when.c_str()).detail("RetryCount", retryCount).detail("DataSize", data.size()).detail("DataContent", data.contents().toString());
+				printf("Check DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
+							data.size(), data.contents().toString().c_str());
+				compareDBKVs(data, self);
+				break;
+			} catch (Error& e) {
+					retryCount++;
+					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CheckDBError").error(e);
+					wait(tr.onError(e));
+			}
+		}
+
 		return Void();
-
-		//    state Key keyPrefix = LiteralStringRef("");
-		//    //              int numPrint = 20; //number of entries in the front and end to print out.
-		//    state Transaction tr(cx);
-		//    state int retryCount = 0;
-		//    loop {
-		//            try {
-		//                    state Version v = wait( tr.getReadVersion() );
-		//                    state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
-		//                    printf("Check DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
-		//                               data.size(), data.contents().toString().c_str());
-		//                    compareDBKVs(data, self);
-		//                    break;
-		//            } catch (Error& e) {
-		//                    retryCount++;
-		//                    TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CheckDBError").error(e);
-		//                    wait(tr.onError(e));
-		//            }
-		//    }
-
-		//    return Void();
 
 	}
 
@@ -621,6 +622,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state int restoreIndex;
 
 				// Restore each range by calling backupAgent.restore()
+				TraceEvent("FastRestore").detail("TestWorkload", "PrepareRestoreRequests").detail("BackupRanges", self->backupRanges.size());
 				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
 				state Transaction tr1(cx);
 				loop {
@@ -631,6 +633,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
 						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
 							auto range = self->backupRanges[restoreIndex];
+							TraceEvent("FastRestore").detail("TestWorkload", "ConstructRestoreRequest").detail("Range", range.toString());
 							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
 							                                 std::to_string(restoreIndex));
 							restoreTags.push_back(restoreTag);
@@ -650,6 +653,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				};
 				printf("FastRestore:Test workload triggers the restore by setting up restoreRequestTriggerKey\n");
+				TraceEvent("FastRestore").detail("TestWorkload", "Trigger restore by setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
 				if (BUGGIFY) {

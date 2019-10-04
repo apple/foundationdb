@@ -60,12 +60,16 @@ void dummySampleWorkload(Reference<RestoreMasterData> self);
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
 	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
 
-	// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
-	wait(recruitRestoreRoles(masterWorker, self));
+	try {
+		// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
+		wait(recruitRestoreRoles(masterWorker, self));
 
-	wait(distributeRestoreSysInfo(masterWorker, self));
+		wait(distributeRestoreSysInfo(masterWorker, self));
 
-	wait(startProcessRestoreRequests(self, cx));
+		wait(startProcessRestoreRequests(self, cx));
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestore").detail("StartRestoreMaster", "Unexpectedly unhandled error").detail("Error", e.what()).detail("ErrorCode", e.code());
+	}
 
 	return Void();
 }
@@ -156,16 +160,25 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
 
 	// lock DB for restore
-	wait(lockDatabase(cx, randomUID));
-	try {
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		wait(checkDatabaseLock(tr, randomUID));
-	} catch (Error& e) {
-		TraceEvent(SevError, "FastRestoreMayFail").detail("Reason", "DB is not properly locked").detail("ExpectedLockID", randomUID);
+	state int numTries = 0;
+	loop {
+		try {
+			wait(lockDatabase(cx, randomUID));
+			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(checkDatabaseLock(tr, randomUID));
+			TraceEvent("FastRestore").detail("DBIsLocked", randomUID);
+			break;
+		} catch (Error& e) {
+			TraceEvent("FastRestore").detail("CheckLockError", e.what());
+			TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail").detail("Reason", "DB is not properly locked").detail("ExpectedLockID", randomUID);
+			numTries++;
+			wait(delay(5.0));
+		}
 	}
+	
 
 	wait(clearDB(cx));
 
@@ -184,11 +197,17 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
 	wait(notifyRestoreCompleted(self, cx));
 
-	try {
-		wait(unlockDatabase(cx, randomUID));
-	} catch (Error& e) {
-		TraceEvent(SevWarn, "UnlockDBFailed").detail("UID", randomUID.toString());
+	numTries = 0;
+	loop {
+		try {
+			wait(unlockDatabase(cx, randomUID));
+			break;
+		} catch (Error& e) {
+			TraceEvent(numTries > 50 ? SevError : SevWarn, "UnlockDBFailed").detail("UID", randomUID.toString());
+			numTries++;
+		}
 	}
+	
 
 	TraceEvent("FastRestore").detail("RestoreMasterComplete", self->id());
 

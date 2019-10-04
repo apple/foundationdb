@@ -1608,7 +1608,7 @@ ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
