@@ -43,3 +43,10 @@ To stop the cluster, one can run:
 
 Note that all data are lost between reboots of the processes as they have not
 been configured to use a persistent volume (but write to Docker's temporary file system).
+
+
+Using Docker Image With a Mounted Volume
+-----------------------------------------
+
+Specify mount volume using `--mount` option. You can specify volume-name, container-path,
+volume type, device. Follow the script described:
