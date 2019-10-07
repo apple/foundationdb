@@ -33,7 +33,7 @@ std::string describe( uint32_t const& item ) {
 
 struct RemoveServersSafelyWorkload : TestWorkload {
 	bool enabled, killProcesses;
-	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckTimeouts;
+	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckRetries;
 	double minDelay, maxDelay;
 	double kill1Timeout, kill2Timeout;
 
@@ -48,7 +48,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		minMachinesToKill = getOption( options, LiteralStringRef("minMachinesToKill"), 1 );
 		maxMachinesToKill = getOption( options, LiteralStringRef("maxMachinesToKill"), 10 );
 		maxMachinesToKill = std::max(minMachinesToKill, maxMachinesToKill);
-		maxSafetyCheckTimeouts = getOption(options, LiteralStringRef("maxSafetyCheckTimeouts"), 50);
+		maxSafetyCheckRetries = getOption(options, LiteralStringRef("maxSafetyCheckRetries"), 50);
 		minDelay = getOption( options, LiteralStringRef("minDelay"), 0.0 );
 		maxDelay = getOption( options, LiteralStringRef("maxDelay"), 60.0 );
 		kill1Timeout = getOption( options, LiteralStringRef("kill1Timeout"), 60.0 );
@@ -413,7 +413,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
 		if (markExcludeAsFailed) {
-			state int timeouts = 0;
+			state int retries = 0;
 			loop {
 				state bool safe = false;
 				state std::set<AddressExclusion> failSet =
@@ -426,27 +426,26 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusions", describe(toKillMarkFailedArray));
-				loop {
-					choose {
-						when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray))) {
-							safe = _safe;
-							break;
-						}
-						when(wait(delay(5.0))) {
-							TraceEvent("RemoveAndKill", functionId)
-							    .detail("Step", "SafetyCheckTimedOut")
-							    .detail("Exclusions", describe(toKillMarkFailedArray));
-						}
+				choose {
+					when(bool _safe = wait(checkSafeExclusions(cx, toKillMarkFailedArray))) {
+						safe = _safe;
 					}
-					if (timeouts == self->maxSafetyCheckTimeouts) {
-						// Do not perform safety check, essentially simulating 'FORCE' option
-						TraceEvent("RemoveAndKill", functionId).detail("Step", "SafetyCheckLimitReached").detail("Timeouts", timeouts);
-						safe = true;
-						break;
+					when(wait(delay(5.0))) {
+						TraceEvent("RemoveAndKill", functionId)
+							.detail("Step", "SafetyCheckTimedOut")
+							.detail("Exclusions", describe(toKillMarkFailedArray));
 					}
-					timeouts++;
+				}
+				if (retries == self->maxSafetyCheckRetries) {
+					// Do not mark as failed if limit is reached
+					TraceEvent("RemoveAndKill", functionId)
+						.detail("Step", "SafetyCheckLimitReached")
+						.detail("Retries", retries);
+					markExcludeAsFailed = false;
+					safe = true;
 				}
 				if (safe) break;
+				retries++;
 			}
 		}
 
