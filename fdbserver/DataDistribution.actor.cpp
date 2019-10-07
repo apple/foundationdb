@@ -846,6 +846,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			else {
 				int nTries = 0;
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
+					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
@@ -857,6 +858,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						randomTeams.push_back( std::make_pair( NONE_SHARED, dest ) );
 					else
 						nTries++;
+				}
+
+				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
+				if (g_network->isSimulated() && randomTeams.empty() && !self->zeroHealthyTeams->get()) {
+					TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
 				}
 
 				for( int i = 0; i < randomTeams.size(); i++ ) {
@@ -899,6 +905,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					}
 				}
 			}
+			// if (!bestOption.present()) {
+			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
+			// 	self->traceAllInfo(true);
+			// }
 
 			req.reply.send( bestOption );
 
@@ -1341,6 +1351,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
+			    .detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
