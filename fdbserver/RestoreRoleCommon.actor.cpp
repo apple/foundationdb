@@ -59,10 +59,11 @@ ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Re
 }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	if (!self->versionBatchStart) {
-		self->versionBatchStart = true;
-		self->resetPerVersionBatch();
-	}
+	// if (!self->versionBatchStart) {
+	// 	self->versionBatchStart = true;
+	// 	self->resetPerVersionBatch();
+	// }
+	self->resetPerVersionBatch();
 	TraceEvent("FastRestore")
 	    .detail("InitVersionBatch", req.batchID)
 	    .detail("Role", getRoleStr(self->role))

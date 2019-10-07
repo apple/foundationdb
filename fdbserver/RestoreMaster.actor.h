@@ -75,6 +75,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
+	void resetPerVersionBatch() {}
+
 	std::string describeNode() {
 		std::stringstream ss;
 		ss << "Master versionBatch:" << batchIndex;

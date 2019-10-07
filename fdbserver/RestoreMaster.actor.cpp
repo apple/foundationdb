@@ -229,6 +229,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
 		wait(initializeVersionBatch(self));
 		wait(distributeWorkloadPerVersionBatch(self, cx, request, versionBatch->second));
+		self->batchIndex++;
 	}
 
 	TraceEvent("FastRestore").detail("RestoreToVersion", request.targetVersion);

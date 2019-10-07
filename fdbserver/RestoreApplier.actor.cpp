@@ -110,6 +110,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	getDetailsOfNotifiedDoubleValue(self->logVersion.get(), logVersion, logFileIndex);
 	getDetailsOfNotifiedDoubleValue(self->rangeVersion.get(), rangeVersion, rangeFileIndex);
 
+	if (self->processedFileState.find(req.fileUID) == self->processedFileState.end()) {
+		self->processedFileState.insert(std::make_pair(req.fileUID, NotifiedVersion(0)));
+	}
+	state std::map<uint32_t, NotifiedVersion>::iterator curFileState = self->processedFileState.find(req.fileUID);
+
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
 		.detail("FileUID", req.fileUID)
@@ -117,13 +122,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		.detail("LogFileIndex", logFileIndex)
 	    .detail("RangeVersion", rangeVersion)
 		.detail("RangeFileIndex", rangeFileIndex)
+		.detail("ProcessedFileVersion", curFileState->second.get())
 	    .detail("Request", req.toString());
-
-	if (self->processedFileState.find(req.fileUID) == self->processedFileState.end()) {
-		self->processedFileState.insert(std::make_pair(req.fileUID, NotifiedVersion(0)));
-	}
-
-	state std::map<uint32_t, NotifiedVersion>::iterator curFileState = self->processedFileState.find(req.fileUID);
+	
 	wait(curFileState->second.whenAtLeast(req.prevVersion));
 
 	if (curFileState->second.get() == req.prevVersion) {
@@ -136,6 +137,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		state int mIndex = 0;
 		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
+			TraceEvent(SevDebug, "FastRestore").detail("ApplierNode", self->id()).detail("FileUID", req.fileUID).detail("Version", commitVersion).detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 			numMutations++;
 		}
@@ -346,6 +348,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
                                                  Database cx) {
 	TraceEvent("FastRestore")
 	    .detail("ApplierApplyToDB", self->id())
+		.detail("BatchID", req.batchID)
 	    .detail("DBApplierPresent", self->dbApplier.present());
 	if (!self->dbApplier.present()) {
 		self->dbApplier = applyToDB(self, cx);

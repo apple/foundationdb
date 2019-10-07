@@ -518,6 +518,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
+		TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", version).detail("ParsedMutationKV", m.toString());
 
 		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
 		kvOps[version].push_back_deep(kvOps[version].arena(), m);
