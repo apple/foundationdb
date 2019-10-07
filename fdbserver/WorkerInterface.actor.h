@@ -467,6 +467,12 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
                         Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
 }
+namespace oldTLog_6_2 {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
+}
 
 typedef decltype(&tLog) TLogFn;
 
