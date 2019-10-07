@@ -163,7 +163,7 @@ bool isBackupMessage(const VersionedMessage& msg) {
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	const int blockSize = 1 << 20;
 	state Reference<IBackupFile> logFile =
-	    wait(self->container->writeLogFile(self->messages[0].getVersion(), popVersion, blockSize));
+	    wait(self->container->writeTaggedLogFile(self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
 	state int idx = 0;
 	for (; idx < numMsg; idx++) {
 		// TODO: Endianness for version.version & version.sub
