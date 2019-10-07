@@ -198,7 +198,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = self->kvOps.begin();
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator prevIt = it;
 	state int index = 0;
-	state int prevIndex = index;
+	state int prevIndex = index; // prevIndex is the starting index used in the current transaction. When txn fails and retries, it is the starting index.
 	state int count = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int numVersion = 0;
@@ -215,19 +215,22 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			if (lastTxnHasError) {
 				Optional<Value> txnSucceeded = wait(tr->get(restoreApplierKeyFor(self->id(), txnIndex)));
 				if (!txnSucceeded.present()) {
+					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusFailed",  txnIndex).detail("ApplierApplyToDB", self->id())
+						.detail("TxnIndex", txnIndex).detail("Version", it->first).detail("Index", index).detail("NumIncludedAtomicOps", numAtomicOp);
 					// Re-execute previous txn
 					it = prevIt;
 					index = prevIndex;
-					txnIndex--;
+					txnIndex--; // Retry the previous transaction
+					numAtomicOp = 0;
 					transactionSize = 0;
-					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusFailed",  txnIndex).detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("NumIncludedAtomicOps", numAtomicOp);
 				} else {
-					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusSucceeded", txnIndex).detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("NumIncludedAtomicOps", numAtomicOp);
+					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusSucceeded", txnIndex).detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("Version", it->first).detail("Index", index).detail("NumIncludedAtomicOps", numAtomicOp);
 					// tr->reset();
 					// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					// tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					// txnIndex++;
 					// tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
+					++index; // Exception skips the ++index in it->second's for-loop
 					prevIt = it;
 					prevIndex = index;
 					transactionSize = 0;
@@ -236,19 +239,16 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				lastTxnHasError = false;
 			}
 			
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			txnIndex++;
+			TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("Version", it->first).detail("Index", index);
 			tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
 			transactionSize = 0;
 			numAtomicOp = 0;
 
 			for (; it != self->kvOps.end(); ++it) {
-				numVersion++;
 				//TraceEvent("FastRestore").detail("Applier", self->id()).detail("ApplyKVsToDBVersion", it->first);
 				state MutationRef m;
-				for (; index < it->second.size(); ++index) {
+				for (; index < it->second.size();++index) {
 					m = it->second[index];
 					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
@@ -257,7 +257,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					TraceEvent(SevDebug, "FastRestore_Debug").detail("Applier", self->describeNode()).detail("Version", it->first).detail("Mutation", m.toString());
+					TraceEvent(SevDebug, "FastRestore_Debug").detail("ApplierApplyToDB", self->describeNode()).detail("Version", it->first).detail("Mutation", m.toString());
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
@@ -280,9 +280,10 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						txnIndex++;
+						TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("Version", it->first).detail("Index", index);
 						tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
 						prevIt = it;
-						prevIndex = index;
+						prevIndex = index+1;
 						transactionSize = 0;
 						numAtomicOp = 0;
 					}
@@ -294,9 +295,10 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					txnIndex++;
+					TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnIndex", txnIndex).detail("Version", it->first).detail("Index", index);
 					tr->set(restoreApplierKeyFor(self->id(), txnIndex), restoreApplierTxnValue);
 					prevIt = it;
-					prevIndex = index;
+					prevIndex = index+1;
 					transactionSize = 0;
 					numAtomicOp = 0;
 				}
@@ -308,7 +310,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			}
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("Error", e.what()).detail("TxnStatus", "?");
+			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError").detail("ApplierApplyToDB", self->id()).detail("Error", e.what()).detail("TxnStatus", "?");
 			lastTxnHasError = true;
 			// if (e.code() == commit_unknown_result) {
 			// 	lastTxnHasError = true;

@@ -184,7 +184,7 @@ struct AtomicOpsWorkload : TestWorkload {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
 							tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
-							TraceEvent(SevDebug, "AtomicOpsWorkload_XlogResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
+							//TraceEvent(SevDebug, "AtomicOpsWorkload_XlogResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
 						}
 					}
 
@@ -198,7 +198,7 @@ struct AtomicOpsWorkload : TestWorkload {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
 							tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
-							TraceEvent(SevDebug, "AtomicOpsWorkload_XopsResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
+							//TraceEvent(SevDebug, "AtomicOpsWorkload_XopsResult").detail("Key", kv.key).detail("Value", kv.value).detail("OpType", self->opType).detail("OpTypeStr", typeString[self->opType]);
 						}
 
 						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
