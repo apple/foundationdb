@@ -3165,8 +3165,7 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 
 			TraceEvent("DDExcludedServersChanged", self->distributorId)
 			    .detail("RowsExcluded", excludedResults.size())
-			    .detail("RowsExcludedPermanently", failedResults.size())
-			    .detail("TotalExclusions", excluded.size());
+			    .detail("RowsFailed", failedResults.size());
 
 			self->restartRecruiting.trigger();
 			state Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
