@@ -240,9 +240,13 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					
 					// Increase curIndexInCurTxn and curTxnId accordingly for succeeded txn; updated uncommitted txn info.
 					curIndexInCurTxn++;
-					if (curIndexInCurTxn >= curItInCurTxn->second.size()) {
+					while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
 						curIndexInCurTxn = 0;
 						curItInCurTxn++;
+					}
+					if (curItInCurTxn == self->kvOps.end()) {
+						wait(tr->commit());
+						break;
 					}
 					startItInUncommittedTxn = curItInCurTxn;
 					startIndexInUncommittedTxn = curIndexInCurTxn;
@@ -257,10 +261,10 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
 
 			// TODO: Figure out the tracking of the txn progress. The numbering in multiple exception handlings is important
-			while (curItInCurTxn != self->kvOps.end()) {
+			//while (curItInCurTxn != self->kvOps.end()) {
 				state MutationRef m;
 				ASSERT_WE_THINK(curIndexInCurTxn < curItInCurTxn->second.size());
-				while (curIndexInCurTxn < curItInCurTxn->second.size()) {
+				//while (curIndexInCurTxn < curItInCurTxn->second.size()) {
 					m = curItInCurTxn->second[curIndexInCurTxn];
 					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
@@ -290,9 +294,13 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						wait(tr->commit());
 						// Update current txn info and uncommitted txn info
 						curIndexInCurTxn++;
-						if (curIndexInCurTxn >= curItInCurTxn->second.size()) {
+						while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
 							curIndexInCurTxn = 0;
 							curItInCurTxn++;
+						}
+						if (curItInCurTxn == self->kvOps.end()) {
+							wait(tr->commit());
+							break;
 						}
 						startIndexInUncommittedTxn = curIndexInCurTxn;
 						startItInUncommittedTxn = curItInCurTxn;
@@ -306,15 +314,19 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr->set(restoreApplierKeyFor(self->id(), curIndexInCurTxn), restoreApplierTxnValue);
 					}
-				}
+				//}
 
 				if (transactionSize > 0) { // the commit batch should NOT across versions
 					wait(tr->commit());
 					// Update current txn info and uncommitted txn info
 					curIndexInCurTxn++;
-					if (curIndexInCurTxn >= curItInCurTxn->second.size()) {
+					while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
 						curIndexInCurTxn = 0;
 						curItInCurTxn++;
+					}
+					if (curItInCurTxn == self->kvOps.end()) {
+						wait(tr->commit());
+						break;
 					}
 					startIndexInUncommittedTxn = curIndexInCurTxn;
 					startItInUncommittedTxn = curItInCurTxn;
@@ -328,7 +340,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue);
 				}
-			}
+			// } //while (curItInCurTxn != self->kvOps.end())
 			// Last transaction
 			if (transactionSize > 0) {
 				wait(tr->commit());
@@ -345,7 +357,23 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		}
 	}
 
+	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB_Finished", self->id()).detail("CleanupCurTxnIds", curTxnId);
+	// House cleaning
 	self->kvOps.clear();
+	// clean up txn ids
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(restoreApplierKeys);
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB_Finished", self->id());
 
 	return Void();
 }

@@ -619,7 +619,9 @@ const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDo
 const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
                                      LiteralStringRef("\xff\x02/restoreRequests0"));
 
-const KeyRef restoreApplierKey = LiteralStringRef("\xff\x02/restoreApplier/");
+const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
+                                     LiteralStringRef("\xff\x02/restoreApplier"));
+const KeyRef restoreApplierKey = restoreApplierKeys.begin;
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKey: track atomic transaction progress to ensure applying atomicOp exactly once

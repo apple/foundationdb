@@ -288,6 +288,7 @@ extern const KeyRef restoreStatusKey; // To be used when we measure fast restore
 extern const KeyRef restoreRequestTriggerKey;
 extern const KeyRef restoreRequestDoneKey;
 extern const KeyRangeRef restoreRequestKeys;
+extern const KeyRangeRef restoreApplierKeys;
 extern const KeyRef restoreApplierKey;
 extern const KeyRef restoreApplierTxnValue;
 
