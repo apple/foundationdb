@@ -916,6 +916,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
 
 			if (!currentKey.present())
