@@ -25,7 +25,7 @@
 #include "flow/Error.h"
 #include "flow/Platform.h"
 
-// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by scripts/alloc.pl
+// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by tools/alloc_instrumentation.py
 //#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
 //#define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
