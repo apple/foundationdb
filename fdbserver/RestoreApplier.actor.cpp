@@ -204,6 +204,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state Version curTxnId = 0; // The id of the current uncommitted txn, which monotonically increase for each successful transaction
 	state Version uncommittedTxnId = 0; // The id of the most recent succeeded txn. Used to recover the failed txn id in retry 
 	state bool lastTxnHasError = false; // Does the last txn has error. TODO: Only need to handle txn_commit_unknown error
+	state bool startNextVersion = false; // The next txn will include mutations in next version
 
 	state int numAtomicOps = 0;
 	state double transactionSize = 0;
@@ -248,23 +249,28 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						wait(tr->commit());
 						break;
 					}
+					curTxnId++;
+
 					startItInUncommittedTxn = curItInCurTxn;
 					startIndexInUncommittedTxn = curIndexInCurTxn;
-					
+					uncommittedTxnId = curTxnId;
+
 					transactionSize = 0;
 					numAtomicOps = 0;
 				}
 				lastTxnHasError = false;
 			}
 			
-			TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn).detail("Version", curItInCurTxn->first);
+			TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id())
+				.detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
+				.detail("CurrentIteratorMutations", curItInCurTxn->second.size())
+				.detail("Version", curItInCurTxn->first);
 			tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
 
-			// TODO: Figure out the tracking of the txn progress. The numbering in multiple exception handlings is important
-			//while (curItInCurTxn != self->kvOps.end()) {
+			{ // Iterate versions: curItInCurTxn
 				state MutationRef m;
 				ASSERT_WE_THINK(curIndexInCurTxn < curItInCurTxn->second.size());
-				//while (curIndexInCurTxn < curItInCurTxn->second.size()) {
+				{ // Iterate mutations at the same version: curIndexInCurTxn
 					m = curItInCurTxn->second[curIndexInCurTxn];
 					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
@@ -302,22 +308,40 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 							wait(tr->commit());
 							break;
 						}
+						curTxnId++;
 						startIndexInUncommittedTxn = curIndexInCurTxn;
 						startItInUncommittedTxn = curItInCurTxn;
+
+						uncommittedTxnId = curTxnId;
 						transactionSize = 0;
 						numAtomicOps = 0;
 
 						// Start next transaction
-						TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn).detail("Version", curItInCurTxn->first);
+						TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
+							.detail("CurrentIteratorMutations", curItInCurTxn->second.size()).detail("Version", curItInCurTxn->first);
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr->set(restoreApplierKeyFor(self->id(), curIndexInCurTxn), restoreApplierTxnValue);
-					}
-				//}
+					} else {
+						curIndexInCurTxn++;
+						while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
+							curIndexInCurTxn = 0;
+							curItInCurTxn++;
+							startNextVersion = true;
+						}
 
-				if (transactionSize > 0) { // the commit batch should NOT across versions
+						if (curItInCurTxn == self->kvOps.end()) {
+							wait(tr->commit());
+							break;
+						}
+					}
+				}
+
+				if (startNextVersion && transactionSize > 0) { // the commit batch should NOT across versions
+					startNextVersion = false;
 					wait(tr->commit());
+					
 					// Update current txn info and uncommitted txn info
 					curIndexInCurTxn++;
 					while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
@@ -328,24 +352,29 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						wait(tr->commit());
 						break;
 					}
+					curTxnId++;
+
 					startIndexInUncommittedTxn = curIndexInCurTxn;
 					startItInUncommittedTxn = curItInCurTxn;
+					uncommittedTxnId = curTxnId;
+					
 					transactionSize = 0;
 					numAtomicOps = 0;
 
 					// Start next transaction
-					TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn).detail("Version", curItInCurTxn->first);
+					TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
+						.detail("CurrentIteratorMutations", curItInCurTxn->second.size()).detail("Version", curItInCurTxn->first);
 					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue);
 				}
-			// } //while (curItInCurTxn != self->kvOps.end())
+			} //while (curItInCurTxn != self->kvOps.end())
 			// Last transaction
 			if (transactionSize > 0) {
 				wait(tr->commit());
 			}
-			break;
+			//break;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError").detail("Error", e.what()).detail("TxnStatus", "?")
 				.detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn).detail("Version", curItInCurTxn->first);
@@ -357,7 +386,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		}
 	}
 
-	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB_Finished", self->id()).detail("CleanupCurTxnIds", curTxnId);
+	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id()).detail("CleanupCurTxnIds", curTxnId);
 	// House cleaning
 	self->kvOps.clear();
 	// clean up txn ids
@@ -366,14 +395,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->clear(restoreApplierKeys);
+			tr->clear( KeyRangeRef(restoreApplierKeyFor(self->id(),0), restoreApplierKeyFor(self->id(),curTxnId+1)) );
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
-	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB_Finished", self->id());
+	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id());
 
 	return Void();
 }
