@@ -815,7 +815,8 @@ ACTOR Future<Void> workerServer(
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
-	state Reference<AsyncVar<UID>> activeSharedTLog = Reference<AsyncVar<UID>>(new AsyncVar<UID>());
+	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );

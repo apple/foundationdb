@@ -321,7 +321,7 @@ struct TLogData : NonCopyable {
 	int64_t instanceID;
 	int64_t bytesInput;
 	int64_t bytesDurable;
-	int64_t targetVolatileBytes;
+	int64_t targetVolatileBytes;  // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 
