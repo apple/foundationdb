@@ -151,7 +151,7 @@ protected:
 
 private:
 	int actorCount = 0;
-	AsyncVar<bool> actorCountIsZero = true;
+	AsyncVar<bool> actorCountIsZero = AsyncVar<bool>(true);
 };
 
 class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
