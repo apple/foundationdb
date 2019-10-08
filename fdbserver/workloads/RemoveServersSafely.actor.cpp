@@ -403,12 +403,20 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		state std::vector<AddressExclusion>	toKillArray;
 		state std::vector<AddressExclusion>	toKillMarkFailedArray;
 		state AddressExclusion coordExcl;
-		// Exclude a coordinator under buggify, but only if fault tolerance is > 0
-		if (BUGGIFY && g_simulator.desiredCoordinators > 1) {
+		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
+		if (BUGGIFY && toKill.size()) {
 			std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
-			auto& randomCoordinator = deterministicRandom()->randomChoice(coordinators);
-			coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
-			toKill.insert(coordExcl);
+			if (coordinators.size() > 2) {
+				auto removeServer = toKill.begin();
+				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
+				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
+				TraceEvent("RemoveAndKill", functionId)
+					.detail("Step", "ReplaceKillSet")
+					.detail("Removing", removeServer->toString())
+					.detail("Adding", coordExcl.toString());
+				toKill.erase(removeServer);
+				toKill.insert(coordExcl);
+			}
 		}
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		killProcArray = self->getProcesses(toKill);
