@@ -4690,6 +4690,13 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		req.reply.send(reply);
 		return Void();
 	}
+	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
+	if (self->teamCollection->teams.size() <= 1) {
+		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams");
+		reply.safe = false;
+		req.reply.send(reply);
+		return Void();
+	}
 	vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
 	for (const AddressExclusion& excl : req.exclusions) {
@@ -4705,7 +4712,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		std::sort(teamServerIDs.begin(), teamServerIDs.end());
 		TraceEvent("DDExclusionSafetyCheck")
 			.detail("Excluding", describe(excludeServerIDs))
-			.detail("Existing", describe(teamServerIDs));
+			.detail("Existing", team->getDesc());
 		// Find size of set intersection of both vectors and see if the leftover team is valid
 		vector<UID> intersectSet(teamServerIDs.size());
 		auto it = std::set_intersection(excludeServerIDs.begin(), excludeServerIDs.end(), teamServerIDs.begin(),
