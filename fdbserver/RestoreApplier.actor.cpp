@@ -183,7 +183,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
-		TraceEvent("FastRestore").detail("ApplierApplyToDBEmpty", self->id());
+		TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id()).detail("Reason", "EmptyVersionMutation");
 		return Void();
 	}
 	ASSERT_WE_THINK(self->kvOps.size());
@@ -197,15 +197,28 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	// When the current txn fails and retries, startItInUncommittedTxn is the starting iterator in retry; startIndexInUncommittedTxn is the starting index in retry;
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator curItInCurTxn = self->kvOps.begin();
-	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator startItInUncommittedTxn = curItInCurTxn; // Starting iter. in the most recent succeeded txn
 	state int curIndexInCurTxn = 0; // current index in current txn; it increases per mutation
-	state int startIndexInUncommittedTxn = 0; // start index in the most recent succeeded txn. Note: Txns have different number of mutations
+
+	// In case a version has 0 txns
+	while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
+		curIndexInCurTxn = 0;
+		curItInCurTxn++;
+	}
+	if (curItInCurTxn == self->kvOps.end()) {
+		TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id()).detail("Reason", "NoMutationAtVersions");
+		return Void();
+	}
+	// Save the starting point for current txn
+	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator startItInUncommittedTxn = curItInCurTxn; // Starting iter. in the most recent succeeded txn
+	state int startIndexInUncommittedTxn = curIndexInCurTxn; // start index in the most recent succeeded txn. Note: Txns have different number of mutations
 	
+	// Track txn succeess or fail; Handle commit_unknown_result in txn commit
 	state Version curTxnId = 0; // The id of the current uncommitted txn, which monotonically increase for each successful transaction
 	state Version uncommittedTxnId = 0; // The id of the most recent succeeded txn. Used to recover the failed txn id in retry 
 	state bool lastTxnHasError = false; // Does the last txn has error. TODO: Only need to handle txn_commit_unknown error
-	state bool startNextVersion = false; // The next txn will include mutations in next version
 
+	// Decide when to commit a transaction. We buffer enough mutations in a txn before commit the txn
+	state bool startNextVersion = false; // The next txn will include mutations in next version
 	state int numAtomicOps = 0;
 	state double transactionSize = 0;
 
@@ -246,7 +259,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						curItInCurTxn++;
 					}
 					if (curItInCurTxn == self->kvOps.end()) {
-						wait(tr->commit());
+						wait(tr->commit()); // Empty txn
 						break;
 					}
 					curTxnId++;

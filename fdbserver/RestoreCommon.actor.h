@@ -253,7 +253,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 ACTOR template <class Interface, class Request>
 Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests) {
-	state std::stringstream requestss;
+	state std::stringstream requestsStr;
 
 	if (requests.empty()) {
 		return Void();
@@ -265,7 +265,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 			for (auto& request : requests) {
 				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
 				cmdReplies.push_back(stream->getReply(request.second));
-				requestss << "UID:" << request.first.toString() << "Req:" << request.second.toString() << "; ";
+				requestsStr << "UID:" << request.first.toString() << " ";
 			}
 
 			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
@@ -283,7 +283,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 				    .detail("Request", request.second.toString());
 			}
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests requests:%d, requestStr:%s, Error code:%d, error message:%s\n", requests.size(), requestss.str(), e.code(), e.what());
+			fprintf(stdout, "sendBatchRequests requests:%d, requestStr:%s, Error code:%d, error message:%s\n", requests.size(), requestsStr.str(), e.code(), e.what());
 		}
 	}
 
