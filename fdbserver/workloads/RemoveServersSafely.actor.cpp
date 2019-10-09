@@ -407,19 +407,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (BUGGIFY && toKill.size()) {
 			std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
 			if (coordinators.size() > 2) {
-				auto removeServer = toKill.begin();
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
 				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
-				TraceEvent("RemoveAndKill", functionId)
-					.detail("Step", "ReplaceKillSet")
-					.detail("Removing", removeServer->toString())
-					.detail("Adding", coordExcl.toString());
-				toKill.erase(removeServer);
-				toKill.insert(coordExcl);
 			}
 		}
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
-		killProcArray = self->getProcesses(toKill);
 		if (markExcludeAsFailed) {
 			state int retries = 0;
 			loop {
@@ -456,7 +448,19 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				retries++;
 			}
 		}
-
+		// Swap out coordinator with server in kill set, but only if already marking as failed and safety check passes
+		if (markExcludeAsFailed && coordExcl.isValid()) {
+			auto removeServer = toKill.begin();
+			TraceEvent("RemoveAndKill", functionId)
+				.detail("Step", "ReplaceKillSet")
+				.detail("Removing", removeServer->toString())
+				.detail("Adding", coordExcl.toString());
+			toKill.erase(removeServer);
+			toKill.insert(coordExcl);
+			toKillArray.erase(std::remove(toKillArray.begin(), toKillArray.end(), *removeServer), toKillArray.end());
+			toKillArray.push_back(coordExcl);
+		}
+		killProcArray = self->getProcesses(toKill);
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
 		if (markExcludeAsFailed) {
 			wait( excludeServers( cx, toKillMarkFailedArray, true ) );
