@@ -372,10 +372,11 @@ struct SpecialTraceMetricType
 TRACE_METRIC_TYPE(double, double);
 
 struct TraceEvent {
-	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
-	TraceEvent( Severity, const char* type, UID id = UID() );
-	TraceEvent( struct TraceInterval&, UID id = UID() );
-	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
+	TraceEvent( const char* type, UID id = UID(), bool enabled = true );   // Assumes SevInfo severity
+	TraceEvent( Severity, const char* type, UID id = UID(), bool enabled = true );
+	TraceEvent( struct TraceInterval&, UID id = UID(), bool enabled = true );
+	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID(), bool enabled = true );
+	// For defining debug TraceEvent
 
 	static void setNetworkThread();
 	static bool isNetworkThread();
