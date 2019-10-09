@@ -148,17 +148,11 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 		(int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
-<<<<<<< HEAD
 ACTOR Future<Void> trackShardBytes(
 		DataDistributionTracker* self,
 		KeyRange keys,
 		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize)
 {
-=======
-ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
-                                   Reference<AsyncVar<Optional<StorageMetrics>>> shardMetrics,
-                                   bool addToSizeEstimate = true) {
->>>>>>> Added metrics for read hot key detection
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardBytesStarting")
@@ -234,7 +228,6 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
 			StorageMetrics metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT ) );
 
 			/*TraceEvent("ShardSizeUpdate")
-<<<<<<< HEAD
 				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
@@ -255,25 +248,6 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker* self, KeyRange keys,
 			}
 
 			shardSize->set( metrics );
-=======
-			    .detail("Keys", keys)
-			    .detail("UpdatedSize", metrics.metrics.bytes)
-			    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
-			    .detail("BandwithStatus", getBandwidthStatus(metrics))
-			    .detail("BytesLower", bounds.min.bytes)
-			    .detail("BytesUpper", bounds.max.bytes)
-			    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
-			    .detail("BandwidthUpper", bounds.max.bytesPerKSecond)
-			    .detail("ShardMetricsPresent", shardMetrics->get().present())
-			    .detail("OldShardMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
-			    .detail("TrackerID", trackerID);*/
-
-			if (shardMetrics->get().present() && addToSizeEstimate)
-				self->dbSizeEstimate->set(self->dbSizeEstimate->get() + metrics.bytes -
-				                          shardMetrics->get().get().bytes);
-
-			shardMetrics->set(metrics);
->>>>>>> Added metrics for read hot key detection
 		}
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled)
