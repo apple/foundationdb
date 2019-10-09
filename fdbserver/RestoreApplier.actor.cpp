@@ -223,14 +223,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state double transactionSize = 0;
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	
-	loop {
+
+	loop { // Transaction retry loop
 		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Check if the transaction succeeds
 			if (lastTxnHasError) {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> txnSucceeded = wait(tr->get(restoreApplierKeyFor(self->id(), curTxnId)));
 				if (!txnSucceeded.present()) {
 					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusFailed",  curTxnId).detail("ApplierApplyToDB", self->id())
@@ -245,45 +245,56 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 					numAtomicOps = 0;
 					transactionSize = 0;
+					startNextVersion = false;
+
+					lastTxnHasError = false;
+					continue;
 				} else {
 					TraceEvent(SevWarn, "FastRestore_ApplyTxnError").detail("TxnStatusSucceeded",  curTxnId).detail("ApplierApplyToDB", self->id())
 						.detail("CurrentSucceedTxnId", curIndexInCurTxn)
 						.detail("CurIteratorVersion", curItInCurTxn->first).detail("CurrentIteratorMutations", curItInCurTxn->second.size())
 						.detail("CurrentIndexInSucceedTxn", curIndexInCurTxn)
 						.detail("NumIncludedAtomicOps", numAtomicOps);
+
+					// Skip else, and execute the logic when a txn succeed
 					
 					// Increase curIndexInCurTxn and curTxnId accordingly for succeeded txn; updated uncommitted txn info.
-					curIndexInCurTxn++;
-					while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
-						curIndexInCurTxn = 0;
-						curItInCurTxn++;
-					}
-					if (curItInCurTxn == self->kvOps.end()) {
-						wait(tr->commit()); // Empty txn
-						break;
-					}
-					curTxnId++;
+					// curIndexInCurTxn++;
+					// while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
+					// 	curIndexInCurTxn = 0;
+					// 	curItInCurTxn++;
+					// }
+					// if (curItInCurTxn == self->kvOps.end()) {
+					// 	//wait(tr->commit()); // Empty txn
+					// 	break;
+					// }
+					// curTxnId++;
 
-					startItInUncommittedTxn = curItInCurTxn;
-					startIndexInUncommittedTxn = curIndexInCurTxn;
-					uncommittedTxnId = curTxnId;
+					// startItInUncommittedTxn = curItInCurTxn;
+					// startIndexInUncommittedTxn = curIndexInCurTxn;
+					// uncommittedTxnId = curTxnId;
 
-					transactionSize = 0;
-					numAtomicOps = 0;
+					// transactionSize = 0;
+					// numAtomicOps = 0;
+					// lastTxnHasError = false;
+					
 				}
-				lastTxnHasError = false;
-			}
-			
-			TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id())
-				.detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
-				.detail("CurrentIteratorMutations", curItInCurTxn->second.size())
-				.detail("Version", curItInCurTxn->first);
-			tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
+			} else { // !lastTxnHasError: accumulate mutations in a txn
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id())
+							.detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
+							.detail("CurrentIteratorMutations", curItInCurTxn->second.size())
+							.detail("Version", curItInCurTxn->first);
 
-			{ // Iterate versions: curItInCurTxn
-				state MutationRef m;
-				ASSERT_WE_THINK(curIndexInCurTxn < curItInCurTxn->second.size());
-				{ // Iterate mutations at the same version: curIndexInCurTxn
+				tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue); // UUID to tell if txn succeeds at an unknown error
+
+				loop { // Loop: Accumulate mutations in a transaction
+
+					state MutationRef m;
+					ASSERT_WE_THINK(curIndexInCurTxn < curItInCurTxn->second.size());
+							
 					m = curItInCurTxn->second[curIndexInCurTxn];
 					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
@@ -303,39 +314,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						numAtomicOps++;
 					} else {
 						TraceEvent(SevError, "FastRestore")
-						    .detail("UnhandledMutationType", m.type)
-						    .detail("TypeName", typeStr);
+							.detail("UnhandledMutationType", m.type)
+							.detail("TypeName", typeStr);
 					}
 
 					transactionSize += m.expectedSize();
 
 					if (transactionSize >= opConfig.transactionBatchSizeThreshold) { // commit per 512B
-						wait(tr->commit());
-						// Update current txn info and uncommitted txn info
-						curIndexInCurTxn++;
-						while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
-							curIndexInCurTxn = 0;
-							curItInCurTxn++;
-						}
-						if (curItInCurTxn == self->kvOps.end()) {
-							wait(tr->commit());
-							break;
-						}
-						curTxnId++;
-						startIndexInUncommittedTxn = curIndexInCurTxn;
-						startItInUncommittedTxn = curItInCurTxn;
-
-						uncommittedTxnId = curTxnId;
-						transactionSize = 0;
-						numAtomicOps = 0;
-
-						// Start next transaction
-						TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
-							.detail("CurrentIteratorMutations", curItInCurTxn->second.size()).detail("Version", curItInCurTxn->first);
-						tr->reset();
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr->set(restoreApplierKeyFor(self->id(), curIndexInCurTxn), restoreApplierTxnValue);
+						break; // Got enough mutation in the txn
 					} else {
 						curIndexInCurTxn++;
 						while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
@@ -344,50 +330,39 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 							startNextVersion = true;
 						}
 
-						if (curItInCurTxn == self->kvOps.end()) {
-							wait(tr->commit());
+						if (startNextVersion || curItInCurTxn == self->kvOps.end()) {
 							break;
 						}
-					}
+					}				
 				}
+			} // !lastTxnHasError 
 
-				if (startNextVersion && transactionSize > 0) { // the commit batch should NOT across versions
-					startNextVersion = false;
-					wait(tr->commit());
-					
-					// Update current txn info and uncommitted txn info
-					curIndexInCurTxn++;
-					while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
-						curIndexInCurTxn = 0;
-						curItInCurTxn++;
-					}
-					if (curItInCurTxn == self->kvOps.end()) {
-						wait(tr->commit());
-						break;
-					}
-					curTxnId++;
 
-					startIndexInUncommittedTxn = curIndexInCurTxn;
-					startItInUncommittedTxn = curItInCurTxn;
-					uncommittedTxnId = curTxnId;
-					
-					transactionSize = 0;
-					numAtomicOps = 0;
-
-					// Start next transaction
-					TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn)
-						.detail("CurrentIteratorMutations", curItInCurTxn->second.size()).detail("Version", curItInCurTxn->first);
-					tr->reset();
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr->set(restoreApplierKeyFor(self->id(), curTxnId), restoreApplierTxnValue);
-				}
-			} //while (curItInCurTxn != self->kvOps.end())
-			// Last transaction
-			if (transactionSize > 0) {
+			// Commit the txn and prepare the starting point for next txn
+			if (!lastTxnHasError && (startNextVersion || transactionSize > 0 || curItInCurTxn == self->kvOps.end())) {
 				wait(tr->commit());
 			}
-			//break;
+			
+			// Logic for a successful transaction: Update current txn info and uncommitted txn info
+			lastTxnHasError = false;
+			curIndexInCurTxn++;
+			while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
+				curIndexInCurTxn = 0;
+				curItInCurTxn++;
+			}
+			if (curItInCurTxn == self->kvOps.end()) {
+				break;
+			}
+			curTxnId++;
+
+			startIndexInUncommittedTxn = curIndexInCurTxn;
+			startItInUncommittedTxn = curItInCurTxn;
+			uncommittedTxnId = curTxnId;
+			
+			transactionSize = 0;
+			numAtomicOps = 0;
+			startNextVersion = false;
+			//}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError").detail("Error", e.what()).detail("TxnStatus", "?")
 				.detail("ApplierApplyToDB", self->id()).detail("TxnId", curTxnId).detail("StartIndexInCurrentTxn", curIndexInCurTxn).detail("Version", curItInCurTxn->first);
