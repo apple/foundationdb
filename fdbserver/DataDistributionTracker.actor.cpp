@@ -121,6 +121,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 
 	bounds.max.bytesPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
+	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 
 	//The first shard can have arbitrarily small size
 	if(shard.begin == allKeys.begin) {
@@ -131,11 +132,13 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 
 	bounds.min.bytesPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
+	bounds.min.bytesReadPerKSecond = 0;
 
 	//The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last shard)
 	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
 	bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 
 	return bounds;
 }
@@ -574,10 +577,16 @@ ACTOR Future<Void> shardEvaluator(
 	}
 
 	/*TraceEvent("ShardEvaluator", self->distributorId)
-		.detail("TrackerId", trackerID)
-		.detail("ShouldSplit", shouldSplit)
-		.detail("ShouldMerge", shouldMerge)
-		.detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough());*/
+	    // .detail("TrackerId", trackerID)
+	    .detail("BeginKey", keys.begin.printable())
+	    .detail("EndKey", keys.end.printable())
+	    .detail("ShouldSplit", shouldSplit)
+	    .detail("ShouldMerge", shouldMerge)
+	    .detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough())
+	    .detail("CurrentMetrics", stats.toString())
+	    .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
+	    .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
+	    .detail("WriteBandwitdhStatus", getBandwidthStatus(stats));*/
 
 	if(!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger( self, keys, shardSize );
