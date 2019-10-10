@@ -131,7 +131,9 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterW
 	ASSERT(!masterData->loadersInterf.empty());
 	RestoreSysInfo sysInfo(masterData->appliersInterf);
 	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
+	FRTraceEvent().detail("DistributeRestoreSysInfo", masterData->loadersInterf.size());
 	for (auto& loader : masterData->loadersInterf) {
+		FRTraceEvent().detail("Loader", loader.first);
 		requests.push_back(std::make_pair(loader.first, RestoreSysInfoRequest(sysInfo)));
 	}
 

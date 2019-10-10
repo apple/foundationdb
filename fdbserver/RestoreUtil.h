@@ -34,6 +34,24 @@
 #include <cstdint>
 #include <cstdarg>
 
+#define FR_DEBUG
+#define FR_VERBOSE_DEBUG
+
+#ifndef FR_DEBUG
+#define FR_DEBUG
+#define FRTraceEvent(...)	TraceEvent(SevDebug, "FastRestore", UID(), true)
+#else
+#define FRTraceEvent(...)	TraceEvent(SevDebug, "FastRestore", UID(), false)
+#endif
+
+#ifndef FR_VERBOSE_DEBUG
+#define FR_VERBOSE_DEBUG
+#define FRVBTraceEvent	TraceEvent(SevDebug, "FastRestoreVerbose", UID(), true);
+#else
+#define FRVBTraceEvent	TraceEvent(SevDebug, "FastRestore", UID(), false);
+#endif
+
+
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
