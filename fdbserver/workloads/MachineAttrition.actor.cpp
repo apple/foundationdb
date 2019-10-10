@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "ClusterRecruitmentInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -59,7 +60,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
 	int machinesToKill, machinesToLeave;
-	double testDuration;
+	double testDuration, suspendDuration;
 	bool reboot;
 	bool killDc;
 	bool killSelf;
@@ -78,6 +79,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		machinesToKill = getOption( options, LiteralStringRef("machinesToKill"), 2 );
 		machinesToLeave = getOption( options, LiteralStringRef("machinesToLeave"), 1 );
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
 		killDc = getOption( options, LiteralStringRef("killDc"), deterministicRandom()->random01() < 0.25 );
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
@@ -124,6 +126,12 @@ struct MachineAttritionWorkload : TestWorkload {
 				reportErrorsExcept( machineKillWorker( this, meanDelay, cx ), "machineKillWorkerError", UID(), &normalAttritionErrors()),
 				testDuration, Void() );
 		}
+		if (!clientId && !g_network->isSimulated()) {
+			double meanDelay = testDuration / machinesToKill;
+			return timeout(reportErrorsExcept(noSimMachineKillWorker(this, meanDelay, cx),
+			                                  "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
+			               testDuration, Void());
+		}
 		if(killSelf)
 			throw please_reboot();
 		return Void();
@@ -132,17 +140,84 @@ struct MachineAttritionWorkload : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 	}
 
-	struct UIDPredicate {
-		UIDPredicate(StringRef uid ) : uid( uid ) {}
-		bool operator() ( WorkerInterface rhs ) { return rhs.locality.zoneId() != uid; }
-	private:
-		StringRef uid;
-	};
+	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, double meanDelay, Database cx) {
+		ASSERT(!g_network->isSimulated());
+		state int killedMachines = 0;
+		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
+		state std::vector<WorkerDetails> workers =
+		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+		deterministicRandom()->randomShuffle(workers);
+		// Can reuse reboot request to send to each interface since no reply promise needed
+		state RebootRequest rbReq;
+		if (self->reboot) {
+			rbReq.waitForDuration = self->suspendDuration;
+		} else {
+			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+		}
+		if (self->killDc) {
+			wait(delay(delayBeforeKill));
+			// Pick a dcId to kill
+			while (workers.back().processClass == ProcessClass::ClassType::TesterClass) {
+				deterministicRandom()->randomShuffle(workers);
+			}
+			Optional<Standalone<StringRef>> killDcId = workers.back().interf.locality.dcId();
+			TraceEvent("Assassination").detail("TargetDataCenter", killDcId);
+			for (const auto& worker : workers) {
+				// kill all matching dcId workers, except testers
+				if (worker.interf.locality.dcId() == killDcId &&
+				    worker.processClass == ProcessClass::ClassType::TesterClass) {
+					worker.interf.clientInterface.reboot.send(rbReq);
+				}
+			}
+		} else {
+			while (killedMachines < self->machinesToKill && workers.size() > self->machinesToLeave) {
+				TraceEvent("WorkerKillBegin")
+				    .detail("KilledMachines", killedMachines)
+				    .detail("MachinesToKill", self->machinesToKill)
+				    .detail("MachinesToLeave", self->machinesToLeave)
+				    .detail("Machines", workers.size());
+				wait(delay(delayBeforeKill));
+				TraceEvent("WorkerKillAfterDelay").detail("Delay", delayBeforeKill);
+				if (self->waitForVersion) {
+					state Transaction tr(cx);
+					loop {
+						try {
+							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							wait(success(tr.getReadVersion()));
+							break;
+						} catch (Error& e) {
+							wait(tr.onError(e));
+						}
+					}
+				}
+				// Pick a machine to kill, ignoring testers
+				state WorkerDetails targetMachine;
+				while (workers.back().processClass == ProcessClass::ClassType::TesterClass) {
+					deterministicRandom()->randomShuffle(workers);
+				}
+				targetMachine = workers.back();
+				TraceEvent("Assassination")
+				    .detail("TargetMachine", targetMachine.interf.locality.toString())
+				    .detail("ZoneId", targetMachine.interf.locality.zoneId())
+				    .detail("KilledMachines", killedMachines)
+				    .detail("MachinesToKill", self->machinesToKill)
+				    .detail("MachinesToLeave", self->machinesToLeave)
+				    .detail("Machines", self->machines.size());
+				targetMachine.interf.clientInterface.reboot.send(rbReq);
+				killedMachines++;
+				workers.pop_back();
+				wait(delay(meanDelay - delayBeforeKill));
+				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
+				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
+			}
+		}
+		return Void();
+	}
 
 	ACTOR static Future<Void> machineKillWorker( MachineAttritionWorkload *self, double meanDelay, Database cx ) {
 		state int killedMachines = 0;
 		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-		state std::set<UID> killedUIDs;
 
 		ASSERT( g_network->isSimulated() );
 
@@ -196,7 +271,6 @@ struct MachineAttritionWorkload : TestWorkload {
 					TEST(true); //Marked a zone for maintenance before killing it
 					bool _ =
 					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
-					// }
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
 					TEST(true); // Disable DD for all storage server failures
 					self->ignoreSSFailures =
