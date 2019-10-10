@@ -258,7 +258,7 @@ ACTOR Future<int64_t> getFirstSize( Reference<AsyncVar<Optional<StorageMetrics>>
 	}
 }
 
-ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys, int64_t oldShardsEndingSize ) {
+ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize ) {
 	state vector<Future<int64_t>> sizes;
 	state vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards.intersectingRanges(keys) ) {
