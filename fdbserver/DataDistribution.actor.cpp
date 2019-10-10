@@ -3474,9 +3474,9 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				// We saw a corner case in in 3 data_hall configuration
-				// when optimalTeamCount = 1, healthyTeamCount = 0.
-				if (self->optimalTeamCount > 0 && self->healthyTeamCount > 0) {
+				// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing between
+				// healthy and unhealthy
+				if (self->optimalTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
@@ -3484,7 +3484,6 @@ ACTOR Future<Void> storageServerTracker(
 					status.isUndesired = true;
 				}
 				otherChanges.push_back( self->zeroOptimalTeams.onChange() );
-				otherChanges.push_back(self->zeroHealthyTeams->onChange());
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
