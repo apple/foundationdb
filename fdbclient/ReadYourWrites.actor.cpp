@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/JsonBuilder.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1226,6 +1227,23 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 			return e;
 		}
 		return Optional<Value>();
+	}
+
+	// TODO : add conflict keys to special key space
+	if (key == LiteralStringRef("\xff\xff/conflicting_keys/json")){
+		if (!tr.info.conflictingKeyRanges.empty()){
+			// TODO : return a json value which represents all the values
+			JsonBuilderArray conflictingKeysArray; 
+			for (auto & cKR : tr.info.conflictingKeyRanges) {
+				for (auto & kr : cKR) {
+					conflictingKeysArray.push_back(format("[%s, %s)", kr.begin.toString().c_str(), kr.end.toString().c_str()));
+				}
+			}
+			Optional<Value> output = StringRef(conflictingKeysArray.getJson());
+			return output;
+		} else {
+			return Optional<Value>();
+		}
 	}
 
 	if(checkUsedDuringCommit()) {

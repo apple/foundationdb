@@ -2613,7 +2613,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				proxy_memory_limit_exceeded(),
 				commit_unknown_result()});
 	}
-
+	
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -2673,6 +2673,10 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					}
 					return Void();
 				} else {
+					if (ci.conflictingKeyRanges.present()){
+						tr->info.conflictingKeyRanges.push_back_deep(tr->info.conflictingKeyRanges.arena(), ci.conflictingKeyRanges.get());
+					}
+
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("Conflict", 1);
 
@@ -2783,6 +2787,11 @@ Future<Void> Transaction::commitMutations() {
 		}
 		if(options.firstInBatch) {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+		}
+		if(options.reportConflictingKeys) {
+			// TODO : Is it better to keep it as a flag?
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_REPORT_CONFLICTING_KEYS;
+			tr.reportConflictingKeys();
 		}
 
 		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );
@@ -2973,6 +2982,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
 			validateOptionValue(value, false);
 			options.includePort = true;
+			break;
+		
+		case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
+			validateOptionValue(value, false);
+			options.reportConflictingKeys = true;
 			break;
 
 		default:

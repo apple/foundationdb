@@ -356,8 +356,10 @@ struct ResolutionRequestBuilder {
 
 		vector<int> resolversUsed;
 		for (int r = 0; r<outTr.size(); r++)
-			if (outTr[r])
+			if (outTr[r]) {
 				resolversUsed.push_back(r);
+				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
+			}
 		transactionResolverMap.push_back(std::move(resolversUsed));
 	}
 };
@@ -1026,7 +1028,36 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_too_old());
 		}
 		else {
-			trs[t].reply.sendError(not_committed());
+			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
+			if (trs[t].isReportConflictingKeys()) {
+				Standalone<VectorRef<KeyRangeRef>> conflictingEntries;
+				std::vector<KeyRange> unmergedConflictingKRs;
+				for (int resolverInd = 0; resolverInd < resolution.size(); ++resolverInd){
+					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[t]) {
+						unmergedConflictingKRs.emplace_back(kr);
+						// TraceEvent("ConflictingKeyRange").detail("ResolverIndex", resolverInd).detail("TrasactionIndex", t).detail("StartKey", kr.begin.toString()).detail("EndKey", kr.end.toString());
+					}
+				}
+				// Sort the keyranges by begin key, then union overlap ranges from left to right
+				std::sort(unmergedConflictingKRs.begin(), unmergedConflictingKRs.end(), [](KeyRange a, KeyRange b){
+					return a.begin < b.begin;
+				});
+				auto next = unmergedConflictingKRs.begin();
+				// At least one conflicting keyrange should be returned, which means curr is valid
+				KeyRangeRef curr = *(next++);
+				while (next != unmergedConflictingKRs.end()) {
+					if (curr.end >= next->begin) {
+						curr = KeyRangeRef(curr.begin, std::max(curr.end, next->end));
+					} else {
+						conflictingEntries.push_back_deep(conflictingEntries.arena(), curr);
+						curr = *next;
+					}
+					next++;
+				}
+				conflictingEntries.push_back_deep(conflictingEntries.arena(), curr);
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<KeyRangeRef>>>(conflictingEntries)));
+			} else
+				trs[t].reply.sendError(not_committed());
 		}
 
 		// TODO: filter if pipelined with large commit

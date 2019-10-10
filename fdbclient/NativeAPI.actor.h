@@ -132,6 +132,7 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 	bool includePort : 1;
+	bool reportConflictingKeys : 1;
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
@@ -143,6 +144,7 @@ struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
+	Standalone<VectorRef<VectorRef<KeyRangeRef>>> conflictingKeyRanges;
 
 	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
@@ -271,6 +273,7 @@ public:
 	void reset();
 	void fullReset();
 	double getBackoff(int errCode);
+
 	void debugTransaction(UID dID) { info.debugID = dID; }
 
 	Future<Void> commitMutations();

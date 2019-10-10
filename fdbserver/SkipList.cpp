@@ -123,8 +123,9 @@ struct ReadConflictRange {
 	StringRef begin, end;
 	Version version;
 	int transaction;
-	ReadConflictRange( StringRef begin, StringRef end, Version version, int transaction )
-		: begin(begin), end(end), version(version), transaction(transaction)
+	Standalone<VectorRef<KeyRangeRef>> * conflictingKeyRange;
+	ReadConflictRange( StringRef begin, StringRef end, Version version, int transaction, Standalone<VectorRef<KeyRangeRef>> * cKR = nullptr )
+		: begin(begin), end(end), version(version), transaction(transaction), conflictingKeyRange(cKR)
 	{
 	}
 	bool operator<(const ReadConflictRange& rhs) const { return compare(begin, rhs.begin)<0; }
@@ -529,7 +530,7 @@ public:
 
 		int started = min(M,count);
 		for(int i=0; i<started; i++){
-			inProgress[i].init( ranges[i], header, transactionConflictStatus );
+			inProgress[i].init( ranges[i], header, transactionConflictStatus, ranges[i].conflictingKeyRange );
 			nextJob[i] = i+1;
 		}
 		nextJob[started-1] = 0;
@@ -544,8 +545,10 @@ public:
 					nextJob[prevJob] = nextJob[job];
 					job = prevJob;
 				}
-				else
-					inProgress[job].init( ranges[started++], header, transactionConflictStatus );
+				else {
+					int temp = started++;
+					inProgress[job].init( ranges[temp], header, transactionConflictStatus, ranges[temp].conflictingKeyRange );
+				}
 			}
 			prevJob = job;
 			job = nextJob[job];
@@ -757,17 +760,25 @@ private:
 		Version version;
 		bool *result;
 		int state;
+		Standalone<VectorRef<KeyRangeRef>>* conflictingKeyRange;
 
-		void init( const ReadConflictRange& r, Node* header, bool* tCS ) {
+		void init( const ReadConflictRange& r, Node* header, bool* tCS, Standalone<VectorRef<KeyRangeRef>>* cKR) {
 			this->start.init( r.begin, header );
 			this->end.init( r.end, header );
 			this->version = r.version;
 			result = &tCS[ r.transaction ];
+			conflictingKeyRange = cKR;
 			this->state = 0;
 		}
 
 		bool noConflict() { return true; }
-		bool conflict() { *result = true; return true; }
+		bool conflict() { 
+			*result = true;
+			if(conflictingKeyRange != nullptr){
+				conflictingKeyRange->push_back_deep(conflictingKeyRange->arena(), KeyRangeRef(start.value, end.value));
+			}
+			return true;
+		}
 
 		// Return true if finished
 		force_inline bool advance() {
@@ -961,8 +972,8 @@ void destroyConflictSet(ConflictSet* cs) {
 	delete cs;
 }
 
-ConflictBatch::ConflictBatch( ConflictSet* cs )
-	: cs(cs), transactionCount(0)
+ConflictBatch::ConflictBatch( ConflictSet* cs, std::map< int, Standalone<VectorRef<KeyRangeRef>> >* conflictingKeyRangeMap )
+	: cs(cs), transactionCount(0), conflictingKeyRangeMap(conflictingKeyRangeMap)
 {
 }
 
@@ -974,6 +985,7 @@ struct TransactionInfo {
 	VectorRef< std::pair<int,int> > readRanges;
 	VectorRef< std::pair<int,int> > writeRanges;
 	bool tooOld;
+	bool reportConflictingKeys;
 };
 
 void ConflictBatch::addTransaction( const CommitTransactionRef& tr ) {
@@ -981,6 +993,7 @@ void ConflictBatch::addTransaction( const CommitTransactionRef& tr ) {
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
+	info->reportConflictingKeys = tr.report_conflicting_keys;
 
 	if (tr.read_snapshot < cs->oldestVersion && tr.read_conflict_ranges.size()) {
 		info->tooOld = true;
@@ -995,7 +1008,7 @@ void ConflictBatch::addTransaction( const CommitTransactionRef& tr ) {
 			points.emplace_back(range.begin, false, true, false, t, &info->readRanges[r].first);
 			//points.back().keyEnd = StringRef(buf,range.second);
 			points.emplace_back(range.end, false, false, false, t, &info->readRanges[r].second);
-			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
+			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t, tr.report_conflicting_keys ? &(*conflictingKeyRangeMap)[t] : nullptr);
 		}
 		for(int r=0; r<tr.write_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
@@ -1129,7 +1142,6 @@ public:
 	}
 };
 
-
 void ConflictBatch::checkIntraBatchConflicts() {
 	int index = 0;
 	for(int p=0; p<points.size(); p++)
@@ -1140,11 +1152,17 @@ void ConflictBatch::checkIntraBatchConflicts() {
 		const TransactionInfo& tr = *transactionInfo[t];
 		if (transactionConflictStatus[t]) continue;
 		bool conflict = tr.tooOld;
-		for(int i=0; i<tr.readRanges.size(); i++)
-			if ( mcs.any( tr.readRanges[i].first, tr.readRanges[i].second ) ) {
+		for(int i=0; i<tr.readRanges.size(); i++){
+			int startPointIndex = tr.readRanges[i].first;
+			int endPointIndex = tr.readRanges[i].second;
+			if ( mcs.any(startPointIndex , endPointIndex ) ) {
+				if (tr.reportConflictingKeys){
+					(*conflictingKeyRangeMap)[t].push_back_deep((*conflictingKeyRangeMap)[t].arena(), KeyRangeRef(points[startPointIndex].key, points[endPointIndex].key));
+				}
 				conflict = true;
 				break;
 			}
+		}
 		transactionConflictStatus[t] = conflict;
 		if (!conflict)
 			for(int i=0; i<tr.writeRanges.size(); i++)

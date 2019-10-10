@@ -14,7 +14,7 @@ constexpr int RANGELIMIT = 10000;
 struct MakoWorkload : TestWorkload {
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval, zipfConstant;
-	bool enableLogging, commitGet, populateData, runBenchmark, preserveData, zipf;
+	bool enableLogging, commitGet, populateData, runBenchmark, preserveData, zipf, reportConflictingKeys;
 	PerfIntCounter xacts, retries, conflicts, commits, totalOps;
 	std::vector<PerfIntCounter> opCounters;
 	std::vector<uint64_t> insertionCountsToMeasure;
@@ -61,6 +61,8 @@ struct MakoWorkload : TestWorkload {
 		// If true, the workload will picking up keys which are zipfian distributed
 		zipf = getOption(options, LiteralStringRef("zipf"), false);
 		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
+		// If true, return key ranges conflicting with other txs
+		reportConflictingKeys = getOption(options, LiteralStringRef("reportConflictingKeys"), false);
 		// Specified length of keys and length range of values
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16);
 		maxValueBytes = getOption( options, LiteralStringRef("valueBytes"), 16 );
@@ -290,6 +292,8 @@ struct MakoWorkload : TestWorkload {
 			// used for throttling
 			wait(poisson(&lastTime, delay));
 			try{
+				if (self->reportConflictingKeys)
+					tr.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
 				// user-defined value: whether commit read-only ops or not; default is false
 				doCommit = self->commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
@@ -394,11 +398,19 @@ struct MakoWorkload : TestWorkload {
 				TraceEvent("FailedToExecOperations").error(e);
 				if (e.code() == error_code_operation_cancelled)
 					throw;
-				else if (e.code() == error_code_not_committed)
+				else if (e.code() == error_code_not_committed){
 					++self->conflicts;
+				}
 				
 				wait(tr.onError(e));
 				++self->retries;
+				if (self->reportConflictingKeys && deterministicRandom()->random01() < 0.01){
+					// Standalone<VectorRef<KeyRangeRef>> rCKs;
+					// tr.extractConflictingKeys(rCKs);
+					// TraceEvent("ReportConflictingKeys").detail("KeySize", rCKs.size()).detail("KeyStart", rCKs[0].begin.toString()).detail("KeyEnd", rCKs[0].end.toString());
+					Optional<Standalone<StringRef>> temp = wait(tr.get(LiteralStringRef("\xff\xff/conflicting_keys/json")));
+					TraceEvent("ReportConflictingKeys").detail("Log", temp.present() ? temp.get().toString() : "DEBUG_NO_KEYS");
+				}
 			}
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);

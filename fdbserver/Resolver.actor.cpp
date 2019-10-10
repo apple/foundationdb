@@ -132,11 +132,12 @@ ACTOR Future<Void> resolveBatch(
 		
 		vector<int> commitList;
 		vector<int> tooOldList;
+		std::map<int, Standalone<VectorRef<KeyRangeRef>> > conflictingKeyRangeMap;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		double tstart = timer();
-		ConflictBatch conflictBatch( self->conflictSet );
+		ConflictBatch conflictBatch(self->conflictSet, &conflictingKeyRangeMap);
 		int keys = 0;
 		for(int t=0; t<req.transactions.size(); t++) {
 			conflictBatch.addTransaction( req.transactions[t] );
@@ -163,6 +164,8 @@ ACTOR Future<Void> resolveBatch(
 
 		for (int c = 0; c<tooOldList.size(); c++)
 			reply.committed[tooOldList[c]] = ConflictBatch::TransactionTooOld;
+		
+		reply.conflictingKeyRangeMap = std::move(conflictingKeyRangeMap);
 
 		ASSERT(req.prevVersion >= 0 || req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 

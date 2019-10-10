@@ -103,26 +103,30 @@ struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
-	Optional<Value> metadataVersion;
+	Optional<Value> metadataVersion;	
+	// TODO : data structure okay here ?
+	Optional<Standalone<VectorRef<KeyRangeRef>>> conflictingKeyRanges;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId, metadataVersion);
+		serializer(ar, version, txnBatchId, metadataVersion, conflictingKeyRanges);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion) {}
+	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion, const Optional<Standalone<VectorRef<KeyRangeRef>>>& conflictingKeyRanges = Optional<Standalone<VectorRef<KeyRangeRef>>>() ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion), conflictingKeyRanges(conflictingKeyRanges) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
-		FLAG_FIRST_IN_BATCH = 0x2
+		FLAG_FIRST_IN_BATCH = 0x2,
+		FLAG_REPORT_CONFLICTING_KEYS = 0x4
 	};
 
 	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
+	bool isReportConflictingKeys()  const { return (flags & FLAG_REPORT_CONFLICTING_KEYS) != 0; }
 	
 	Arena arena;
 	CommitTransactionRef transaction;
@@ -135,6 +139,10 @@ struct CommitTransactionRequest : TimedRequest {
 	template <class Ar> 
 	void serialize(Ar& ar) { 
 		serializer(ar, transaction, reply, arena, flags, debugID);
+	}
+
+	void reportConflictingKeys(){
+		transaction.report_conflicting_keys = true;
 	}
 };
 
