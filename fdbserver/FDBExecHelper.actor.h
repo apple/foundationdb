@@ -59,7 +59,6 @@ void setExecOpInProgress(UID execUID);
 // clears the execUID op from the list of ops in progress
 void clearExecOpInProgress(UID execUID);
 
-
 // registers a non-stopped TLog instance
 void registerTLog(UID uid);
 // unregisters a stopped TLog instance

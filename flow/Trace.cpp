@@ -653,23 +653,22 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id, bool enabled ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(enabled) {
+TraceEvent::TraceEvent(const char* type, UID id, bool enabled)
+  : id(id), type(type), severity(SevInfo), initialized(false), enabled(enabled) {
 	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id, bool enabled )
-	: id(id), type(type), severity(severity), initialized(false),
-	  enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity)) {
+TraceEvent::TraceEvent(Severity severity, const char* type, UID id, bool enabled)
+  : id(id), type(type), severity(severity), initialized(false),
+    enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity)) {
 	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
-TraceEvent::TraceEvent( TraceInterval& interval, UID id, bool enabled )
-	: id(id), type(interval.type),
-	  severity(interval.severity),
-	  initialized(false),
-	  enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity)) {
+TraceEvent::TraceEvent(TraceInterval& interval, UID id, bool enabled)
+  : id(id), type(interval.type), severity(interval.severity), initialized(false),
+    enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity)) {
 
 	g_trace_depth++;
 	setMaxFieldLength(0);
@@ -677,11 +676,9 @@ TraceEvent::TraceEvent( TraceInterval& interval, UID id, bool enabled )
 
 	init(interval);
 }
-TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id, bool enabled )
-	: id(id), type(interval.type),
-	  severity(severity),
-	  initialized(false),
-	  enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity)) {
+TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id, bool enabled)
+  : id(id), type(interval.type), severity(severity), initialized(false),
+    enabled(enabled && (g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity)) {
 
 	g_trace_depth++;
 	setMaxFieldLength(0);

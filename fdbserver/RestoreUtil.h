@@ -39,18 +39,17 @@
 
 #ifndef FR_DEBUG
 #define FR_DEBUG
-#define FRTraceEvent(...)	TraceEvent(SevDebug, "FastRestore", UID(), true)
+#define FRTraceEvent(...) TraceEvent(SevDebug, "FastRestore", UID(), true)
 #else
-#define FRTraceEvent(...)	TraceEvent(SevDebug, "FastRestore", UID(), false)
+#define FRTraceEvent(...) TraceEvent(SevDebug, "FastRestore", UID(), false)
 #endif
 
 #ifndef FR_VERBOSE_DEBUG
 #define FR_VERBOSE_DEBUG
-#define FRVBTraceEvent	TraceEvent(SevDebug, "FastRestoreVerbose", UID(), true);
+#define FRVBTraceEvent TraceEvent(SevDebug, "FastRestoreVerbose", UID(), true);
 #else
-#define FRVBTraceEvent	TraceEvent(SevDebug, "FastRestore", UID(), false);
+#define FRVBTraceEvent TraceEvent(SevDebug, "FastRestore", UID(), false);
 #endif
-
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
