@@ -3475,7 +3475,8 @@ ACTOR Future<Void> storageServerTracker(
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
 				// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing between
-				// healthy and unhealthy
+				// healthy and unhealthy and result in OOM (See PR#2228).
+
 				if (self->optimalTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
