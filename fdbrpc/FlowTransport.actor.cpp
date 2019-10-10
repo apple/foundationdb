@@ -410,6 +410,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 	loop {
 		try {
 			if (!conn) {  // Always, except for the first loop with an incoming connection
+				self->outgoingConnectionIdle = true;
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
 					if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
@@ -998,7 +999,6 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 	auto peer = getPeer(address);
 	if(!peer) {
 		peer = Reference<Peer>( new Peer(this, address) );
-		peer->outgoingConnectionIdle = true;
 		if(startConnectionKeeper) {
 			peer->connect = connectionKeeper(peer);
 		}
