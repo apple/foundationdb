@@ -600,20 +600,26 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						allServers.insert(srcSet.begin(), srcSet.end());
 						allServers.insert(destSet.begin(), destSet.end());
 
-						alreadyMoved = destSet.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = destSet.empty() && isSubset;
 						if(destSet != intendedTeam && !alreadyMoved) {
 							TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
-								.detail("KeyBegin", keys.begin)
-								.detail("KeyEnd", keys.end)
-								.detail("IterationBegin", begin)
-								.detail("IterationEnd", endKey)
-								.detail("DestSet", describe(destSet))
-								.detail("IntendedTeam", describe(intendedTeam))
-								.detail("KeyServers", keyServers);
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("IterationBegin", begin)
+							    .detail("IterationEnd", endKey)
+							    .detail("SrcSet", describe(srcSet))
+							    .detail("DestSet", describe(destSet))
+							    .detail("IntendedTeam", describe(intendedTeam))
+							    .detail("KeyServers", keyServers);
 							//ASSERT( false );
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
 
+							// FIXME: this change will not propagate to other MoveKeys actors working in parallel(?)
 							intendedTeam.clear();
 							for(int i = 0; i < dest.size(); i++)
 								intendedTeam.insert(dest[i]);
@@ -642,7 +648,11 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 						allServers.insert(srcSet.begin(), srcSet.end());
 
-						alreadyMoved = dest2.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = dest2.empty() && isSubset;
 						if (dest2 != dest && !alreadyMoved) {
 							TraceEvent(SevError,"FinishMoveKeysError", relocationIntervalId)
 								.detail("Reason", "dest mismatch")

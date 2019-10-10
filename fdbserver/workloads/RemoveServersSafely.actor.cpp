@@ -303,7 +303,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		TraceEvent("RemoveAndKill").detail("Step", "excluded list first").detail("Excluderesult", bClearedFirst ? "succeeded" : "failed").detail("KillTotal", toKill1.size()).detail("Processes", killProcArray.size()).detail("ToKill1", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 
 		// Include the servers, if unable to exclude
-		if (!bClearedFirst) {
+		// Reinclude when buggify is on to increase the surface area of the next set of excludes
+		if (!bClearedFirst || BUGGIFY) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill").detail("Step", "include all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
