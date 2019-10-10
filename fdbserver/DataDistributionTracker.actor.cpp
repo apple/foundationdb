@@ -151,7 +151,7 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 ACTOR Future<Void> trackShardBytes(
 		DataDistributionTracker* self,
 		KeyRange keys,
-		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize)
+		Reference<AsyncVar<Optional<StorageMetrics>>> shardMetrics)
 {
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
@@ -240,14 +240,14 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 				.detail("TrackerID", trackerID);*/
 
-			if( shardSize->get().present() ) {
-				self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.bytes - shardSize->get().get().bytes );
+			if( shardMetrics->get().present() ) {
+				self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.bytes - shardMetrics->get().get().bytes );
 				if(keys.begin >= systemKeys.begin) {
-					self->systemSizeEstimate += metrics.bytes - shardSize->get().get().bytes;
+					self->systemSizeEstimate += metrics.bytes - shardMetrics->get().get().bytes;
 				}
 			}
 
-			shardSize->set( metrics );
+			shardMetrics->set( metrics );
 		}
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled)
