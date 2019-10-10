@@ -38,14 +38,16 @@
 #define FR_VERBOSE_DEBUG
 
 #ifndef FR_DEBUG
-#define FR_DEBUG
+#ifdef FR_DEBUG
+
 #define FRTraceEvent(...) TraceEvent(SevDebug, "FastRestore", UID(), true)
 #else
 #define FRTraceEvent(...) TraceEvent(SevDebug, "FastRestore", UID(), false)
 #endif
 
 #ifndef FR_VERBOSE_DEBUG
-#define FR_VERBOSE_DEBUG
+#ifdef FR_VERBOSE_DEBUG
+
 #define FRVBTraceEvent TraceEvent(SevDebug, "FastRestoreVerbose", UID(), true);
 #else
 #define FRVBTraceEvent TraceEvent(SevDebug, "FastRestore", UID(), false);
