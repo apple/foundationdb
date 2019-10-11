@@ -620,13 +620,13 @@ const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/
                                      LiteralStringRef("\xff\x02/restoreRequests0"));
 
 const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
-                                      LiteralStringRef("\xff\x02/restoreApplier0"));
+                                     LiteralStringRef("\xff\x02/restoreApplier0"));
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
 const Key restoreApplierKeyFor(UID const& applierID, Version version) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreWorkersKeys.begin );
+	wr.serializeBytes(restoreWorkersKeys.begin);
 	wr << applierID << version;
 	return wr.toValue();
 }
