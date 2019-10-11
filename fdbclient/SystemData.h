@@ -288,6 +288,10 @@ extern const KeyRef restoreStatusKey; // To be used when we measure fast restore
 extern const KeyRef restoreRequestTriggerKey;
 extern const KeyRef restoreRequestDoneKey;
 extern const KeyRangeRef restoreRequestKeys;
+extern const KeyRangeRef restoreApplierKeys;
+extern const KeyRef restoreApplierTxnValue;
+
+const Key restoreApplierKeyFor(UID const& applierID, Version version);
 const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
