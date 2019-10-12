@@ -1342,10 +1342,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
 
-			if (movingHighestPriority < PRIORITY_TEAM_REDUNDANT) {
+			if (movingHighestPriority < SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 				highestPriority = movingHighestPriority;
 			} else if (partitionsInFlight > 0) {
-				highestPriority = std::max<int>(highestPriority, PRIORITY_MERGE_SHARD);
+				highestPriority = std::max<int>(highestPriority, SERVER_KNOBS->PRIORITY_MERGE_SHARD);
 			}
 
 			JsonBuilderObject team_tracker;
@@ -1354,7 +1354,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			team_tracker.setKeyRawNumber("unhealthy_servers",inFlight.getValue("UnhealthyServers"));
 
 			JsonBuilderObject stateSectionObj;
-			if (highestPriority >= PRIORITY_TEAM_0_LEFT) {
+			if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "missing_data";
 				stateSectionObj["description"] = "No replicas remain of some data";
@@ -1363,7 +1363,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 					*minReplicasRemaining = 0;
 				}
 			}
-			else if (highestPriority >= PRIORITY_TEAM_1_LEFT) {
+			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only one replica remains of some data";
@@ -1372,7 +1372,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 					*minReplicasRemaining = 1;
 				}
 			}
-			else if (highestPriority >= PRIORITY_TEAM_2_LEFT) {
+			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only two replicas remain of some data";
@@ -1381,26 +1381,26 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 					*minReplicasRemaining = 2;
 				}
 			}
-			else if (highestPriority >= PRIORITY_TEAM_UNHEALTHY) {
+			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
-			} else if (highestPriority >= PRIORITY_MERGE_SHARD) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_repartitioning";
 				stateSectionObj["description"] = "Repartitioning.";
-			} else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "optimizing_team_collections";
 				stateSectionObj["description"] = "Optimizing team collections";
-			} else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
-			} else if (highestPriority == PRIORITY_TEAM_HEALTHY) {
+			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
 				stateSectionObj["healthy"] = true;
  				stateSectionObj["name"] = "healthy";
-			} else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
 				stateSectionObj["description"] = "Rebalancing";
