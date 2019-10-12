@@ -49,7 +49,7 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData() : startTime(-1), priority(-1), boundaryPriority(-1), healthPriority(-1), workFactor(0), wantsNewServers(false), interval("QueuedRelocation") {}
-	RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1), healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
+	explicit RelocateData( RelocateShard const& rs ) : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1), healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
 		wantsNewServers(
 			rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
@@ -599,12 +599,14 @@ struct DDQueueData {
 	}
 
 	//This function cannot handle relocation requests which split a shard into three pieces
-	void queueRelocation( RelocateData rd, std::set<UID> &serversToLaunchFrom ) {
+	void queueRelocation( RelocateShard rs, std::set<UID> &serversToLaunchFrom ) {
 		//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
 
 		// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
-		bool hasHealthPriority = rd.healthPriority != -1;
-		bool hasBoundaryPriority = rd.boundaryPriority != -1;
+		RelocateData rd(rs);
+		bool hasHealthPriority = RelocateData::isHealthPriority( rd.priority );
+		bool hasBoundaryPriority = RelocateData::isBoundaryPriority( rd.priority );
+		
 		auto ranges = queueMap.intersectingRanges( rd.keys );
 		for(auto r = ranges.begin(); r != ranges.end(); ++r ) {
 			RelocateData& rrs = r->value();
