@@ -164,8 +164,8 @@ struct MachineAttritionWorkload : TestWorkload {
 			TraceEvent("Assassination").detail("TargetDataCenter", killDcId);
 			for (const auto& worker : workers) {
 				// kill all matching dcId workers, except testers
-				if (worker.interf.locality.dcId() == killDcId &&
-				    worker.processClass == ProcessClass::ClassType::TesterClass) {
+				if (worker.interf.locality.dcId().present() && worker.interf.locality.dcId() == killDcId &&
+				    worker.processClass != ProcessClass::ClassType::TesterClass) {
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
