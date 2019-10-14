@@ -55,41 +55,35 @@ fdb_error_t wait_future(FDBFuture *f) {
 int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
   FDBFuture *f;
   fdb_error_t err = 0;
-  int retry = DEFAULT_RETRY_COUNT;
+  fdb_error_t err2 = 0;
 
-  do {
-    f = fdb_transaction_commit(transaction);
-    err = wait_future(f);
-    fdb_future_destroy(f);
-    if (stats) {
-      if (err == 1020 /* not_committed */)
-	stats->conflicts++;
-      else {
-	stats->errors[OP_COMMIT]++;
-      }
-    }
-    
-    if (err) {
-      fprintf(stderr, "ERROR: Error %d occured at fdb_transaction_commit\n",
-	      err);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	fprintf(stderr,
-		"ERROR: fdb_transaction_on_error returned %d at %s:%d\n",
-		err, __FILE__, __LINE__);
-	break;
-      }
-    } else {
-      if (stats)
-	stats->ops[OP_COMMIT]++;
-      break;
-    }
-  } while (err && retry--);
+  f = fdb_transaction_commit(transaction);
+  err = wait_future(f);
+  fdb_future_destroy(f);
   
-  return err;
+  if (err) {
+    if (err == 1020 /* not_committed */)
+      stats->conflicts++;
+    else {
+      fprintf(stderr, "ERROR: Error %d occured at fdb_transaction_commit\n", err);
+      stats->errors[OP_COMMIT]++;
+    }
+    f = fdb_transaction_on_error(transaction, err);
+    err2 = wait_future(f);
+    fdb_future_destroy(f);
+    if (err2) {
+      /* not retryable */
+      fprintf(stderr,
+	      "ERROR: fdb_transaction_on_error returned %d at %s:%d\n",
+	      err2, __FILE__, __LINE__);
+      return 0; /* returning zero because we will not retry this transaction */
+    }
+    return err;
+  }
+
+  if (stats)
+    stats->ops[OP_COMMIT]++;
+  return 0;
 }
 
 void update_op_stats(struct timespec *start, struct timespec *end, int op,
@@ -478,6 +472,7 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
   int randstrlen;
   int rangei;
 
+ RETRY_TXN:
   /* transaction */
   clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
   for (i = 0; i < MAX_OP; i++) {
@@ -636,6 +631,13 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
       clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
       update_op_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT,
                       stats);
+    } else {
+      /*
+       * In case of a commit error, we need to retry with the same transaction object.
+       * For benchmarking purpose, we don't need to replay the exact same workload,
+       * so we simply jump to the beginning of this function.
+       */
+      goto RETRY_TXN;
     }
   }
   stats->xacts++;
