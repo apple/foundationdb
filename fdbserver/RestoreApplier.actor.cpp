@@ -313,7 +313,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				tr->set(restoreApplierKeyFor(self->id(), progress.curTxnId), restoreApplierTxnValue);
 
 				while (1) { // Loop: Accumulate mutations in a transaction
-					state MutationRef m = progress.getCurrentMutation();
+					MutationRef m = progress.getCurrentMutation();
 
 					if (m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP) {
 						typeStr = typeString[m.type];
