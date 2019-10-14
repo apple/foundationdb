@@ -619,7 +619,6 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
 
-							// FIXME: this change will not propagate to other MoveKeys actors working in parallel(?)
 							intendedTeam.clear();
 							for(int i = 0; i < dest.size(); i++)
 								intendedTeam.insert(dest[i]);
