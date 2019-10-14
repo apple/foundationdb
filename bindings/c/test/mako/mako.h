@@ -29,6 +29,8 @@
 #define MODE_BUILD 1
 #define MODE_RUN 2
 
+#define FDB_ERROR_DONT_RETRY -1
+
 /* we set mako_txn_t and mako_args_t only once in the master process,
  * and won't be touched by child processes.
  */

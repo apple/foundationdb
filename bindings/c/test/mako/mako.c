@@ -41,6 +41,31 @@
     }                                                                          \
   } while (0)
 
+#define fdb_wait_and_handle_error(_func, _f, _t)			\
+  do {									\
+    int err = wait_future(_f);						\
+    if (err) {								\
+      int err2;								\
+      fdb_future_destroy(_f);						\
+      _f = fdb_transaction_on_error(_t, err);				\
+      err2 = wait_future(_f);						\
+      fdb_future_destroy(_f);						\
+      if (err2) {							\
+        /* not retryable */						\
+        if (err2 != 2017 /* used_during_commit */) {			\
+          fprintf(stderr,						\
+        	  "ERROR: fdb_transaction_on_error returned %d at %s:%d\n",	\
+        	  err2, __FILE__, __LINE__);				\
+        }								\
+        return FDB_ERROR_DONT_RETRY;					\
+      }									\
+      fprintf(stderr, "ERROR: Error %s (%d) occured at %s\n",		\
+        	  #_func, fdb_get_error(err), err);			\
+      return err;							\
+    }									\
+  } while (0);
+
+
 fdb_error_t wait_future(FDBFuture *f) {
   fdb_error_t err;
 
@@ -54,42 +79,39 @@ fdb_error_t wait_future(FDBFuture *f) {
 
 int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
   FDBFuture *f;
-  fdb_error_t err = 0;
-  int retry = DEFAULT_RETRY_COUNT;
+  fdb_error_t err, err2;
 
-  do {
-    f = fdb_transaction_commit(transaction);
-    err = wait_future(f);
-    fdb_future_destroy(f);
-    if (stats) {
-      if (err == 1020 /* not_committed */)
-	stats->conflicts++;
-      else {
-	stats->errors[OP_COMMIT]++;
-      }
-    }
-    
-    if (err) {
-      fprintf(stderr, "ERROR: Error %d occured at fdb_transaction_commit\n",
-	      err);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	fprintf(stderr,
-		"ERROR: fdb_transaction_on_error returned %d at %s:%d\n",
-		err, __FILE__, __LINE__);
-	break;
-      }
-    } else {
-      if (stats)
-	stats->ops[OP_COMMIT]++;
-      break;
-    }
-  } while (err && retry--);
+  f = fdb_transaction_commit(transaction);
+  err = wait_future(f);
+  fdb_future_destroy(f);
   
-  return err;
+  if (err) {
+    if (err == 1020 /* not_committed */)
+      stats->conflicts++;
+    else {
+      stats->errors[OP_COMMIT]++;
+    }
+    f = fdb_transaction_on_error(transaction, err);
+    err2 = wait_future(f);
+    fdb_future_destroy(f);
+    if (err2) {
+      /* not retryable */
+      fprintf(stderr,
+	      "ERROR: fdb_transaction_on_error returned %d at %s:%d\n",
+	      err2, __FILE__, __LINE__);
+      return FDB_ERROR_DONT_RETRY;
+    }
+    if ((err != 1020 /* not_committed */) &&
+	(err != 1021 /* commit_unknown_result */)) {
+      fprintf(stderr, "ERROR: Error %s (%d) occured at fdb_transaction_commit\n",
+	      fdb_get_error(err), err);
+    }
+    return err;
+  }
+
+  if (stats)
+    stats->ops[OP_COMMIT]++;
+  return 0;
 }
 
 void update_op_stats(struct timespec *start, struct timespec *end, int op,
@@ -272,28 +294,9 @@ int64_t run_op_getreadversion(FDBTransaction *transaction) {
   int64_t rv = 0;
   FDBFuture *f;
   fdb_error_t err;
-  int retry = DEFAULT_RETRY_COUNT;
 
-  do {
-    f = fdb_transaction_get_read_version(transaction);
-    err = wait_future(f);
-
-    if (err) {
-      fdb_future_destroy(f);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	break;
-      }
-    }
-  } while (err && retry--);
-
-  if (err) {
-    fprintf(stderr, "ERROR: fdb_transaction_get_read_version: %s\n", fdb_get_error(err));
-    return -1;
-  }
+  f = fdb_transaction_get_read_version(transaction);
+  fdb_wait_and_handle_error(fdb_transaction_get_read_version, f, transaction);
 
 #if FDB_API_VERSION < 620
   err = fdb_future_get_version(f, &rv);
@@ -319,30 +322,11 @@ int run_op_get(FDBTransaction *transaction, char *keystr, char *valstr,
   char *val;
   int vallen;
   fdb_error_t err;
-  int retry = DEFAULT_RETRY_COUNT;
 
-  do {
-    f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
-			    snapshot);
-    err = wait_future(f);
-
-    if (err) {
-      fdb_future_destroy(f);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	break;
-      }
-    }
-  } while (err && retry--);
-
-  if (err) {
-    fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));
-    return -1;
-  }
-
+  f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr),
+			  snapshot);
+  fdb_wait_and_handle_error(fdb_transaction_get, f, transaction);
+  
   err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
   fdb_future_destroy(f);
   if (err || !out_present) {
@@ -361,34 +345,15 @@ int run_op_getrange(FDBTransaction *transaction, char *keystr, char *keystr2,
   FDBKeyValue const *out_kv;
   int out_count;
   int out_more;
-  int retry = DEFAULT_RETRY_COUNT;
 
-  do {
-    f = fdb_transaction_get_range(
-          transaction,
-          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t *)keystr, strlen(keystr)),
-          FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t *)keystr2, strlen(keystr2)) + 1,
-          0 /* limit */, 0 /* target_bytes */,
-          FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */, 0 /* iteration */,
-          snapshot, reverse /* reverse */);
-    err = wait_future(f);
-
-    if (err) {
-      fdb_future_destroy(f);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	break;
-      }
-    }
-  } while (err && retry--);
-
-  if (err) {
-    fprintf(stderr, "ERROR: fdb_transaction_get_range: %s\n", fdb_get_error(err));
-    return -1;
-  }
+  f = fdb_transaction_get_range(
+    transaction,
+    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t *)keystr, strlen(keystr)),
+    FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t *)keystr2, strlen(keystr2)) + 1,
+    0 /* limit */, 0 /* target_bytes */,
+    FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */, 0 /* iteration */,
+    snapshot, reverse /* reverse */);
+  fdb_wait_and_handle_error(fdb_transaction_get_range, f, transaction);
 
   err = fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more);
   if (err) {
@@ -407,29 +372,10 @@ int run_op_update(FDBTransaction *transaction, char *keystr, char *valstr) {
   char *val;
   int vallen;
   fdb_error_t err;
-  int retry = DEFAULT_RETRY_COUNT;
 
   /* GET first */
-  do {
-    f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr), 0);
-    err = wait_future(f);
-
-    if (err) {
-      fdb_future_destroy(f);
-      f = fdb_transaction_on_error(transaction, err);
-      err = wait_future(f);
-      fdb_future_destroy(f);
-      if (err) {
-	/* not retryable */
-	break;
-      }
-    }
-  } while (err && retry--);
-
-  if (err) {
-    fprintf(stderr, "ERROR: fdb_transaction_get: %s\n", fdb_get_error(err));
-    return -1;
-  }
+  f = fdb_transaction_get(transaction, (uint8_t *)keystr, strlen(keystr), 0);
+  fdb_wait_and_handle_error(fdb_transaction_get, f, transaction);
 
   err = fdb_future_get_value(f, &out_present, (const uint8_t **)&val, &vallen);
   fdb_future_destroy(f);
@@ -477,170 +423,195 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
   int64_t readversion;
   int randstrlen;
   int rangei;
+  int retry = 0;
 
-  /* transaction */
-  clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
-  for (i = 0; i < MAX_OP; i++) {
+  /* retry loop */
+  do {
+    retry = 0;
+    
+    /* transaction */
+    clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
+    for (i = 0; i < MAX_OP; i++) {
+      
+      if ((args->txnspec.ops[i][OP_COUNT] > 0) && (i != OP_COMMIT)) {
+	for (count = 0; count < args->txnspec.ops[i][OP_COUNT]; count++) {
+	  
+	  /* pick a random key(s) */
+	  if (args->zipf) {
+	    keynum = zipfian_next();
+	  } else {
+	    keynum = urand(0, args->rows - 1);
+	  }
+	  genkey(keystr, keynum, args->rows, args->key_length + 1);
+	  
+	  /* range */
+	  if (args->txnspec.ops[i][OP_RANGE] > 0) {
+	    keyend = keynum + args->txnspec.ops[i][OP_RANGE] - 1; /* inclusive */
+	    if (keyend > args->rows - 1) {
+	      keyend = args->rows - 1;
+	    }
+	    genkey(keystr2, keyend, args->rows, args->key_length + 1);
+	  }
+	  
+	  if (stats->xacts % args->sampling == 0) {
+	    /* per op latency */
+	    clock_gettime(CLOCK_MONOTONIC, &timer_start);
+	  }
+	  
+	  switch (i) {
+	  case OP_GETREADVERSION:
+	    readversion = run_op_getreadversion(transaction);
+	    if (!readversion) {
+	      rc = -1;
+	    }
+	    break;
+	  case OP_GET:
+	    rc = run_op_get(transaction, keystr, valstr, 0);
+	    break;
+	  case OP_GETRANGE:
+	    rc = run_op_getrange(transaction, keystr, keystr2, valstr, 0,
+				 args->txnspec.ops[i][OP_REVERSE]);
+	    break;
+	  case OP_SGET:
+	    rc = run_op_get(transaction, keystr, valstr, 1);
+	    break;
+	  case OP_SGETRANGE:
+	    rc = run_op_getrange(transaction, keystr, keystr2, valstr, 1,
+				 args->txnspec.ops[i][OP_REVERSE]);
+	    break;
+	  case OP_UPDATE:
+	    randstr(valstr, args->value_length + 1);
+	    rc = run_op_update(transaction, keystr, valstr);
+	    docommit = 1;
+	    break;
+	  case OP_INSERT:
+	    randstr(keystr + KEYPREFIXLEN, args->key_length - KEYPREFIXLEN +
+		    1); /* make it (almost) unique */
+	    randstr(valstr, args->value_length + 1);
+	    rc = run_op_insert(transaction, keystr, valstr);
+	    docommit = 1;
+	    break;
+	  case OP_INSERTRANGE:
+	    randstrlen = args->key_length - KEYPREFIXLEN -
+	      digits(args->txnspec.ops[i][OP_RANGE]);
+	    randstr(keystr + KEYPREFIXLEN,
+		    randstrlen + 1); /* make it (almost) unique */
+	    randstr(valstr, args->value_length + 1);
+	    for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
+	      sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d",
+		      digits(args->txnspec.ops[i][OP_RANGE]), rangei);
+	      rc = run_op_insert(transaction, keystr, valstr);
+	      if (rc != 0)
+		break;
+	    }
+	    docommit = 1;
+	    break;
+	  case OP_CLEAR:
+	    rc = run_op_clear(transaction, keystr);
+	    docommit = 1;
+	    break;
+	  case OP_SETCLEAR:
+	    randstr(keystr + KEYPREFIXLEN, args->key_length - KEYPREFIXLEN +
+		    1); /* make it (almost) unique */
+	    randstr(valstr, args->value_length + 1);
+	    rc = run_op_insert(transaction, keystr, valstr);
+	    if (rc == 0) {
+	      /* commit insert so mutation goes to storage */
+	      if (commit_transaction(transaction, stats) == 0) {
+		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+		update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
+				OP_COMMIT, stats);
+	      }
+	      fdb_transaction_reset(transaction);
+	      rc = run_op_clear(transaction, keystr);
+	    }
+	    docommit = 1;
+	    break;
+	  case OP_CLEARRANGE:
+	    rc = run_op_clearrange(transaction, keystr, keystr2);
+	    docommit = 1;
+	    break;
+	  case OP_SETCLEARRANGE:
+	    randstrlen = args->key_length - KEYPREFIXLEN -
+	      digits(args->txnspec.ops[i][OP_RANGE]);
+	    randstr(keystr + KEYPREFIXLEN,
+		    randstrlen + 1); /* make it (almost) unique */
+	    randstr(valstr, args->value_length + 1);
+	    for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
+	      sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d",
+		      digits(args->txnspec.ops[i][OP_RANGE]), rangei);
+	      if (rangei == 0) {
+		strcpy(keystr2, keystr);
+		keystr2[strlen(keystr)] = '\0';
+	      }
+	      rc = run_op_insert(transaction, keystr, valstr);
+	      if (rc != 0) {
+		/* rollback not necessary, transaction will be reset */
+		break;
+	      }
+	    }
+	    /* commit inserts so mutation goes to storage */
+	    if (commit_transaction(transaction, stats) == 0) {
+	      clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+	      update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
+			      OP_COMMIT, stats);
+	    }
+	    fdb_transaction_reset(transaction);
+	    rc = run_op_clearrange(transaction, keystr2, keystr);
+	    docommit = 1;
+	    break;
+	  default:
+	    fprintf(stderr, "ERROR: Unknown Operation %d\n", i);
+	    break;
+	  }
 
-    if ((args->txnspec.ops[i][OP_COUNT] > 0) && (i != OP_COMMIT)) {
-      for (count = 0; count < args->txnspec.ops[i][OP_COUNT]; count++) {
+	  if (stats->xacts % args->sampling == 0) {
+	    clock_gettime(CLOCK_MONOTONIC, &timer_end);
+	    if (rc == 0) {
+	      /* per op latency */
+	      update_op_stats(&timer_start, &timer_end, i, stats);
+	    }
+	  }
 
-        /* pick a random key(s) */
-        if (args->zipf) {
-          keynum = zipfian_next();
-        } else {
-          keynum = urand(0, args->rows - 1);
-        }
-        genkey(keystr, keynum, args->rows, args->key_length + 1);
-
-        /* range */
-        if (args->txnspec.ops[i][OP_RANGE] > 0) {
-          keyend = keynum + args->txnspec.ops[i][OP_RANGE] - 1; /* inclusive */
-          if (keyend > args->rows - 1) {
-            keyend = args->rows - 1;
-          }
-          genkey(keystr2, keyend, args->rows, args->key_length + 1);
-        }
-
-        if (stats->xacts % args->sampling == 0) {
-          /* per op latency */
-          clock_gettime(CLOCK_MONOTONIC, &timer_start);
-        }
-
-        switch (i) {
-        case OP_GETREADVERSION:
-          readversion = run_op_getreadversion(transaction);
-          if (!readversion) {
-            rc = -1;
-          }
-          break;
-        case OP_GET:
-          rc = run_op_get(transaction, keystr, valstr, 0);
-          break;
-        case OP_GETRANGE:
-          rc = run_op_getrange(transaction, keystr, keystr2, valstr, 0,
-                               args->txnspec.ops[i][OP_REVERSE]);
-          break;
-        case OP_SGET:
-          rc = run_op_get(transaction, keystr, valstr, 1);
-          break;
-        case OP_SGETRANGE:
-          rc = run_op_getrange(transaction, keystr, keystr2, valstr, 1,
-                               args->txnspec.ops[i][OP_REVERSE]);
-          break;
-        case OP_UPDATE:
-          randstr(valstr, args->value_length + 1);
-          rc = run_op_update(transaction, keystr, valstr);
-          docommit = 1;
-          break;
-        case OP_INSERT:
-          randstr(keystr + KEYPREFIXLEN, args->key_length - KEYPREFIXLEN +
-                                             1); /* make it (almost) unique */
-          randstr(valstr, args->value_length + 1);
-          rc = run_op_insert(transaction, keystr, valstr);
-          docommit = 1;
-          break;
-        case OP_INSERTRANGE:
-          randstrlen = args->key_length - KEYPREFIXLEN -
-                       digits(args->txnspec.ops[i][OP_RANGE]);
-          randstr(keystr + KEYPREFIXLEN,
-                  randstrlen + 1); /* make it (almost) unique */
-          randstr(valstr, args->value_length + 1);
-          for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
-            sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d",
-                    digits(args->txnspec.ops[i][OP_RANGE]), rangei);
-            rc = run_op_insert(transaction, keystr, valstr);
-            if (rc != 0)
-              break;
-          }
-          docommit = 1;
-          break;
-        case OP_CLEAR:
-          rc = run_op_clear(transaction, keystr);
-          docommit = 1;
-          break;
-        case OP_SETCLEAR:
-          randstr(keystr + KEYPREFIXLEN, args->key_length - KEYPREFIXLEN +
-                                             1); /* make it (almost) unique */
-          randstr(valstr, args->value_length + 1);
-          rc = run_op_insert(transaction, keystr, valstr);
-          if (rc == 0) {
-            /* commit insert so mutation goes to storage */
-            if (commit_transaction(transaction, stats) == 0) {
-              clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-              update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
-                              OP_COMMIT, stats);
-            }
-            fdb_transaction_reset(transaction);
-            rc = run_op_clear(transaction, keystr);
-          }
-          docommit = 1;
-          break;
-        case OP_CLEARRANGE:
-          rc = run_op_clearrange(transaction, keystr, keystr2);
-          docommit = 1;
-          break;
-        case OP_SETCLEARRANGE:
-          randstrlen = args->key_length - KEYPREFIXLEN -
-                       digits(args->txnspec.ops[i][OP_RANGE]);
-          randstr(keystr + KEYPREFIXLEN,
-                  randstrlen + 1); /* make it (almost) unique */
-          randstr(valstr, args->value_length + 1);
-          for (rangei = 0; rangei < args->txnspec.ops[i][OP_RANGE]; rangei++) {
-            sprintf(keystr + KEYPREFIXLEN + randstrlen, "%0.*d",
-                    digits(args->txnspec.ops[i][OP_RANGE]), rangei);
-            if (rangei == 0) {
-              strcpy(keystr2, keystr);
-              keystr2[strlen(keystr)] = '\0';
-            }
-            rc = run_op_insert(transaction, keystr, valstr);
-            if (rc != 0) {
-              /* rollback not necessary, transaction will be reset */
-              break;
-            }
-          }
-          /* commit inserts so mutation goes to storage */
-          if (commit_transaction(transaction, stats) == 0) {
-            clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-            update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
-                            OP_COMMIT, stats);
-          }
-          fdb_transaction_reset(transaction);
-          rc = run_op_clearrange(transaction, keystr2, keystr);
-          docommit = 1;
-          break;
-        default:
-          fprintf(stderr, "ERROR: Unknown Operation %d\n", i);
-          break;
-        }
-
-        if (stats->xacts % args->sampling == 0) {
-          clock_gettime(CLOCK_MONOTONIC, &timer_end);
-          if (rc == 0) {
-            /* per op latency */
-            update_op_stats(&timer_start, &timer_end, i, stats);
-          }
-        }
-
-        /* check rc */
-        if (rc != 0) {
-          stats->errors[i]++;
-        } else {
-          stats->ops[i]++;
-        }
+	  /* check rc */
+	  if (rc != 0) {
+	    stats->errors[i]++;
+	    /* we don't need to complete the entire transaction, immediately retry */
+	    if (rc != FDB_ERROR_DONT_RETRY) {
+	      retry = 1;
+	      continue; /* retry */
+	    }
+	  } else {
+	    stats->ops[i]++;
+	  }
+	}
       }
     }
-  }
-  if (docommit | args->commit_get) {
-    if (commit_transaction(transaction, stats) == 0) {
-      clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-      update_op_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT,
-                      stats);
-    }
-  }
-  stats->xacts++;
 
+    if (docommit | args->commit_get) {
+      rc = commit_transaction(transaction, stats);
+      if (rc == 0) {
+	/* success */
+	clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+	update_op_stats(&timer_per_xact_start, &timer_per_xact_end, OP_COMMIT,
+			stats);
+      } else {
+	/*
+	 * In case of a commit error, we need to retry with the same transaction object.
+	 * For benchmarking purpose, we don't need to replay the exact same workload,
+	 * so we simply jump to the beginning of this function.
+	 */
+	if (rc != FDB_ERROR_DONT_RETRY) {
+	  retry = 1;
+	  continue; /* retry */
+	}
+      }
+    }
+  } while (retry);
+
+  stats->xacts++;
   fdb_transaction_reset(transaction);
+
   return 0;
 }
 
