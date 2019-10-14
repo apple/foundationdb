@@ -1865,14 +1865,14 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
+ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
                                                   Future<Version> fVersion, KeySelector begin, KeySelector end,
                                                   GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
                                                   bool snapshot, bool reverse, TransactionInfo info) {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
-	state Standalone<RangeResultRef> output;
+	state GetRangeResult result;
 	state bool enabledReadProxy = true;
 
 	try {
@@ -1886,7 +1886,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 		                                     // if so maybe there is a much subtler problem even with this.
 
 		if( begin.getKey() == allKeys.begin && begin.offset < 1 ) {
-			output.readToBegin = true;
+			result.output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual( begin.getKey() ), begin.arena());
 		}
 
@@ -1897,8 +1897,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 			state bool usingReadProxy = false;
 
 			if( end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual()) ) {
-				getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
-				return output;
+				getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result.output);
+				return result;
 			}
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
@@ -1997,6 +1997,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 				ASSERT( !limits.hasRowLimit() || rep.data.size() <= limits.rows );
 
 				limits.decrement( rep.data );
+				result.version = rep.version;
 
 				if(reverse && begin.isLastLessOrEqual() && rep.data.size() && rep.data.end()[-1].key == begin.getKey()) {
 					modifiedSelectors = false;
@@ -2006,42 +2007,42 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 				bool readThrough = modifiedSelectors && !rep.more;
 
 				// optimization: first request got all data--just return it
-				if( finished && !output.size() ) {
-					bool readToBegin = output.readToBegin;
-					bool readThroughEnd = output.readThroughEnd;
+				if( finished && !result.output.size() ) {
+					bool readToBegin = result.output.readToBegin;
+					bool readThroughEnd = result.output.readThroughEnd;
 
-					output = Standalone<RangeResultRef>( RangeResultRef( rep.data, modifiedSelectors || limits.isReached() || rep.more ), rep.arena );
-					output.readToBegin = readToBegin;
-					output.readThroughEnd = readThroughEnd;
+					result.output = Standalone<RangeResultRef>( RangeResultRef( rep.data, modifiedSelectors || limits.isReached() || rep.more ), rep.arena );
+					result.output.readToBegin = readToBegin;
+					result.output.readThroughEnd = readThroughEnd;
 
-					if( BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) ) {
-						output.more = true;
-						output.resize(output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows),output.size()));
-						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
-						return output;
+					if( BUGGIFY && limits.hasByteLimit() && result.output.size() > std::max(1, originalLimits.minRows) ) {
+						result.output.more = true;
+						result.output.resize(result.output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows), result.output.size()));
+						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result.output);
+						return result;
 					}
 
 					if( readThrough ) {
-						output.arena().dependsOn( shard.arena() );
-						output.readThrough = reverse ? shard.begin : shard.end;
+						result.output.arena().dependsOn( shard.arena() );
+						result.output.readThrough = reverse ? shard.begin : shard.end;
 					}
 
-					getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
-					return output;
+					getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result.output);
+					return result;
 				}
 
-				output.arena().dependsOn( rep.arena );
-				output.append(output.arena(), rep.data.begin(), rep.data.size());
+				result.output.arena().dependsOn( rep.arena );
+				result.output.append(result.output.arena(), rep.data.begin(), rep.data.size());
 
 				if( finished ) {
 					if( readThrough ) {
-						output.arena().dependsOn( shard.arena() );
-						output.readThrough = reverse ? shard.begin : shard.end;
+						result.output.arena().dependsOn( shard.arena() );
+						result.output.readThrough = reverse ? shard.begin : shard.end;
 					}
-					output.more = modifiedSelectors || limits.isReached() || rep.more;
+					result.output.more = modifiedSelectors || limits.isReached() || rep.more;
 
-					getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
-					return output;
+					getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result.output);
+					return result;
 				}
 
 				readVersion = rep.version; // see above comment
@@ -2053,7 +2054,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 					if( !rep.data.size() ) {
 						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
-						return result;
+						// return result; // TODO (Vishesh)
 					}
 
 					if( reverse )
@@ -2063,9 +2064,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 				} else {
 					TEST(true);  // GetKeyValuesReply.more in getRange
 					if( reverse )
-						end = firstGreaterOrEqual( output[output.size()-1].key );
+						end = firstGreaterOrEqual( result.output[result.output.size()-1].key );
 					else
-						begin = firstGreaterThan( output[output.size()-1].key );
+						begin = firstGreaterThan( result.output[result.output.size()-1].key );
 				}
 
 
@@ -2089,7 +2090,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 						    getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange,
 						                 reverse, result);
-						return result;
+						// return result; //TODO (Vishesh)
 					}
 				} else {
 					if (trLogInfo)
@@ -2111,10 +2112,17 @@ ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Reference<Transac
 	}
 }
 
-Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
-	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info )
-{
-	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info);
+ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Future<Version> fVersion, KeySelector begin,
+                                                  KeySelector end, GetRangeLimits limits, bool reverse,
+                                                  TransactionInfo info) {
+	GetRangeResult result = wait(getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits,
+	                                      Promise<std::pair<Key, Key>>(), true, reverse, info));
+	return result.output;
+}
+
+ACTOR Future<Standalone<RangeResultRef>> extractRangeRefFromResult(Future<GetRangeResult> result) {
+	GetRangeResult result = wait(result);
+	return result.output;
 }
 
 Transaction::Transaction( Database const& cx )
@@ -2366,7 +2374,7 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 		extraConflictRanges.push_back( conflictRange.getFuture() );
 	}
 
-	return ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info);
+	return extractRangeRefFromResult(::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info));
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getRange(
@@ -3504,4 +3512,22 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 			.error(e);
 		throw;
 	}
+}
+
+namespace NativeAPI {
+	Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, TransactionInfo info) {
+		return ::getKey(cx, k, version, info);
+	}
+
+    Future<Key> resolveKey(Database const& cx, KeySelector const& key, Version const& version,
+                           TransactionInfo const& info) {
+	    if (key.isFirstGreaterOrEqual()) return Future<Key>(key.getKey());
+	    if (key.isFirstGreaterThan()) return Future<Key>(keyAfter(key.getKey()));
+	    return ::getKey(cx, key, version, info);
+    }
+
+	Future<Standalone<RangeResultRef>> getRangeFallback(Database cx, Version version, KeySelector begin, KeySelector end,
+														GetRangeLimits limits, bool reverse, TransactionInfo info) {
+	    return ::getRangeFallback(cx, version, begin, end, limits, reverse, info);
+    }
 }

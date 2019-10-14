@@ -26,6 +26,9 @@
 	#define FDBCLIENT_NATIVEAPI_ACTOR_H
 
 
+#include <map>
+#include <vector>
+
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -325,6 +328,22 @@ int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::num
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+struct GetRangeResult {
+	Standalone<RangeResultRef> output;
+	Version version;
+};
+
+namespace NativeAPI {
+Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, TransactionInfo info);
+
+Future<Key> resolveKey(Database const& cx, KeySelector const& key, Version const& version,
+                       TransactionInfo const& info);
+
+Future<Standalone<RangeResultRef>> getRangeFallback(Database cx, Version version, KeySelector begin, KeySelector end,
+                                                    GetRangeLimits limits, bool reverse, TransactionInfo info);
+
+} // namespace NativeAPI
 
 #include "flow/unactorcompiler.h"
 #endif

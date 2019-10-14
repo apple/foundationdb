@@ -32,6 +32,7 @@ struct ReadProxyInterface {
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
+	RequestStream<struct WatchValueRequest> watchValue;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
