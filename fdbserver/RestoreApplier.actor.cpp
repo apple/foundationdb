@@ -153,14 +153,13 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	self->sanityCheckMutationOps();
 
-	// When the current txn fails and retries, startItInUncommittedTxn is the starting iterator in retry;
+	// When the current txn fails and retries,
 	// startIndexInUncommittedTxn is the starting index in retry;
-	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator curItInCurTxn = self->kvOps.begin();
+	state VersionedMutationsMap::iterator curItInCurTxn = self->kvOps.begin();
 	state int curIndexInCurTxn = 0; // current index in current txn; it increases per mutation
 
 	// In case a version has 0 txns
-	while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
-		curIndexInCurTxn = 0;
+	while (curItInCurTxn != self->kvOps.end() && curItInCurTxn->second.empty()) {
 		curItInCurTxn++;
 	}
 	if (curItInCurTxn == self->kvOps.end()) {
@@ -202,7 +201,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
 					    .detail("TxnStatusFailed", curTxnId)
 					    .detail("ApplierApplyToDB", self->id())
-					    .detail("CurrentFailedTxnId", curIndexInCurTxn)
 					    .detail("UncommittedTxnId", uncommittedTxnId)
 					    .detail("CurIteratorVersion", curItInCurTxn->first)
 					    .detail("StartIteratorVersionInUncommittedTxn", startItInUncommittedTxn->first)
@@ -224,7 +222,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
 					    .detail("TxnStatusSucceeded", curTxnId)
 					    .detail("ApplierApplyToDB", self->id())
-					    .detail("CurrentSucceedTxnId", curIndexInCurTxn)
 					    .detail("CurIteratorVersion", curItInCurTxn->first)
 					    .detail("CurrentIteratorMutations", curItInCurTxn->second.size())
 					    .detail("CurrentIndexInSucceedTxn", curIndexInCurTxn)
@@ -318,12 +315,12 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			//}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError")
-			    .detail("Error", e.what())
 			    .detail("TxnStatus", "?")
 			    .detail("ApplierApplyToDB", self->id())
 			    .detail("TxnId", curTxnId)
 			    .detail("StartIndexInCurrentTxn", curIndexInCurTxn)
-			    .detail("Version", curItInCurTxn->first);
+			    .detail("Version", curItInCurTxn->first)
+			    .error(e, true);
 			lastTxnHasError = true;
 			// if (e.code() == commit_unknown_result) {
 			// 	lastTxnHasError = true;
