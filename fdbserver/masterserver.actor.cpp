@@ -545,6 +545,10 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
+			TraceEvent(SevWarn, "MasterRecoveryInvalidConfiguration", self->dbgid)
+				.setMaxEventLength(11000)
+				.setMaxFieldLength(10000)
+				.detail("Conf", self->configuration.toString());
 			status = RecoveryStatus::configuration_invalid;
 		} else if (!self->cstate.prevDBState.tLogs.size()) {
 			status = RecoveryStatus::configuration_never_created;
@@ -665,7 +669,12 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
-	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("Conf", self->configuration.toString()).trackLatest("RecoveredConfig");
+
+	TraceEvent("MasterRecoveredConfig", self->dbgid)
+		.setMaxEventLength(11000)
+		.setMaxFieldLength(10000)
+		.detail("Conf", self->configuration.toString())
+		.trackLatest("RecoveredConfig");
 
 	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
 	self->dcId_locality.clear();
@@ -797,7 +806,10 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 		regionJSON["regions"] = self->configuration.getRegionJSON();
 		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion()).toString()));
 		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation 
-		TraceEvent("ForcedRecoveryConfigChange", self->dbgid).detail("Conf", self->configuration.toString());
+		TraceEvent("ForcedRecoveryConfigChange", self->dbgid)
+			.setMaxEventLength(11000)
+			.setMaxFieldLength(10000)
+			.detail("Conf", self->configuration.toString());
 	}
 	initialConfChanges->push_back(regionCommit);
 }
@@ -1201,7 +1213,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 					self->registrationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;

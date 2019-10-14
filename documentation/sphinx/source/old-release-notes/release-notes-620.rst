@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.3
+6.2.5
 =====
 
 Performance
@@ -26,6 +26,7 @@ Performance
 * Improved the speed of recoveries on large clusters at ``log_version >= 4``. `(PR #1729) <https://github.com/apple/foundationdb/pull/1729>`_.
 * Log routers will prefer to peek from satellites at ``log_version >= 4``. `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
 * In clusters using a region configuration, clients will read from the remote region if all of the servers in the primary region are overloaded. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
+* Significantly improved the rate at which the transaction logs in a remote region can pull data from the primary region. [6.2.4] `(PR #2101) <https://github.com/apple/foundationdb/pull/2101>`_.
 
 Fixes
 -----
@@ -45,6 +46,10 @@ Fixes
 * The ``fileconfigure`` command in ``fdbcli`` could fail with an unknown error if the file did not contain a valid JSON object. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
 * Configuring regions would fail with an internal error if the cluster contained storage servers that didn't set a datacenter ID. `(PR #2017) <https://github.com/apple/foundationdb/pull/2017>`_.
 * Clients no longer prefer reading from servers with the same zone ID, because it could create hot shards. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
+* Data distribution could fail to start if any storage servers had misconfigured locality information. This problem could persist even after the offending storage servers were removed or fixed. [6.2.5] `(PR #2110) <https://github.com/apple/foundationdb/pull/2110>`_.
+* Data distribution was running at too high of a priority, which sometimes caused other roles on the same process to stall. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
+* Loading a 6.1 or newer ``fdb_c`` library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. [6.2.5] `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. [6.2.5] `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
 
 Status
 ------
@@ -62,6 +67,7 @@ Status
 * Add ``coordinator`` to the list of roles that can be reported for a process. [6.2.3] `(PR #2006) <https://github.com/apple/foundationdb/pull/2006>`_.
 * Added ``worst_durability_lag_storage_server`` and ``limiting_durability_lag_storage_server`` to  the ``cluster.qos`` section, each with subfields ``versions`` and ``seconds``. These report the durability lag values being used by ratekeeper to potentially limit the transaction rate. [6.2.3] `(PR #2003) <https://github.com/apple/foundationdb/pull/2003>`_.
 * Added ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` to  the ``cluster.qos`` section, each with subfields ``versions`` and ``seconds``. These are meant to replace ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server``, which are now deprecated. [6.2.3] `(PR #2003) <https://github.com/apple/foundationdb/pull/2003>`_.
+* Added ``system_kv_size_bytes`` to the ``cluster.data`` section to record the size of the system keyspace. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 
 Bindings
 --------
@@ -73,6 +79,13 @@ Bindings
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Finalizers could run too early leading to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
 * Added a transaction option to control the field length of keys and values in debug transaction logging in order to avoid truncation. `(PR #1844) <https://github.com/apple/foundationdb/pull/1844>`_.
+* Added a transaction option to control the whether ``get_addresses_for_key`` includes a port in the address. This will be deprecated in api version 700, and addresses will include ports by default. [6.2.4] `(PR #2060) <https://github.com/apple/foundationdb/pull/2060>`_.
+* Python: ``Versionstamp`` comparisons didn't work in Python 3. [6.2.4] `(PR #2089) <https://github.com/apple/foundationdb/pull/2089>`_.
+
+Features
+--------
+
+* Added the ``cleanup`` command to ``fdbbackup`` which can be used to remove orphaned backups or DRs. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 
 Other Changes
 -------------
@@ -93,6 +106,7 @@ Other Changes
 * Added a ``no_wait`` option to the ``fdbcli`` exclude command to avoid blocking. `(PR #1852) <https://github.com/apple/foundationdb/pull/1852>`_.
 * Idle clusters will fsync much less frequently. `(PR #1697) <https://github.com/apple/foundationdb/pull/1697>`_.
 * CMake is now the official build system. The Makefile based build system is deprecated.
+* The incompatible client list in status (``cluster.incompatible_connections``) may now spuriously include clients that use the multi-version API to try connecting to the cluster at multiple versions.
 
 Fixes only impacting 6.2.0+
 ---------------------------
@@ -104,6 +118,12 @@ Fixes only impacting 6.2.0+
 * The macOS client was not compatible with a Linux server. [6.2.3] `(PR #2045) <https://github.com/apple/foundationdb/pull/2045>`_.
 * Incompatible clients would continually reconnect with coordinators. [6.2.3] `(PR #2048) <https://github.com/apple/foundationdb/pull/2048>`_.
 * Connections were being closed as idle when there were still unreliable requests waiting for a response. [6.2.3] `(PR #2048) <https://github.com/apple/foundationdb/pull/2048>`_.
+* The cluster controller would saturate its CPU for a few seconds when sending configuration information to all of the worker processes. [6.2.4] `(PR #2086) <https://github.com/apple/foundationdb/pull/2086>`_.
+* The data distributor would build all possible team combinations if it was tracking an unhealthy server with less than 10 teams. [6.2.4] `(PR #2099) <https://github.com/apple/foundationdb/pull/2099>`_.
+* The cluster controller could crash if a coordinator was unreachable when compiling cluster status. [6.2.4] `(PR #2065) <https://github.com/apple/foundationdb/pull/2065>`_.
+* The cluster controller could crash if a coordinator was unreachable when compiling cluster status. [6.2.4] `(PR #2065) <https://github.com/apple/foundationdb/pull/2065>`_.
+* A storage server could crash if it took longer than 10 minutes to fetch a key range from another server. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
+* Excluding or including servers would restart the data distributor. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 
 Earlier release notes
 ---------------------

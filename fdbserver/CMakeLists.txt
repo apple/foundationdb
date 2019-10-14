@@ -53,6 +53,7 @@ set(FDBSERVER_SRCS
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
+  OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h

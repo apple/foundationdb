@@ -75,9 +75,21 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
+ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	loop {
+		info->set( db->get().read().client );
+		wait( db->onChange() );
+	}
+}
+
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
+}
+
+Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
+	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().read().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
 struct ErrorInfo {
@@ -240,7 +252,7 @@ struct TLogOptions {
 	TLogOptions( TLogVersion v, TLogSpillType s ) : version(v), spillType(s) {}
 
 	TLogVersion version = TLogVersion::DEFAULT;
-	TLogSpillType spillType = TLogSpillType::DEFAULT;
+	TLogSpillType spillType = TLogSpillType::UNSET;
 
 	static ErrorOr<TLogOptions> FromStringRef( StringRef s ) {
 		TLogOptions options;
@@ -265,45 +277,50 @@ struct TLogOptions {
 	}
 
 	bool operator == ( const TLogOptions& o ) {
-		return version == o.version && spillType == o.spillType;
+		return version == o.version &&
+			(spillType == o.spillType || version >= TLogVersion::V5);
 	}
 
 	std::string toPrefix() const {
-		if (version == TLogVersion::V2) return "";
-
-		std::string toReturn =
-			"V_" + boost::lexical_cast<std::string>(version) +
-			"_LS_" + boost::lexical_cast<std::string>(spillType);
+		std::string toReturn = "";
+		switch (version) {
+		case TLogVersion::UNSET:
+			ASSERT(false);
+		case TLogVersion::V2:
+			return "";
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			toReturn =
+				"V_" + boost::lexical_cast<std::string>(version) +
+				"_LS_" + boost::lexical_cast<std::string>(spillType);
+			break;
+		case TLogVersion::V5:
+			toReturn = "V_" + boost::lexical_cast<std::string>(version);
+			break;
+		}
 		ASSERT_WE_THINK( FromStringRef( toReturn ).get() == *this );
 		return toReturn + "-";
 	}
 };
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
-	auto tLogFn = tLog;
-	if ( options.spillType == TLogSpillType::VALUE ) {
-		switch (options.version) {
+	switch (options.version) {
 		case TLogVersion::V2:
-		case TLogVersion::V3:
-		case TLogVersion::V4:
+			if (options.spillType == TLogSpillType::REFERENCE)
+				ASSERT(false);
 			return oldTLog_6_0::tLog;
-		default:
-			ASSERT(false);
-		}
-	}
-	if ( options.spillType == TLogSpillType::REFERENCE ) {
-		switch (options.version) {
-		case TLogVersion::V2:
-			ASSERT(false);
 		case TLogVersion::V3:
 		case TLogVersion::V4:
+			if (options.spillType == TLogSpillType::VALUE)
+				return oldTLog_6_0::tLog;
+			else
+				return oldTLog_6_2::tLog;
+		case TLogVersion::V5:
 			return tLog;
 		default:
 			ASSERT(false);
-		}
 	}
-	ASSERT(false);
-	return tLogFn;
+	return tLog;
 }
 
 struct DiskStore {
@@ -724,11 +741,12 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		}
 
 		choose {
-			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
-				.detail("RatekeeperID", ni.ratekeeper.present() ? ni.ratekeeper.get().id() : UID())
-				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
-				ServerDBInfo localInfo = ni;
+			when( CachedSerialization<ServerDBInfo> ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
+				ServerDBInfo localInfo = ni.read();
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+				
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -739,6 +757,35 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		}
 	}
 }
+
+class SharedLogsKey {
+	TLogVersion logVersion;
+	TLogSpillType spillType;
+	KeyValueStoreType storeType;
+
+public:
+	SharedLogsKey( const TLogOptions& options, KeyValueStoreType kvst )
+			: logVersion(options.version), spillType(options.spillType), storeType(kvst) {
+		if (logVersion >= TLogVersion::V5)
+			spillType = TLogSpillType::UNSET;
+	}
+
+	bool operator<(const SharedLogsKey& other) const {
+		return std::tie(logVersion, spillType, storeType) <
+			std::tie(other.logVersion, other.spillType, other.storeType);
+	}
+};
+
+struct SharedLogsValue {
+	Future<Void> actor = Void();
+	UID uid = UID();
+	PromiseStream<InitializeTLogRequest> requests;
+
+	SharedLogsValue() = default;
+	SharedLogsValue( Future<Void> actor, UID uid, PromiseStream<InitializeTLogRequest> requests )
+		: actor(actor), uid(uid), requests(requests) {
+	}
+};
 
 ACTOR Future<Void> workerServer(
 		Reference<ClusterConnectionFile> connFile,
@@ -767,8 +814,9 @@ ACTOR Future<Void> workerServer(
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
-	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
+	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
@@ -882,16 +930,18 @@ ACTOR Future<Void> workerServer(
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
+				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded, activeSharedTLog );
 				recoveries.push_back(recovery.getFuture());
+				activeSharedTLog->set(s.storeID);
 
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
-				if(!logData.first.isValid() || logData.first.isReady()) {
-					logData.first = oldLog.getFuture() || tl;
+				if(!logData.actor.isValid() || logData.actor.isReady()) {
+					logData.actor = oldLog.getFuture() || tl;
+					logData.uid = s.storeID;
 				}
 				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
@@ -1030,9 +1080,9 @@ ACTOR Future<Void> workerServer(
 				}
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
-				logData.second.send(req);
-				if(!logData.first.isValid() || logData.first.isReady()) {
+				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
+				logData.requests.send(req);
+				if(!logData.actor.isValid() || logData.actor.isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -1049,11 +1099,14 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded );
-					logData.first = handleIOErrors( logData.first, data, logId );
-					logData.first = handleIOErrors( logData.first, queue, logId );
-					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
+					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, logData.requests, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
+					tLogCore = handleIOErrors( tLogCore, data, logId );
+					tLogCore = handleIOErrors( tLogCore, queue, logId );
+					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore ) );
+					logData.actor = tLogCore;
+					logData.uid = logId;
 				}
+				activeSharedTLog->set(logData.uid);
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
 				if( !storageCache.exists( req.reqId ) ) {

@@ -42,6 +42,7 @@ class TCTeamInfo;
 struct TCMachineInfo;
 class TCMachineTeamInfo;
 
+ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self);
 
 struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
@@ -90,7 +91,10 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
 		ASSERT(serversOnMachine.empty());
 		serversOnMachine.push_back(server);
-		machineID = server->lastKnownInterface.locality.zoneId().get();
+
+		LocalityData& locality = server->lastKnownInterface.locality;
+		ASSERT(locality.zoneId().present());
+		machineID = locality.zoneId().get();
 	}
 
 	std::string getServersIDStr() {
@@ -609,6 +613,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<bool> zeroOptimalTeams;
 
 	AsyncMap< AddressExclusion, bool > excludedServers;  // true if an address is in the excluded list in the database.  Updated asynchronously (eventually)
+	std::set<AddressExclusion> invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
 
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
@@ -618,6 +623,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Future<Void> checkTeamDelay;
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
+	Future<Void> checkInvalidLocalities;
 
 	Future<Void> wrongStoreTypeRemover;
 
@@ -662,7 +668,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
-	    teamBuilder(Void()), badTeamRemover(Void()), wrongStoreTypeRemover(Void()), configuration(configuration),
+	    teamBuilder(Void()), badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), configuration(configuration),
 	    readyToStart(readyToStart), clearHealthyZoneFuture(true),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
 	    initialFailureReactionDelay(
@@ -835,6 +841,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			else {
 				int nTries = 0;
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
+					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
@@ -846,6 +853,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						randomTeams.push_back( std::make_pair( NONE_SHARED, dest ) );
 					else
 						nTries++;
+				}
+
+				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
+				if (g_network->isSimulated() && randomTeams.empty() && !self->zeroHealthyTeams->get()) {
+					TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
 				}
 
 				for( int i = 0; i < randomTeams.size(); i++ ) {
@@ -888,6 +900,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					}
 				}
 			}
+			// if (!bestOption.present()) {
+			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
+			// 	self->traceAllInfo(true);
+			// }
 
 			req.reply.send( bestOption );
 
@@ -999,6 +1015,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// we preferentially mark the least used server as undesirable?
 		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
 			if (self->shouldHandleServer(i->first)) {
+				if (!self->isValidLocality(self->configuration.storagePolicy, i->first.locality)) {
+					TraceEvent(SevWarnAlways, "MissingLocality")
+					    .detail("Server", i->first.uniqueID)
+					    .detail("Locality", i->first.locality.toString());
+					auto addr = i->first.address();
+					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
+					if (self->checkInvalidLocalities.isReady()) {
+						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
+						self->addActor.send(self->checkInvalidLocalities);
+					}
+				}
 				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0);
 			}
 		}
@@ -1011,6 +1038,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		return Void();
+	}
+
+	// Check if server or machine has a valid locality based on configured replication policy
+	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) {
+		// Future: Once we add simulation test that misconfigure a cluster, such as not setting some locality entries,
+		// DD_VALIDATE_LOCALITY should always be true. Otherwise, simulation test may fail.
+		if (!SERVER_KNOBS->DD_VALIDATE_LOCALITY) {
+			// Disable the checking if locality is valid
+			return true;
+		}
+
+		std::set<std::string> replicationPolicyKeys = storagePolicy->attributeKeys();
+		for (auto& policy : replicationPolicyKeys) {
+			if (!locality.isPresent(policy)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	void evaluateTeamQuality() {
@@ -1300,6 +1346,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
+			    .detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
@@ -1394,6 +1441,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 			Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
 			auto& locality = representativeServer->lastKnownInterface.locality;
+			if (!isValidLocality(configuration.storagePolicy, locality)) {
+				TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
+				    .detail("Machine", machine->second->machineID.toString())
+				    .detail("InvalidLocality", locality.toString());
+				continue;
+			}
 			const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
 			machine->second->localityEntry = localityEntry;
 			++numHealthyMachine;
@@ -1431,6 +1484,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT_WE_THINK(server_info.find(machine.second->serversOnMachine[0]->id) != server_info.end());
 				// Skip unhealthy machines
 				if (!isMachineHealthy(machine.second)) continue;
+				// Skip machine with incomplete locality
+				if (!isValidLocality(configuration.storagePolicy,
+				                     machine.second->serversOnMachine[0]->lastKnownInterface.locality)) {
+					continue;
+				}
 
 				// Invariant: We only create correct size machine teams.
 				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
@@ -1600,6 +1658,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto& server : server_info) {
 			// Only pick healthy server, which is not failed or excluded.
 			if (server_status.get(server.first).isUnhealthy()) continue;
+			if (!isValidLocality(configuration.storagePolicy, server.second->lastKnownInterface.locality)) continue;
 
 			int numTeams = server.second->teams.size();
 			if (numTeams < minTeams) {
@@ -1612,6 +1671,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		if (leastUsedServers.empty()) {
+			// If we cannot find a healthy server with valid locality
+			TraceEvent("NoHealthyAndValidLocalityServers")
+				.detail("Servers", server_info.size())
+				.detail("UnhealthyServers", unhealthyServers);
 			return Reference<TCServerInfo>();
 		} else {
 			return deterministicRandom()->randomChoice(leastUsedServers);
@@ -1834,7 +1897,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// The desired machine team number is not the same with the desired server team number
 			// in notEnoughTeamsForAServer() below, because the machineTeamRemover() does not
 			// remove a machine team with the most number of machine teams.
-			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine) {
+			if (m.second->machineTeams.size() < targetMachineTeamNumPerMachine && isMachineHealthy(m.second)) {
 				return true;
 			}
 		}
@@ -1855,7 +1918,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 		ASSERT(targetTeamNumPerServer > 0);
 		for (auto& s : server_info) {
-			if (s.second->teams.size() < targetTeamNumPerServer) {
+			if (s.second->teams.size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
 				return true;
 			}
 		}
@@ -2529,7 +2592,7 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	return Void();
 }
 
-bool inCorrectDC(DDTeamCollection* self, TCServerInfo* server) {
+bool isCorrectDC(DDTeamCollection* self, TCServerInfo* server) {
 	return (self->includedDCs.empty() ||
 	        std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
 	            self->includedDCs.end());
@@ -2582,7 +2645,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		}
 
 		// To avoid removing machine teams too fast, which is unlikely happen though
-		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
+		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution) );
 
 		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
@@ -2705,7 +2768,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			removeServerTeamDelay = removeServerTeamDelay / 100;
 		}
 		// To avoid removing server teams too fast, which is unlikely happen though
-		wait(delay(removeServerTeamDelay));
+		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
 		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between
@@ -3105,7 +3168,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 // and serverID are decided by the server's filename. By parsing storage server file's filename on each disk, process on
 // each machine creates the TCServer with the correct serverID and StorageServerInterface.
 ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state bool isFetchingResults = false;
 	state Transaction tr(self->cx);
@@ -3143,7 +3206,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Vo
 					}
 
 					tr = Transaction(self->cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 				}
 				when( waitNext( serverRemoved ) ) {
 					if( isFetchingResults ) {
@@ -3177,7 +3240,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 					healthyZoneTimeout = Never();
 				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-					healthyZoneTimeout = delay(timeoutSeconds);
+					healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
 					if(self->healthyZone.get() != p.first) {
 						TraceEvent("MaintenanceZoneStart", self->distributorId).detail("ZoneID", printable(p.first)).detail("EndVersion", p.second).detail("Duration", timeoutSeconds);
 						self->healthyZone.set(p.first);
@@ -3356,14 +3419,18 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
-	state bool hasWrongDC = !inCorrectDC(self, server);
+	state bool hasWrongDC = !isCorrectDC(self, server);
+	state bool hasInvalidLocality =
+	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 
 	try {
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
-			hasWrongDC = !inCorrectDC(self, server);
+			hasWrongDC = !isCorrectDC(self, server);
+			hasInvalidLocality =
+			    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually
 			// be eliminated. This samAddress checking must be redo whenever the server's state (e.g., storeType,
@@ -3407,9 +3474,10 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
-				// We saw a corner case in in 3 data_hall configuration
-				// when optimalTeamCount = 1, healthyTeamCount = 0.
-				if (self->optimalTeamCount > 0 && self->healthyTeamCount > 0) {
+				// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing between
+				// healthy and unhealthy and result in OOM (See PR#2228).
+
+				if (self->optimalTeamCount > 0) {
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
@@ -3417,14 +3485,14 @@ ACTOR Future<Void> storageServerTracker(
 					status.isUndesired = true;
 				}
 				otherChanges.push_back( self->zeroOptimalTeams.onChange() );
-				otherChanges.push_back(self->zeroHealthyTeams->onChange());
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
-			if (hasWrongDC) {
-				TraceEvent(SevWarn, "UndesiredDC", self->distributorId)
+			if (hasWrongDC || hasInvalidLocality) {
+				TraceEvent(SevWarn, "UndesiredDCOrLocality", self->distributorId)
 				    .detail("Server", server->id)
-				    .detail("WrongDC", "?");
+				    .detail("WrongDC", hasWrongDC)
+				    .detail("InvalidLocality", hasInvalidLocality);
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
@@ -3451,7 +3519,9 @@ ACTOR Future<Void> storageServerTracker(
 
 			failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
 			//We need to recruit new storage servers if the key value store type has changed
-			if (hasWrongDC || server->wrongStoreTypeToRemove.get()) self->restartRecruiting.trigger();
+			if (hasWrongDC || hasInvalidLocality || server->wrongStoreTypeToRemove.get()) {
+				self->restartRecruiting.trigger();
+			}
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
 			    ( server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
@@ -3585,7 +3655,9 @@ ACTOR Future<Void> storageServerTracker(
 					// Restart the storeTracker for the new interface. This will cancel the previous
 					// keyValueStoreTypeTracker
 					storeTypeTracker = keyValueStoreTypeTracker(self, server);
-					hasWrongDC = !inCorrectDC(self, server);
+					hasWrongDC = !isCorrectDC(self, server);
+					hasInvalidLocality =
+					    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 					self->restartTeamBuilder.trigger();
 
 					if(restartRecruiting)
@@ -3646,6 +3718,68 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			recruiting = false;
 		}
 	}
+}
+
+ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
+	state double start = now();
+	state bool hasCorrectedLocality = false;
+
+	loop {
+		try {
+			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY, TaskPriority::DataDistribution));
+
+			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
+			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
+			state vector<ProcessData> workers = wait(getWorkers(self->cx));
+			state std::set<AddressExclusion> existingAddrs;
+			for (int i = 0; i < workers.size(); i++) {
+				const ProcessData& workerData = workers[i];
+				AddressExclusion addr(workerData.address.ip, workerData.address.port);
+				existingAddrs.insert(addr);
+				if (self->invalidLocalityAddr.count(addr) &&
+				    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
+					// The locality info on the addr has been corrected
+					self->invalidLocalityAddr.erase(addr);
+					hasCorrectedLocality = true;
+					TraceEvent("InvalidLocalityCorrected").detail("Addr", addr.toString());
+				}
+			}
+
+			wait(yield(TaskPriority::DataDistribution));
+
+			// In case system operator permanently excludes workers on the address with invalid locality
+			for (auto addr = self->invalidLocalityAddr.begin(); addr != self->invalidLocalityAddr.end();) {
+				if (!existingAddrs.count(*addr)) {
+					// The address no longer has a worker
+					addr = self->invalidLocalityAddr.erase(addr);
+					hasCorrectedLocality = true;
+					TraceEvent("InvalidLocalityNoLongerExists").detail("Addr", addr->toString());
+				} else {
+					++addr;
+				}
+			}
+
+			if (hasCorrectedLocality) {
+				// Recruit on address who locality has been corrected
+				self->restartRecruiting.trigger();
+				hasCorrectedLocality = false;
+			}
+
+			if (self->invalidLocalityAddr.empty()) {
+				break;
+			}
+
+			if (now() - start > 300) { // Report warning if invalid locality is not corrected within 300 seconds
+				// The incorrect locality info has not been properly corrected in a reasonable time
+				TraceEvent(SevWarn, "PersistentInvalidLocality").detail("Addresses", self->invalidLocalityAddr.size());
+				start = now();
+			}
+		} catch (Error& e) {
+			TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
+		}
+	}
+
+	return Void();
 }
 
 int numExistingSSOnAddr(DDTeamCollection* self, const AddressExclusion& addr) {
@@ -3757,13 +3891,21 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			}
 
 			auto excl = self->excludedServers.getKeys();
-			for(auto& s : excl)
+			for (auto& s : excl) {
 				if (self->excludedServers.get(s)) {
 					TraceEvent(SevDebug, "DDRecruitExcl2")
 					    .detail("Primary", self->primary)
 					    .detail("Excluding", s.toString());
 					exclusions.insert( s );
 				}
+			}
+
+			// Exclude workers that have invalid locality
+			for (auto& addr : self->invalidLocalityAddr) {
+				TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
+				exclusions.insert(addr);
+			}
+
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
 			for(auto it : exclusions) {
 				rsr.excludeAddresses.push_back(it);
@@ -3805,7 +3947,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				}
 				when(wait(self->restartRecruiting.onTrigger())) {}
 			}
-			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::DataDistribution) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				throw;
@@ -3876,7 +4018,7 @@ ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db 
 ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
 	TraceEvent("DDMonitorHealthyTeamsStart").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
 	loop choose {
-		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY) : Never()) ) {
+		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistribution) : Never()) ) {
 			self->doBuildTeams = true;
 			wait( DDTeamCollection::checkBuildTeams(self) );
 		}

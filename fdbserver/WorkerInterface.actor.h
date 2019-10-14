@@ -411,6 +411,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error
 struct ServerDBInfo;
 
 class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
+class Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
@@ -442,7 +443,9 @@ ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMaste
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -464,7 +467,15 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+}
+namespace oldTLog_6_2 {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;

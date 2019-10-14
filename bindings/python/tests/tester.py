@@ -143,6 +143,7 @@ def test_db_options(db):
     db.options.set_transaction_retry_limit(10)
     db.options.set_transaction_retry_limit(-1)
     db.options.set_transaction_causal_read_risky()
+    db.options.set_transaction_include_port_in_address()
 
 
 @fdb.transactional
@@ -163,6 +164,7 @@ def test_options(tr):
     tr.options.set_log_transaction()
     tr.options.set_read_lock_aware()
     tr.options.set_lock_aware()
+    tr.options.set_include_port_in_address()
 
     tr.get(b'\xff').wait()
 

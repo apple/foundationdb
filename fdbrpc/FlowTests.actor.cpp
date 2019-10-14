@@ -31,6 +31,45 @@ void forceLinkFlowTests() {}
 
 using std::vector;
 
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/delayOrdering") {
+	state double x = deterministicRandom()->random01();
+	state double y = deterministicRandom()->random01();
+	if (BUGGIFY) {
+		y = x;
+	}
+	state int last = 0;
+	state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+		*last = 1;
+		return Void();
+	});
+	state Future<Void> f2 = map(delay(y), [last = &last](const Void&) {
+		*last = 2;
+		return Void();
+	});
+	wait(f1 && f2);
+	ASSERT((x <= y) == (last == 2));
+	return Void();
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;

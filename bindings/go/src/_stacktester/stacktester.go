@@ -805,6 +805,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		db.Options().SetTransactionRetryLimit(10)
 		db.Options().SetTransactionRetryLimit(-1)
 		db.Options().SetTransactionCausalReadRisky()
+		db.Options().SetTransactionIncludePortInAddress()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")
@@ -850,6 +851,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetLogTransaction()
 			tr.Options().SetReadLockAware()
 			tr.Options().SetLockAware()
+			tr.Options().SetIncludePortInAddress()
 
 			return tr.Get(fdb.Key("\xff")).MustGet(), nil
 		})

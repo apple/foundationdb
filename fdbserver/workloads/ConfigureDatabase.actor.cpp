@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -272,52 +273,17 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			state int randomChoice = deterministicRandom()->randomInt(0, 7);
 			if( randomChoice == 0 ) {
+				wait( success(
+						runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
+							{
+								return tr->get(LiteralStringRef("This read is only to ensure that the database recovered"));
+							})));
+				wait( delay( 20 + 10 * deterministicRandom()->random01() ) );
+			}
+			else if( randomChoice < 3 ) {
 				double waitDuration = 3.0 * deterministicRandom()->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
 				wait( delay( waitDuration ) );
-			}
-			else if( randomChoice == 1 ) {
-				tr = Transaction( cx );
-				loop {
-					try {
-						tr.clear( normalKeys );
-						wait( tr.commit() );
-						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
-					}
-				}
-			}
-			else if( randomChoice == 2 ) {
-				state double loadDuration = deterministicRandom()->random01() * 10.0;
-				state double startTime = now();
-				state int amtLoaded = 0;
-
-				loop {
-					if( now() - startTime > loadDuration )
-						break;
-					loop {
-						tr = Transaction( cx );
-						try {
-							for( i = 0; i < 10; i++ ) {
-								state Key randomKey( "ConfigureTest" + deterministicRandom()->randomUniqueID().toString() );
-								Optional<Value> val = wait( tr.get( randomKey ) );
-								uint64_t nextVal = val.present() ? valueToUInt64( val.get() ) + 1 : 0;
-								tr.set( randomKey, format( "%016llx", nextVal ) );
-							}
-							wait( tr.commit() );
-							amtLoaded += 10;
-							break;
-						}
-						catch( Error& e ) {
-							wait( tr.onError( e ) );
-							++self->retries;
-						}
-					}
-					wait( delay( 0.1 ) );
-				}
-
-				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);
 			}
 			else if( randomChoice == 3 ) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
