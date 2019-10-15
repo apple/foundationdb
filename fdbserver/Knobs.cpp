@@ -105,6 +105,19 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
 	init( MERGE_ONTO_NEW_TEAM,                                     1 ); if( randomize && BUGGIFY ) MERGE_ONTO_NEW_TEAM = deterministicRandom()->coinflip() ? 0 : 2;
+	
+	init( PRIORITY_RECOVER_MOVE,                                 110 );
+	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
+	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  121 );
+	init( PRIORITY_TEAM_HEALTHY,                                 140 );
+	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
+	init( PRIORITY_TEAM_REDUNDANT,                               200 );
+	init( PRIORITY_MERGE_SHARD,                                  340 );
+	init( PRIORITY_TEAM_UNHEALTHY,                               700 );
+	init( PRIORITY_TEAM_2_LEFT,                                  709 );
+	init( PRIORITY_TEAM_1_LEFT,                                  800 );
+	init( PRIORITY_TEAM_0_LEFT,                                  809 );
+	init( PRIORITY_SPLIT_SHARD,                                  900 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );

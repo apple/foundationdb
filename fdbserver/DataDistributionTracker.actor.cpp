@@ -369,12 +369,12 @@ ACTOR Future<Void> shardSplitter(
 		for( int i = 0; i < skipRange; i++ ) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
 			self->shardsAffectedByTeamFailure->defineShard( r );
-			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+			self->output.send( RelocateShard( r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD) );
 		}
 		for( int i = numShards-1; i > skipRange; i-- ) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
 			self->shardsAffectedByTeamFailure->defineShard( r );
-			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+			self->output.send( RelocateShard( r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD) );
 		}
 
 		self->sizeChanges.add( changeSizes( self, keys, shardSize->get().get().bytes ) );
@@ -475,7 +475,7 @@ Future<Void> shardMerger(
 
 	restartShardTrackers( self, mergeRange, endingStats );
 	self->shardsAffectedByTeamFailure->defineShard( mergeRange );
-	self->output.send( RelocateShard( mergeRange, PRIORITY_MERGE_SHARD ) );
+	self->output.send( RelocateShard( mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD ) );
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
