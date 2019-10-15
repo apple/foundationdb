@@ -494,11 +494,47 @@
              "three_data_hall",
              "three_data_hall_fallback"
          ]},
+
+
+{ "regions":[{
+   "datacenters":[{
+         "id":"DC1",
+         "priority":1
+   },
+   {
+         "id":"DC3",
+         "priority":0,
+         "satellite":1,
+         "satellite_logs":1
+   },
+   {
+         "id":"DC4",
+         "priority":1,
+         "satellite":1,
+         "satellite_logs":2
+   }],
+   "satellite_redundancy_mode":"one_satellite_single",
+   "satellite_logs":1
+   },{
+   "datacenters":[{
+         "id":"DC2",
+         "priority":0
+   }],
+   }]
+}
+
+
+
+
+
+
+
          "regions":[{
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[

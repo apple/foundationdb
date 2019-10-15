@@ -32,8 +32,9 @@
 struct SatelliteInfo {
 	Key dcId;
 	int32_t priority;
+	int32_t satelliteDesiredTLogCount;
 
-	SatelliteInfo() : priority(0) {}
+	SatelliteInfo() : priority(0), satelliteDesiredTLogCount(-1) {}
 
 	struct sort_by_priority {
 		bool operator ()(SatelliteInfo const&a, SatelliteInfo const& b) const { return a.priority > b.priority; }
@@ -41,7 +42,7 @@ struct SatelliteInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority);
+		serializer(ar, dcId, priority, satelliteDesiredTLogCount);
 	}
 };
 
