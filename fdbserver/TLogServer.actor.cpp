@@ -1378,24 +1378,31 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
 			while(trackerData.sequence_version.size() && seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
 				if(seqBegin->second.canBeSet()) {
-					seqBegin->second.sendError(timed_out());
+					seqBegin->second.sendError(operation_obsolete());
 				}
 				trackerData.sequence_version.erase(seqBegin);
 				seqBegin = trackerData.sequence_version.begin();
 			}
 
 			if(trackerData.sequence_version.size() && sequence < seqBegin->first) {
-				throw timed_out();
+				throw operation_obsolete();
 			}
 
 			trackerData.lastUpdate = now();
 			std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequence].getFuture());
-			req.begin = prevPeekData.first;
+			req.begin = std::max(prevPeekData.first, req.begin);
 			req.onlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch( Error &e ) {
-			if(e.code() == error_code_timed_out) {
-				req.reply.sendError(timed_out());
+			if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				req.reply.sendError(e);
+				auto& trackerData = logData->peekTracker[peekId];
+				trackerData.lastUpdate = now();
+				auto& sequenceData = trackerData.sequence_version[sequence+1];
+				trackerData.lastUpdate = now();
+				if (!sequenceData.isSet()) {
+					sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
+				}
 				return Void();
 			} else {
 				throw;
@@ -1408,6 +1415,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(req.sequence.present()) {
 			auto& trackerData = logData->peekTracker[peekId];
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
+			trackerData.lastUpdate = now();
 			if (!sequenceData.isSet()) {
 				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
 			}
@@ -1451,15 +1459,15 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			trackerData.lastUpdate = now();
 			if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-				req.reply.sendError(timed_out());
+				req.reply.sendError(operation_obsolete());
 				if (!sequenceData.isSet())
-					sequenceData.sendError(timed_out());
+					sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
 				return Void();
 			}
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get().first != rep.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
@@ -1612,18 +1620,18 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 	if(req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
-		trackerData.lastUpdate = now();
 		auto& sequenceData = trackerData.sequence_version[sequence+1];
+		trackerData.lastUpdate = now();
 		if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-			req.reply.sendError(timed_out());
+			req.reply.sendError(operation_obsolete());
 			if(!sequenceData.isSet())
-				sequenceData.sendError(timed_out());
+				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
 			return Void();
 		}
 		if(sequenceData.isSet()) {
 			if(sequenceData.getFuture().get().first != reply.end) {
 				TEST(true); //tlog peek second attempt ended at a different version
-				req.reply.sendError(timed_out());
+				req.reply.sendError(operation_obsolete());
 				return Void();
 			}
 		} else {

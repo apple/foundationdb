@@ -166,7 +166,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ? self->futureResults.front() : Never() ) ) {
 					if(res.begin.get() != expectedBegin) {
-						throw timed_out();
+						throw operation_obsolete();
 					}
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
@@ -200,8 +200,11 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			if(e.code() == error_code_end_of_stream) {
 				self->end.reset( self->messageVersion.version );
 				return Void();
-			} else if(e.code() == error_code_timed_out) {
-				TraceEvent("PeekCursorTimedOut", self->randomID);
+			} else if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
+				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
+				// and thus we've likely just wasted 10min.
+				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;

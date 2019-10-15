@@ -886,8 +886,8 @@ namespace oldTLog_4_6 {
 					wait(yield());
 				}
 			} catch( Error &e ) {
-				if(e.code() == error_code_timed_out) {
-					req.reply.sendError(timed_out());
+				if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+					req.reply.sendError(e);
 					return Void();
 				} else {
 					throw;
@@ -923,15 +923,15 @@ namespace oldTLog_4_6 {
 				auto& sequenceData = trackerData.sequence_version[sequence+1];
 				trackerData.lastUpdate = now();
 				if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					if (!sequenceData.isSet())
-						sequenceData.sendError(timed_out());
+						sequenceData.sendError(operation_obsolete());
 					return Void();
 				}
 				if(sequenceData.isSet()) {
 					if(sequenceData.getFuture().get() != rep.end) {
 						TEST(true); //tlog peek second attempt ended at a different version
-						req.reply.sendError(timed_out());
+						req.reply.sendError(operation_obsolete());
 						return Void();
 					}
 				} else {
@@ -1002,7 +1002,7 @@ namespace oldTLog_4_6 {
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get() != reply.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
