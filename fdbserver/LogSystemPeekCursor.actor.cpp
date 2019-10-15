@@ -172,6 +172,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					self->futureResults.pop_front();
 					self->results = res;
 					self->onlySpilled = res.onlySpilled;
+					if(!res.onlySpilled && !self->parallelGetMore) {
+						// After we burn though the rest of the futures, then we should use a new
+						// randomID and sequence the next time we return to doing parallel peeks.
+						self->randomID = deterministicRandom()->randomUniqueID();
+						self->sequence = 0;
+					}
 					if(res.popped.present())
 						self->poppedVersion = std::min( std::max(self->poppedVersion, res.popped.get()), self->end.version );
 					self->rd = ArenaReader( self->results.arena, self->results.messages, Unversioned() );
