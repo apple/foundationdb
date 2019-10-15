@@ -107,6 +107,7 @@ public:
 
 	//AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
+	int DISABLE_ODIRECT;
 
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
