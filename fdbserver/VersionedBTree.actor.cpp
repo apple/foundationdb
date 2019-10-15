@@ -318,6 +318,9 @@ public:
 			if(newPageID == invalidLogicalPageID) {
 				debug_printf("FIFOQueue::Cursor Allocating new page %s\n", self->toString().c_str());
 				wait(store(newPageID, self->queue->pager->newPageID()));
+				// numPages is only increased if the page is allocated here.
+				// Callers who pass in a page are responsible for updating numPages when necessary (it isn't always necessary)
+				++self->queue->numPages;
 			}
 			debug_printf("FIFOQueue::Cursor Adding page %s init=%d %s\n", ::toString(newPageID).c_str(), initializeNewPage, self->toString().c_str());
 
@@ -337,7 +340,6 @@ public:
 				auto p = self->raw();
 				p->formatVersion = RawPage::FORMAT_VERSION;
 				p->endOffset = 0;
-				++self->queue->numPages;
 			}
 
 			debug_printf("FIFOQueue::Cursor Added page %s\n", self->toString().c_str());
@@ -364,9 +366,9 @@ public:
 			debug_printf("FIFOQueue::Cursor write(%s) %s\n", ::toString(item).c_str(), self->toString().c_str());
 			auto p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
-			++self->queue->numEntries;
 			self->offset += bytesNeeded;
 			p->endOffset = self->offset;
+			++self->queue->numEntries;
 			debug_printf("FIFOQueue::Cursor write(%s) finished, %s\n", ::toString(item).c_str(), self->toString().c_str());
 			return Void();
 		}
@@ -404,17 +406,17 @@ public:
 				return Optional<T>();
 			}
 
-			--self->queue->numEntries;
 			self->offset += bytesRead;
+			--self->queue->numEntries;
 			debug_printf("FIFOQueue::Cursor popped %s, %s\n", ::toString(result).c_str(), self->toString().c_str());
 			ASSERT(self->offset <= p->endOffset);
 
 			if(self->offset == p->endOffset) {
 				debug_printf("FIFOQueue::Cursor Page exhausted, %s\n", self->toString().c_str());
-				--self->queue->numPages;
 				LogicalPageID oldPageID = self->pageID;
 				self->pageID = p->nextPageID;
 				self->offset = p->nextOffset;
+				--self->queue->numPages;
 				self->page.clear();
 				debug_printf("FIFOQueue::Cursor Page exhausted, moved to new page, %s\n", self->toString().c_str());
 
@@ -563,6 +565,8 @@ public:
 		// If a new tail page was allocated, link the last page of the tail writer to it.
 		if(newTailPage.get() != invalidLogicalPageID) {
 			tailWriter.newPage(newTailPage.get(), 0, false);
+			// The flush sequence allocated a page and added it to the queue so increment numPages
+			++numPages;
 
 			// newPage() should be ready immediately since a pageID is being explicitly passed.
 			ASSERT(tailWriter.notBusy().isReady());
