@@ -205,7 +205,7 @@ public:
 	virtual void setMetaKey(KeyRef metaKey) = 0;
 
 	// Sets the next commit version
-	virtual void setVersion(Version v) = 0;
+	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() = 0;
 
