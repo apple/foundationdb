@@ -468,7 +468,7 @@ public:
 				deterministicRandom()->randomShuffle(w);
 				for( int i=0; i < w.size(); i++ ) {
 					id_used[w[i].interf.locality.processId()]++;
-					return WorkerFitnessInfo(w[i], it.first.first, it.first.second);
+					return WorkerFitnessInfo(w[i], std::max(ProcessClass::GoodFit, it.first.first), it.first.second);
 				}
 			}
 		}
@@ -524,18 +524,8 @@ public:
 
 		RoleFitness() : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole), count(0), worstIsDegraded(false) {}
 
-		RoleFitness(RoleFitness first, RoleFitness second, ProcessClass::ClusterRole role) : bestFit(std::min(first.worstFit, second.worstFit)), worstFit(std::max(first.worstFit, second.worstFit)), count(first.count + second.count), role(role) {
-			if(first.worstFit > second.worstFit) {
-				worstIsDegraded = first.worstIsDegraded;
-			} else if(second.worstFit > first.worstFit) {
-				worstIsDegraded = second.worstIsDegraded;
-			} else {
-				worstIsDegraded = first.worstIsDegraded || second.worstIsDegraded;
-			}
-		}
-
 		RoleFitness( vector<WorkerDetails> workers, ProcessClass::ClusterRole role ) : role(role) {
-			worstFit = ProcessClass::BestFit;
+			worstFit = ProcessClass::GoodFit;
 			worstIsDegraded = false;
 			bestFit = ProcessClass::NeverAssign;
 			for(auto& it : workers) {
@@ -782,7 +772,7 @@ public:
 
 			auto datacenters = getDatacenters( req.configuration );
 
-			RoleFitness bestFitness;
+			std::pair<RoleFitness,RoleFitness> bestFitness;
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
@@ -799,7 +789,7 @@ public:
 					proxies.push_back(first_proxy.worker);
 					resolvers.push_back(first_resolver.worker);
 
-					auto fitness = RoleFitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver), ProcessClass::NoRole );
+					auto fitness = std::make_pair( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
 
 					if(dcId == clusterControllerDcId) {
 						bestFitness = fitness;
@@ -845,7 +835,8 @@ public:
 
 			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-				  RoleFitness(std::min(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), std::max(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), req.configuration.getDesiredProxies()+req.configuration.getDesiredResolvers(), ProcessClass::NoRole).betterCount(bestFitness) ) ) {
+				  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(bestFitness.first) ||
+				  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(bestFitness.second) ) ) {
 				throw operation_failed();
 			}
 
@@ -991,10 +982,14 @@ public:
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[clusterControllerProcessId]++;
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
+		auto newMasterFit = mworker.worker.processClass.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(mworker.worker.interf.address())) {
+			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
+		}
 
-		if ( oldMasterFit < mworker.fitness )
+		if ( oldMasterFit <  newMasterFit )
 			return false;
-		if ( oldMasterFit > mworker.fitness || ( dbi.master.locality.processId() == clusterControllerProcessId && mworker.worker.interf.locality.processId() != clusterControllerProcessId ) )
+		if ( oldMasterFit > newMasterFit || ( dbi.master.locality.processId() == clusterControllerProcessId && mworker.worker.interf.locality.processId() != clusterControllerProcessId ) )
 			return true;
 
 		std::set<Optional<Key>> primaryDC;
@@ -1024,6 +1019,7 @@ public:
 		if(oldTLogFit < newTLogFit) return false;
 
 		bool oldSatelliteFallback = false;
+
 		for(auto& logSet : dbi.logSystemConfig.tLogs) {
 			if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
@@ -1096,7 +1092,7 @@ public:
 		}
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 		// Check proxy/resolver fitness
-		RoleFitness oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver), ProcessClass::NoRole);
+		std::pair<RoleFitness,RoleFitness> oldInFit = std::make_pair(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver));
 
 		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
 		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
@@ -1106,12 +1102,13 @@ public:
 		proxies.push_back(first_proxy.worker);
 		resolvers.push_back(first_resolver.worker);
 
-		RoleFitness newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver), ProcessClass::NoRole);
-		if(oldInFit.betterFitness(newInFit)) return false;
+		std::pair<RoleFitness,RoleFitness> newInFit = std::make_pair(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
+		if(oldInFit.first.betterFitness(newInFit.first) || oldInFit.second.betterFitness(newInFit.second)) return false;
 		if(oldTLogFit > newTLogFit || oldInFit > newInFit || (oldSatelliteFallback && !newSatelliteFallback) || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
-			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", mworker.fitness)
+			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", newMasterFit)
 				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
-				.detail("OldInFit", oldInFit.toString()).detail("NewInFit", newInFit.toString())
+				.detail("OldProxyFit", oldInFit.first.toString()).detail("NewProxyFit", newInFit.first.toString())
+				.detail("OldResolverFit", oldInFit.second.toString()).detail("NewResolverFit", newInFit.second.toString())
 				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
 				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
 				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
