@@ -1037,9 +1037,40 @@ public:
 		auto newSatelliteTLogs = region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
 		RoleFitness newSatelliteTLogFit(newSatelliteTLogs, ProcessClass::TLog);
 
-		if(oldSatelliteTLogFit < newSatelliteTLogFit)
-			return false;
+		std::map<Optional<Key>,int32_t> satellite_priority;
+		for(auto& r : region.satellites) {
+			satellite_priority[r.dcId] = r.priority;
+		}
+
+		int32_t oldSatelliteRegionFit = std::numeric_limits<int32_t>::max();
+		for(auto& it : satellite_tlogs) {
+			if(satellite_priority.count(it.interf.locality.dcId())) {
+				oldSatelliteRegionFit = std::min(oldSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
+			} else {
+				oldSatelliteRegionFit = -1;
+			}
+		}
+
+		int32_t newSatelliteRegionFit = std::numeric_limits<int32_t>::max();
+		for(auto& it : newSatelliteTLogs) {
+			if(satellite_priority.count(it.interf.locality.dcId())) {
+				newSatelliteRegionFit = std::min(newSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
+			} else {
+				newSatelliteRegionFit = -1;
+			}
+		}
+
+		if(oldSatelliteFallback && !newSatelliteFallback)
+			return true;
 		if(!oldSatelliteFallback && newSatelliteFallback)
+			return false;
+
+		if(oldSatelliteRegionFit < newSatelliteRegionFit)
+			return true;
+		if(oldSatelliteRegionFit > newSatelliteRegionFit)
+			return false;
+
+		if(oldSatelliteTLogFit < newSatelliteTLogFit)
 			return false;
 
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog);
