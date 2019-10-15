@@ -45,7 +45,8 @@ class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
 public:
 	static void init() {
-		if (eio_init( &eio_want_poll, NULL )) { 
+		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
+		if (eio_init( &eio_want_poll, NULL )) {
 			TraceEvent("EioInitError").detail("ErrorNo", errno);
 			throw platform_error(); 
 		}
