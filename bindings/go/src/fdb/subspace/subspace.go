@@ -54,6 +54,10 @@ type Subspace interface {
 	// Subspace prepended.
 	Pack(t tuple.Tuple) fdb.Key
 
+	// PackWithVersionstamp is similar to Pack, but afford for an
+	// IncompleteVersionstamp in the tuple
+	PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error)
+
 	// Unpack returns the Tuple encoded by the given key with the prefix of this
 	// Subspace removed. Unpack will return an error if the key is not in this
 	// Subspace or does not encode a well-formed Tuple.
@@ -106,6 +110,10 @@ func (s subspace) Bytes() []byte {
 
 func (s subspace) Pack(t tuple.Tuple) fdb.Key {
 	return fdb.Key(concat(s.b, t.Pack()...))
+}
+
+func (s subspace) PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error) {
+	return t.PackWithVersionstamp(s.b)
 }
 
 func (s subspace) Unpack(k fdb.KeyConvertible) (tuple.Tuple, error) {
