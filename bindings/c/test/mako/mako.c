@@ -60,7 +60,7 @@
         return FDB_ERROR_DONT_RETRY;					\
       }									\
       fprintf(stderr, "ERROR: Error %s (%d) occured at %s\n",		\
-        	  #_func, fdb_get_error(err), err);			\
+	      #_func, err, fdb_get_error(err));				\
       return err;							\
     }									\
   } while (0);
@@ -77,7 +77,7 @@ fdb_error_t wait_future(FDBFuture *f) {
 }
 
 
-int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
+int commit_transaction(mako_args_t *args, FDBTransaction *transaction, mako_stats_t *stats) {
   FDBFuture *f;
   fdb_error_t err, err2;
 
@@ -101,8 +101,9 @@ int commit_transaction(FDBTransaction *transaction, mako_stats_t *stats) {
 	      err2, __FILE__, __LINE__);
       return FDB_ERROR_DONT_RETRY;
     }
-    if ((err != 1020 /* not_committed */) &&
-	(err != 1021 /* commit_unknown_result */)) {
+    if (((err != 1020 /* not_committed */) &&
+	(err != 1021 /* commit_unknown_result */)) ||
+	(args->verbose == VERBOSE_ANNOYING)) {
       fprintf(stderr, "ERROR: Error %s (%d) occured at fdb_transaction_commit\n",
 	      fdb_get_error(err), err);
     }
@@ -160,7 +161,7 @@ int cleanup(FDBTransaction *transaction, mako_args_t *args) {
   clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
   fdb_transaction_clear_range(transaction, (uint8_t *)beginstr, 5,
                               (uint8_t *)endstr, 5);
-  if (commit_transaction(transaction, NULL))
+  if (commit_transaction(args, transaction, NULL))
     goto FDB_FAIL;
 
   fdb_transaction_reset(transaction);
@@ -243,7 +244,7 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
     /* commit every 100 inserts (default) */
     if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
 
-      if (commit_transaction(transaction, NULL))
+      if (commit_transaction(args, transaction, NULL))
 	goto FDB_FAIL;
 
       /* xact latency stats */
@@ -259,7 +260,7 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
     }
   }
 
-  if (commit_transaction(transaction, NULL))
+  if (commit_transaction(args, transaction, NULL))
     goto FDB_FAIL;
 
   /* xact latency stats */
@@ -517,7 +518,7 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
 	    rc = run_op_insert(transaction, keystr, valstr);
 	    if (rc == 0) {
 	      /* commit insert so mutation goes to storage */
-	      if (commit_transaction(transaction, stats) == 0) {
+	      if (commit_transaction(args, transaction, stats) == 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
 		update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
 				OP_COMMIT, stats);
@@ -551,7 +552,7 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
 	      }
 	    }
 	    /* commit inserts so mutation goes to storage */
-	    if (commit_transaction(transaction, stats) == 0) {
+	    if (commit_transaction(args, transaction, stats) == 0) {
 	      clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
 	      update_op_stats(&timer_per_xact_start, &timer_per_xact_end,
 			      OP_COMMIT, stats);
@@ -589,7 +590,7 @@ int run_transaction(FDBTransaction *transaction, mako_args_t *args,
     }
 
     if (docommit | args->commit_get) {
-      rc = commit_transaction(transaction, stats);
+      rc = commit_transaction(args, transaction, stats);
       if (rc == 0) {
 	/* success */
 	clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
