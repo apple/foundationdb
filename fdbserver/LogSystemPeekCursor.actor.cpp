@@ -151,7 +151,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
-					throw timed_out();
+					throw operation_obsolete();
 				}
 			} else if (self->futureResults.size() == 1) {
 				self->randomID = deterministicRandom()->randomUniqueID();
@@ -172,12 +172,6 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					self->futureResults.pop_front();
 					self->results = res;
 					self->onlySpilled = res.onlySpilled;
-					if(!res.onlySpilled && !self->parallelGetMore) {
-						// After we burn though the rest of the futures, then we should use a new
-						// randomID and sequence the next time we return to doing parallel peeks.
-						self->randomID = deterministicRandom()->randomUniqueID();
-						self->sequence = 0;
-					}
 					if(res.popped.present())
 						self->poppedVersion = std::min( std::max(self->poppedVersion, res.popped.get()), self->end.version );
 					self->rd = ArenaReader( self->results.arena, self->results.messages, Unversioned() );
