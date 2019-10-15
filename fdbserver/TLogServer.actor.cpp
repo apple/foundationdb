@@ -1397,9 +1397,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
 				auto& trackerData = logData->peekTracker[peekId];
-				trackerData.lastUpdate = now();
 				auto& sequenceData = trackerData.sequence_version[sequence+1];
-				trackerData.lastUpdate = now();
 				if (!sequenceData.isSet()) {
 					sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
 				}
