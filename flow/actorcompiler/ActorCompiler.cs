@@ -427,7 +427,7 @@ namespace actorcompiler
             Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
         }
 
-        const string thisAddress = "reinterpret_cast<unsigned long>(this)";
+        const string thisAddress = "reinterpret_cast<uintptr_t>(this)";
 
         void ProbeEnter(Function fun, string name, int index = -1) {
             if (generateProbes) {
