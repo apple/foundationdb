@@ -1158,7 +1158,7 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 				Standalone<RangeResultRef> existingDestUidValues = wait(tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 				std::map<Key,Key> existingRanges;
