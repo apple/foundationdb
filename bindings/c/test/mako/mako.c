@@ -21,7 +21,7 @@
 
 #include "mako.h"
 #include "utils.h"
-#include "zipf.h"
+#include "fdbclient/zipf.h"
 
 #define check_fdb_error(_e)                                                    \
   do {                                                                         \

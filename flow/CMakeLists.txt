@@ -63,6 +63,7 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   actorcompiler.h
   error_definitions.h
+  ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h
   flat_buffers.h
   flat_buffers.cpp
   flow.cpp
