@@ -132,10 +132,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
 			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
 			for (auto& logFile : versionBatch->second.logFiles) {
-				logFile.fileIndex = (++fileIndex);
+				logFile.fileIndex = ++fileIndex;
 			}
 			for (auto& rangeFile : versionBatch->second.rangeFiles) {
-				rangeFile.fileIndex = (++fileIndex);
+				rangeFile.fileIndex = ++fileIndex;
 			}
 		}
 
