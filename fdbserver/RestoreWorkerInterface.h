@@ -201,6 +201,7 @@ struct LoadingParam {
 	Key url;
 	Version prevVersion;
 	Version endVersion;
+	int fileIndex;
 	Version version;
 	std::string filename;
 	int64_t offset;
@@ -220,17 +221,16 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, version, filename, offset, length, blockSize,
-		           restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, version, filename, offset, length,
+		           blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		str << "isRangeFile:" << isRangeFile << "url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " endVersion:" << endVersion << " version:" << version << " filename:" << filename
-		    << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString()
-		    << " removePrefix:" << removePrefix.toString();
+		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
+		    << " fileIndex:" << fileIndex << " endVersion:" << endVersion << " version:" << version
+		    << " filename:" << filename << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
+		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString();
 		return str.str();
 	}
 };

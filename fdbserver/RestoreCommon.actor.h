@@ -189,6 +189,7 @@ struct RestoreFileFR {
 	                      // [beginVersion, endVersion)
 	int64_t cursor; // The start block location to be restored. All blocks before cursor have been scheduled to load and
 	                // restore
+	int fileIndex; // index of backup file. Must be identical per file.
 
 	Tuple pack() const {
 		return Tuple()
@@ -199,7 +200,8 @@ struct RestoreFileFR {
 		    .append(blockSize)
 		    .append(endVersion)
 		    .append(beginVersion)
-		    .append(cursor);
+		    .append(cursor)
+		    .append(fileIndex);
 	}
 	static RestoreFileFR unpack(Tuple const& t) {
 		RestoreFileFR r;
@@ -212,26 +214,31 @@ struct RestoreFileFR {
 		r.endVersion = t.getInt(i++);
 		r.beginVersion = t.getInt(i++);
 		r.cursor = t.getInt(i++);
+		r.fileIndex = t.getInt(i++);
 		return r;
 	}
 
-	bool operator<(const RestoreFileFR& rhs) const { return beginVersion < rhs.beginVersion; }
+	bool operator<(const RestoreFileFR& rhs) const {
+		return beginVersion < rhs.beginVersion || (beginVersion == rhs.beginVersion && endVersion < rhs.endVersion) ||
+		       (beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && fileIndex < rhs.fileIndex);
+	}
 
 	RestoreFileFR()
 	  : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion),
-	    beginVersion(invalidVersion), cursor(0) {}
+	    beginVersion(invalidVersion), cursor(0), fileIndex(0) {}
 
 	RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize,
 	              Version endVersion, Version beginVersion)
 	  : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize),
-	    endVersion(endVersion), beginVersion(beginVersion), cursor(0) {}
+	    endVersion(endVersion), beginVersion(beginVersion), cursor(0), fileIndex(0) {}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "version:" << std::to_string(version) << " fileName:" << fileName
 		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
 		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
-		   << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor);
+		   << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor)
+		   << " fileIndex:" << std::to_string(fileIndex);
 		return ss.str();
 	}
 };
