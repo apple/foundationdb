@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # bindingtester.py
 #
@@ -38,15 +38,13 @@ from functools import reduce
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 
-import bindingtester
-
 from bindingtester import FDB_API_VERSION
 from bindingtester import Result
 
 from bindingtester import util
 from bindingtester.tests import Test, InstructionSet
 
-from known_testers import Tester
+from bindingtester.known_testers import Tester
 
 import fdb
 import fdb.tuple
@@ -110,9 +108,10 @@ class ResultSet(object):
 
             # Fill in 'None' values for testers that didn't produce a result and generate an output string describing the results
             all_results = {i: results[i] if i in results else None for i in range(len(self.tester_results))}
-            result_str = '\n'.join(['  %-*s - %s' % (name_length, self.tester_results.keys()[i], r) for i, r in all_results.items()])
+            result_keys = list(self.tester_results.keys())
+            result_str = '\n'.join(['  %-*s - %s' % (name_length, result_keys[i], r) for i, r in all_results.items()])
 
-            result_list = results.values()
+            result_list = list(results.values())
 
             # If any of our results matches the global error filter, we ignore the result
             if any(r.matches_global_error_filter(self.specification) for r in result_list):
@@ -264,19 +263,19 @@ class TestRunner(object):
 
         if self.args.concurrency == 1:
             self.test.setup(self.args)
-            test_instructions = {fdb.Subspace((self.args.instruction_prefix,)): self.test.generate(self.args, 0)}
+            test_instructions = {fdb.Subspace((bytes(self.args.instruction_prefix, 'utf-8'),)): self.test.generate(self.args, 0)}
         else:
             test_instructions = {}
             main_thread = InstructionSet()
             for i in range(self.args.concurrency):
                 # thread_spec = fdb.Subspace(('thread_spec', i))
-                thread_spec = 'thread_spec%d' % i
+                thread_spec = b'thread_spec%d' % i
                 main_thread.push_args(thread_spec)
                 main_thread.append('START_THREAD')
                 self.test.setup(self.args)
                 test_instructions[fdb.Subspace((thread_spec,))] = self.test.generate(self.args, i)
 
-            test_instructions[fdb.Subspace((self.args.instruction_prefix,))] = main_thread
+            test_instructions[fdb.Subspace((bytes(self.args.instruction_prefix, 'utf-8'),))] = main_thread
 
         return test_instructions
 

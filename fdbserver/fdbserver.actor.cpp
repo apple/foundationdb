@@ -685,7 +685,7 @@ static void printUsage( const char *name, bool devhelp ) {
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-	void* operator new (std::size_t size) throw(std::bad_alloc) {
+	void* operator new (std::size_t size)  {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -709,7 +709,7 @@ extern bool g_crashOnError;
 	}
 
 	//array throwing new and matching delete[]
-	void* operator new  [](std::size_t size) throw(std::bad_alloc) {
+	void* operator new  [](std::size_t size) {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -1576,6 +1576,11 @@ int main(int argc, char* argv[]) {
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+
+		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
 
 		if (role == SkipListTest) {
 			skipListTest();

@@ -1328,6 +1328,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		if (dataStats.size())
 		{
 			statusObjData.setKeyRawNumber("total_kv_size_bytes",dataStats.getValue("TotalSizeBytes"));
+			statusObjData.setKeyRawNumber("system_kv_size_bytes",dataStats.getValue("SystemSizeBytes"));
 			statusObjData.setKeyRawNumber("partitions_count",dataStats.getValue("Shards"));
 		}
 

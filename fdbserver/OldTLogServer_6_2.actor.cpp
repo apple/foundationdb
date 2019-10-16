@@ -1,5 +1,6 @@
 /*
- * TLogServer.actor.cpp
+ * OldTLogServer_6_2.actor.cpp
+
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -46,6 +47,8 @@ using std::pair;
 using std::make_pair;
 using std::min;
 using std::max;
+
+namespace oldTLog_6_2 {
 
 struct TLogQueueEntryRef {
 	UID id;
@@ -197,7 +200,6 @@ private:
 static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/3/0") );
 static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/3/0"), LiteralStringRef("FoundationDB/LogServer/4/0") );
 static const KeyRangeRef persistProtocolVersionKeys( LiteralStringRef( "ProtocolVersion/" ), LiteralStringRef( "ProtocolVersion0" ) );
-static const KeyRangeRef persistTLogSpillTypeKeys( LiteralStringRef( "TLogSpillType/" ), LiteralStringRef( "TLogSpillType0" ) );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -501,15 +503,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version logRouterPoppedVersion, logRouterPopToVersion;
 	int8_t locality;
 	UID recruitmentID;
-	TLogSpillType logSpillType;
 	std::set<Tag> allTags;
 	Future<Void> terminated;
 	FlowLock execOpLock;
 	bool execOpCommitInProgress;
 	int txsTags;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, int txsTags, UID recruitmentID, ProtocolVersion protocolVersion, TLogSpillType logSpillType, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
-			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion), logSpillType(logSpillType),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, int txsTags, UID recruitmentID, ProtocolVersion protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			minPoppedTagVersion(0), minPoppedTag(invalidTag),
 			// These are initialized differently on init() or recovery
@@ -565,7 +566,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)) );
-			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
@@ -585,22 +585,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	LogEpoch epoch() const { return recoveryCount; }
-
-	bool shouldSpillByValue( Tag t ) const {
-		switch (logSpillType) {
-		case TLogSpillType::VALUE:
-			return true;
-		case TLogSpillType::REFERENCE:
-			return t.locality == tagLocalityTxs || t == txsTag;
-		default:
-			ASSERT(false);
-			return false;
-		}
-	}
-
-	bool shouldSpillByReference( Tag t ) const {
-		return !shouldSpillByValue( t );
-	}
 };
 
 template <class T>
@@ -682,7 +666,7 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 
 	if (data->nothingPersistent) return;
 
-	if (logData->shouldSpillByValue(data->tag)) {
+	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
 		self->persistentData->clear( KeyRangeRef(
 					persistTagMessagesKey( logData->logId, data->tag, Version(0) ),
 					persistTagMessagesKey( logData->logId, data->tag, data->popped ) ) );
@@ -698,8 +682,8 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 }
 
 ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data ) {
-	// For anything spilled by value, we do not need to track its popped location.
-	if (logData->shouldSpillByValue(data->tag)) {
+	// txsTag is spilled by value, so we do not need to track its popped location.
+	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
 		return Void();
 	}
 
@@ -771,7 +755,7 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData && logData->shouldSpillByReference(tagData->tag)) {
+			if (tagData && tagData->tag.locality != tagLocalityTxs && tagData->tag != txsTag) {
 				if(!tagData->nothingPersistent) {
 					minLocation = std::min(minLocation, tagData->poppedLocation);
 					minVersion = std::min(minVersion, tagData->popped);
@@ -836,7 +820,8 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					anyData = true;
 					tagData->nothingPersistent = false;
 
-					if (logData->shouldSpillByValue(tagData->tag)) {
+					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
+						// spill txsTag by value
 						wr = BinaryWriter( Unversioned() );
 						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 							wr << msg->second.toStringRef();
@@ -941,7 +926,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 			for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 				Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
 				if (tagData) {
-					if (logData->shouldSpillByValue(tagData->tag)) {
+					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
 						minVersion = std::min(minVersion, newPersistentDataVersion);
 					} else {
 						minVersion = std::min(minVersion, tagData->popped);
@@ -1026,8 +1011,6 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 		if(logData->version_sizes.empty()) {
 			nextVersion = logData->version.get();
 		} else {
-			// Double check that a running TLog wasn't wrongly affected by spilling locked SharedTLogs.
-			ASSERT_WE_THINK(self->targetVolatileBytes == SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 			Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
 			while( totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
 			       sizeItr != logData->version_sizes.end()
@@ -1459,7 +1442,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 		}
 
-		if ( logData->shouldSpillByValue(req.tag) ) {
+		if (req.tag.locality == tagLocalityTxs || req.tag == txsTag) {
 			Standalone<VectorRef<KeyValueRef>> kvs = wait(
 					self->persistentData->readRange(KeyRangeRef(
 							persistTagMessagesKey(logData->logId, req.tag, req.begin),
@@ -1817,7 +1800,6 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistTxsTagsKeys.begin), BinaryWriter::toValue(logData->txsTags, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistProtocolVersionKeys.begin), BinaryWriter::toValue(logData->protocolVersion, Unversioned()) ) );
-	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistTLogSpillTypeKeys.begin), BinaryWriter::toValue(logData->logSpillType, AssumeVersion(logData->protocolVersion)) ) );
 
 	for(auto tag : logData->allTags) {
 		ASSERT(!logData->getTagData(tag));
@@ -2341,12 +2323,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state Future<Standalone<VectorRef<KeyValueRef>>> fTxsTags = storage->readRange(persistTxsTagsKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
 
 	// FIXME: metadata in queue?
 
 	wait( waitForAll( std::vector{fFormat, fRecoveryLocation} ) );
-	wait( waitForAll( std::vector{fVers, fKnownCommitted, fLocality, fLogRouterTags, fTxsTags, fRecoverCounts, fProtocolVersions, fTLogSpillTypes} ) );
+	wait( waitForAll( std::vector{fVers, fKnownCommitted, fLocality, fLogRouterTags, fTxsTags, fRecoverCounts, fProtocolVersions} ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -2424,10 +2405,9 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
-		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, AssumeVersion(protocolVersion) );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
-		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), protocolVersion, logSpillType, std::vector<Tag>()) );
+		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), protocolVersion, std::vector<Tag>()) );
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
 		self->id_data[id1] = logData;
@@ -2601,10 +2581,21 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 	}
 }
 
-void stopAllTLogs( TLogData* self, UID newLogId ) {
+// Start the tLog role for a worker
+ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
+	state TLogInterface recruited(self->dbgid, locality);
+	recruited.initEndpoints();
+
+	DUMPTOKEN( recruited.peekMessages );
+	DUMPTOKEN( recruited.popMessages );
+	DUMPTOKEN( recruited.commit );
+	DUMPTOKEN( recruited.lock );
+	DUMPTOKEN( recruited.getQueuingMetrics );
+	DUMPTOKEN( recruited.confirmRunning );
+
 	for(auto it : self->id_data) {
 		if( !it.second->stopped ) {
-			TraceEvent("TLogStoppedByNewRecruitment", self->dbgid).detail("LogId", it.second->logId).detail("StoppedId", it.first.toString()).detail("RecruitedId", newLogId).detail("EndEpoch", it.second->logSystem->get().getPtr() != 0);
+			TraceEvent("TLogStoppedByNewRecruitment", self->dbgid).detail("LogId", it.second->logId).detail("StoppedId", it.first.toString()).detail("RecruitedId", recruited.id()).detail("EndEpoch", it.second->logSystem->get().getPtr() != 0);
 			if(!it.second->isPrimary && it.second->logSystem->get()) {
 				it.second->removed = it.second->removed && it.second->logSystem->get()->endEpoch();
 			}
@@ -2618,23 +2609,8 @@ void stopAllTLogs( TLogData* self, UID newLogId ) {
 		}
 		it.second->stopCommit.trigger();
 	}
-}
 
-// Start the tLog role for a worker
-ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
-	state TLogInterface recruited(self->dbgid, locality);
-	recruited.initEndpoints();
-
-	DUMPTOKEN( recruited.peekMessages );
-	DUMPTOKEN( recruited.popMessages );
-	DUMPTOKEN( recruited.commit );
-	DUMPTOKEN( recruited.lock );
-	DUMPTOKEN( recruited.getQueuingMetrics );
-	DUMPTOKEN( recruited.confirmRunning );
-
-	stopAllTLogs(self, recruited.id());
-
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.spillType, req.allTags) );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.allTags) );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
@@ -2753,10 +2729,7 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 	if (activeSharedTLog->get() != tlogId) {
 		// TODO: This should fully spill, but currently doing so will cause us to no longer update poppedVersion
 		// and QuietDatabase will hang thinking our TLog is behind.
-		TraceEvent("SharedTLogBeginSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
 		self->targetVolatileBytes = SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT * 2;
-	} else {
-		TraceEvent("SharedTLogSkipSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
 	}
 	return Void();
 }
@@ -2797,11 +2770,8 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 				when ( wait( error ) ) { throw internal_error(); }
 				when ( wait( activeSharedTLog->onChange() ) ) {
 					if (activeSharedTLog->get() == tlogId) {
-						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
 						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
 					} else {
-						stopAllTLogs(&self, tlogId);
-						TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
 						self.sharedActors.send( startSpillingInTenSeconds(&self, tlogId, activeSharedTLog) );
 					}
 				}
@@ -2893,3 +2863,5 @@ TEST_CASE("/fdbserver/tlogserver/VersionMessagesOverheadFactor" ) {
 
 	return Void();
 }
+
+} // namespace oldTLog_6_2
