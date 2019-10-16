@@ -34,7 +34,7 @@ struct SatelliteInfo {
 	int32_t priority;
 	int32_t satelliteDesiredTLogCount = -1;
 
-	SatelliteInfo() : priority(0), satelliteDesiredTLogCount(-1) {}
+	SatelliteInfo() : priority(0) {}
 
 	struct sort_by_priority {
 		bool operator ()(SatelliteInfo const&a, SatelliteInfo const& b) const { return a.priority > b.priority; }
