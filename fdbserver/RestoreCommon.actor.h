@@ -219,8 +219,7 @@ struct RestoreFileFR {
 	}
 
 	bool operator<(const RestoreFileFR& rhs) const {
-		return beginVersion < rhs.beginVersion || (beginVersion == rhs.beginVersion && endVersion < rhs.endVersion) ||
-		       (beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && fileIndex < rhs.fileIndex);
+		return std::tie(beginVersion, endVersion, fileIndex) < std::tie(rhs.beginVersion, rhs.endVersion, rhs.fileIndex);
 	}
 
 	RestoreFileFR()

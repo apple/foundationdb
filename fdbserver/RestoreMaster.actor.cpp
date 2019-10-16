@@ -163,7 +163,6 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
 
 	// lock DB for restore
-	wait(lockDatabase(cx, randomUID));
 	state int numTries = 0;
 	loop {
 		try {
