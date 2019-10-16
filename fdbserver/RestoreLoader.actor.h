@@ -75,7 +75,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
-		RestoreRoleData::resetPerVersionBatch();
 		rangeToApplier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;
