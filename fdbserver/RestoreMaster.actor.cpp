@@ -202,16 +202,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
 	wait(notifyRestoreCompleted(self, cx));
 
-	numTries = 0;
-	loop {
-		try {
-			wait(unlockDatabase(cx, randomUID));
-			break;
-		} catch (Error& e) {
-			TraceEvent(numTries > 50 ? SevError : SevWarn, "UnlockDBFailed").detail("UID", randomUID.toString());
-			numTries++;
-		}
+	try {
+		wait(unlockDatabase(cx, randomUID));
+	} catch (Error& e) {
+		TraceEvent(SevError, "UnlockDBFailed").detail("UID", randomUID.toString());
+		ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
 	}
+
 
 	TraceEvent("FastRestore").detail("RestoreMasterComplete", self->id());
 
