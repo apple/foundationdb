@@ -32,7 +32,7 @@
 struct SatelliteInfo {
 	Key dcId;
 	int32_t priority;
-	int32_t satelliteDesiredTLogCount;
+	int32_t satelliteDesiredTLogCount = -1;
 
 	SatelliteInfo() : priority(0), satelliteDesiredTLogCount(-1) {}
 
