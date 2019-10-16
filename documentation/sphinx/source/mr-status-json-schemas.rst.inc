@@ -498,7 +498,8 @@
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[
