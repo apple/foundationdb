@@ -345,7 +345,7 @@ struct ProxySnapRequest
 
 struct ExclusionSafetyCheckReply
 {
-	constexpr static FileIdentifier file_identifier = 459034028;
+	constexpr static FileIdentifier file_identifier = 11;
 	bool safe;
 
 	ExclusionSafetyCheckReply() : safe(false) {}

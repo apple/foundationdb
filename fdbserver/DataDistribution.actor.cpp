@@ -3131,14 +3131,14 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 
 			std::set<AddressExclusion> excluded;
 			std::set<AddressExclusion> failed;
-			for (auto r = excludedResults.begin(); r != excludedResults.end(); ++r) {
-				AddressExclusion addr = decodeExcludedServersKey(r->key);
+			for (const auto& r : excludedResults) {
+				AddressExclusion addr = decodeExcludedServersKey(r.key);
 				if (addr.isValid()) {
 					excluded.insert(addr);
 				}
 			}
-			for (auto r = failedResults.begin(); r != failedResults.end(); ++r) {
-				AddressExclusion addr = decodeFailedServersKey(r->key);
+			for (const auto& r : failedResults) {
+				AddressExclusion addr = decodeFailedServersKey(r.key);
 				if (addr.isValid()) {
 					failed.insert(addr);
 				}
@@ -3148,18 +3148,18 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 			// want to trigger entries that are different
 			// Do not retrigger and double-overwrite failed servers
 			auto old = self->excludedServers.getKeys();
-			for (auto& o : old) {
+			for (const auto& o : old) {
 				if (!excluded.count(o) && !failed.count(o)) {
 					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 				}
 			}
-			for (auto& n : excluded) {
+			for (const auto& n : excluded) {
 				if (!failed.count(n)) {
 					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
 				}
 			}
 
-			for (auto& f : failed) {
+			for (const auto& f : failed) {
 				self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
 			}
 
@@ -3938,7 +3938,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			}
 
 			auto excl = self->excludedServers.getKeys();
-			for(auto& s : excl) {
+			for(const auto& s : excl) {
 				if (self->excludedServers.get(s) != DDTeamCollection::Status::NONE) {
 					TraceEvent(SevDebug, "DDRecruitExcl2")
 					    .detail("Primary", self->primary)
