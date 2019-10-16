@@ -810,27 +810,32 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-
-		Key			val;
-		MutationRef backupMutation;
-		uint32_t*	partBuffer = NULL;
+		state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations.begin();
 
 		// Serialize the log range mutations within the map
-		for (auto& logRangeMutation : logRangeMutations)
+		for (; logRangeMutation != logRangeMutations.end(); ++logRangeMutation)
 		{
+			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				yieldBytes = 0;
+				wait(yield());
+			}
+
+			yieldBytes += logRangeMutation->second.expectedSize();
+			
 			BinaryWriter wr(Unversioned());
 
 			// Serialize the log destination
-			wr.serializeBytes( logRangeMutation.first );
+			wr.serializeBytes( logRangeMutation->first );
 
 			// Write the log keys and version information
 			wr << (uint8_t)hashlittle(&v, sizeof(v), 0);
 			wr << bigEndian64(commitVersion);
 
+			MutationRef backupMutation;
 			backupMutation.type = MutationRef::SetValue;
-			partBuffer = NULL;
+			uint32_t* partBuffer = NULL;
 
-			val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
+			Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 			for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
@@ -852,7 +857,7 @@ ACTOR Future<Void> commitBatch(
 
 				// Define the mutation type and and location
 				backupMutation.param1 = wr.toValue();
-				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
+				ASSERT( backupMutation.param1.startsWith(logRangeMutation->first) );  // We are writing into the configured destination
 					
 				auto& tags = self->tagsForKey(backupMutation.param1);
 				toCommit.addTags(tags);
