@@ -773,8 +773,10 @@ template <>
 struct dynamic_size_traits<StringRef> : std::true_type {
 	template <class Context>
 	static size_t size(const StringRef& t, Context&) { return t.size(); }
-	template<class Context>
-	static void save(uint8_t* out, const StringRef& t, Context&) { std::copy(t.begin(), t.end(), out); }
+	template <class Context>
+	static void save(uint8_t* out, const StringRef& t, Context&) {
+		::memcpy(out, t.begin(), t.size());
+	}
 
 	template <class Context>
 	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {
