@@ -50,6 +50,26 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 	return Void();
 }
 
+TEST_CASE("/flow/delayOrdering") {
+	state double x = deterministicRandom()->random01();
+	state double y = deterministicRandom()->random01();
+	if (BUGGIFY) {
+		y = x;
+	}
+	state int last = 0;
+	state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+		*last = 1;
+		return Void();
+	});
+	state Future<Void> f2 = map(delay(y), [last = &last](const Void&) {
+		*last = 2;
+		return Void();
+	});
+	wait(f1 && f2);
+	ASSERT((x <= y) == (last == 2));
+	return Void();
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;

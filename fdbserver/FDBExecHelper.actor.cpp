@@ -194,44 +194,6 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 	return err;
 }
 
-std::map<NetworkAddress, std::set<UID>> execOpsInProgress;
-
-bool isExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	return (execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-}
-
-void setExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) == execOpsInProgress[addr].end());
-	execOpsInProgress[addr].insert(execUID);
-	return;
-}
-
-void clearExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-	execOpsInProgress[addr].erase(execUID);
-	return;
-}
-
-std::map<NetworkAddress, std::set<UID>> tLogsAlive;
-
-void registerTLog(UID uid) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	tLogsAlive[addr].insert(uid);
-}
-void unregisterTLog(UID uid) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	if (tLogsAlive[addr].find(uid) != tLogsAlive[addr].end()) {
-		tLogsAlive[addr].erase(uid);
-	}
-}
-bool isTLogInSameNode() {
-	NetworkAddress addr = g_network->getLocalAddress();
-	return tLogsAlive[addr].size() >= 1;
-}
-
 struct StorageVersionInfo {
 	Version version;
 	Version durableVersion;

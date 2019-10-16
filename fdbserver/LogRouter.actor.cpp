@@ -220,7 +220,6 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = self->version.get() + 1;
-	state Version tagPopped = 0;
 	state Version lastVer = 0;
 	state std::vector<int> tags;
 
@@ -231,7 +230,6 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					break;
 				}
 				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
-					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() )
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
 					else
