@@ -1274,7 +1274,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker, int *minReplicasRemaining) {
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker, DatabaseConfiguration configuration, int *minReplicasRemaining) {
 	state JsonBuilderObject statusObjData;
 
 	try {
@@ -1339,6 +1339,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				continue;
 			}
 
+			int replicas = configuration.storageTeamSize;
 			bool primary = inFlight.getInt("Primary");
 			int highestPriority = inFlight.getInt("HighestPriority");
 
@@ -1359,27 +1360,21 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["name"] = "missing_data";
 				stateSectionObj["description"] = "No replicas remain of some data";
 				stateSectionObj["min_replicas_remaining"] = 0;
-				if(primary) {
-					*minReplicasRemaining = 0;
-				}
+				replicas = 0;
 			}
 			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only one replica remains of some data";
 				stateSectionObj["min_replicas_remaining"] = 1;
-				if(primary) {
-					*minReplicasRemaining = 1;
-				}
+				replicas = 1;
 			}
 			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only two replicas remain of some data";
 				stateSectionObj["min_replicas_remaining"] = 2;
-				if(primary) {
-					*minReplicasRemaining = 2;
-				}
+				replicas = 2;
 			}
 			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 				stateSectionObj["healthy"] = false;
@@ -1415,6 +1410,13 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				if(primary) {
 					statusObjData["state"] = stateSectionObj;
 				}
+			}
+
+			if(primary) {
+				*minReplicasRemaining = std::max(*minReplicasRemaining, 0) + replicas;
+			}
+			else if(replicas > 0) {
+				*minReplicasRemaining = std::max(*minReplicasRemaining, 0) + 1;
 			}
 		}
 		statusObjData["team_trackers"] = teamTrackers;
@@ -2235,7 +2237,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
-			futures2.push_back(dataStatusFetcher(ddWorker, &minReplicasRemaining));
+			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
