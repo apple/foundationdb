@@ -19,12 +19,13 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "ClusterRecruitmentInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -128,9 +129,9 @@ struct MachineAttritionWorkload : TestWorkload {
 		}
 		if (!clientId && !g_network->isSimulated()) {
 			double meanDelay = testDuration / machinesToKill;
-			return timeout(reportErrorsExcept(noSimMachineKillWorker(this, meanDelay, cx),
-			                                  "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
-			               testDuration, Void());
+			return timeout(
+				reportErrorsExcept(noSimMachineKillWorker(this, meanDelay, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
+			    testDuration, Void());
 		}
 		if(killSelf)
 			throw please_reboot();
@@ -138,6 +139,17 @@ struct MachineAttritionWorkload : TestWorkload {
 	}
 	virtual Future<bool> check( Database const& cx ) { return ignoreSSFailures; }
 	virtual void getMetrics( vector<PerfMetric>& m ) {
+	}
+
+	static bool noSimIsViableKill(int coordFaultTolerance, int& killedCoord, std::vector<NetworkAddress> coordAddrs, WorkerDetails worker) {
+		if (worker.processClass == ProcessClass::ClassType::TesterClass) return false;
+		bool isCoord = (std::find(coordAddrs.begin(), coordAddrs.end(), worker.interf.address()) != coordAddrs.end());
+		if (isCoord && coordFaultTolerance > killedCoord) {
+			killedCoord++;
+		} else if (isCoord) {
+			return false;
+		}
+		return true;
 	}
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, double meanDelay, Database cx) {
@@ -154,18 +166,32 @@ struct MachineAttritionWorkload : TestWorkload {
 		} else {
 			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
 		}
+		// keep track of coordinator fault tolerance and make sure we don't go over
+		state ClientCoordinators coords(cx->getConnectionFile());
+		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+		state std::vector<NetworkAddress> coordAddrs;
+		for (const auto& cls : coords.clientLeaderServers) {
+			leaderServers.push_back(retryBrokenPromise(cls.getLeader, GetLeaderRequest(coords.clusterKey, UID()), TaskPriority::CoordinationReply));
+			coordAddrs.push_back(cls.getLeader.getEndpoint().getPrimaryAddress());
+		}
+		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0));
+		int coordUnavailable = 0;
+		for (const auto& leaderServer : leaderServers) {
+			if (!leaderServer.isReady()) {
+				coordUnavailable++;
+			}
+		}
+		state int coordFaultTolerance = (leaderServers.size() - 1) / 2 - coordUnavailable;
+		state int killedCoord = 0;
 		if (self->killDc) {
 			wait(delay(delayBeforeKill));
 			// Pick a dcId to kill
-			while (workers.back().processClass == ProcessClass::ClassType::TesterClass) {
-				deterministicRandom()->randomShuffle(workers);
-			}
 			Optional<Standalone<StringRef>> killDcId = workers.back().interf.locality.dcId();
 			TraceEvent("Assassination").detail("TargetDataCenter", killDcId);
 			for (const auto& worker : workers) {
-				// kill all matching dcId workers, except testers
+				// kill all matching dcId workers, except testers. Also preserve a majority of coordinators
 				if (worker.interf.locality.dcId().present() && worker.interf.locality.dcId() == killDcId &&
-				    worker.processClass != ProcessClass::ClassType::TesterClass) {
+				    noSimIsViableKill(coordFaultTolerance, killedCoord, coordAddrs, worker)) {
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
@@ -191,9 +217,9 @@ struct MachineAttritionWorkload : TestWorkload {
 						}
 					}
 				}
-				// Pick a machine to kill, ignoring testers
+				// Pick a machine to kill, ignoring testers and preserving majority of coordinators
 				state WorkerDetails targetMachine;
-				while (workers.back().processClass == ProcessClass::ClassType::TesterClass) {
+				while (!noSimIsViableKill(coordFaultTolerance, killedCoord, coordAddrs, workers.back())) {
 					deterministicRandom()->randomShuffle(workers);
 				}
 				targetMachine = workers.back();
