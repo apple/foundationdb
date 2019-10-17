@@ -266,7 +266,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	Version prevVersion = 0;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
-		// drive applier's NotifiedVersion (e.g., logVersion and rangeVersion)
+		// drive applier's NotifiedVersion.
 		if (loader == self->loadersInterf.end()) {
 			loader = self->loadersInterf.begin();
 		}

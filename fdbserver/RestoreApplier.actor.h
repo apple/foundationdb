@@ -41,8 +41,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
-	NotifiedVersion rangeVersion; // All requests of mutations in range file below this version has been processed
-	NotifiedVersion logVersion; // All requests of mutations in log file below this version has been processed
+	// processedFileState: key: file unique index; value: largest version of mutation received on the applier
+	std::map<uint32_t, NotifiedVersion> processedFileState;
 	Optional<Future<Void>> dbApplier;
 
 	// rangeToApplier is in master and loader. Loader uses it to determine which applier a mutation should be sent
