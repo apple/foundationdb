@@ -52,3 +52,4 @@ The latest changes are detailed in :doc:`release-notes`. The documentation has t
    tutorials
    administration
    earlier-release-notes
+   metrics
