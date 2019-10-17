@@ -382,7 +382,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "layer_status_incomplete",
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
-                  "consistencycheck_disabled"
+                  "consistencycheck_disabled",
+                  "duplicate_mutation_streams",
+                  "duplicate_mutation_fetch_timeout"
                ]
             },
             "issues":[
