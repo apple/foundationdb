@@ -28,7 +28,10 @@
 
 // SerializedMutationListMap:
 // Key is the signature/version of the mutation list, Value is the mutation list (or part of the mutation list)
-typedef std::map<Standalone<StringRef>, Standalone<StringRef>> SerializedMutationListMap; 
+typedef std::map<Standalone<StringRef>, Standalone<StringRef>> SerializedMutationListMap;
+// SerializedMutationPartMap:
+// Key has the same semantics as SerializedMutationListMap; Value is the part number of the splitted mutation list
+typedef std::map<Standalone<StringRef>, uint32_t> SerializedMutationPartMap;
 
 bool isRangeMutation(MutationRef m);
 void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvector_arena,
@@ -43,13 +46,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
                                          bool isSampling = false);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
                                           bool isRangeFile, Version startVersion, Version endVersion, int fileIndex);
-ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
-                                                           SerializedMutationListMap* mutationMap,
-                                                           std::map<Standalone<StringRef>, uint32_t>* mutationPartMap,
-                                                           Reference<IBackupContainer> bc, Version version,
-                                                           std::string fileName, int64_t readOffset, int64_t readLen,
-                                                           KeyRange restoreRange, Key addPrefix, Key removePrefix,
-                                                           Key mutationLogPrefix);
+ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
+    NotifiedVersion* pProcessedFileOffset, SerializedMutationListMap* mutationMap,
+    SerializedMutationPartMap* mutationPartMap, Reference<IBackupContainer> bc, Version version, std::string fileName,
+    int64_t readOffset, int64_t readLen, KeyRange restoreRange, Key addPrefix, Key removePrefix, Key mutationLogPrefix);
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsMap* kvOps,
                                                              Reference<IBackupContainer> bc, Version version,
                                                              std::string fileName, int64_t readOffset_input,
@@ -531,11 +531,13 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 // Parse data blocks in a log file into a vector of <string, string> pairs. Each pair.second contains the mutations at a
 // version encoded in pair.first Step 1: decodeLogFileBlock into <string, string> pairs Step 2: Concatenate the
 // pair.second of pairs with the same pair.first.
-ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
-    NotifiedVersion* pProcessedFileOffset, std::map<Standalone<StringRef>, Standalone<StringRef>>* pMutationMap,
-    std::map<Standalone<StringRef>, uint32_t>* pMutationPartMap, Reference<IBackupContainer> bc, Version version,
-    std::string fileName, int64_t readOffset, int64_t readLen, KeyRange restoreRange, Key addPrefix, Key removePrefix,
-    Key mutationLogPrefix) {
+ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
+                                                           SerializedMutationListMap* pMutationMap,
+                                                           SerializedMutationPartMap* pMutationPartMap,
+                                                           Reference<IBackupContainer> bc, Version version,
+                                                           std::string fileName, int64_t readOffset, int64_t readLen,
+                                                           KeyRange restoreRange, Key addPrefix, Key removePrefix,
+                                                           Key mutationLogPrefix) {
 	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
