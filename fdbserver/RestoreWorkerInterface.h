@@ -342,26 +342,28 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
+	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
 	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(Version prevVersion, Version version, bool isRangeFile,
-	                                                   VectorRef<MutationRef> mutations)
-	  : prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
+	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
+	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
+	    mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
-		   << " mutations.size:" << mutations.size();
+		ss << "fileIndex" << fileIndex << "prevVersion:" << prevVersion << " version:" << version
+		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, fileIndex, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
