@@ -4,6 +4,12 @@ set(FDBBACKUP_SRCS
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
+set(FDBCONVERT_SRCS
+	FileConverter.actor.cpp
+	FileConverter.h)
+add_flow_target(EXECUTABLE NAME fdbconvert SRCS ${FDBCONVERT_SRCS})
+target_link_libraries(fdbconvert PRIVATE fdbclient)
+
 if(NOT OPEN_FOR_IDE)
   fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
   install_symlink(
