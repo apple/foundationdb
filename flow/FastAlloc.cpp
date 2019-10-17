@@ -260,6 +260,10 @@ void *FastAllocator<Size>::allocate() {
 		initThread();
 	}
 
+#ifdef USE_GPERFTOOLS
+	return malloc(Size);
+#endif
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
@@ -302,6 +306,10 @@ void FastAllocator<Size>::release(void *ptr) {
 	if(!threadInitialized) {
 		initThread();
 	}
+
+#ifdef USE_GPERFTOOLS
+	return free(ptr);
+#endif
 
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
@@ -538,4 +546,3 @@ template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
-

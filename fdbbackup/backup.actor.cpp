@@ -83,7 +83,7 @@ enum enumProgramExe {
 };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP
+	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP, BACKUP_CLEANUP
 };
 
 enum enumDBType {
@@ -102,7 +102,7 @@ enum {
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON,
+	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON, OPT_DELETE_DATA, OPT_MIN_CLEANUP_SECONDS,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -260,6 +260,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_JSON,            "--json",           SO_NONE},
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -289,6 +290,37 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE,       "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
+	{ OPT_TRACE,           "--log",            SO_NONE },
+	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
+	{ OPT_QUIET,           "-q",               SO_NONE },
+	{ OPT_QUIET,           "--quiet",          SO_NONE },
+	{ OPT_VERSION,         "--version",        SO_NONE },
+	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
+	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_DELETE_DATA,     "--delete_data",    SO_NONE },
+	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -320,6 +352,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -351,6 +384,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -378,6 +412,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -647,6 +682,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -680,6 +716,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -712,6 +749,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -744,6 +782,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -773,6 +812,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1245,6 +1285,7 @@ enumBackupType	getBackupType(std::string backupType)
 		values["start"] = BACKUP_START;
 		values["status"] = BACKUP_STATUS;
 		values["abort"] = BACKUP_ABORT;
+		values["cleanup"] = BACKUP_CLEANUP;
 		values["wait"] = BACKUP_WAIT;
 		values["discontinue"] = BACKUP_DISCONTINUE;
 		values["pause"] = BACKUP_PAUSE;
@@ -1922,6 +1963,21 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 	return Void();
 }
 
+ACTOR Future<Void> cleanupMutations(Database db, bool deleteData) {
+	try
+	{
+		wait(cleanupBackup(db, deleteData));
+	}
+	catch (Error& e) {
+		if(e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDone) {
 	try
 	{
@@ -2130,7 +2186,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
                                        std::string removePrefix) {
 	try {
 		state FileBackupAgent backupAgent;
-		state int64_t restoreVersion = -1;
+		state Version restoreVersion = invalidVersion;
 
 		if (ranges.size() > 1) {
 			fprintf(stderr, "Currently only a single restore range is supported!\n");
@@ -2172,20 +2228,20 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 "\n", restoreVersion);
 				throw restore_invalid_version();
 			}
 
 			// Display the restore information, if requested
 			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long)restoreVersion);
+				printf("[DRY RUN] Restoring backup to version: %" PRId64 "\n", restoreVersion);
 				printf("%s\n", description.toString().c_str());
 			}
 		}
 
 		if (waitForDone && verbose) {
 			// If restore completed then report version restored
-			printf("Restored to version %lld%s\n", (long long)restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+			printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) throw;
@@ -2671,6 +2727,9 @@ int main(int argc, char* argv[]) {
 				case BACKUP_ABORT:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT);
 					break;
+				case BACKUP_CLEANUP:
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT);
+					break;
 				case BACKUP_WAIT:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT);
 					break;
@@ -2863,6 +2922,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
+		bool deleteData = false;
 
 		BackupModifyOptions modifyOptions;
 
@@ -2941,6 +3001,12 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_DRYRUN:
 					dryRun = true;
+					break;
+				case OPT_DELETE_DATA:
+					deleteData = true;
+					break;
+				case OPT_MIN_CLEANUP_SECONDS:
+					knobs.push_back( std::make_pair( "min_cleanup_seconds", args->OptionArg() ) );
 					break;
 				case OPT_FORCE:
 					forceAction = true;
@@ -3510,6 +3576,12 @@ int main(int argc, char* argv[]) {
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( abortBackup(db, tagName) );
+				break;
+
+			case BACKUP_CLEANUP:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
+				f = stopAfter( cleanupMutations(db, deleteData) );
 				break;
 
 			case BACKUP_WAIT:

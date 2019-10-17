@@ -1269,12 +1269,7 @@ private:
 
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
-		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
-			// poppedSeq can be lagged very behind in logSpilling feature.
-			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
-		} else {
-			self->nextReadLocation = lastPage->popped;
-		}
+		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);
