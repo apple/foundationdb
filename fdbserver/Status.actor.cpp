@@ -1160,15 +1160,16 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-				Standalone<RangeResultRef> existingDestUidValues = wait(tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
-				std::map<Key,Key> existingRanges;
+				Standalone<RangeResultRef> existingDestUidValues = wait(timeoutError(tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY), 5.0));
+				std::set<std::pair<Key,Key>> existingRanges;
 				for(auto it : existingDestUidValues) {
 					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
-					if(existingRanges.count(range.begin) && existingRanges[range.begin] == range.end) {
-						messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for range `%s` - `%s`.", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
+					std::pair<Key,Key> rangePair = std::make_pair(range.begin,range.end);
+					if(existingRanges.count(rangePair)) {
+						messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
 						break;
 					}
-					existingRanges[range.begin] = range.end;
+					existingRanges.insert(rangePair);
 				}
 				break;
 			} catch(Error &e) {
