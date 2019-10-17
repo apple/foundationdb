@@ -3619,13 +3619,18 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1) {
-			state Key destUidLookupPath = BinaryWriter::toValue(normalizedRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-			Optional<Key> existingDestUidValue = wait(tr->get(destUidLookupPath));
-			if (existingDestUidValue.present()) {
-				destUidValue = existingDestUidValue.get();
-			} else {
+			Standalone<RangeResultRef> existingDestUidValues = wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+			bool found = false;
+			for(auto it : existingDestUidValues) {
+				if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == normalizedRanges[0] ) {
+					destUidValue = it.value;
+					found = true;
+					break;
+				}
+			}
+			if( !found ) {
 				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-				tr->set(destUidLookupPath, destUidValue);
+				tr->set(BinaryWriter::toValue(normalizedRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 			}
 		}
 

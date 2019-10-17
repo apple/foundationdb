@@ -212,6 +212,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 			}
 			*bool_knobs[knob] = v;
 		}
+		return true;
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;

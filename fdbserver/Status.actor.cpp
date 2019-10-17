@@ -1122,33 +1122,67 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 	return statusObj;
 }
 
-ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool isAvailable) {
-	if(isAvailable) {
-		try {
-			state Transaction tr(cx);
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<Value> ccSuspendVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
-					bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
-					if(ccSuspend) {
-						messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
-					}
+ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> ccSuspendVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
+				bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
+				if(ccSuspend) {
+					messages->push_back(JsonString::makeMessage("consistencycheck_disabled", "Consistency checker is disabled."));
+				}
+				break;
+			} catch(Error &e) {
+				if(e.code() == error_code_timed_out) {
+					messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
+						format("Timed out trying to fetch `%s` from the database.", printable(fdbShouldConsistencyCheckBeSuspended).c_str()).c_str()));
 					break;
-				} catch(Error &e) {
-					if(e.code() == error_code_timed_out) {
-						messages->push_back(JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
-							format("Timed out trying to fetch `%s` from the database.", printable(fdbShouldConsistencyCheckBeSuspended).c_str()).c_str()));
+				}
+				wait(tr.onError(e));
+			}
+		}
+	} catch(Error &e) {
+		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
+	}
+	return Void();
+}
+
+ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+				Standalone<RangeResultRef> existingDestUidValues = wait(timeoutError(tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY), 5.0));
+				std::set<std::pair<Key,Key>> existingRanges;
+				for(auto it : existingDestUidValues) {
+					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+					std::pair<Key,Key> rangePair = std::make_pair(range.begin,range.end);
+					if(existingRanges.count(rangePair)) {
+						messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
 						break;
 					}
-					wait(tr.onError(e));
+					existingRanges.insert(rangePair);
 				}
+				break;
+			} catch(Error &e) {
+				if(e.code() == error_code_timed_out) {
+					messages->push_back(JsonString::makeMessage("duplicate_mutation_fetch_timeout",
+						format("Timed out trying to fetch `%s` from the database.", printable(destUidLookupPrefix).c_str()).c_str()));
+					break;
+				}
+				wait(tr.onError(e));
 			}
-		} catch(Error &e) {
-			incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 		}
+	} catch(Error &e) {
+		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
 	return Void();
 }
@@ -2222,7 +2256,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
 
-			wait(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons, isAvailable));
+			state std::vector<Future<Void>> warningFutures;
+			if(isAvailable) {
+				warningFutures.push_back( consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons) );
+				if(!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
+					warningFutures.push_back( logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons) );
+				}
+			}
 
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
@@ -2316,6 +2356,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			else {
 				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
 			}
+			wait( waitForAll(warningFutures) );
 		}
 		else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
