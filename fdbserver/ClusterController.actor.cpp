@@ -572,6 +572,35 @@ public:
 		std::string toString() const { return format("%d %d %d %d", bestFit, worstFit, count, worstIsDegraded); }
 	};
 
+	struct RoleFitnessPair {
+		RoleFitness proxy;
+		RoleFitness resolver;
+
+		RoleFitnessPair() {}
+		RoleFitnessPair(RoleFitness const& proxy, RoleFitness const& resolver) : proxy(proxy), resolver(resolver) {}
+
+		bool operator < (RoleFitnessPair const& r) const {
+			if(proxy.betterFitness(r.proxy)) {
+				return true;
+			}
+			if(r.proxy.betterFitness(proxy)) {
+				return false;
+			}
+			if(resolver.betterFitness(r.resolver)) {
+				return true;
+			}
+			if(r.resolver.betterFitness(resolver)) {
+				return false;
+			}
+			if(proxy.count != r.proxy.count) {
+				return proxy.count > r.proxy.count;
+			}
+			return resolver.count > r.resolver.count;
+		}
+
+		bool operator == (RoleFitnessPair const& r) const { return proxy == r.proxy && resolver == r.resolver; }
+	};
+
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		std::set<Optional<Standalone<StringRef>>> result;
 		for( auto& it : id_worker )
@@ -772,7 +801,7 @@ public:
 
 			auto datacenters = getDatacenters( req.configuration );
 
-			std::pair<RoleFitness,RoleFitness> bestFitness;
+			RoleFitnessPair bestFitness;
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
@@ -789,7 +818,7 @@ public:
 					proxies.push_back(first_proxy.worker);
 					resolvers.push_back(first_resolver.worker);
 
-					auto fitness = std::make_pair( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
+					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
 
 					if(dcId == clusterControllerDcId) {
 						bestFitness = fitness;
@@ -835,8 +864,8 @@ public:
 
 			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-				  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(bestFitness.first) ||
-				  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(bestFitness.second) ) ) {
+				  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(bestFitness.proxy) ||
+				  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(bestFitness.resolver) ) ) {
 				throw operation_failed();
 			}
 
@@ -1092,7 +1121,7 @@ public:
 		}
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 		// Check proxy/resolver fitness
-		std::pair<RoleFitness,RoleFitness> oldInFit = std::make_pair(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver));
+		RoleFitnessPair oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver));
 
 		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
 		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
@@ -1102,13 +1131,15 @@ public:
 		proxies.push_back(first_proxy.worker);
 		resolvers.push_back(first_resolver.worker);
 
-		std::pair<RoleFitness,RoleFitness> newInFit = std::make_pair(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
-		if(oldInFit.first.betterFitness(newInFit.first) || oldInFit.second.betterFitness(newInFit.second)) return false;
-		if(oldTLogFit > newTLogFit || oldInFit > newInFit || (oldSatelliteFallback && !newSatelliteFallback) || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
+		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
+		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
+			return false;
+		}
+		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
 			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", newMasterFit)
 				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
-				.detail("OldProxyFit", oldInFit.first.toString()).detail("NewProxyFit", newInFit.first.toString())
-				.detail("OldResolverFit", oldInFit.second.toString()).detail("NewResolverFit", newInFit.second.toString())
+				.detail("OldProxyFit", oldInFit.proxy.toString()).detail("NewProxyFit", newInFit.proxy.toString())
+				.detail("OldResolverFit", oldInFit.resolver.toString()).detail("NewResolverFit", newInFit.resolver.toString())
 				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
 				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
 				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
