@@ -58,7 +58,8 @@ public:
 	virtual void clear(KeyRangeRef range) = 0;
 	virtual void mutate(int op, StringRef param1, StringRef param2) = 0;
 	virtual void setWriteVersion(Version) = 0;   // The write version must be nondecreasing
-	virtual void forgetVersions(Version begin, Version end) = 0;  // Versions [begin, end) no longer readable
+	virtual void setOldestVersion(Version v) = 0;  // Set oldest readable version to be used in next commit
+	virtual Version getOldestVersion() = 0;  // Get oldest readable version
 	virtual Future<Void> commit() = 0;
 
 	virtual Future<Version> getLatestVersion() = 0;

@@ -213,12 +213,13 @@ public:
 	// After the returned future is ready, future calls must not wait.
 	virtual Future<Version> getLatestVersion() = 0;
 
-	// The pager can invalidate snapshots at versions < v and reuse
-	// any pages that were freed as of version v
-	virtual void setOldestVersion(Version v) = 0;
-
-	// Get the oldest readable version
+	// Returns the oldest readable version as of the most recent committed version
 	virtual Future<Version> getOldestVersion() = 0;
+
+	// The pager can reuse pages that were freed at a version less than v.
+	// If any snapshots are in use at a version less than v, the pager can invalidate them
+	// or keep their versions around until the snapshots are no longer in use.
+	virtual void setOldestVersion(Version v) = 0;
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
