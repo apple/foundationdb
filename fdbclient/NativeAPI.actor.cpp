@@ -3409,6 +3409,13 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
 		                                           TaskPriority::CoordinationReply));
 	}
+	choose {
+		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
+		when(wait(delay(3.0))) {
+			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum");
+			return false;
+		}
+	}
 	int attemptCoordinatorExclude = 0;
 	int coordinatorsUnavailable = 0;
 	for (int i = 0; i < leaderServers.size(); i++) {
