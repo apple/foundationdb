@@ -3409,6 +3409,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
 		                                           TaskPriority::CoordinationReply));
 	}
+	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
 	choose {
 		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
 		when(wait(delay(3.0))) {
