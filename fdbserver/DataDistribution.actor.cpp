@@ -4681,18 +4681,18 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncV
 
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributorData> self, Database cx) {
-	TraceEvent("DDExclusionSafetyCheckBegin");
+	TraceEvent("DDExclusionSafetyCheckBegin", self->ddId);
 	vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
 	DistributorExclusionSafetyCheckReply reply(true);
 	if (!self->teamCollection) {
-		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid");
+		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid", self->ddId);
 		reply.safe = false;
 		req.reply.send(reply);
 		return Void();
 	}
 	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
 	if (self->teamCollection->teams.size() <= 1) {
-		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams");
+		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId);
 		reply.safe = false;
 		req.reply.send(reply);
 		return Void();
@@ -4710,7 +4710,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	for (const auto& team : self->teamCollection->teams) {
 		vector<UID> teamServerIDs = team->getServerIDs();
 		std::sort(teamServerIDs.begin(), teamServerIDs.end());
-		TraceEvent("DDExclusionSafetyCheck")
+		TraceEvent(SevDebug, "DDExclusionSafetyCheck", self->ddId)
 			.detail("Excluding", describe(excludeServerIDs))
 			.detail("Existing", team->getDesc());
 		// Find size of set intersection of both vectors and see if the leftover team is valid
@@ -4723,7 +4723,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 			break;
 		}
 	}
-	TraceEvent("DDExclusionSafetyCheckFinish");
+	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId);
 	req.reply.send(reply);
 	return Void();
 }

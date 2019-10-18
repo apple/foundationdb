@@ -956,7 +956,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 	}
 }
 // Remove the server from keyServer list and set serverKeysFalse to the server's serverKeys list.
-// Changes to keyServer and serverKey must happen symetrically in a transaction.
+// Changes to keyServer and serverKey must happen symmetrically in a transaction.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock) {
 	state Key begin = allKeys.begin;
 	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit

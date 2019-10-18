@@ -449,7 +449,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				retries++;
 			}
 		}
-		// Swap out coordinator with server in kill set, but only if already marking as failed and safety check passes
+		// Swap coordinator with one server in the kill set to ensure the number of processes to kill does not increase.
+		// This is needed only if a new coordinator is added to the toKill set in this function and safety check passes
 		if (markExcludeAsFailed && coordExcl.isValid()) {
 			auto removeServer = toKill.begin();
 			TraceEvent("RemoveAndKill", functionId)
