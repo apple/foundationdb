@@ -87,7 +87,16 @@ if(WIN32)
   # this sets the windows target version to Windows 7
   set(WINDOWS_TARGET 0x0601)
   add_compile_options(/Ot /Ox /Oi /GS- /W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /MD)
-  add_compile_definitions(TLS_DISABLED WIN32 _WIN32_WINNT=0x0502 WINVER=0x0502 BOOST_ALL_NO_LIB NTDDI_VERSION=0x05020000 NDEBUG _CONSOLE _CRT_SECURE_NO_WARNINGS)
+  add_compile_definitions(TLS_DISABLED
+    WIN32
+    _WIN32_WINNT=0x0502
+    WINVER=0x0502
+    BOOST_ALL_NO_LIB
+    NTDDI_VERSION=0x05020000
+    NDEBUG
+    _CONSOLE
+    _CRT_SECURE_NO_WARNINGS
+    PSAPI_VERSION=1)
   #add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
   set(GCC NO)
