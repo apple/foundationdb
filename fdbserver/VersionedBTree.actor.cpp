@@ -206,10 +206,7 @@ public:
 		Future<Void> operation;
 		Mode mode;
 
-		uint32_t debug_id;
-
 		Cursor() : mode(NONE) {
-			debug_id = deterministicRandom()->randomUInt32();
 		}
 
 		// Initialize a cursor.  Since cursors can have async operations pending they can't be copied cleanly.
@@ -236,10 +233,10 @@ public:
 				operation = Void();
 			}
 
-			debug_printf("FIFOQueue::Cursor initialized: %s\n", toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) initialized\n", toString().c_str());
 
 			if(mode == WRITE && initialPageID != invalidLogicalPageID) {
-				newPage(initialPageID);
+				addNewPage(initialPageID, 0, true);
 			}
 		}
 
@@ -250,10 +247,14 @@ public:
 		}
 
 		std::string toString() const {
-			if(mode == NONE) {
-				return format("{cursor=%x queue=n/a}", debug_id);
+			if(mode == WRITE) {
+				return format("{WriteCursor %s:%p pos=%s:%d endOffset=%d}", queue->name.c_str(), this, ::toString(pageID).c_str(), offset, page ? raw()->endOffset : -1);
 			}
-			return format("{cursor=%x queue=%s mode=%d pos=%s:%d endOffset=%d endPage=%s}", debug_id, queue ? queue->name.c_str() : "null", mode, ::toString(pageID).c_str(), offset, page ? raw()->endOffset : -1, ::toString(endPageID).c_str());
+			if(mode == READ) {
+				return format("{ReadCursor %s:%p pos=%s:%d endOffset=%d endPage=%s}", queue->name.c_str(), this, ::toString(pageID).c_str(), offset, page ? raw()->endOffset : -1, ::toString(endPageID).c_str());
+			}
+			ASSERT(mode == NONE);
+			return format("{NullCursor=%p}", this);
 		}
 
 #pragma pack(push, 1)
@@ -291,17 +292,18 @@ public:
 
 		Future<Void> loadPage() {
 			ASSERT(mode == READ);
-			debug_printf("FIFOQueue::Cursor loading %s\n", toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) loadPage\n", toString().c_str());
 			return map(queue->pager->readPage(pageID, true), [=](Reference<IPage> p) {
 				page = p;
 				ASSERT(raw()->formatVersion == RawPage::FORMAT_VERSION);
+				debug_printf("FIFOQueue::Cursor(%s) loadPage done\n", toString().c_str());
 				return Void();
 			});
 		}
 
 		void writePage() {
 			ASSERT(mode == WRITE);
-			debug_printf("FIFOQueue(%s) writing page %s\n", queue->name.c_str(), toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin(), offset);
 			VALGRIND_MAKE_MEM_DEFINED(raw()->begin() + offset, queue->dataBytesPerPage - raw()->endOffset);
 			queue->pager->updatePage(pageID, page);
@@ -310,81 +312,81 @@ public:
 			}
 		}
 
-		ACTOR static Future<Void> newPage_impl(Cursor *self, Future<Void> previous, LogicalPageID newPageID, int newOffset, bool initializeNewPage) {
-			ASSERT(self->mode == WRITE);
-			wait(previous);
-			debug_printf("FIFOQueue::Cursor Adding page %s init=%d %s\n", ::toString(newPageID).c_str(), initializeNewPage, self->toString().c_str());
-			ASSERT(self->mode == WRITE);
-			if(newPageID == invalidLogicalPageID) {
-				debug_printf("FIFOQueue::Cursor Allocating new page %s\n", self->toString().c_str());
-				wait(store(newPageID, self->queue->pager->newPageID()));
-				// numPages is only increased if the page is allocated here.
-				// Callers who pass in a page are responsible for updating numPages when necessary (it isn't always necessary)
-				++self->queue->numPages;
-			}
-			debug_printf("FIFOQueue::Cursor Adding page %s init=%d %s\n", ::toString(newPageID).c_str(), initializeNewPage, self->toString().c_str());
-
-			// Update existing page and write, if it exists
-			if(self->page) {
-				self->setNext(newPageID, newOffset);
-				debug_printf("FIFOQueue::Cursor Linked new page, writing %s\n", self->toString().c_str());
-				self->writePage();
-			}
-
-			self->pageID = newPageID;
-			self->offset = newOffset;
-
-			if(initializeNewPage) {
-				self->page = self->queue->pager->newPageBuffer();
-				self->setNext(0, 0);
-				auto p = self->raw();
-				p->formatVersion = RawPage::FORMAT_VERSION;
-				p->endOffset = 0;
-			}
-
-			debug_printf("FIFOQueue::Cursor Added page %s\n", self->toString().c_str());
-			return Void();
-		}
-
 		// Link the current page to newPageID:newOffset and then write it to the pager.
 		// If initializeNewPage is true a page buffer will be allocated for the new page and it will be initialized 
 		// as a new tail page.
-		void newPage(LogicalPageID newPageID = invalidLogicalPageID, int newOffset = 0, bool initializeNewPage = true) {
-			operation = newPage_impl(this, operation, newPageID, newOffset, initializeNewPage);
+		void addNewPage(LogicalPageID newPageID, int newOffset, bool initializeNewPage) {
+			ASSERT(mode == WRITE);
+			ASSERT(newPageID != invalidLogicalPageID);
+			debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d\n", toString().c_str(), ::toString(newPageID).c_str(), initializeNewPage);
+
+			// Update existing page and write, if it exists
+			if(page) {
+				setNext(newPageID, newOffset);
+				debug_printf("FIFOQueue::Cursor(%s) Linked new page\n", toString().c_str());
+				writePage();
+			}
+
+			pageID = newPageID;
+			offset = newOffset;
+
+			if(initializeNewPage) {
+				debug_printf("FIFOQueue::Cursor(%s) Initializing new page\n", toString().c_str());
+				page = queue->pager->newPageBuffer();
+				setNext(0, 0);
+				auto p = raw();
+				p->formatVersion = RawPage::FORMAT_VERSION;
+				ASSERT(newOffset == 0);
+				p->endOffset = 0;
+			}
+			else {
+				page.clear();
+			}
 		}
 
 		// Write item to the next position in the current page or, if it won't fit, add a new page and write it there.
-		ACTOR static Future<Void> write_impl(Cursor *self, Future<Void> previous, T item) {
+		ACTOR static Future<Void> write_impl(Cursor *self, T item, Future<Void> start) {
 			ASSERT(self->mode == WRITE);
+
+			// Wait for the previous operation to finish
+			state Future<Void> previous = self->operation;
+			wait(start);
 			wait(previous);
+
 			state int bytesNeeded = Codec::bytesNeeded(item);
 			if(self->offset + bytesNeeded > self->queue->dataBytesPerPage) {
-				debug_printf("FIFOQueue::Cursor write(%s) page is full, adding new page %s\n", ::toString(item).c_str(), self->toString().c_str());
-				wait(newPage_impl(self, Void(), invalidLogicalPageID, 0, true));
+				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n", self->toString().c_str(), ::toString(item).c_str());
+				LogicalPageID newPageID = wait(self->queue->pager->newPageID());
+				self->addNewPage(newPageID, 0, true);
 				wait(yield());
 			}
-			debug_printf("FIFOQueue::Cursor write(%s) %s\n", ::toString(item).c_str(), self->toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) write(%s)\n", self->toString().c_str(), ::toString(item).c_str());
 			auto p = self->raw();
 			Codec::writeToBytes(p->begin() + self->offset, item);
 			self->offset += bytesNeeded;
 			p->endOffset = self->offset;
 			++self->queue->numEntries;
-			debug_printf("FIFOQueue::Cursor write(%s) finished, %s\n", ::toString(item).c_str(), self->toString().c_str());
 			return Void();
 		}
 
 		void write(const T &item) {
-			operation = write_impl(this, operation, item);
+			Promise<Void> p;
+			operation = write_impl(this, item, p.getFuture());
+			p.send(Void());
 		}
 
 		// Read the next item at the cursor, moving to a new page first if the current page is exhausted
-		ACTOR static Future<Optional<T>> readNext_impl(Cursor *self, Future<Void> previous, Optional<T> upperBound) {
+		ACTOR static Future<Optional<T>> readNext_impl(Cursor *self, Optional<T> upperBound, Future<Void> start) {
 			ASSERT(self->mode == READ);
+
+			// Wait for the previous operation to finish
+			state Future<Void> previous = self->operation;
+			wait(start);
 			wait(previous);
 
-			debug_printf("FIFOQueue::Cursor readNext begin %s\n", self->toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) readNext begin\n", self->toString().c_str());
 			if(self->pageID == invalidLogicalPageID || self->pageID == self->endPageID) {
-				debug_printf("FIFOQueue::Cursor readNext returning nothing %s\n", self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", self->toString().c_str());
 				return Optional<T>();
 			}
 
@@ -394,31 +396,31 @@ public:
 				wait(yield());
 			}
 
-			debug_printf("FIFOQueue::Cursor readNext reading at current position %s\n", self->toString().c_str());
 			auto p = self->raw();
+			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position\n", self->toString().c_str());
 			ASSERT(self->offset < p->endOffset);
 			int bytesRead;
 			T result = Codec::readFromBytes(p->begin() + self->offset, bytesRead);
 
 			if(upperBound.present() && upperBound.get() < result) {
-				debug_printf("FIFOQueue(%s) not popping %s, exceeds upper bound %s %s\n",
-					self->queue->name.c_str(), ::toString(result).c_str(), ::toString(upperBound.get()).c_str(), self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
+					self->toString().c_str(), ::toString(result).c_str(), ::toString(upperBound.get()).c_str());
 				return Optional<T>();
 			}
 
 			self->offset += bytesRead;
 			--self->queue->numEntries;
-			debug_printf("FIFOQueue::Cursor popped %s, %s\n", ::toString(result).c_str(), self->toString().c_str());
+			debug_printf("FIFOQueue::Cursor(%s) popped %s\n", self->toString().c_str(), ::toString(result).c_str());
 			ASSERT(self->offset <= p->endOffset);
 
 			if(self->offset == p->endOffset) {
-				debug_printf("FIFOQueue::Cursor Page exhausted, %s\n", self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", self->toString().c_str());
 				LogicalPageID oldPageID = self->pageID;
 				self->pageID = p->nextPageID;
 				self->offset = p->nextOffset;
 				--self->queue->numPages;
 				self->page.clear();
-				debug_printf("FIFOQueue::Cursor Page exhausted, moved to new page, %s\n", self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) Page exhausted, moved to new page\n", self->toString().c_str());
 
 				// Freeing the old page must happen after advancing the cursor and clearing the page reference because
 				// freePage() could cause a push onto a queue that causes a newPageID() call which could pop() from this
@@ -433,8 +435,10 @@ public:
 			if(mode == NONE) {
 				return Optional<T>();
 			}
-			Future<Optional<T>> read = readNext_impl(this, operation, upperBound);
+			Promise<Void> p;
+			Future<Optional<T>> read = readNext_impl(this, upperBound, p.getFuture());
 			operation = success(read);
+			p.send(Void());
 			return read;
 		}
 	};
@@ -564,7 +568,7 @@ public:
 
 		// If a new tail page was allocated, link the last page of the tail writer to it.
 		if(newTailPage.get() != invalidLogicalPageID) {
-			tailWriter.newPage(newTailPage.get(), 0, false);
+			tailWriter.addNewPage(newTailPage.get(), 0, false);
 			// The flush sequence allocated a page and added it to the queue so increment numPages
 			++numPages;
 
@@ -577,7 +581,7 @@ public:
 		// If the headWriter wrote anything, link its tail page to the headReader position and point the headReader
 		// to the start of the headWriter
 		if(headWriter.pendingWrites()) {
-			headWriter.newPage(headReader.pageID, headReader.offset, false);
+			headWriter.addNewPage(headReader.pageID, headReader.offset, false);
 			headReader.pageID = headWriter.firstPageIDWritten;
 			headReader.offset = 0;
 		}
@@ -724,6 +728,7 @@ public:
 				Entry &toEvict = evictionOrder.front();
 				// Don't evict the entry that was just added as then we can't return a reference to it.
 				if(toEvict.index != index && toEvict.item.evictable()) {
+					debug_printf("Evicting %s to make room for %s\n", toString(toEvict.index).c_str(), toString(index).c_str());
 					evictionOrder.pop_front();
 					cache.erase(toEvict.index);
 				}
@@ -973,7 +978,7 @@ public:
 		// First try the free list
 		Optional<LogicalPageID> freePageID = wait(self->freeList.pop());
 		if(freePageID.present()) {
-			debug_printf("COWPager(%s) newPageID() returned %s from free list\n", self->filename.c_str(), toString(freePageID.get()).c_str());
+			debug_printf("COWPager(%s) newPageID() returning %s from free list\n", self->filename.c_str(), toString(freePageID.get()).c_str());
 			return freePageID.get();
 		}
 
@@ -986,7 +991,7 @@ public:
 		// Lastly, grow the pager file by a page and return it.
 		LogicalPageID id = self->pHeader->pageCount;
 		++self->pHeader->pageCount;
-		debug_printf("COWPager(%s) new page, %s at end of file\n", self->filename.c_str(), toString(id).c_str());
+		debug_printf("COWPager(%s) newPageID() returning %s at end of file\n", self->filename.c_str(), toString(id).c_str());
 		return id;
 	};
 
@@ -1009,14 +1014,14 @@ public:
 	void updatePage(LogicalPageID pageID, Reference<IPage> data) override {
 		// Get the cache entry for this page
 		PageCacheEntry &cacheEntry = pageCache.get(pageID);
-		debug_printf("COWPager(%s) op=write %s cached=%d reading=%d writing=%d\n", filename.c_str(), toString(pageID).c_str(), cacheEntry.page.isValid(), cacheEntry.reading(), cacheEntry.writing());
+		debug_printf("COWPager(%s) op=write %s cached=%d reading=%d writing=%d\n", filename.c_str(), toString(pageID).c_str(), cacheEntry.readFuture.isValid(), cacheEntry.reading(), cacheEntry.writing());
 
 		// If the page is still being read then it's not also being written because a write places
 		// the new content in the cache entry when the write is launched, not when it is completed.
 		// Any waiting readers should not see this write (though this might change)
 		if(cacheEntry.reading()) {
 			// Wait for the read to finish, then start the write.
-			cacheEntry.writeFuture = map(success(cacheEntry.page), [=](Void) {
+			cacheEntry.writeFuture = map(success(cacheEntry.readFuture), [=](Void) {
 				writePhysicalPage(pageID, data);
 				return Void();
 			});
@@ -1037,7 +1042,7 @@ public:
 		operations.add(forwardError(cacheEntry.writeFuture, errorPromise));
 
 		// Always update the page contents immediately regardless of what happened above.
-		cacheEntry.page = data;
+		cacheEntry.readFuture = data;
 	}
 
 	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data, Version v) override {
@@ -1078,6 +1083,7 @@ public:
 
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(COWPager *self, PhysicalPageID pageID) {
 		state Reference<IPage> page = self->newPageBuffer();
+		debug_printf("COWPager(%s) op=read_physical_start %s\n", self->filename.c_str(), toString(pageID).c_str());
 		int readBytes = wait(self->pageFile->read(page->mutate(), self->physicalPageSize, (int64_t)pageID * self->physicalPageSize));
 		debug_printf("COWPager(%s) op=read_complete %s bytes=%d\n", self->filename.c_str(), toString(pageID).c_str(), readBytes);
 		ASSERT(readBytes == self->physicalPageSize);
@@ -1103,22 +1109,24 @@ public:
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		if(!cacheable) {
+			debug_printf("COWPager(%s) op=read_nocache %s\n", filename.c_str(), toString(pageID).c_str());
 			PageCacheEntry *pCacheEntry = pageCache.getIfExists(pageID);
 			if(pCacheEntry != nullptr) {
-				return pCacheEntry->page;
+				return pCacheEntry->readFuture;
 			}
 
 			return forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 		}
 
 		PageCacheEntry &cacheEntry = pageCache.get(pageID);
-		debug_printf("COWPager(%s) op=read %s cached=%d reading=%d writing=%d\n", filename.c_str(), toString(pageID).c_str(), cacheEntry.page.isValid(), cacheEntry.reading(), cacheEntry.writing());
+		debug_printf("COWPager(%s) op=read %s cached=%d reading=%d writing=%d\n", filename.c_str(), toString(pageID).c_str(), cacheEntry.readFuture.isValid(), cacheEntry.reading(), cacheEntry.writing());
 
-		if(!cacheEntry.page.isValid()) {
-			cacheEntry.page = readPhysicalPage(this, (PhysicalPageID)pageID);
+		if(!cacheEntry.readFuture.isValid()) {
+			debug_printf("COWPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
+			cacheEntry.readFuture = readPhysicalPage(this, (PhysicalPageID)pageID);
 		}
 
-		return forwardError(cacheEntry.page, errorPromise);
+		return forwardError(cacheEntry.readFuture, errorPromise);
 	}
 
 	// Get snapshot as of the most recent committed version of the pager
@@ -1304,11 +1312,11 @@ private:
 #pragma pack(pop)
 
 	struct PageCacheEntry {
-		Future<Reference<IPage>> page;
+		Future<Reference<IPage>> readFuture;
 		Future<Void> writeFuture;
 
 		bool reading() const {
-			return page.isValid() && !page.isReady();
+			return readFuture.isValid() && !readFuture.isReady();
 		}
 
 		bool writing() const {
@@ -1317,11 +1325,11 @@ private:
 
 		bool evictable() const {
 			// Don't evict if a page is still being read or written
-			return page.isReady() && !writing();
+			return !reading() && !writing();
 		}
 
 		void destroy() {
-			page.cancel();
+			readFuture.cancel();
 			writeFuture.cancel();
 		}
 	};
