@@ -98,6 +98,13 @@ if(WIN32)
     _CRT_SECURE_NO_WARNINGS
     PSAPI_VERSION=1)
   #add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
+  # We need to link against psapi... so find it here
+  find_library(PSAPI_LIB psapi)
+  if(NOT PSAPI_LIB)
+    message(FATAL_ERROR "Could not find PSAPI")
+  endif()
+  add_library(psapi INTERFACE)
+  target_link_libraries(psapi INTERFACE ${PSAPI_LIB})
 else()
   set(GCC NO)
   set(CLANG NO)
