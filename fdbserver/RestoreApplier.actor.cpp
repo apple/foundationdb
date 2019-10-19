@@ -93,6 +93,8 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
                                                           Reference<RestoreApplierData> self) {
+	// Assume: self->processedFileState[req.fileIndex] will not be erased while the actor is active.
+	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curFilePos = self->processedFileState[req.fileIndex];
 
 	TraceEvent("FastRestore")
