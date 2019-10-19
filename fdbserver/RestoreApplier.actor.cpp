@@ -93,20 +93,17 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
                                                           Reference<RestoreApplierData> self) {
-	if (self->processedFileState.find(req.fileIndex) == self->processedFileState.end()) {
-		self->processedFileState.insert(std::make_pair(req.fileIndex, NotifiedVersion(0)));
-	}
-	state std::map<uint32_t, NotifiedVersion>::iterator curFileState = self->processedFileState.find(req.fileIndex);
+	state NotifiedVersion& curFilePos = self->processedFileState[req.fileIndex];
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
 	    .detail("FileIndex", req.fileIndex)
-	    .detail("ProcessedFileVersion", curFileState->second.get())
+	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString());
 
-	wait(curFileState->second.whenAtLeast(req.prevVersion));
+	wait(curFilePos.whenAtLeast(req.prevVersion));
 
-	if (curFileState->second.get() == req.prevVersion) {
+	if (curFilePos.get() == req.prevVersion) {
 		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
 		state Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
@@ -123,7 +120,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 			//     .detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 		}
-		curFileState->second.set(req.version);
+		curFilePos.set(req.version);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
