@@ -116,11 +116,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		state int mIndex = 0;
 		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			// TraceEvent(SevDebug, "FastRestore")
-			//     .detail("ApplierNode", self->id())
-			//     .detail("FileUID", req.fileUID)
-			//     .detail("Version", commitVersion)
-			//     .detail("MutationReceived", mutation.toString());
+			TraceEvent(SevDebug, "FastRestore")
+			    .detail("ApplierNode", self->id())
+			    .detail("FileUID", req.fileIndex)
+			    .detail("Version", commitVersion)
+			    .detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 		}
 		curFileState->second.set(req.version);
@@ -316,7 +316,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					//TraceEvent(SevDebug, "FastRestore_Debug").detail("ApplierApplyToDB", self->describeNode()).detail("Version", it->first).detail("Mutation", m.toString());
+					TraceEvent(SevDebug, "FastRestore_Debug").detail("ApplierApplyToDB", self->describeNode()).detail("Version", progress.curItInCurTxn->first).detail("Mutation", m.toString());
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
