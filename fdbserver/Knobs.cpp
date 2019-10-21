@@ -105,6 +105,19 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
 	init( MERGE_ONTO_NEW_TEAM,                                     1 ); if( randomize && BUGGIFY ) MERGE_ONTO_NEW_TEAM = deterministicRandom()->coinflip() ? 0 : 2;
+	
+	init( PRIORITY_RECOVER_MOVE,                                 110 );
+	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
+	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  121 );
+	init( PRIORITY_TEAM_HEALTHY,                                 140 );
+	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
+	init( PRIORITY_TEAM_REDUNDANT,                               200 );
+	init( PRIORITY_MERGE_SHARD,                                  340 );
+	init( PRIORITY_TEAM_UNHEALTHY,                               700 );
+	init( PRIORITY_TEAM_2_LEFT,                                  709 );
+	init( PRIORITY_TEAM_1_LEFT,                                  800 );
+	init( PRIORITY_TEAM_0_LEFT,                                  809 );
+	init( PRIORITY_SPLIT_SHARD,                                  900 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
@@ -115,9 +128,15 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
+	bool buggifySmallReadBandwith = randomize && BUGGIFY;
+	init( SHARD_MAX_BYTES_READ_PER_KSEC,            100LL*1000000*1000 ); if( buggifySmallReadBandwith ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
+	/* 100*1MB/sec * 1000sec/ksec
+		Shards with more than this read bandwidth will be considered as a read cache candidate
+	*/
+	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
 	bool buggifySmallBandwidthSplit = randomize && BUGGIFY;
 	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 10LL*1000*1000;
-	/* 10*1MB/sec * 1000sec/ksec
+	/* 1*1MB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will be split immediately.
 		For a large shard (100MB), splitting it costs ~100MB of work or about 10MB/sec over a 10 sec sampling window.
 		If the sampling window is too much longer, the MVCC window will fill up while we wait.
@@ -127,7 +146,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 		*/
 
 	init( SHARD_MIN_BYTES_PER_KSEC,                100 * 1000 * 1000 ); if( buggifySmallBandwidthSplit ) SHARD_MIN_BYTES_PER_KSEC = 200*1*1000;
-	/* 200*1KB/sec * 1000sec/ksec
+	/* 100*1KB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will not be merged.
 		Obviously this needs to be significantly less than SHARD_MAX_BYTES_PER_KSEC, else we will repeatedly merge and split.
 		It should probably be significantly less than SHARD_SPLIT_BYTES_PER_KSEC, else we will merge right after splitting.
@@ -141,7 +160,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 		*/
 
 	init( SHARD_SPLIT_BYTES_PER_KSEC,              250 * 1000 * 1000 ); if( buggifySmallBandwidthSplit ) SHARD_SPLIT_BYTES_PER_KSEC = 50 * 1000 * 1000;
-	/* 500*1KB/sec * 1000sec/ksec
+	/* 250*1KB/sec * 1000sec/ksec
 		When splitting a shard, it is split into pieces with less than this bandwidth.
 		Obviously this should be less than half of SHARD_MAX_BYTES_PER_KSEC.
 
@@ -435,6 +454,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPLIT_JITTER_AMOUNT,                                  0.05 ); if( randomize && BUGGIFY ) SPLIT_JITTER_AMOUNT = 0.2;
 	init( IOPS_UNITS_PER_SAMPLE,                                10000 * 1000 / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 100 );
 	init( BANDWIDTH_UNITS_PER_SAMPLE,                           SHARD_MIN_BYTES_PER_KSEC / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 25 );
+	init( BYTES_READ_UNITS_PER_SAMPLE,                           100); // Effectively weight up read on small or non-existing key/values.
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
@@ -487,6 +507,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
+	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );
