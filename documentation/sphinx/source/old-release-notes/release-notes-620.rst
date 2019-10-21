@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.5
+6.2.6
 =====
 
 Performance
@@ -27,6 +27,7 @@ Performance
 * Log routers will prefer to peek from satellites at ``log_version >= 4``. `(PR #1795) <https://github.com/apple/foundationdb/pull/1795>`_.
 * In clusters using a region configuration, clients will read from the remote region if all of the servers in the primary region are overloaded. [6.2.3] `(PR #2019) <https://github.com/apple/foundationdb/pull/2019>`_.
 * Significantly improved the rate at which the transaction logs in a remote region can pull data from the primary region. [6.2.4] `(PR #2101) <https://github.com/apple/foundationdb/pull/2101>`_.
+* Raised the data distribution priority of splitting shards because delaying splits can cause hot write shards. [6.2.6] `(PR #2234) <https://github.com/apple/foundationdb/pull/2234>`_.
 
 Fixes
 -----
@@ -50,6 +51,13 @@ Fixes
 * Data distribution was running at too high of a priority, which sometimes caused other roles on the same process to stall. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 * Loading a 6.1 or newer ``fdb_c`` library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. [6.2.5] `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
 * Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. [6.2.5] `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* Coordinator changes could fail to complete if the database wasn't allowing any transactions to start. [6.2.6] `(PR #2191) <https://github.com/apple/foundationdb/pull/2191>`_
+* Status would report incorrect fault tolerance metrics when a remote region was configured and the primary region lost a storage replica. [6.2.6] `(PR #2230) <https://github.com/apple/foundationdb/pull/2230>`_
+* The cluster would not change to a new set of satellite transaction logs when they become available in a better satellite location. [6.2.6] `(PR #2241) <https://github.com/apple/foundationdb/pull/2241>`_.
+* The existence of ``proxy`` or ``resolver`` class processes prevented ``stateless`` class processes from being recruited as proxies or resolvers. [6.2.6] `(PR #2241) <https://github.com/apple/foundationdb/pull/2241>`_.
+* Committing transactions larger than 1 MB could cause the proxy to stall for up to a second. [6.2.6] `(PR #2250) <https://github.com/apple/foundationdb/pull/2250>`_.
+* The cluster controller could become saturated in clusters with large numbers of connected clients using TLS. [6.2.6] `(PR #2252) <https://github.com/apple/foundationdb/pull/2252>`_.
+* Backup and DR would not share a mutation stream if they were started on different versions of FoundationDB. Either backup or DR must be restarted to resolve this issue. [6.2.6] `(PR #2202) <https://github.com/apple/foundationdb/pull/2202>`_.
 
 Status
 ------
@@ -86,6 +94,7 @@ Features
 --------
 
 * Added the ``cleanup`` command to ``fdbbackup`` which can be used to remove orphaned backups or DRs. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
+* Added the ability to configure ``satellite_logs`` by satellite location. This will overwrite the region configure of ``satellite_logs`` if both are present. [6.2.6] `(PR #2241) <https://github.com/apple/foundationdb/pull/2241>`_.
 
 Other Changes
 -------------
@@ -124,6 +133,7 @@ Fixes only impacting 6.2.0+
 * The cluster controller could crash if a coordinator was unreachable when compiling cluster status. [6.2.4] `(PR #2065) <https://github.com/apple/foundationdb/pull/2065>`_.
 * A storage server could crash if it took longer than 10 minutes to fetch a key range from another server. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 * Excluding or including servers would restart the data distributor. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
+* The data distributor could read invalid memory when estimating database size. [6.2.6] `(PR #2225) <https://github.com/apple/foundationdb/pull/2225>`_.
 
 Earlier release notes
 ---------------------

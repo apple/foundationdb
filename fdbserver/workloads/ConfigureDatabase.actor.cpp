@@ -75,12 +75,14 @@ std::string generateRegions() {
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
 		primarySatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25) primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 		primaryDcArr.push_back(primarySatelliteObj);
 
 		StatusObject remoteSatelliteObj;
 		remoteSatelliteObj["id"] = "3";
 		remoteSatelliteObj["priority"] = 1;
 		remoteSatelliteObj["satellite"] = 1;
+		if (deterministicRandom()->random01() < 0.25) remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
 		if(g_simulator.physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
@@ -88,12 +90,14 @@ std::string generateRegions() {
 			primarySatelliteObjB["id"] = "4";
 			primarySatelliteObjB["priority"] = 1;
 			primarySatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			primaryDcArr.push_back(primarySatelliteObjB);
 
 			StatusObject remoteSatelliteObjB;
 			remoteSatelliteObjB["id"] = "5";
 			remoteSatelliteObjB["priority"] = 1;
 			remoteSatelliteObjB["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			remoteDcArr.push_back(remoteSatelliteObjB);
 
 			int satellite_replication_type = deterministicRandom()->randomInt(0,3);
@@ -146,11 +150,8 @@ std::string generateRegions() {
 			}
 		}
 
-		if (deterministicRandom()->random01() < 0.25) {
-			int logs = deterministicRandom()->randomInt(1,7);
-			primaryObj["satellite_logs"] = logs;
-			remoteObj["satellite_logs"] = logs;
-		}
+		if (deterministicRandom()->random01() < 0.25) primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
+		if (deterministicRandom()->random01() < 0.25) remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 
 		int remote_replication_type = deterministicRandom()->randomInt(0, 4);
 		switch (remote_replication_type) {

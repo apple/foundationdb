@@ -179,7 +179,8 @@ public:
 		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
 	}
 
-	Reference<struct Peer> getPeer( NetworkAddress const& address, bool openConnection = true );
+	Reference<struct Peer> getPeer( NetworkAddress const& address );
+	Reference<struct Peer> getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper=true );
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
@@ -410,7 +411,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		try {
 			if (!conn) {  // Always, except for the first loop with an incoming connection
 				self->outgoingConnectionIdle = true;
-
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
 					if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
@@ -654,7 +654,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
-				Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress());
+				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 				sendPacket(self, peer, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
 			}
 		}
@@ -908,7 +908,7 @@ ACTOR static Future<Void> connectionReader(
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
 							}
-							peer = transport->getPeer(peerAddress);
+							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
@@ -987,18 +987,25 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	}
 }
 
-Reference<Peer> TransportData::getPeer( NetworkAddress const& address, bool openConnection ) {
+Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
 	auto peer = peers.find(address);
 	if (peer != peers.end()) {
 		return peer->second;
 	}
-	if(!openConnection) {
-		return Reference<Peer>();
+	return Reference<Peer>();
+}
+
+Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper ) {
+	auto peer = getPeer(address);
+	if(!peer) {
+		peer = Reference<Peer>( new Peer(this, address) );
+		if(startConnectionKeeper) {
+			peer->connect = connectionKeeper(peer);
+		}
+		peers[address] = peer;
 	}
-	Reference<Peer> newPeer = Reference<Peer>( new Peer(this, address) );
-	newPeer->connect = connectionKeeper(newPeer);
-	peers[address] = newPeer;
-	return newPeer;
+
+	return peer;
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
@@ -1077,7 +1084,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	else if (FlowTransport::transport().isClient())
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
-	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
+	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
 		peer->peerReferences = 1;
 	} else {
@@ -1087,7 +1094,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
-	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress(), false);
+	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer) {
 		peer->peerReferences--;
 		if(peer->peerReferences < 0) {
@@ -1246,7 +1253,7 @@ ReliablePacket* FlowTransport::sendReliable( ISerializeSource const& what, const
 		sendLocal( self, what, destination );
 		return nullptr;
 	}
-	Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress());
+	Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 	return sendPacket( self, peer, what, destination, true );
 }
 
@@ -1260,7 +1267,14 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 		sendLocal( self, what, destination );
 		return Reference<Peer>();
 	}
-	Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress(), openConnection);
+	Reference<Peer> peer;
+	if(openConnection) { 
+		peer = self->getOrOpenPeer(destination.getPrimaryAddress());
+	}
+	else {
+		peer = self->getPeer(destination.getPrimaryAddress());
+	}
+
 	sendPacket( self, peer, what, destination, false );
 	return peer;
 }

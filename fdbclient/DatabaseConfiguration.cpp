@@ -73,6 +73,7 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 					s.get("id", idStr);
 					satInfo.dcId = idStr;
 					s.get("priority", satInfo.priority);
+					s.tryGet("satellite_logs", satInfo.satelliteDesiredTLogCount);
 					info.satellites.push_back(satInfo);
 				} else {
 					if (foundNonSatelliteDatacenter) throw invalid_option();
@@ -365,6 +366,9 @@ StatusArray DatabaseConfiguration::getRegionJSON() const {
 				satObj["id"] = s.dcId.toString();
 				satObj["priority"] = s.priority;
 				satObj["satellite"] = 1;
+				if(s.satelliteDesiredTLogCount != -1) {
+					satObj["satellite_logs"] = s.satelliteDesiredTLogCount;
+				}
 
 				dcArr.push_back(satObj);
 			}
