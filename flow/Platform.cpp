@@ -58,6 +58,7 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #pragma comment(lib, "pdh.lib")
+#pragma comment(lib, "psapi.lib")
 
 // for SHGetFolderPath
 #include <ShlObj.h>
