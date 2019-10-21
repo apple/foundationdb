@@ -945,11 +945,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				}
 			}
 
-			if (deterministicRandom()->random01() < 0.25) {
-				int logs = deterministicRandom()->randomInt(1,7);
-				primaryObj["satellite_logs"] = logs;
-				remoteObj["satellite_logs"] = logs;
-			}
+			if (deterministicRandom()->random01() < 0.25) primaryObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
+			if (deterministicRandom()->random01() < 0.25) remoteObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
 
 			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
 			if (minimumRegions <= 1 && (deterministicRandom()->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
@@ -998,12 +995,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
 			primarySatelliteObj["priority"] = 1;
 			primarySatelliteObj["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			primaryDcArr.push_back(primarySatelliteObj);
 
 			StatusObject remoteSatelliteObj;
 			remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
 			remoteSatelliteObj["priority"] = 1;
 			remoteSatelliteObj["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			remoteDcArr.push_back(remoteSatelliteObj);
 
 			if (datacenters > 4) {
@@ -1011,12 +1010,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
 				primarySatelliteObjB["priority"] = 1;
 				primarySatelliteObjB["satellite"] = 1;
+				if (deterministicRandom()->random01() < 0.25) primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 				primaryDcArr.push_back(primarySatelliteObjB);
 
 				StatusObject remoteSatelliteObjB;
 				remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
 				remoteSatelliteObjB["priority"] = 1;
 				remoteSatelliteObjB["satellite"] = 1;
+				if (deterministicRandom()->random01() < 0.25) remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 				remoteDcArr.push_back(remoteSatelliteObjB);
 			}
 			if (useNormalDCsAsSatellites) {

@@ -202,7 +202,7 @@ public:
 	int priority;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
-	  : servers(servers), healthy(true), priority(PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
+	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
 		if (servers.empty()) {
 			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers");
 		}
@@ -2983,25 +2983,25 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				state int lastPriority = team->getPriority();
 				if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
-						team->setPriority( PRIORITY_TEAM_0_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
-						team->setPriority( PRIORITY_TEAM_1_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
-						team->setPriority( PRIORITY_TEAM_2_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_2_LEFT );
 					else
-						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 				}
 				else if ( badTeam || anyWrongConfiguration ) {
 					if ( redundantTeam ) {
-						team->setPriority( PRIORITY_TEAM_REDUNDANT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT );
 					} else {
-						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 					}
 				}
 				else if( anyUndesired )
-					team->setPriority( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
+					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
 				else
-					team->setPriority( PRIORITY_TEAM_HEALTHY );
+					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_HEALTHY );
 
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;
@@ -3019,17 +3019,16 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 					for(int i=0; i<shards.size(); i++) {
 						// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
-						int maxPriority = containsFailed ? PRIORITY_TEAM_FAILED : team->getPriority();
+						int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
 						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 						// so we need to recalculate the shard's priority
-						if (maxPriority < PRIORITY_TEAM_FAILED) { // Q: When will maxPriority >=
-							                                      // PRIORITY_TEAM_FAILED/PRIORITY_TEAM_0_LEFT
+						if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
-									maxPriority = PRIORITY_TEAM_0_LEFT;
+									maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
 									break;
 								}
 
@@ -3053,8 +3052,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										// false We want to differentiate the redundant_team from unhealthy_team in
 										// terms of relocate priority
 										maxPriority =
-										    std::max<int>(maxPriority, redundantTeam ? PRIORITY_TEAM_REDUNDANT
-										                                             : PRIORITY_TEAM_UNHEALTHY);
+										    std::max<int>(maxPriority, redundantTeam ? SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT
+										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
 									TEST(true); // A removed server is still associated with a team in SABTF
@@ -4411,9 +4410,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					.detail( "InFlight", 0 )
 					.detail( "InQueue", 0 )
 					.detail( "AverageShardSize", -1 )
-					.detail( "LowPriorityRelocations", 0 )
-					.detail( "HighPriorityRelocations", 0 )
+					.detail( "UnhealthyRelocations", 0 )
 					.detail( "HighestPriority", 0 )
+					.detail( "BytesWritten", 0 )
+					.detail( "PriorityRecoverMove", 0 )
+					.detail( "PriorityRebalanceUnderutilizedTeam", 0 )
+					.detail( "PriorityRebalannceOverutilizedTeam", 0)
+					.detail( "PriorityTeamHealthy", 0 )
+					.detail( "PriorityTeamContainsUndesiredServer", 0 )
+					.detail( "PriorityTeamRedundant", 0 )
+					.detail( "PriorityMergeShard", 0 )
+					.detail( "PriorityTeamUnhealthy", 0 )
+					.detail( "PriorityTeam2Left", 0 )
+					.detail( "PriorityTeam1Left", 0 )
+					.detail( "PriorityTeam0Left", 0 )
+					.detail( "PrioritySplitShard", 0 )
 					.trackLatest( "MovingData" );
 
 				TraceEvent("TotalDataInFlight", self->ddId).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
@@ -4456,7 +4467,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
+					output.send( RelocateShard( keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE ) );
 				}
 				wait( yield(TaskPriority::DataDistribution) );
 			}

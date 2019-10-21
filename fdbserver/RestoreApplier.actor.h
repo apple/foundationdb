@@ -82,8 +82,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 
 	void resetPerVersionBatch() {
-		RestoreRoleData::resetPerVersionBatch();
-
+		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnApplier", nodeID);
 		inProgressApplyToDB = false;
 		kvOps.clear();
 		dbApplier = Optional<Future<Void>>();

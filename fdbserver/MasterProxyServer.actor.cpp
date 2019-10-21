@@ -450,34 +450,42 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-void adddBackupMutations(ProxyCommitData* self, const std::map<Key, MutationListRef>& logRangeMutations,
+ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
                          LogPushData* toCommit, Version commitVersion) {
-	Key val;
-	MutationRef backupMutation;
-	uint32_t* partBuffer = NULL;
-	const int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
+	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	state int yieldBytes = 0;
 
 	// Serialize the log range mutations within the map
-	for (const auto& logRangeMutation : logRangeMutations) {
+	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
+	{
+		if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+			yieldBytes = 0;
+			wait(yield());
+		}
+
+		yieldBytes += logRangeMutation->second.expectedSize();
+		
 		BinaryWriter wr(Unversioned());
 
 		// Serialize the log destination
-		wr.serializeBytes(logRangeMutation.first);
+		wr.serializeBytes( logRangeMutation->first );
 
 		// Write the log keys and version information
 		wr << (uint8_t)hashlittle(&version, sizeof(version), 0);
 		wr << bigEndian64(commitVersion);
 
+		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
-		partBuffer = NULL;
+		uint32_t* partBuffer = NULL;
 
-		val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
+		Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
+
 			// Assign the second parameter as the part
-			backupMutation.param2 = val.substr(
-			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
+			backupMutation.param2 = val.substr(part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
+				std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
 
 			// Write the last part of the mutation to the serialization, if the buffer is not defined
 			if (!partBuffer) {
@@ -485,29 +493,28 @@ void adddBackupMutations(ProxyCommitData* self, const std::map<Key, MutationList
 				wr << bigEndian32(part);
 
 				// Define the last buffer part
-				partBuffer = (uint32_t*)((char*)wr.getData() + wr.getLength() - sizeof(uint32_t));
-			} else {
+				partBuffer = (uint32_t*) ((char*) wr.getData() + wr.getLength() - sizeof(uint32_t));
+			}
+			else {
 				*partBuffer = bigEndian32(part);
 			}
 
 			// Define the mutation type and and location
 			backupMutation.param1 = wr.toValue();
-			ASSERT(backupMutation.param1.startsWith(
-			    logRangeMutation.first)); // We are writing into the configured destination
-
+			ASSERT( backupMutation.param1.startsWith(logRangeMutation->first) );  // We are writing into the configured destination
+				
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
 			toCommit->addTypedMessage(backupMutation);
 
-			//				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
-			//					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
-			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 						.detail("BackupMutationSize",
-			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-			//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
-			//backupMutation.param1);
-			//				}
+//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
+//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
+//					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
+//			}
 		}
 	}
+	return Void();
 }
 
 ACTOR Future<Void> commitBatch(
@@ -869,7 +876,7 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-		adddBackupMutations(self, logRangeMutations, &toCommit, commitVersion);
+		wait( adddBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
 	}
 
 	self->stats.mutations += mutationCount;
