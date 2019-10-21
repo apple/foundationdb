@@ -1296,19 +1296,25 @@ namespace dbBackup {
 					}
 
 					if (backupRanges.size() == 1) {
-						state Key destUidLookupPath = BinaryWriter::toValue(backupRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-						Optional<Key> existingDestUidValue = wait(srcTr->get(destUidLookupPath));
-						if (existingDestUidValue.present()) {
-							if (destUidValue == existingDestUidValue.get()) {
-								// due to unknown commit result
-								break;
-							} else {
-								// existing backup/DR is running
-								return Void();
+						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+						bool found = false;
+						for(auto it : existingDestUidValues) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+								if(destUidValue != it.value) {
+									// existing backup/DR is running
+									return Void();
+								} else {
+									// due to unknown commit result
+									found = true;
+									break;
+								}
 							}
 						}
-						
-						srcTr->set(destUidLookupPath, destUidValue);
+						if(found) {
+							break;
+						}
+
+						srcTr->set(BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 					}
 
 					Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
@@ -1466,13 +1472,18 @@ namespace dbBackup {
 
 					// Initialize destUid
 					if (backupRanges.size() == 1) {
-						state Key destUidLookupPath = BinaryWriter::toValue(backupRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-						Optional<Key> existingDestUidValue = wait(srcTr->get(destUidLookupPath));
-						if (existingDestUidValue.present()) {
-							destUidValue = existingDestUidValue.get();
-						} else {
+						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+						bool found = false;
+						for(auto it : existingDestUidValues) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+								destUidValue = it.value;
+								found = true;
+								break;
+							}
+						}
+						if( !found ) {
 							destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-							srcTr->set(destUidLookupPath, destUidValue);
+							srcTr->set(BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 						}
 					}
 

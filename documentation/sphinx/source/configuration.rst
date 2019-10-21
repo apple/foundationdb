@@ -599,7 +599,8 @@ Regions are configured in FoundationDB as a json document. For example::
         "datacenters":[{
             "id":"WC1",
             "priority":1,
-            "satellite":1
+            "satellite":1,
+            "satellite_logs":2
         }],
         "satellite_redundancy_mode":"one_satellite_double",
         "satellite_logs":2
@@ -659,7 +660,8 @@ This is the region configuration that implements the example::
         },{
             "id":"WC2",
             "priority":0,
-            "satellite":1
+            "satellite":1,
+            "satellite_logs":2
         }],
         "satellite_redundancy_mode":"one_satellite_double"
     },{
