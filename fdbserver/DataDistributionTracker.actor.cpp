@@ -566,7 +566,7 @@ ACTOR Future<Void> shardEvaluator(
 	    .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	    .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
 	    .detail("WriteBandwitdhStatus", bandwidthStatus)
-		.detail("SplitBecauseHighWriteBandWidth", ( bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin ) ? "Yes" :"No");*/
+	    .detail("SplitBecauseHighWriteBandWidth", ( bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin ) ? "Yes" :"No");*/
 
 	if(!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger( self, keys, shardSize );
