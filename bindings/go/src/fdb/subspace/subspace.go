@@ -54,8 +54,13 @@ type Subspace interface {
 	// Subspace prepended.
 	Pack(t tuple.Tuple) fdb.Key
 
-	// PackWithVersionstamp is similar to Pack, but afford for an
-	// IncompleteVersionstamp in the tuple
+	// PackWithVersionstamp returns the key encoding the specified tuple in
+	// the subspace so that it may be used as the key in fdb.Transaction's
+	// SetVersionstampedKey() method. The passed tuple must contain exactly
+	// one incomplete tuple.Versionstamp instance or the method will return
+	// with an error. The behavior here is the same as if one used the
+	// tuple.PackWithVersionstamp() method to appropriately pack together this
+	// subspace and the passed tuple.
 	PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error)
 
 	// Unpack returns the Tuple encoded by the given key with the prefix of this
