@@ -33,7 +33,7 @@ enum BandwidthStatus {
 	BandwidthStatusHigh
 };
 
-enum ReadBandwithStatus { ReadBandwithStatusNormal, ReadBandwithStatusHigh };
+enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
 BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	if( metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC )
@@ -44,11 +44,11 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	return BandwidthStatusNormal;
 }
 
-ReadBandwithStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
+ReadBandwidthStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
 	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC)
-		return ReadBandwithStatusHigh;
+		return ReadBandwidthStatusHigh;
 	else
-		return ReadBandwithStatusNormal;
+		return ReadBandwidthStatusNormal;
 }
 
 ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
@@ -162,14 +162,14 @@ ACTOR Future<Void> trackShardBytes(
 	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
 	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
 
-	state ReadBandwithStatus readBandwithStatus;
+	state ReadBandwidthStatus readBandwidthStatus;
 	try {
 		loop {
 			ShardSizeBounds bounds;
 			if (shardMetrics->get().present()) {
 				auto bytes = shardMetrics->get().get().bytes;
 				auto bandwidthStatus = getBandwidthStatus(shardMetrics->get().get());
-				auto newReadBandwithStatus = getReadBandwidthStatus(shardMetrics->get().get());
+				auto newReadBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get());
 
 				bounds.max.bytes = std::max( int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES );
 				bounds.min.bytes = std::min( int64_t(bytes * 0.9), std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0) );
@@ -190,19 +190,19 @@ ACTOR Future<Void> trackShardBytes(
 					ASSERT( false );
 				}
 				// handle read bandkwith status
-				if (newReadBandwithStatus != readBandwithStatus) {
-					TraceEvent("ReadBandwithStatusChanged")
-					    .detail("From", readBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High")
-					    .detail("To", newReadBandwithStatus == ReadBandwithStatusNormal ? "Normal" : "High");
-					readBandwithStatus = newReadBandwithStatus;
+				if (newReadBandwidthStatus != readBandwidthStatus) {
+					TraceEvent("ReadBandwidthStatusChanged")
+					    .detail("From", readBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High")
+					    .detail("To", newReadBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High");
+					readBandwidthStatus = newReadBandwidthStatus;
 				}
-				if (newReadBandwithStatus == ReadBandwithStatusNormal) {
+				if (newReadBandwidthStatus == ReadBandwidthStatusNormal) {
 					TEST(true);
 					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
 					                                 (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 					bounds.min.bytesReadPerKSecond = 0;
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
-				} else if (newReadBandwithStatus == ReadBandwithStatusHigh) {
+				} else if (newReadBandwidthStatus == ReadBandwidthStatusHigh) {
 					TEST(true);
 					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
@@ -234,7 +234,7 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
-				.detail("BandwithStatus", getBandwidthStatus(metrics))
+				.detail("BandwidthStatus", getBandwidthStatus(metrics))
 				.detail("BytesLower", bounds.min.bytes)
 				.detail("BytesUpper", bounds.max.bytes)
 				.detail("BandwidthLower", bounds.min.bytesPerKSecond)
