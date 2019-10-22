@@ -812,6 +812,16 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 		// Disable committing mutations into blog
 		tr->clear(prefixRange(destUidValue.withPrefix(logRangesRange.begin)));
 	}
+	
+	if(!endVersion.present() && backupVersions.size() == 1) {
+		Standalone<RangeResultRef> existingDestUidValues = wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+		for(auto it : existingDestUidValues) {
+			if( it.value == destUidValue ) {
+				tr->clear(it.key);
+			}
+		}
+	}
+
 	return Void();
 }
 

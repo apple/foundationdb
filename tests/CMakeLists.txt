@@ -196,6 +196,7 @@ add_fdb_test(TEST_FILES slow/VersionStampSwitchover.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
 add_fdb_test(TEST_FILES slow/ddbalance.txt)
+add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOpTinyData.txt)
 # Note that status tests are not deterministic.
 add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
 add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
@@ -209,5 +210,6 @@ add_fdb_test(TEST_FILES status/separate_no_database.txt)
 add_fdb_test(TEST_FILES status/separate_no_servers.txt)
 add_fdb_test(TEST_FILES status/separate_not_enough_servers.txt)
 add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
+
 
 verify_testing()

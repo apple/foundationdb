@@ -198,12 +198,6 @@ bool enableFailures = true;
 
 #define test_assert(x) if (!(x)) { cout << "Test failed: " #x << endl; return false; }
 
-template <class X> vector<X> vec( X x ) { vector<X> v; v.push_back(x); return v; }
-template <class X> vector<X> vec( X x, X y ) { vector<X> v; v.push_back(x); v.push_back(y); return v; }
-template <class X> vector<X> vec( X x, X y, X z ) { vector<X> v; v.push_back(x); v.push_back(y); v.push_back(z); return v; }
-
-//KeyRange keyRange( const Key& a, const Key& b ) { return std::make_pair(a,b); }
-
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 

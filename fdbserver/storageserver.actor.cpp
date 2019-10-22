@@ -889,6 +889,12 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.emptyQueries;
 		}
 
+		StorageMetrics metrics;
+		metrics.bytesReadPerKSecond = v.present() ? std::max((int64_t)(req.key.size() + v.get().size()),
+		                                                     SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE)
+		                                          : SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		data->metrics.notify(req.key, metrics);
+
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
@@ -1088,6 +1094,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount;
+	state int64_t readSize;
 	//state UID rrid = deterministicRandom()->randomUniqueID();
 	//state int originalLimit = limit;
 	//state int originalLimitBytes = *pLimitBytes;
@@ -1156,8 +1163,10 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, more, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
 
-			for (auto i = &result.data[prevSize]; i != result.data.end(); i++)
+			for (auto i = &result.data[prevSize]; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
+				readSize += sizeof(KeyValueRef) + i->expectedSize();
+			}
 
 			// Setup for the next iteration
 			if (more) { // if there might be more data, begin reading right after what we already found to find out
@@ -1244,8 +1253,10 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, false, *pLimitBytes );
 			limit += result.data.size() - prevSize;
 
-			for (auto i = &result.data[prevSize]; i != result.data.end(); i++)
+			for (auto i = &result.data[prevSize]; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
+				readSize += sizeof(KeyValueRef) + i->expectedSize();
+			}
 
 			vStart = vEnd;
 			readEnd = readBegin;
@@ -1259,6 +1270,9 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	}
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
+	StorageMetrics metrics;
+	metrics.bytesReadPerKSecond = std::max(readSize, SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+	data->metrics.notify(limit >= 0 ? range.begin : range.end, metrics);
 	return result;
 }
 
@@ -1311,8 +1325,18 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 
 	if (index < rep.data.size()) {
 		*pOffset = 0;
+
+		StorageMetrics metrics;
+		metrics.bytesReadPerKSecond =
+		    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+		data->metrics.notify(sel.getKey(), metrics);
+
 		return rep.data[ index ].key;
 	} else {
+		StorageMetrics metrics;
+		metrics.bytesReadPerKSecond = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		data->metrics.notify(sel.getKey(), metrics);
+
 		// FIXME: If range.begin=="" && !forward, return success?
 		*pOffset = index - rep.data.size() + 1;
 		if (!forward) *pOffset = -*pOffset;
@@ -1439,6 +1463,12 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
 				data->metrics.notify(r.data[i].key, m);
 			}*/
+
+			for (int i = 0; i < r.data.size(); i++) {
+				StorageMetrics m;
+				m.bytesReadPerKSecond = r.data[i].expectedSize();
+				data->metrics.notify(r.data[i].key, m);
+			}
 
 			r.penalty = data->getPenalty();
 			req.reply.send( r );

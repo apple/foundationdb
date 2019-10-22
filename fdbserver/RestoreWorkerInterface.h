@@ -201,6 +201,7 @@ struct LoadingParam {
 	Key url;
 	Version prevVersion;
 	Version endVersion;
+	int fileIndex;
 	Version version;
 	std::string filename;
 	int64_t offset;
@@ -220,17 +221,16 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, version, filename, offset, length, blockSize,
-		           restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, version, filename, offset, length,
+		           blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		str << "isRangeFile:" << isRangeFile << "url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " endVersion:" << endVersion << " version:" << version << " filename:" << filename
-		    << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString()
-		    << " removePrefix:" << removePrefix.toString();
+		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
+		    << " fileIndex:" << fileIndex << " endVersion:" << endVersion << " version:" << version
+		    << " filename:" << filename << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
+		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString();
 		return str.str();
 	}
 };
@@ -342,26 +342,28 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
+	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
 	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(Version prevVersion, Version version, bool isRangeFile,
-	                                                   VectorRef<MutationRef> mutations)
-	  : prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
+	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
+	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
+	    mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
-		   << " mutations.size:" << mutations.size();
+		ss << "fileIndex" << fileIndex << "prevVersion:" << prevVersion << " version:" << version
+		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, fileIndex, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
