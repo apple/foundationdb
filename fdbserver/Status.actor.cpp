@@ -1171,15 +1171,12 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				state Future<Standalone<RangeResultRef>> existingDestUidValues = tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
 				state Future<Standalone<RangeResultRef>> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
 				wait( (success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture );
-				if(timeoutFuture.isReady()) {
-					throw timed_out();
-				}
 
 				std::set<LogRangeAndUID> loggingRanges;
 				for(auto& it : existingLogRanges.get()) {
@@ -1202,6 +1199,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 						}
 						existingRanges.insert(rangePair);
 					} else {
+						//This cleanup is done during status, because it should only be required once after upgrading to 6.2.7 or later.
+						//There is no other good location to detect that the metadata is mismatched.
+						TraceEvent(SevWarnAlways, "CleaningDestUidLookup").detail("K", it.key.printable()).detail("V", it.value.printable());
 						tr.clear(it.key);
 					}
 				}
