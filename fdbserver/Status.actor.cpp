@@ -1186,7 +1186,7 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *
 					Key logDestination;
 					UID logUid;
 					KeyRef logRangeBegin = logRangesDecodeKey(it.key, &logUid);
-					Key	logRangeEnd = logRangesDecodeValue(it.value, &logDestination);
+					Key logRangeEnd = logRangesDecodeValue(it.value, &logDestination);
 					loggingRanges.insert(LogRangeAndUID(KeyRangeRef(logRangeBegin, logRangeEnd), logUid));
 				}
 
