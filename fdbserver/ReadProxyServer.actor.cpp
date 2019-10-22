@@ -77,7 +77,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 	return ssi;
 }
 
-ACTOR Future<Void> RP_getKey(GetKeyRequest req, Database cx) {
+ACTOR Future<Void> getKey(GetKeyRequest req, Database cx) {
 	loop {
 		try {
 			state KeySelectorRef keySel = req.sel;
@@ -238,340 +238,90 @@ Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations(Dat
 	return locations;
 }
 
-ACTOR Future<Void> RP_getExactRange(Database cx, Version version, KeyRange keys,
-                                                          GetRangeLimits limits, bool reverse,
-                                                          GetKeyValuesRequest _req) {
-	state GetKeyValuesReply finalReply;
-
-	loop {
-		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues));
-		ASSERT(locations.size());
-		state int shard = 0;
-		loop {
-			const KeyRangeRef& range = locations[shard].first;
-
-			GetKeyValuesRequest req;
-			req.version = version;
-			req.begin = firstGreaterOrEqual(range.begin);
-			req.end = firstGreaterOrEqual(range.end);
-
-			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
-
-			try {
-				++cx->transactionPhysicalReads;
-				state GetKeyValuesReply rep;
-				choose {
-					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-					when(GetKeyValuesReply _rep =
-					         wait(loadBalance(locations[shard].second, &StorageServerInterface::getKeyValues, req,
-					                          TaskPriority::DefaultPromiseEndpoint, false,
-					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
-						rep = _rep;
-					}
-				}
-				finalReply.arena.dependsOn(rep.arena);
-				finalReply.data.append(finalReply.arena, rep.data.begin(), rep.data.size());
-
-				if (limits.hasRowLimit() && rep.data.size() > limits.rows) {
-					TraceEvent(SevError, "GetExactRangeTooManyRows")
-					    .detail("RowLimit", limits.rows)
-					    .detail("DeliveredRows", finalReply.data.size());
-					ASSERT(false);
-				}
-				limits.decrement(rep.data);
-
-				if (limits.isReached()) {
-					finalReply.version = rep.version;
-					finalReply.more = true;
-					_req.reply.send(finalReply);
-					return Void();
-				}
-
-				bool more = rep.more;
-				// If the reply says there is more but we know that we finished the shard, then fix rep.more
-				if (reverse && more && rep.data.size() > 0 &&
-				    finalReply.data[finalReply.data.size() - 1].key == locations[shard].first.begin)
-					more = false;
-
-				if (more) {
-					if (!rep.data.size()) {
-						TraceEvent(SevError, "GetExactRangeError")
-						    .detail("Reason", "More data indicated but no rows present")
-						    .detail("LimitBytes", limits.bytes)
-						    .detail("LimitRows", limits.rows)
-						    .detail("OutputSize", finalReply.data.size())
-						    .detail("OutputBytes", finalReply.data.expectedSize())
-						    .detail("BlockSize", rep.data.size())
-						    .detail("BlockBytes", rep.data.expectedSize());
-						ASSERT(false);
-					}
-					TEST(true); // GetKeyValuesReply.more in getExactRange
-					// Make next request to the same shard with a beginning key just after the last key returned
-					if (reverse)
-						locations[shard].first =
-						    KeyRangeRef(locations[shard].first.begin, finalReply.data[finalReply.data.size() - 1].key);
-					else
-						locations[shard].first =
-						    KeyRangeRef(keyAfter(finalReply.data[finalReply.data.size() - 1].key), locations[shard].first.end);
-				}
-
-				if (!more || locations[shard].first.empty()) {
-					TEST(true);
-					if (shard == locations.size() - 1) {
-						const KeyRangeRef& range = locations[shard].first;
-						KeyRef begin = reverse ? keys.begin : range.end;
-						KeyRef end = reverse ? range.begin : keys.end;
-
-						if (begin >= end) {
-							finalReply.more = false;
-							finalReply.version = rep.version;
-							_req.reply.send(finalReply);
-							return Void();
-						}
-						TEST(true); // Multiple requests of key locations
-
-						keys = KeyRangeRef(begin, end);
-						break;
-					}
-
-					++shard;
-				}
-
-				// Soft byte limit - return results early if the user specified a byte limit and we got results
-				// This can prevent problems where the desired range spans many shards and would be too slow to
-				// fetch entirely.
-				if (limits.hasSatisfiedMinRows() && finalReply.data.size() > 0) {
-					finalReply.more = true;
-					finalReply.version = rep.version;
-					_req.reply.send(finalReply);
-					return Void();
-				}
-
-			} catch (Error& e) {
-				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-					const KeyRangeRef& range = locations[shard].first;
-
-					if (reverse)
-						keys = KeyRangeRef(keys.begin, range.end);
-					else
-						keys = KeyRangeRef(range.begin, keys.end);
-
-					cx->invalidateCache(keys);
-					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
-					break;
-				} else {
-					TraceEvent(SevInfo, "GetExactRangeError")
-					    .error(e)
-					    .detail("ShardBegin", locations[shard].first.begin)
-					    .detail("ShardEnd", locations[shard].first.end);
-					throw;
-				}
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> RP_getRangeFallback(Database cx, Version version, KeySelector begin, KeySelector end,
-                                    GetRangeLimits limits, bool reverse, GetKeyValuesRequest req) {
-	if (version == latestVersion) {
-		state Transaction transaction(cx);
-		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
-		transaction.setOption(FDBTransactionOptions::LOCK_AWARE);
-		transaction.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		Version ver = wait(transaction.getReadVersion());
-		version = ver;
-	}
-
-	Future<Key> fb = NativeAPI::resolveKey(cx, begin, version, TransactionInfo(TaskPriority::DefaultOnMainThread));
-	state Future<Key> fe = NativeAPI::resolveKey(cx, end, version, TransactionInfo(TaskPriority::DefaultOnMainThread));
-
-	state Key b = wait(fb);
-	state Key e = wait(fe);
-	if (b >= e) {
-		return Void();
-	}
-
-	// if e is allKeys.end, we have read through the end of the database
-	// if b is allKeys.begin, we have either read through the beginning of the database,
-	// or allKeys.begin exists in the database and will be part of the conflict range anyways
-
-	wait(RP_getExactRange(cx, version, KeyRangeRef(b, e), limits, reverse, req));
-	// ASSERT(!limits.hasRowLimit() || r.size() <= limits.rows);
-
-	// If we were limiting bytes and the returned range is twice the request (plus 10K) log a warning
-	// if (limits.hasByteLimit() &&
-	//     r.expectedSize() >
-	//         size_t(limits.bytes + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT + CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) &&
-	//     limits.minRows == 0) {
-	// 	TraceEvent(SevWarnAlways, "GetRangeFallbackTooMuchData")
-	// 	    .detail("LimitBytes", limits.bytes)
-	// 	    .detail("DeliveredBytes", r.expectedSize())
-	// 	    .detail("LimitRows", limits.rows)
-	// 	    .detail("DeliveredRows", r.size());
-	// }
-
-	return Void();
-}
-
 ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 	state KeySelector begin = _req.begin;
 	state KeySelector end = _req.end;
 	state GetRangeLimits limits(abs(_req.limit), _req.limitBytes);
 	state bool reverse = _req.limit < 0;
 
-	state GetRangeLimits originalLimits(limits);
-	state KeySelector originalBegin = begin;
-	state KeySelector originalEnd = end;
-	state GetKeyValuesReply finalReply;
-
 	try {
-		cx->validateVersion(_req.version);
-
-		state double startTime = now();
-		state Version readVersion = _req.version;
-
-		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
-			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
+		state Promise<std::pair<Key, Key>> conflictRange;
+		GetRangeResult result = wait(
+		    NativeAPI::getRange(cx, Reference<TransactionLogInfo>(), Future<Version>(_req.version), begin, end, limits,
+		                        conflictRange, false, reverse, TransactionInfo(TaskPriority::DefaultOnMainThread)));
+		GetKeyValuesReply finalReply;
+		finalReply.version = result.version;
+		finalReply.more = result.output.more;
+		finalReply.data = result.output;
+		finalReply.usingReadProxy = true;
+		finalReply.readToBegin = result.output.readToBegin;
+		finalReply.readThroughEnd = result.output.readThroughEnd;
+		_req.reply.send(finalReply);
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			_req.reply.sendError(transaction_too_old());
+			throw e;
 		}
 
-		ASSERT(!limits.isReached());
-		ASSERT((!limits.hasRowLimit() || limits.rows >= limits.minRows) && limits.minRows >= 0);
+		_req.reply.sendError(e);
+		return Void();
+	}
+}
 
-		loop {
-			if (end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual())) {
-				finalReply.version = readVersion;
-				finalReply.more = false;
-				_req.reply.send(finalReply);
+ACTOR Future<Void> watchValue(WatchValueRequest req, Database cx) {
+	TransactionInfo info(TaskPriority::DefaultOnMainThread);
+
+	state Version ver = req.version;
+	cx->validateVersion(ver);
+	ASSERT(ver != latestVersion);
+
+	loop {
+		state pair<KeyRange, Reference<LocationInfo>> ssi =
+		    wait(getKeyLocation(cx, req.key, &StorageServerInterface::watchValue));
+
+		try {
+			state WatchValueReply resp;
+			choose {
+				when(WatchValueReply r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
+				                                          WatchValueRequest(req.key, req.value, req.version, req.debugID),
+				                                          TaskPriority::DefaultPromiseEndpoint))) {
+					resp = r;
+				}
+				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
+			}
+
+			Version v = wait(waitForCommittedVersion(cx, resp.version));
+
+			// False if there is a master failure between getting the response and getting the committed version,
+			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
+			if (v - resp.version < 50000000) {
+				req.reply.send(resp);
 				return Void();
 			}
-
-			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
-			bool locationBackward = reverse ? (end - 1).isBackward() : begin.isBackward();
-			pair<KeyRange, Reference<LocationInfo>> beginServer =
-			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, locationBackward));
-			state KeyRange shard = beginServer.first;
-
-			state bool modifiedSelectors = false;
-			state GetKeyValuesRequest req;
-
-			req.isFetchKeys = _req.isFetchKeys;
-			req.version = readVersion;
-			req.debugID = _req.debugID;
-
-			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
-			    (!begin.isFirstGreaterOrEqual() ||
-			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
-				                                   // not modifying anything
-
-				req.begin = firstGreaterOrEqual(shard.begin);
-				modifiedSelectors = true;
-			} else
-				req.begin = begin;
-
-			if (!reverse && end.isDefinitelyGreater(shard.end)) {
-				req.end = firstGreaterOrEqual(shard.end);
-				modifiedSelectors = true;
-			} else
-				req.end = end;
-
-			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
-
-			try {
-				++cx->transactionPhysicalReads;
-				// if (CLIENT_BUGGIFY) {
-				// 	_req.reply.sendError(deterministicRandom()->randomChoice(
-				// 	    std::vector<Error>{ transaction_too_old(), future_version() }));
-				// }
-
-				state GetKeyValuesReply rep =
-				    wait(loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req,
-				                     TaskPriority::DefaultPromiseEndpoint, false,
-				                     cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
-
-				ASSERT(!rep.more || rep.data.size());
-				ASSERT(!limits.hasRowLimit() || rep.data.size() <= limits.rows);
-
-				limits.decrement(rep.data);
-
-				if (reverse && begin.isLastLessOrEqual() && rep.data.size() &&
-				    rep.data.end()[-1].key == begin.getKey()) {
-					modifiedSelectors = false;
-				}
-
-				bool finished = limits.isReached() || (!modifiedSelectors && !rep.more) || limits.hasSatisfiedMinRows();
-
-				finalReply.arena.dependsOn(rep.arena);
-				finalReply.data.append(finalReply.arena, rep.data.begin(), rep.data.size());
-
-				if (finished && !finalReply.data.size()) {
-					finalReply.version = rep.version;
-					finalReply.more = modifiedSelectors || limits.isReached() || rep.more;
-					_req.reply.send(finalReply);
-					return Void();
-				}
-
-				if (finished) {
-					finalReply.version = rep.version;
-					finalReply.more = modifiedSelectors || limits.isReached() || rep.more;
-					_req.reply.send(finalReply);
-					return Void();
-				}
-
-				readVersion = rep.version; // see above comment
-
-				if (!rep.more) {
-					ASSERT(modifiedSelectors);
-					TEST(true); // !GetKeyValuesReply.more and modifiedSelectors in getRange
-
-					if (!rep.data.size()) {
-						// TODO (Vishesh): Fallback instead?
-						// Standalone<RangeResultRef> result = wait(
-						//     NativeAPI::getRangeFallback(cx, _req.version, originalBegin, originalEnd, originalLimits,
-						//                                 reverse, TransactionInfo(TaskPriority::DefaultOnMainThread)));
-						// finalReply.more = result.more;
-						// finalReply.version = readVersion;
-						// finalReply.data = result;
-						// _req.reply.send(finalReply);
-						// _req.reply.sendError(transaction_too_old());
-						wait(RP_getRangeFallback(cx, _req.version, originalBegin, originalEnd, originalLimits,
-												 reverse, _req));
-						return Void();
-					}
-
-					if (reverse)
-						end = firstGreaterOrEqual(shard.begin);
-					else
-						begin = firstGreaterOrEqual(shard.end);
-				} else {
-					TEST(true); // GetKeyValuesReply.more in getRange
-					if (reverse)
-						end = firstGreaterOrEqual(finalReply.data[finalReply.data.size() - 1].key);
-					else
-						begin = firstGreaterThan(finalReply.data[finalReply.data.size() - 1].key);
-				}
-
-			} catch (Error& e) {
-				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
-					cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
-					                    reverse ? (end - 1).isBackward() : begin.isBackward());
-					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY)); // TODO (Vishesh) Add TaskId
-				} else {
-					if (e.code() == error_code_actor_cancelled) {
-						_req.reply.sendError(transaction_too_old());
-						throw e;
-					}
-					TraceEvent("ReadProxy_GetKeyValuesError").detail("Name", e.name()).detail("What", e.what());
-					_req.reply.sendError(e);
-					return Void();
-				}
+			ver = v;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				req.reply.sendError(watch_cancelled());
+				throw e;
+			} else if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(req.key);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
+				TEST(e.code() ==
+				     error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
+				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
+				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME));
+			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
+				                                           // it was cancelled
+				TEST(true); // A watch timed out
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY));
+			} else {
+				state Error err = e;
+				req.reply.sendError(err);
+				return Void();
 			}
 		}
-	} catch (Error& e) {
-		throw;
 	}
 }
 
@@ -581,10 +331,13 @@ ACTOR Future<Void> readProxyServerCore(ReadProxyInterface readProxy, Reference<A
 	actors.add(waitFailureServer(readProxy.waitFailure.getFuture()));
 
 	loop choose {
-		when(GetKeyRequest req = waitNext(readProxy.getKey.getFuture())) { actors.add(RP_getKey(req, cx)); }
+		when(GetKeyRequest req = waitNext(readProxy.getKey.getFuture())) { actors.add(getKey(req, cx)); }
 		when(GetValueRequest req = waitNext(readProxy.getValue.getFuture())) { actors.add(getValue(req, cx)); }
 		when(GetKeyValuesRequest req = waitNext(readProxy.getKeyValues.getFuture())) {
 			actors.add(getKeyValues(req, cx));
+		}
+		when(WatchValueRequest req = waitNext(readProxy.watchValue.getFuture())) {
+			actors.add(watchValue(req, cx));
 		}
 		when(wait(actors.getResult())) {}
 	}

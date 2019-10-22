@@ -38,13 +38,15 @@ struct ReadProxyInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getValue, getKey, getKeyValues, waitFailure);
+		serializer(ar, getValue, getKey, getKeyValues, watchValue, waitFailure);
 	}
 
 	void initEndpoints() {
 		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		watchValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		waitFailure.getEndpoint( TaskPriority::LoadBalancedEndpoint );
 	}
 
 	UID id() const { return getValue.getEndpoint().token; }

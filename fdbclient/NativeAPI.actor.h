@@ -332,17 +332,17 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 struct GetRangeResult {
 	Standalone<RangeResultRef> output;
 	Version version;
+
+	GetRangeResult() : output(Standalone<RangeResultRef>()) {}
 };
 
 namespace NativeAPI {
 Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, TransactionInfo info);
 
-Future<Key> resolveKey(Database const& cx, KeySelector const& key, Version const& version,
-                       TransactionInfo const& info);
-
-Future<Standalone<RangeResultRef>> getRangeFallback(Database cx, Version version, KeySelector begin, KeySelector end,
-                                                    GetRangeLimits limits, bool reverse, TransactionInfo info);
-
+Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
+                                KeySelector begin, KeySelector end, GetRangeLimits limits,
+                                Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
+                                TransactionInfo info);
 } // namespace NativeAPI
 
 #include "flow/unactorcompiler.h"
