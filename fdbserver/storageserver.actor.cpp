@@ -890,9 +890,10 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		}
 
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = v.present() ? std::max((int64_t)(req.key.size() + v.get().size()),
-		                                                     SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE)
-		                                          : SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		// If the read yields no value, randomly sample the empty read.
+		metrics.bytesReadPerKSecond =
+		    v.present() ? (int64_t)(req.key.size() + v.get().size())
+		                : deterministicRandom()->random01() > 0.5 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
 		data->metrics.notify(req.key, metrics);
 
 		if( req.debugID.present() )
@@ -1271,7 +1272,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
 	StorageMetrics metrics;
-	metrics.bytesReadPerKSecond = std::max(readSize, SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+	metrics.bytesReadPerKSecond = readSize;
 	data->metrics.notify(limit >= 0 ? range.begin : range.end, metrics);
 	return result;
 }
@@ -1327,14 +1328,15 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 		*pOffset = 0;
 
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond =
-		    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+		metrics.bytesReadPerKSecond = (int64_t)rep.data[index].key.size();
 		data->metrics.notify(sel.getKey(), metrics);
 
 		return rep.data[ index ].key;
 	} else {
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		// Randomly sample an empty read
+		metrics.bytesReadPerKSecond =
+		    deterministicRandom()->random01() > 0.5 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
 		data->metrics.notify(sel.getKey(), metrics);
 
 		// FIXME: If range.begin=="" && !forward, return success?

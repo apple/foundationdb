@@ -454,7 +454,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPLIT_JITTER_AMOUNT,                                  0.05 ); if( randomize && BUGGIFY ) SPLIT_JITTER_AMOUNT = 0.2;
 	init( IOPS_UNITS_PER_SAMPLE,                                10000 * 1000 / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 100 );
 	init( BANDWIDTH_UNITS_PER_SAMPLE,                           SHARD_MIN_BYTES_PER_KSEC / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 25 );
-	init( BYTES_READ_UNITS_PER_SAMPLE,                           100); // Effectively weight up read on small or non-existing key/values.
+	init( BYTES_READ_UNITS_PER_SAMPLE,                           10000);
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
