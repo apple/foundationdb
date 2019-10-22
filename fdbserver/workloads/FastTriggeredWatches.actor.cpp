@@ -134,7 +134,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				}
 				Version ver = wait( setFuture );
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
-				ASSERT( lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT || lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND*(12+getDuration) );
+				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
+				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (18 + getDuration));
 
 				if( now() - testStart > self->testDuration )
 					break;
