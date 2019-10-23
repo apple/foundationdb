@@ -339,7 +339,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 					progress.nextMutation(); // Prepare for the next mutation
 					// commit per transactionBatchSizeThreshold bytes; and commit does not cross version boundary
-					if (progress.transactionSize >= opConfig.transactionBatchSizeThreshold || progress.startNextVersion || progress.isDone()) {
+					if (progress.shouldCommit()) {
 						break; // Got enough mutation in the txn
 					}
 				}
