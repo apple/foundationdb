@@ -65,7 +65,9 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool reboot;
 	bool killDc;
 	bool killMachine;
+	bool killDatahall;
 	bool killSelf;
+	std::string targetId;
 	bool replacement;
 	bool waitForVersion;
 	bool allowFaultInjection;
@@ -85,7 +87,9 @@ struct MachineAttritionWorkload : TestWorkload {
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
 		killDc = getOption( options, LiteralStringRef("killDc"), deterministicRandom()->random01() < 0.25 );
 		killMachine = getOption( options, LiteralStringRef("killMachine"), false);
+		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
+		targetId = getOption( options, LiteralStringRef("targetId"), "");
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
 		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
@@ -172,11 +176,12 @@ struct MachineAttritionWorkload : TestWorkload {
 			wait(delay(delayBeforeKill));
 			// Pick a dcId to kill
 			deterministicRandom()->randomShuffle(workers);
-			Optional<Standalone<StringRef>> killDcId = workers.back().interf.locality.dcId();
-			TraceEvent("Assassination").detail("TargetDataCenter", killDcId);
+			Optional<Standalone<StringRef>> killDcId = self->targetId.empty() ? workers.back().interf.locality.dcId() : self->targetId;
+			TraceEvent("Assassination").detail("TargetDataCenterId", killDcId);
 			for (const auto& worker : workers) {
 				// kill all matching dcId workers
 				if (worker.interf.locality.dcId().present() && worker.interf.locality.dcId() == killDcId) {
+					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
@@ -184,11 +189,25 @@ struct MachineAttritionWorkload : TestWorkload {
 			wait(delay(delayBeforeKill));
 			// Pick a machine to kill
 			deterministicRandom()->randomShuffle(workers);
-			Optional<Standalone<StringRef>> killMachineId = workers.back().interf.locality.machineId();
-			TraceEvent("Assassination").detail("TargetMachine", killMachineId);
+			Optional<Standalone<StringRef>> killMachineId = self->targetId.empty() ? workers.back().interf.locality.machineId() : self->targetId;
+			TraceEvent("Assassination").detail("TargetMachineId", killMachineId);
 			for (const auto& worker : workers) {
 				// kill all matching machine workers
 				if (worker.interf.locality.machineId().present() && worker.interf.locality.machineId() == killMachineId) {
+					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
+					worker.interf.clientInterface.reboot.send(rbReq);
+				}
+			}
+		} else if (self->killDatahall) {
+			wait(delay(delayBeforeKill));
+			// Pick a datahall to kill
+			deterministicRandom()->randomShuffle(workers);
+			Optional<Standalone<StringRef>> killDatahallId = self->targetId.empty() ? workers.back().interf.locality.dataHallId() : self->targetId;
+			TraceEvent("Assassination").detail("TargetDatahallId", killDatahallId);
+			for (const auto& worker : workers) {
+				// kill all matching datahall workers
+				if (worker.interf.locality.dataHallId().present() && worker.interf.locality.dataHallId() == killDatahallId) {
+					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
