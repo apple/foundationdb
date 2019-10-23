@@ -152,6 +152,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
 					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
+				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
+					throw timed_out();
+				}
+			} else if (self->futureResults.size() == 1) {
+				self->randomID = deterministicRandom()->randomUniqueID();
+				self->sequence = 0;
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}
