@@ -359,7 +359,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			    .detail("TxnStatus", "?")
 			    .detail("ApplierApplyToDB", self->id())
 			    .detail("TxnId", progress.curTxnId)
-			    .detail("StartIndexInCurrentTxn", progress.curIndexInCurTxn)
+			    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 			    .detail("Version", progress.curItInCurTxn->first)
 			    .error(e, true);
 			progress.lastTxnHasError = true;

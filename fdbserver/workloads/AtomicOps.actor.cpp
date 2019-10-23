@@ -102,10 +102,12 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-		for(int c=0; c<actorCount; c++)
-		clients.push_back(
+		for(int c=0; c<actorCount; c++) {
+			clients.push_back(
 			timeout(
 				atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+		}
+		
 		return delay(testDuration);
 	}
 
