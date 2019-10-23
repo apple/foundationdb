@@ -52,6 +52,7 @@ struct MasterProxyInterface {
 	RequestStream< struct TxnStateRequest >  txnState;
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
+	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -63,7 +64,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, proxySnapReq);
+				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
 	}
 
 	void initEndpoints() {
@@ -339,6 +340,35 @@ struct ProxySnapRequest
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct ExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 11;
+	bool safe;
+
+	ExclusionSafetyCheckReply() : safe(false) {}
+	explicit ExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct ExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 13852702;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<ExclusionSafetyCheckReply> reply;
+
+	ExclusionSafetyCheckRequest() {}
+	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, exclusions, reply);
 	}
 };
 
