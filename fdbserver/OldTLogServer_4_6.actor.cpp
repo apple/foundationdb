@@ -876,7 +876,7 @@ namespace oldTLog_4_6 {
 				peekId = req.sequence.get().first;
 				sequence = req.sequence.get().second;
 				if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->peekTracker.find(peekId) == self->peekTracker.end()) {
-					throw timed_out();
+					throw operation_obsolete();
 				}
 				if(sequence > 0) {
 					auto& trackerData = self->peekTracker[peekId];
