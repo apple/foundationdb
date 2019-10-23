@@ -129,8 +129,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
 	bool buggifySmallReadBandwidth = randomize && BUGGIFY;
-	init( SHARD_MAX_BYTES_READ_PER_KSEC,            100LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
-	/* 100*1MB/sec * 1000sec/ksec
+	init( SHARD_MAX_BYTES_READ_PER_KSEC,            3LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
+	/* 8*1MB/sec * 1000sec/ksec
 		Shards with more than this read bandwidth will be considered as a read cache candidate
 	*/
 	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
@@ -454,7 +454,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPLIT_JITTER_AMOUNT,                                  0.05 ); if( randomize && BUGGIFY ) SPLIT_JITTER_AMOUNT = 0.2;
 	init( IOPS_UNITS_PER_SAMPLE,                                10000 * 1000 / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 100 );
 	init( BANDWIDTH_UNITS_PER_SAMPLE,                           SHARD_MIN_BYTES_PER_KSEC / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 25 );
-	init( BYTES_READ_UNITS_PER_SAMPLE,                         10000 );
+	init( BYTES_READ_UNITS_PER_SAMPLE,                           100000 );
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );

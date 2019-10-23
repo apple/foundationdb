@@ -893,7 +893,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		// If the read yields no value, randomly sample the empty read.
 		metrics.bytesReadPerKSecond =
 		    v.present() ? (int64_t)(req.key.size() + v.get().size())
-		                : deterministicRandom()->random01() > 0.5 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
+		                : deterministicRandom()->random01() > 0.95 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
 		data->metrics.notify(req.key, metrics);
 
 		if( req.debugID.present() )
@@ -1336,7 +1336,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 		StorageMetrics metrics;
 		// Randomly sample an empty read
 		metrics.bytesReadPerKSecond =
-		    deterministicRandom()->random01() > 0.5 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
+		    deterministicRandom()->random01() > 0.95 ? SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE : 0;
 		data->metrics.notify(sel.getKey(), metrics);
 
 		// FIXME: If range.begin=="" && !forward, return success?
