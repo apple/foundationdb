@@ -62,7 +62,8 @@ public:
 	virtual Version getOldestVersion() = 0;  // Get oldest readable version
 	virtual Future<Void> commit() = 0;
 
-	virtual Future<Version> getLatestVersion() = 0;
+	virtual Future<Void> init() = 0;
+	virtual Version getLatestVersion() = 0;
 
 	// readAtVersion() may only be called on a version which has previously been passed to setWriteVersion() and never previously passed
 	//   to forgetVersion.  The returned results when violating this precondition are unspecified; the store is not required to be able to detect violations.
