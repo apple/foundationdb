@@ -43,7 +43,7 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	if (self->versionBatchStart) {
 		self->versionBatchStart = false;
 	}
@@ -58,7 +58,7 @@ ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Re
 	return Void();
 }
 
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	self->resetPerVersionBatch();
 	TraceEvent("FastRestore")
 	    .detail("InitVersionBatch", req.batchID)
