@@ -1036,6 +1036,9 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		try {
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+				throw timed_out();
+			}
 			auto& trackerData = logData->peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
 				trackerData.sequence_version[0].send(std::make_pair(req.begin, req.onlySpilled));
