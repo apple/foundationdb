@@ -1131,7 +1131,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
-		stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		}
 		request.reply.send(reply);
 	}
 
