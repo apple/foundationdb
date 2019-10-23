@@ -3373,3 +3373,74 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 		throw;
 	}
 }
+
+ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions) {
+	TraceEvent("ExclusionSafetyCheckBegin")
+	    .detail("NumExclusion", exclusions.size())
+	    .detail("Exclusions", describe(exclusions));
+	state ExclusionSafetyCheckRequest req(exclusions);
+	state bool ddCheck;
+	try {
+		loop {
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {}
+				when(ExclusionSafetyCheckReply _ddCheck =
+				         wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
+				                          req, cx->taskID))) {
+					ddCheck = _ddCheck.safe;
+					break;
+				}
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent("ExclusionSafetyCheckError")
+			    .detail("NumExclusion", exclusions.size())
+			    .detail("Exclusions", describe(exclusions))
+			    .error(e);
+		}
+		throw;
+	}
+	TraceEvent("ExclusionSafetyCheckCoordinators");
+	state ClientCoordinators coordinatorList(cx->getConnectionFile());
+	state vector<Future<Optional<LeaderInfo>>> leaderServers;
+	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
+		leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
+		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
+		                                           TaskPriority::CoordinationReply));
+	}
+	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
+	choose {
+		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
+		when(wait(delay(3.0))) {
+			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum");
+			return false;
+		}
+	}
+	int attemptCoordinatorExclude = 0;
+	int coordinatorsUnavailable = 0;
+	for (int i = 0; i < leaderServers.size(); i++) {
+		NetworkAddress leaderAddress =
+		    coordinatorList.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
+		if (leaderServers[i].isReady()) {
+			if ((std::count(exclusions.begin(), exclusions.end(),
+			                AddressExclusion(leaderAddress.ip, leaderAddress.port)) ||
+			     std::count(exclusions.begin(), exclusions.end(), AddressExclusion(leaderAddress.ip)))) {
+				attemptCoordinatorExclude++;
+			}
+		} else {
+			coordinatorsUnavailable++;
+		}
+	}
+	int faultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
+	bool coordinatorCheck = (attemptCoordinatorExclude <= faultTolerance);
+	TraceEvent("ExclusionSafetyCheckFinish")
+	    .detail("CoordinatorListSize", leaderServers.size())
+	    .detail("NumExclusions", exclusions.size())
+	    .detail("FaultTolerance", faultTolerance)
+	    .detail("AttemptCoordinatorExclude", attemptCoordinatorExclude)
+	    .detail("CoordinatorCheck", coordinatorCheck)
+	    .detail("DataDistributorCheck", ddCheck);
+
+	return (ddCheck && coordinatorCheck);
+}

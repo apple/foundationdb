@@ -82,6 +82,9 @@ ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock l
 ACTOR Future<bool> canRemoveStorageServer(Transaction* tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
+ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock);
+// Directly removes serverID from serverKeys and keyServers system keyspace.
+// Performed when a storage server is marked as permanently failed.
 
 #include "flow/unactorcompiler.h"
 #endif

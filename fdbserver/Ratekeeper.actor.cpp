@@ -697,7 +697,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 
 				conf->fromKeyValues( (VectorRef<KeyValueRef>) results );
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey);
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
 				wait( tr.commit() );
 				wait( watchFuture );
 				break;

@@ -1509,7 +1509,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 
 		// send a snap request to DD
 		if (!commitData->db->get().distributor.present()) {
-			TraceEvent(SevWarnAlways, "DataDistributorNotPresent");
+			TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
 			throw operation_failed();
 		}
 		state Future<ErrorOr<Void>> ddSnapReq =
@@ -1538,6 +1538,34 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	TraceEvent("SnapMasterProxy_SnapReqExit")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
+	return Void();
+}
+
+ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
+	TraceEvent("SafetyCheckMasterProxyBegin");
+	state ExclusionSafetyCheckReply reply(false);
+	if (!db->get().distributor.present()) {
+		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
+		req.reply.send(reply);
+		return Void();
+	}
+	try {
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
+		        DistributorExclusionSafetyCheckRequest(req.exclusions));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		reply.safe = _reply.safe;
+	} catch (Error& e) {
+		TraceEvent("SafetyCheckMasterProxyResponseError").error(e);
+		if (e.code() != error_code_operation_cancelled) {
+			req.reply.sendError(e);
+			return Void();
+		} else {
+			throw e;
+		}
+	}
+	TraceEvent("SafetyCheckMasterProxyFinish");
+	req.reply.send(reply);
 	return Void();
 }
 
@@ -1681,6 +1709,9 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
 			TraceEvent(SevDebug, "SnapMasterEnqueue");
 			addActor.send(proxySnapCreate(snapReq, &commitData));
+		}
+		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
+			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;

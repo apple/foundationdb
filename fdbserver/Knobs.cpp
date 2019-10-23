@@ -116,6 +116,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PRIORITY_TEAM_UNHEALTHY,                               700 );
 	init( PRIORITY_TEAM_2_LEFT,                                  709 );
 	init( PRIORITY_TEAM_1_LEFT,                                  800 );
+	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  900 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
@@ -206,6 +207,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
 	init( REBALANCE_MAX_RETRIES,                                 100 );
 	init( DD_OVERLAP_PENALTY,                                  10000 );
+	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 );
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
 
