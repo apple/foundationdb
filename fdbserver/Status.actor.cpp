@@ -1167,7 +1167,7 @@ struct LogRangeAndUID {
 ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
 	try {
 		state Transaction tr(cx);
-		state Future<Void> timeoutFuture = timeoutError(Never(), 5.0);
+		state Future<Void> timeoutFuture = timeoutError(Future<Void>(Never()), 5.0);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
