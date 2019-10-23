@@ -67,7 +67,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool killMachine;
 	bool killDatahall;
 	bool killSelf;
-	std::string targetId;
+	Standalone<StringRef> targetId;
 	bool replacement;
 	bool waitForVersion;
 	bool allowFaultInjection;
@@ -89,7 +89,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		killMachine = getOption( options, LiteralStringRef("killMachine"), false);
 		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
-		targetId = getOption( options, LiteralStringRef("targetId"), "");
+		targetId = getOption( options, LiteralStringRef("targetId"), LiteralStringRef(""));
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
 		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
@@ -176,7 +176,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			wait(delay(delayBeforeKill));
 			// Pick a dcId to kill
 			deterministicRandom()->randomShuffle(workers);
-			Optional<Standalone<StringRef>> killDcId = self->targetId.empty() ? workers.back().interf.locality.dcId() : self->targetId;
+			Optional<Standalone<StringRef>> killDcId = self->targetId.toString().empty() ? workers.back().interf.locality.dcId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetDataCenterId", killDcId);
 			for (const auto& worker : workers) {
 				// kill all matching dcId workers
@@ -189,7 +189,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			wait(delay(delayBeforeKill));
 			// Pick a machine to kill
 			deterministicRandom()->randomShuffle(workers);
-			Optional<Standalone<StringRef>> killMachineId = self->targetId.empty() ? workers.back().interf.locality.machineId() : self->targetId;
+			Optional<Standalone<StringRef>> killMachineId = self->targetId.toString().empty() ? workers.back().interf.locality.machineId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetMachineId", killMachineId);
 			for (const auto& worker : workers) {
 				// kill all matching machine workers
@@ -202,7 +202,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			wait(delay(delayBeforeKill));
 			// Pick a datahall to kill
 			deterministicRandom()->randomShuffle(workers);
-			Optional<Standalone<StringRef>> killDatahallId = self->targetId.empty() ? workers.back().interf.locality.dataHallId() : self->targetId;
+			Optional<Standalone<StringRef>> killDatahallId = self->targetId.toString().empty() ? workers.back().interf.locality.dataHallId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetDatahallId", killDatahallId);
 			for (const auto& worker : workers) {
 				// kill all matching datahall workers
