@@ -43,7 +43,7 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+void handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	if (self->versionBatchStart) {
 		self->versionBatchStart = false;
 	}
@@ -55,7 +55,7 @@ ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Re
 
 	req.reply.send(RestoreCommonReply(self->id()));
 
-	return Void();
+	return;
 }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
