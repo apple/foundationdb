@@ -8,6 +8,9 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ;    transactionsPerSecond=250.0
     testDuration=30.0
     clearAfterTest=false
+; Specify a type of atomicOp
+;	opType=0
+;	actorsPerClient=1
 
 ; AtomicBackupCorrectness.txt does not mix Cycle and AtomicOps workloads
 ;    testName=Cycle

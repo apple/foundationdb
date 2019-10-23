@@ -115,11 +115,12 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		state int mIndex = 0;
 		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			// TraceEvent(SevDebug, "FastRestore")
-			//     .detail("ApplierNode", self->id())
-			//     .detail("FileUID", req.fileUID)
-			//     .detail("Version", commitVersion)
-			//     .detail("MutationReceived", mutation.toString());
+			TraceEvent(SevDebug, "FastRestore")
+			    .detail("ApplierNode", self->id())
+			    .detail("FileUID", req.fileIndex)
+			    .detail("Version", commitVersion)
+			    .detail("Index", mIndex)
+			    .detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 		}
 		curFilePos.set(req.version);
@@ -218,9 +219,7 @@ struct DBApplyProgress {
 	}
 
 	bool shouldCommit() {
-		// TODO: Change transactionSize > 0 to transactionSize > opConfig.transactionBatchSizeThreshold to batch
-		// mutations in a txn
-		return (!lastTxnHasError && (startNextVersion || transactionSize > 0 || curItInCurTxn == self->kvOps.end()));
+		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold || curItInCurTxn == self->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -299,7 +298,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				TraceEvent("FastRestore_ApplierTxn")
 				    .detail("ApplierApplyToDB", self->id())
 				    .detail("TxnId", progress.curTxnId)
-				    .detail("StartIndexInCurrentTxn", progress.curIndexInCurTxn)
+				    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 				    .detail("CurrentIteratorMutations", progress.curItInCurTxn->second.size())
 				    .detail("Version", progress.curItInCurTxn->first);
 
@@ -315,7 +314,13 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					// TraceEvent(SevDebug, "FastRestore_Debug").detail("ApplierApplyToDB", self->describeNode()).detail("Version", progress.curItInCurTxn->first).detail("Mutation", m.toString());
+					TraceEvent(SevDebug, "FastRestore_Debug")
+					    .detail("ApplierApplyToDB", self->describeNode())
+					    .detail("Version", progress.curItInCurTxn->first)
+					    .detail("Index", progress.curIndexInCurTxn)
+					    .detail("Mutation", m.toString())
+						.detail("MutationSize", m.expectedSize())
+						.detail("TxnSize", progress.transactionSize);
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
@@ -332,14 +337,10 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 					progress.transactionSize += m.expectedSize();
 
-					if (progress.transactionSize >= opConfig.transactionBatchSizeThreshold) { // commit per 512B
+					progress.nextMutation(); // Prepare for the next mutation
+					// commit per transactionBatchSizeThreshold bytes; and commit does not cross version boundary
+					if (progress.transactionSize >= opConfig.transactionBatchSizeThreshold || progress.startNextVersion || progress.isDone()) {
 						break; // Got enough mutation in the txn
-					} else {
-						progress.nextMutation();
-						// Mutations in the same transaction come from the same version
-						if (progress.startNextVersion || progress.isDone()) {
-							break;
-						}
 					}
 				}
 			} // !lastTxnHasError
@@ -348,8 +349,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			if (progress.shouldCommit()) {
 				wait(tr->commit());
 			}
-			// Logic for a successful transaction: Update current txn info and uncommitted txn info
-			progress.nextMutation();
+
 			if (progress.isDone()) { // Are all mutations processed?
 				break;
 			}
