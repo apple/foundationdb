@@ -2781,6 +2781,15 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		self.sharedActors.send( updateStorageLoop(&self) );
 
 		loop {
+			if (activeSharedTLog->get() == tlogId) {
+				TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
+				self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+			} else {
+				stopAllTLogs(&self, tlogId);
+				TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
+				self.sharedActors.send( startSpillingInTenSeconds(&self, tlogId, activeSharedTLog) );
+			}
+
 			choose {
 				when ( InitializeTLogRequest req = waitNext(tlogRequests.getFuture() ) ) {
 					if( !self.tlogCache.exists( req.recruitmentID ) ) {
@@ -2791,16 +2800,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 					}
 				}
 				when ( wait( error ) ) { throw internal_error(); }
-				when ( wait( activeSharedTLog->onChange() ) ) {
-					if (activeSharedTLog->get() == tlogId) {
-						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
-					} else {
-						stopAllTLogs(&self, tlogId);
-						TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.sharedActors.send( startSpillingInTenSeconds(&self, tlogId, activeSharedTLog) );
-					}
-				}
+				when ( wait( activeSharedTLog->onChange() ) ) {}
 			}
 		}
 	} catch (Error& e) {
