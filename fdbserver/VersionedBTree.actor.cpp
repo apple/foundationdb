@@ -49,6 +49,10 @@ std::string toString(const T &o) {
 	return o.toString();
 }
 
+std::string toString(StringRef s) {
+	return s.printable();
+}
+
 std::string toString(LogicalPageID id) {
 	if(id == invalidLogicalPageID) {
 		return "LogicalPageID{invalid}";
@@ -358,6 +362,7 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n", self->toString().c_str(), ::toString(item).c_str());
 				LogicalPageID newPageID = wait(self->queue->pager->newPageID());
 				self->addNewPage(newPageID, 0, true);
+				++self->queue->numPages;
 				wait(yield());
 			}
 			debug_printf("FIFOQueue::Cursor(%s) before write(%s)\n", self->toString().c_str(), ::toString(item).c_str());
@@ -1171,7 +1176,7 @@ public:
 		// Write old committed header to Page 1
 		self->operations.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
 
-		// Flush the free list delayed free list queues together as they are used by freePage() and newPageID()
+		// Flush the free list and delayed free list queues together as they are used by freePage() and newPageID()
 		loop {
 			state bool freeBusy = wait(self->freeList.preFlush());
 			state bool delayedFreeBusy = wait(self->delayedFreeList.preFlush());
@@ -1281,8 +1286,20 @@ public:
 		int64_t total;
 		g_network->getDiskBytes(parentDirectory(filename), free, total);
 		int64_t pagerSize = pHeader->pageCount * physicalPageSize;
-		int64_t reusable = freeList.numEntries * physicalPageSize;
+
+		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be,
+		// if each commit delayed entries that were freeable were shuffled from the delayed free queue to the free queue.
+		// but this doesn't seem necessary most of the time.
+		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+
 		return StorageBytes(free, total, pagerSize, free + reusable);
+	}
+
+	// Get the number of pages in use but not by the pager itself.
+	int64_t getUserPageCount() {
+		int userPages = pHeader->pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages - delayedFreeList.numEntries;
+		debug_printf("COWPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64 " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64 "\n", filename.c_str(), userPages, pHeader->pageCount, freeList.numPages, freeList.numEntries, delayedFreeList.numPages, delayedFreeList.numEntries);
+		return userPages;
 	}
 
 	Future<Void> init() override {
@@ -2546,7 +2563,7 @@ public:
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<int> incrementalLazyDelete(VersionedBTree *self, bool *stop, unsigned int minPages = 0, int maxPages = std::numeric_limits<int>::max()) {
+	ACTOR static Future<int> incrementalLazyDelete(VersionedBTree *self, bool *pStop = nullptr, unsigned int minPages = 0, int maxPages = std::numeric_limits<int>::max()) {
 		// TODO: Is it contractually okay to always to read at the latest version?
 		state Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLatestVersion());
 		state int freedPages = 0;
@@ -2598,7 +2615,7 @@ public:
 			freedPages += q.get().pageID.size();
 
 			// If stop is set and we've freed the minimum number of pages required, or the maximum is exceeded, return.
-			if((freedPages >= minPages && *stop) || freedPages >= maxPages) {
+			if((freedPages >= minPages && pStop != nullptr && *pStop) || freedPages >= maxPages) {
 				break;
 			}
 		}
@@ -2701,6 +2718,38 @@ public:
 		if(m_pBuffer == nullptr)
 			return m_latestCommit;
 		return commit_impl(this);
+	}
+
+	ACTOR static Future<Void> destroyAndCheckSanity_impl(VersionedBTree *self) {
+		ASSERT(g_network->isSimulated());
+
+		self->setWriteVersion(self->getLatestVersion() + 1);
+		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
+
+		loop {
+			int freedPages = wait(self->incrementalLazyDelete(self));
+			debug_printf("incrementalLazyDelete freed %d\n", freedPages);
+			wait(self->commit());
+			if(self->m_lazyDeleteQueue.numEntries == 0) {
+				break;
+			}
+			self->setWriteVersion(self->getLatestVersion() + 1);
+		}
+
+		LazyDeleteQueueT::QueueState s = self->m_lazyDeleteQueue.getState();
+		ASSERT(s.numEntries == 0);
+		ASSERT(s.numPages == 1);
+
+		debug_printf("rootPageCount %d\n", self->m_header.root.count);
+		ASSERT(self->m_header.height == 1);
+		// All that should be in use now is the root page and the lazy delete queue empty page.
+		ASSERT(((COWPager *)self->m_pager)->getUserPageCount() == self->m_header.root.count + 1);
+
+		return Void();
+	}
+
+	Future<Void> destroyAndCheckSanity() {
+		return destroyAndCheckSanity_impl(this);
 	}
 
 	bool isSingleVersion() const {
