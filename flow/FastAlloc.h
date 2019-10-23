@@ -212,6 +212,10 @@ static void* allocateFast(int size) {
 	if (size <= 128) return FastAllocator<128>::allocate();
 	if (size <= 256) return FastAllocator<256>::allocate();
 	if (size <= 512) return FastAllocator<512>::allocate();
+	if (size <= 1024) return FastAllocator<1024>::allocate();
+	if (size <= 2048) return FastAllocator<2048>::allocate();
+	if (size <= 4096) return FastAllocator<4096>::allocate();
+	if (size <= 8192) return FastAllocator<8192>::allocate();
 	return new uint8_t[size];
 }
 
@@ -223,6 +227,10 @@ static void freeFast(int size, void* ptr) {
 	if (size <= 128) return FastAllocator<128>::release(ptr);
 	if (size <= 256) return FastAllocator<256>::release(ptr);
 	if (size <= 512) return FastAllocator<512>::release(ptr);
+	if (size <= 1024) return FastAllocator<1024>::release(ptr);
+	if (size <= 2048) return FastAllocator<2048>::release(ptr);
+	if (size <= 4096) return FastAllocator<4096>::release(ptr);
+	if (size <= 8192) return FastAllocator<8192>::release(ptr);
 	delete[](uint8_t*)ptr;
 }
 
