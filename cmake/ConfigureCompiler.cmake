@@ -221,8 +221,13 @@ else()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
+  check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
+  message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if(SUPPORT_DTRACE)
     add_compile_definitions(DTRACE_PROBES)
+  endif()
+  if(HAS_ALIGNED_ALLOC)
+    add_compile_definitions(HAS_ALIGNED_ALLOC)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

@@ -38,33 +38,6 @@ struct RelocateShard {
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
-// Higher priorities are executed first
-// Priority/100 is the "priority group"/"superpriority".  Priority inversion
-//   is possible within but not between priority groups; fewer priority groups
-//   mean better worst case time bounds
-enum {
-	PRIORITY_REBALANCE_SHARD = 100,
-	PRIORITY_RECOVER_MOVE    = 110,
-	PRIORITY_REBALANCE_UNDERUTILIZED_TEAM  = 120,
-	PRIORITY_REBALANCE_OVERUTILIZED_TEAM  = 121,
-	PRIORITY_TEAM_HEALTHY    = 140,
-	PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER = 150,
-
-	// Set removing_redundant_team priority lower than merge/split_shard_priority,
-	// so that removing redundant teams does not block merge/split shards.
-	PRIORITY_TEAM_REDUNDANT  = 200,
-
-	PRIORITY_MERGE_SHARD     = 340,
-	PRIORITY_SPLIT_SHARD     = 350,
-
-	PRIORITY_TEAM_UNHEALTHY  = 800,
-	PRIORITY_TEAM_2_LEFT     = 809,
-
-	PRIORITY_TEAM_1_LEFT     = 900,
-
-	PRIORITY_TEAM_0_LEFT     = 999
-};
-
 enum {
 	SOME_SHARED = 2,
 	NONE_SHARED = 3

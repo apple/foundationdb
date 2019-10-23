@@ -498,7 +498,8 @@
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[
@@ -577,6 +578,7 @@
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0, // estimated
+         "system_kv_size_bytes":0, // estimated
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,

@@ -67,7 +67,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "satellite_logs" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -916,6 +916,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
 
 			if (!currentKey.present())
@@ -1208,8 +1209,6 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 			for(auto& s : servers)
 				tr.set( encodeExcludedServersKey(s), StringRef() );
@@ -1240,9 +1239,6 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-
-			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 
 			for(auto& s : servers ) {

@@ -106,6 +106,7 @@ struct AddingShard : NonCopyable {
 	Version transferredVersion;
 
 	enum Phase { WaitPrevious, Fetching, Waiting };
+
 	Phase phase;
 
 	AddingShard( StorageServer* server, KeyRangeRef const& keys );
@@ -1948,8 +1949,9 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	state double startTime = now();
 	loop {
-		wait(delay(600));
-		TraceEvent(SevWarnAlways, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
+		state double waitSeconds = BUGGIFY ? 5.0 : 600.0;
+		wait(delay(waitSeconds));
+		TraceEvent(waitSeconds > 300.0 ? SevWarnAlways : SevInfo, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
 	}
 }
 
@@ -2068,6 +2070,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
 						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+						warningLogger = logFetchKeysWarning(shard);
 						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 

@@ -106,6 +106,24 @@ public:
 	double INFLIGHT_PENALTY_ONE_LEFT;
 	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
 
+	// Higher priorities are executed first
+	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
+	//   is possible within but not between priority groups; fewer priority groups
+	//   mean better worst case time bounds
+	// Maximum allowable priority is 999.
+	int PRIORITY_RECOVER_MOVE;
+	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_TEAM_HEALTHY;
+	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	int PRIORITY_TEAM_REDUNDANT;
+	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_TEAM_UNHEALTHY;
+	int PRIORITY_TEAM_2_LEFT;
+	int PRIORITY_TEAM_1_LEFT;
+	int PRIORITY_TEAM_0_LEFT;
+	int PRIORITY_SPLIT_SHARD;
+
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -244,6 +262,7 @@ public:
 	double ENFORCED_MIN_RECOVERY_DURATION;
 	double REQUIRED_MIN_RECOVERY_DURATION;
 	bool ALWAYS_CAUSAL_READ_RISKY;
+	int MAX_COMMIT_UPDATES;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -423,6 +442,7 @@ public:
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	double MAX_STATUS_REQUESTS_PER_SECOND;
 	int CONFIGURATION_ROWS_TO_FETCH;
+	bool DISABLE_DUPLICATE_LOG_WARNING;
 
 	// IPager
 	int PAGER_RESERVED_PAGES;

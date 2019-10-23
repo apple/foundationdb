@@ -524,6 +524,7 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
+#if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
 	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
@@ -540,6 +541,7 @@ inline static void* aligned_alloc(size_t alignment, size_t size) {
 	posix_memalign(&ptr, alignment, size);
 	return ptr;
 }
+#endif
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 

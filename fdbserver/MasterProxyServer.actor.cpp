@@ -236,6 +236,7 @@ struct ProxyCommitData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
@@ -810,27 +811,32 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-
-		Key			val;
-		MutationRef backupMutation;
-		uint32_t*	partBuffer = NULL;
+		state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations.begin();
 
 		// Serialize the log range mutations within the map
-		for (auto& logRangeMutation : logRangeMutations)
+		for (; logRangeMutation != logRangeMutations.end(); ++logRangeMutation)
 		{
+			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				yieldBytes = 0;
+				wait(yield());
+			}
+
+			yieldBytes += logRangeMutation->second.expectedSize();
+			
 			BinaryWriter wr(Unversioned());
 
 			// Serialize the log destination
-			wr.serializeBytes( logRangeMutation.first );
+			wr.serializeBytes( logRangeMutation->first );
 
 			// Write the log keys and version information
 			wr << (uint8_t)hashlittle(&v, sizeof(v), 0);
 			wr << bigEndian64(commitVersion);
 
+			MutationRef backupMutation;
 			backupMutation.type = MutationRef::SetValue;
-			partBuffer = NULL;
+			uint32_t* partBuffer = NULL;
 
-			val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
+			Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 			for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
@@ -852,7 +858,7 @@ ACTOR Future<Void> commitBatch(
 
 				// Define the mutation type and and location
 				backupMutation.param1 = wr.toValue();
-				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
+				ASSERT( backupMutation.param1.startsWith(logRangeMutation->first) );  // We are writing into the configured destination
 					
 				auto& tags = self->tagsForKey(backupMutation.param1);
 				toCommit.addTags(tags);
@@ -1040,7 +1046,9 @@ ACTOR Future<Void> commitBatch(
 ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
+	self->updateCommitRequests++;
 	wait(self->logSystem->confirmEpochLive(debugID));
+	self->updateCommitRequests--;
 	self->lastCommitLatency = now()-confirmStart;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
 	return Void();
@@ -1448,7 +1456,12 @@ ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future
 		if(elapsed < interval) {
 			wait( delay(interval + 0.0001 - elapsed) );
 		} else {
-			addActor.send(updateLastCommit(self));
+			if(self->updateCommitRequests < SERVER_KNOBS->MAX_COMMIT_UPDATES) {
+				addActor.send(updateLastCommit(self));
+			} else {
+				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TooManyLastCommitUpdates").suppressFor(1.0);
+				self->lastStartCommit = now();
+			}
 		}
 	}
 }

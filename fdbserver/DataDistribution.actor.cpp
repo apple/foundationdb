@@ -189,7 +189,7 @@ public:
 	int priority;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
-	  : servers(servers), healthy(true), priority(PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
+	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
 		if (servers.empty()) {
 			TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers");
 		}
@@ -2558,7 +2558,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		}
 
 		// To avoid removing machine teams too fast, which is unlikely happen though
-		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
+		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution) );
 
 		wait(waitUntilHealthy(self));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
@@ -2681,7 +2681,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			removeServerTeamDelay = removeServerTeamDelay / 100;
 		}
 		// To avoid removing server teams too fast, which is unlikely happen though
-		wait(delay(removeServerTeamDelay));
+		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
 		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between
@@ -2865,25 +2865,25 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				state int lastPriority = team->getPriority();
 				if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
-						team->setPriority( PRIORITY_TEAM_0_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
-						team->setPriority( PRIORITY_TEAM_1_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
-						team->setPriority( PRIORITY_TEAM_2_LEFT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_2_LEFT );
 					else
-						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 				}
 				else if ( badTeam || anyWrongConfiguration ) {
 					if ( redundantTeam ) {
-						team->setPriority( PRIORITY_TEAM_REDUNDANT );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT );
 					} else {
-						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 					}
 				}
 				else if( anyUndesired )
-					team->setPriority( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
+					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
 				else
-					team->setPriority( PRIORITY_TEAM_HEALTHY );
+					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_HEALTHY );
 
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;
@@ -2901,13 +2901,13 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 					for(int i=0; i<shards.size(); i++) {
 						int maxPriority = team->getPriority();
-						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
+						if(maxPriority < SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
-									maxPriority = PRIORITY_TEAM_0_LEFT;
+									maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
 									break;
 								}
 
@@ -2931,8 +2931,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										// false We want to differentiate the redundant_team from unhealthy_team in
 										// terms of relocate priority
 										maxPriority =
-										    std::max<int>(maxPriority, redundantTeam ? PRIORITY_TEAM_REDUNDANT
-										                                             : PRIORITY_TEAM_UNHEALTHY);
+										    std::max<int>(maxPriority, redundantTeam ? SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT
+										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
 									TEST(true); // A removed server is still associated with a team in SABTF
@@ -3064,7 +3064,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 }
 
 ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state bool isFetchingResults = false;
 	state Transaction tr(self->cx);
@@ -3102,7 +3102,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Vo
 					}
 
 					tr = Transaction(self->cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 				}
 				when( waitNext( serverRemoved ) ) {
 					if( isFetchingResults ) {
@@ -3136,7 +3136,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 					healthyZoneTimeout = Never();
 				} else if (p.second > tr.getReadVersion().get()) {
 					double timeoutSeconds = (p.second - tr.getReadVersion().get())/(double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-					healthyZoneTimeout = delay(timeoutSeconds);
+					healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
 					if(self->healthyZone.get() != p.first) {
 						TraceEvent("MaintenanceZoneStart", self->distributorId).detail("ZoneID", printable(p.first)).detail("EndVersion", p.second).detail("Duration", timeoutSeconds);
 						self->healthyZone.set(p.first);
@@ -3591,7 +3591,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 
 	loop {
 		try {
-			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY));
+			wait(delay(SERVER_KNOBS->DD_CHECK_INVALID_LOCALITY_DELAY, TaskPriority::DataDistribution));
 
 			// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 			// processId; This actor is inactive most time, so iterating all workers incurs little performance overhead.
@@ -3770,7 +3770,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 				}
 				when( wait( self->restartRecruiting.onTrigger() ) ) {}
 			}
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::DataDistribution) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				throw;
@@ -3830,7 +3830,7 @@ ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db 
 
 ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
 	loop choose {
-		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY) : Never()) ) {
+		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistribution) : Never()) ) {
 			self->doBuildTeams = true;
 			wait( DDTeamCollection::checkBuildTeams(self) );
 		}
@@ -4174,9 +4174,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					.detail( "InFlight", 0 )
 					.detail( "InQueue", 0 )
 					.detail( "AverageShardSize", -1 )
-					.detail( "LowPriorityRelocations", 0 )
-					.detail( "HighPriorityRelocations", 0 )
+					.detail( "UnhealthyRelocations", 0 )
 					.detail( "HighestPriority", 0 )
+					.detail( "BytesWritten", 0 )
+					.detail( "PriorityRecoverMove", 0 )
+					.detail( "PriorityRebalanceUnderutilizedTeam", 0 )
+					.detail( "PriorityRebalannceOverutilizedTeam", 0)
+					.detail( "PriorityTeamHealthy", 0 )
+					.detail( "PriorityTeamContainsUndesiredServer", 0 )
+					.detail( "PriorityTeamRedundant", 0 )
+					.detail( "PriorityMergeShard", 0 )
+					.detail( "PriorityTeamUnhealthy", 0 )
+					.detail( "PriorityTeam2Left", 0 )
+					.detail( "PriorityTeam1Left", 0 )
+					.detail( "PriorityTeam0Left", 0 )
+					.detail( "PrioritySplitShard", 0 )
 					.trackLatest( "MovingData" );
 
 				TraceEvent("TotalDataInFlight", self->ddId).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
@@ -4219,7 +4231,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
+					output.send( RelocateShard( keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE ) );
 				}
 				wait( yield(TaskPriority::DataDistribution) );
 			}
