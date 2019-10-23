@@ -1151,26 +1151,61 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx, JsonBuilder
 	return Void();
 }
 
+struct LogRangeAndUID {
+	KeyRange range;
+	UID destID;
+
+	LogRangeAndUID(KeyRange const& range, UID const& destID) : range(range), destID(destID) {}
+
+	bool operator < (LogRangeAndUID const& r) const { 
+		if(range.begin != r.range.begin) return range.begin < r.range.begin;
+		if(range.end != r.range.end) return range.end < r.range.end;
+		return destID < r.destID; 
+	}
+};
+
 ACTOR static Future<Void> logRangeWarningFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
 	try {
 		state Transaction tr(cx);
+		state Future<Void> timeoutFuture = timeoutError(Future<Void>(Never()), 5.0);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				Standalone<RangeResultRef> existingDestUidValues = wait(timeoutError(tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY), 5.0));
-				std::set<std::pair<Key,Key>> existingRanges;
-				for(auto it : existingDestUidValues) {
-					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
-					std::pair<Key,Key> rangePair = std::make_pair(range.begin,range.end);
-					if(existingRanges.count(rangePair)) {
-						messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
-						break;
-					}
-					existingRanges.insert(rangePair);
+				state Future<Standalone<RangeResultRef>> existingDestUidValues = tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
+				state Future<Standalone<RangeResultRef>> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				wait( (success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture );
+
+				std::set<LogRangeAndUID> loggingRanges;
+				for(auto& it : existingLogRanges.get()) {
+					Key logDestination;
+					UID logUid;
+					KeyRef logRangeBegin = logRangesDecodeKey(it.key, &logUid);
+					Key logRangeEnd = logRangesDecodeValue(it.value, &logDestination);
+					loggingRanges.insert(LogRangeAndUID(KeyRangeRef(logRangeBegin, logRangeEnd), logUid));
 				}
+
+				std::set<std::pair<Key,Key>> existingRanges;
+				for(auto& it : existingDestUidValues.get()) {
+					KeyRange range = BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+					UID logUid = BinaryReader::fromStringRef<UID>(it.value, Unversioned());
+					if(loggingRanges.count(LogRangeAndUID(range, logUid))) {
+						std::pair<Key,Key> rangePair = std::make_pair(range.begin,range.end);
+						if(existingRanges.count(rangePair)) {
+							messages->push_back(JsonString::makeMessage("duplicate_mutation_streams", format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`", printable(range.begin).c_str(), printable(range.end).c_str()).c_str()));
+							break;
+						}
+						existingRanges.insert(rangePair);
+					} else {
+						//This cleanup is done during status, because it should only be required once after upgrading to 6.2.7 or later.
+						//There is no other good location to detect that the metadata is mismatched.
+						TraceEvent(SevWarnAlways, "CleaningDestUidLookup").detail("K", it.key.printable()).detail("V", it.value.printable());
+						tr.clear(it.key);
+					}
+				}
+				wait(tr.commit() || timeoutFuture);
 				break;
 			} catch(Error &e) {
 				if(e.code() == error_code_timed_out) {
