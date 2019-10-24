@@ -221,9 +221,13 @@ struct StorageServerMetrics {
 			notifyMetrics.bytesPerKSecond = bandwidthSample.addAndExpire( key, metrics.bytesPerKSecond, expire ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		if (metrics.iosPerKSecond)
 			notifyMetrics.iosPerKSecond = iopsSample.addAndExpire( key, metrics.iosPerKSecond, expire ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-		if (metrics.bytesReadPerKSecond)
+		if (metrics.bytesReadPerKSecond) {
 			notifyMetrics.bytesReadPerKSecond = bytesReadSample.addAndExpire(key, metrics.bytesReadPerKSecond, expire) *
 			                                    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+			if (deterministicRandom()->random01() < 0.01) {
+				TraceEvent("BytesReadSampleCountX100").detail("SampleCount", bytesReadSample.queue.size());
+			}
+		}
 		if (!notifyMetrics.allZero()) {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
