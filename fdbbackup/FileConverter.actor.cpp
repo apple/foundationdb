@@ -63,9 +63,9 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 }
 
 void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
-	std::cout<< msg << " " << files.size() << " log files\n";
+	std::cout << msg << " " << files.size() << " log files\n";
 	for (const auto& file : files) {
-		std::cout<< file.toString() << "\n";
+		std::cout << file.toString() << "\n";
 	}
 	std::cout << std::endl;
 }
@@ -121,13 +121,13 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 	while (args->Next()) {
 		auto lastError = args->LastError();
 		switch (lastError) {
-			case SO_SUCCESS:
-				break;
+		case SO_SUCCESS:
+			break;
 
-			default:
-				fprintf(stderr, "ERROR: argument given for option `%s'\n", args->OptionText());
-				return FDB_EXIT_ERROR;
-				break;
+		default:
+			fprintf(stderr, "ERROR: argument given for option `%s'\n", args->OptionText());
+			return FDB_EXIT_ERROR;
+			break;
 		}
 
 		int optId = args->OptionId();
@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
 
 		auto f = stopAfter(test_container(param));
 		return status;
-	}	catch (Error& e) {
+	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		return FDB_EXIT_ERROR;
 	} catch (std::exception& e) {
