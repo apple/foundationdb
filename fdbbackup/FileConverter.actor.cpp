@@ -72,9 +72,12 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 
 struct ConvertParams {
 	std::string container_url;
-	Version begin, end;
-	std::string log_dir;
-	std::string trace_file;
+	Version begin = invalidVersion;
+	Version end = invalidVersion;
+	bool log_enabled = false;
+	std::string log_dir, trace_format, trace_log_group;
+
+	bool isValid() { return begin != invalidVersion && end != invalidVersion && !container_url.empty(); }
 
 	std::string toString() {
 		std::string s;
@@ -84,6 +87,17 @@ struct ConvertParams {
 		s.append(format("%" PRId64, begin));
 		s.append(" End:");
 		s.append(format("%" PRId64, end));
+		if (log_enabled) {
+			if (!log_dir.empty()) {
+				s.append(" LogDir:").append(log_dir);
+			}
+			if (!trace_format.empty()) {
+				s.append(" Format:").append(trace_format);
+			}
+			if (!trace_log_group.empty()) {
+				s.append(" LogGroup:").append(trace_log_group);
+			}
+		}
 		return s;
 	}
 };
@@ -93,6 +107,7 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 	state BackupFileList listing = wait(container->dumpFileList());
 	std::sort(listing.logs.begin(), listing.logs.end());
 	printLogFiles("Container has", listing.logs);
+	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
 	// state BackupDescription desc = wait(container->describeBackup());
 	// std::cout << "\n" << desc.toString() << "\n";
 
@@ -118,36 +133,49 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 		int optId = args->OptionId();
 		const char* arg = args->OptionArg();
 		switch (optId) {
-			case OPT_HELP:
+		case OPT_HELP:
+			printConvertUsage();
+			return FDB_EXIT_ERROR;
+
+		case OPT_BEGIN_VERSION:
+			if (!sscanf(arg, "%" SCNd64, &param->begin)) {
+				std::cerr << "ERROR: could not parse begin version " << arg << "\n";
 				printConvertUsage();
 				return FDB_EXIT_ERROR;
+			}
+			break;
 
-			case OPT_BEGIN_VERSION:
-				if (!sscanf(arg, "%" SCNd64, &param->begin)) {
-					std::cerr << "ERROR: could not parse begin version " << arg << "\n";
-					printConvertUsage();
-					return FDB_EXIT_ERROR;
-				}
-				break;
+		case OPT_END_VERSION:
+			if (!sscanf(arg, "%" SCNd64, &param->end)) {
+				std::cerr << "ERROR: could not parse end version " << arg << "\n";
+				printConvertUsage();
+				return FDB_EXIT_ERROR;
+			}
+			break;
 
-			case OPT_END_VERSION:
-				if (!sscanf(arg, "%" SCNd64, &param->end)) {
-					std::cerr << "ERROR: could not parse end version " << arg << "\n";
-					printConvertUsage();
-					return FDB_EXIT_ERROR;
-				}
-				break;
+		case OPT_CONTAINER:
+			param->container_url = args->OptionArg();
+			break;
 
-			case OPT_CONTAINER:
-				param->container_url = args->OptionArg();
-				break;
+		case OPT_TRACE:
+			param->log_enabled = true;
+			break;
 
-			case OPT_TRACE:
-			case OPT_TRACE_DIR:
-			case OPT_TRACE_FORMAT:
-			case OPT_TRACE_LOG_GROUP:
-				// TODO
-				break;
+		case OPT_TRACE_DIR:
+			param->log_dir = args->OptionArg();
+			break;
+
+		case OPT_TRACE_FORMAT:
+			if (!validateTraceFormat(args->OptionArg())) {
+				std::cerr << "ERROR: Unrecognized trace format " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
+			param->trace_format = args->OptionArg();
+			break;
+
+		case OPT_TRACE_LOG_GROUP:
+			param->trace_log_group = args->OptionArg();
+			break;
 		}
 	}
 	return FDB_EXIT_SUCCESS;
@@ -155,15 +183,28 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 
 int main(int argc, char** argv) {
 	try {
-		if (argc < 3) {
-			printConvertUsage();
-			return FDB_EXIT_ERROR;
-		}
 		CSimpleOpt* args = new CSimpleOpt(argc, argv, gConverterOptions, SO_O_EXACT);
 		ConvertParams param;
 		int status = parseCommandLine(&param, args);
 		std::cout << "Params: " << param.toString() << "\n";
-		if (status != FDB_EXIT_SUCCESS) return status;
+		if (status != FDB_EXIT_SUCCESS || !param.isValid()) {
+			printConvertUsage();
+			return status;
+		}
+
+		if (param.log_enabled) {
+			if (param.log_dir.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
+			} else {
+				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(param.log_dir));
+			}
+			if (!param.trace_format.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param.trace_format));
+			}
+			if (!param.trace_log_group.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
+			}
+		}
 
 		platformInit();
 		Error::init();
@@ -177,7 +218,7 @@ int main(int argc, char** argv) {
 		}
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, "", "convert");
+		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "convert", param.trace_log_group);
 
 		auto f = stopAfter(test_container(param));
 		return status;
