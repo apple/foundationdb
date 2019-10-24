@@ -129,7 +129,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
 	bool buggifySmallReadBandwidth = randomize && BUGGIFY;
-	init( SHARD_MAX_BYTES_READ_PER_KSEC,            3LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
+	init( SHARD_MAX_BYTES_READ_PER_KSEC,            8LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
 	/* 8*1MB/sec * 1000sec/ksec
 		Shards with more than this read bandwidth will be considered as a read cache candidate
 	*/
