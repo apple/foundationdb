@@ -123,6 +123,24 @@ struct AtomicOpsWorkload : TestWorkload {
 	Key logKey( int group ) { return StringRef(format("log%08x%08x%08x",group,clientId,opNum++));}
 
 	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
+		// Sanity check if log keyspace has elements
+		state ReadYourWritesTransaction tr1(cx);
+		loop {
+			try {
+				Key begin(std::string("log"));
+				Standalone<RangeResultRef> log = wait( tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+				if (!log.empty()) {
+					TraceEvent(SevError, "AtomicOpSetup").detail("LogKeySpace", "Not empty").detail("Result", log.toString());
+					for(auto& kv : log) {
+						TraceEvent(SevWarn, "AtomicOpSetup").detail("K", kv.key.toString()).detail("V", kv.value.toString());
+					}
+				}
+				break;
+			} catch( Error &e ) {
+				wait( tr1.onError(e) );
+			}
+		}
+
 		state int g = 0;
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
@@ -168,7 +186,6 @@ struct AtomicOpsWorkload : TestWorkload {
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
-					// self->opNum--;
 				}
 			}
 		}
