@@ -102,12 +102,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-		for(int c=0; c<actorCount; c++) {
+		for (int c = 0; c < actorCount; c++) {
 			clients.push_back(
-			timeout(
-				atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+			    timeout(atomicOpWorker(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
 		}
-		
+
 		return delay(testDuration);
 	}
 
@@ -128,16 +127,21 @@ struct AtomicOpsWorkload : TestWorkload {
 		loop {
 			try {
 				Key begin(std::string("log"));
-				Standalone<RangeResultRef> log = wait( tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+				Standalone<RangeResultRef> log =
+				    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 				if (!log.empty()) {
-					TraceEvent(SevError, "AtomicOpSetup").detail("LogKeySpace", "Not empty").detail("Result", log.toString());
-					for(auto& kv : log) {
-						TraceEvent(SevWarn, "AtomicOpSetup").detail("K", kv.key.toString()).detail("V", kv.value.toString());
+					TraceEvent(SevError, "AtomicOpSetup")
+					    .detail("LogKeySpace", "Not empty")
+					    .detail("Result", log.toString());
+					for (auto& kv : log) {
+						TraceEvent(SevWarn, "AtomicOpSetup")
+						    .detail("K", kv.key.toString())
+						    .detail("V", kv.value.toString());
 					}
 				}
 				break;
-			} catch( Error &e ) {
-				wait( tr1.onError(e) );
+			} catch (Error& e) {
+				wait(tr1.onError(e));
 			}
 		}
 

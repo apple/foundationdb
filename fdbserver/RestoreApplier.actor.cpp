@@ -220,7 +220,8 @@ struct DBApplyProgress {
 	}
 
 	bool shouldCommit() {
-		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold || curItInCurTxn == self->kvOps.end()));
+		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold ||
+		                             curItInCurTxn == self->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -320,8 +321,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					    .detail("Version", progress.curItInCurTxn->first)
 					    .detail("Index", progress.curIndexInCurTxn)
 					    .detail("Mutation", m.toString())
-						.detail("MutationSize", m.expectedSize())
-						.detail("TxnSize", progress.transactionSize);
+					    .detail("MutationSize", m.expectedSize())
+					    .detail("TxnSize", progress.transactionSize);
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
