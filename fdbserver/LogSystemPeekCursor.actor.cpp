@@ -991,8 +991,16 @@ void ILogSystem::BufferedCursor::advanceTo(LogMessageVersion n) {
 }
 
 ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, TaskPriority taskID ) {
+	if(cursor->version().version >= maxVersion) {
+		return Void();
+	}
 	loop {
 		wait(yield());
+		wait(cursor->getMore(taskID));
+		self->poppedVersion = std::max(self->poppedVersion, cursor->popped());
+		if(self->canDiscardPopped) {
+			self->initialPoppedVersion = std::max(self->initialPoppedVersion, cursor->popped());
+		}
 		if(cursor->version().version >= maxVersion) {
 			return Void();
 		}
@@ -1002,11 +1010,6 @@ ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Refe
 			if(cursor->version().version >= maxVersion) {
 				return Void();
 			}
-		}
-		wait(cursor->getMore(taskID));
-		self->poppedVersion = std::max(self->poppedVersion, cursor->popped());
-		if(self->canDiscardPopped) {
-			self->initialPoppedVersion = std::max(self->initialPoppedVersion, cursor->popped());
 		}
 	}
 }
