@@ -17,8 +17,6 @@
 #include <limits.h>
 #endif
 
-#define DEFAULT_RETRY_COUNT 3
-
 #define VERBOSE_NONE 0
 #define VERBOSE_DEFAULT 1
 #define VERBOSE_ANNOYING 2
@@ -29,9 +27,11 @@
 #define MODE_BUILD 1
 #define MODE_RUN 2
 
-/* we set mako_txn_t and mako_args_t only once in the master process,
- * and won't be touched by child processes.
- */
+#define FDB_SUCCESS 0
+#define FDB_ERROR_RETRY -1
+#define FDB_ERROR_ABORT -2
+#define FDB_ERROR_CONFLICT -3
+
 
 /* transaction specification */
 enum Operations {
@@ -55,7 +55,7 @@ enum Operations {
 #define OP_RANGE 1
 #define OP_REVERSE 2
 
-/* for arguments */
+/* for long arguments */
 enum Arguments {
   ARG_KEYLEN,
   ARG_VALLEN,
@@ -82,6 +82,10 @@ enum TPSChangeTypes {
 #define KEYPREFIX "mako"
 #define KEYPREFIXLEN 4
 
+/* we set mako_txnspec_t and mako_args_t only once in the master process,
+ * and won't be touched by child processes.
+ */
+
 typedef struct {
   /* for each operation, it stores "count", "range" and "reverse" */
   int ops[MAX_OP][3];
@@ -91,6 +95,7 @@ typedef struct {
 
 /* benchmark parameters */
 typedef struct {
+  int api_version;
   int json;
   int num_processes;
   int num_threads;
