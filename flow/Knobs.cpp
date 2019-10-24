@@ -88,7 +88,6 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
 	init( EIO_USE_ODIRECT,                                      0  );
-	init( DISABLE_ODIRECT,                                      0  );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
