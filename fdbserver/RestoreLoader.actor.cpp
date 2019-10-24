@@ -39,8 +39,8 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 void _parseSerializedMutation(VersionedMutationsMap* kvOps, SerializedMutationListMap* mutationMap,
                               bool isSampling = false);
 
-void handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self);
-void handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req,
+void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
+void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
                                            Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self,
                                          bool isSampling = false);
@@ -110,7 +110,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 }
 
 // Assume: Only update the local data if it (applierInterf) has not been set
-void handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self) {
+void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
 	TraceEvent("FastRestore").detail("HandleRestoreSysInfoRequest", self->id());
 	ASSERT(self.isValid());
 
@@ -126,7 +126,7 @@ void handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoa
 	return;
 }
 
-void handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req,
+void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
                                            Reference<RestoreLoaderData> self) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
 	if (self->rangeToApplier.empty()) {

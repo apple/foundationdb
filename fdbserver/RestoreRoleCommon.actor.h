@@ -55,7 +55,7 @@ typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutations
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
