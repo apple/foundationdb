@@ -29,7 +29,10 @@
 #define MODE_BUILD 1
 #define MODE_RUN 2
 
-#define FDB_ERROR_DONT_RETRY -1
+#define FDB_SUCCESS 0
+#define FDB_FAILURE -1
+#define FDB_ABORT -2
+#define FDB_CONFLICT -3
 
 /* we set mako_txn_t and mako_args_t only once in the master process,
  * and won't be touched by child processes.
@@ -57,7 +60,7 @@ enum Operations {
 #define OP_RANGE 1
 #define OP_REVERSE 2
 
-/* for arguments */
+/* for long arguments */
 enum Arguments {
   ARG_KEYLEN,
   ARG_VALLEN,
@@ -93,6 +96,7 @@ typedef struct {
 
 /* benchmark parameters */
 typedef struct {
+  int api_version;
   int json;
   int num_processes;
   int num_threads;
