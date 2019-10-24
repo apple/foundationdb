@@ -85,6 +85,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
 
+	//AsyncFileEIO
+	init( EIO_MAX_PARALLELISM,                                  4  );
+	init( EIO_USE_ODIRECT,                                      0  );
+
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
