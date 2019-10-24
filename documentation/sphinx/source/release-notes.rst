@@ -60,6 +60,7 @@ Fixes
 * Don't track batch priority GRV requests in latency bands. [6.2.7] `(PR #2279) <https://github.com/apple/foundationdb/pull/2279>`_.
 * Transaction log processes used twice their normal memory when switching spill types. [6.2.7] `(PR #2256) <https://github.com/apple/foundationdb/pull/2256>`_.
 * Under certain conditions, cross region replication could stall for 10 minute periods. [6.2.7] `(PR #1818) <https://github.com/apple/foundationdb/pull/1818>`_ `(PR #2276) <https://github.com/apple/foundationdb/pull/2276>`_.
+* When dropping a remote region from the configuration after processes in the region have failed, data distribution would create teams from the dead servers for one minute. [6.2.7] `(PR #2286) <https://github.com/apple/foundationdb/pull/1818>`_.
 
 Status
 ------
