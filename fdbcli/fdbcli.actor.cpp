@@ -2017,7 +2017,7 @@ ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 		}
 	}
 	if (all) {
-		std::vector<AddressExclusion()> includeAll;
+		std::vector<AddressExclusion> includeAll;
 		includeAll.push_back(AddressExclusion());
 		wait(makeInterruptable(includeServers(db, includeAll, failed)));
 	} else {
