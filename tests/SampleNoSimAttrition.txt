@@ -5,15 +5,15 @@ testTitle=Temp
     expectedRate=0
 
     testName=Attrition
-	killDc=true
-	targetId=2
+    killDc=true
+    targetId=2
     reboot=true
     testDuration=10.0
-	suspendDuration=5.0
+    suspendDuration=5.0
 
-	testName=Attrition
-	killMachine=true
-	targetId=1
+    testName=Attrition
+    killMachine=true
+    targetId=1
     reboot=true
     testDuration=10.0
-	suspendDuration=2.0
+    suspendDuration=2.0
