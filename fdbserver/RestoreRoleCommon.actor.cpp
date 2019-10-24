@@ -55,7 +55,7 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
-void handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
 	self->resetPerVersionBatch();
 	TraceEvent("FastRestore")
 	    .detail("InitVersionBatch", req.batchID)
