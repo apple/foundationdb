@@ -54,7 +54,7 @@ struct RestoreSimpleRequest;
 typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutationsMap;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
+void handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.

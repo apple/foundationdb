@@ -56,7 +56,7 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 	return;
 }
 
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+void handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	self->resetPerVersionBatch();
 	TraceEvent("FastRestore")
 	    .detail("InitVersionBatch", req.batchID)
@@ -64,7 +64,7 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return Void();
+	return;
 }
 
 //-------Helper functions

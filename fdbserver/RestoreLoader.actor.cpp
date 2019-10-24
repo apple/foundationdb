@@ -86,7 +86,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					actors.add(handleInitVersionBatchRequest(req, self));
+					handleInitVersionBatchRequest(req, self);
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -133,7 +133,6 @@ void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVector
 		self->rangeToApplier = req.rangeToApplier;
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
-
 	return;
 }
 

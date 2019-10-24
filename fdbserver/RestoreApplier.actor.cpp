@@ -65,7 +65,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					actors.add(handleInitVersionBatchRequest(req, self));
+					handleInitVersionBatchRequest(req, self);
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
