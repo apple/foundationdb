@@ -123,7 +123,6 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 	self->appliersInterf = req.sysInfo.appliers;
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return;
 }
 
 void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
@@ -133,7 +132,6 @@ void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVector
 		self->rangeToApplier = req.rangeToApplier;
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
-	return;
 }
 
 ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoaderData> self) {
@@ -345,8 +343,6 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 		mvector.push_back_deep(mvector_arena, curm);
 		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
 	}
-
-	return;
 }
 
 // key_input format:

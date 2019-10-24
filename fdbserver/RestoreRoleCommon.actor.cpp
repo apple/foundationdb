@@ -53,7 +53,6 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return;
 }
 
 void handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
@@ -64,7 +63,6 @@ void handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<Res
 	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return;
 }
 
 //-------Helper functions
