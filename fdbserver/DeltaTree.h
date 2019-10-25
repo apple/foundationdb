@@ -1,5 +1,5 @@
 /*
- * MutablePrefixTree.h
+ * DeltaTree.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,11 +20,11 @@
 
 #pragma once
 
+#include "fdbserver/PrefixTree.h"
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/PrefixTree.h"
 #include <string.h>
 
 // Delta Tree is a memory mappable binary tree of T objects such that each node's item is
@@ -209,7 +209,7 @@ public:
 		}
 	};
 
-	// Cursor provides a way to seek into a PrefixTree and iterate over its contents
+	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
 	// All Cursors from a Reader share the same decoded node 'cache' (tree of DecodedNodes)
 	struct Cursor {
 		Cursor() : reader(nullptr), node(nullptr) {
@@ -342,7 +342,7 @@ public:
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
-			nodeBytes = build(root(), begin, end, prev, next);
+			nodeBytes = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
 		}
 		else {
 			nodeBytes = 0;
@@ -351,7 +351,7 @@ public:
 	}
 
 private:
-	static OffsetT build(Node &root, const T *begin, const T *end, const T *prev, const T *next) {
+	static OffsetT build(Node &root, const T *begin, const T *end, const T *prev, const T *next, int subtreeCommon) {
 		//printf("build: %s to %s\n", begin->toString().c_str(), (end - 1)->toString().c_str());
 		//printf("build: root at %p  sizeof(Node) %d  delta at %p  \n", &root, sizeof(Node), &root.delta());
 		ASSERT(end != begin);
@@ -361,12 +361,8 @@ private:
 		int mid = perfectSubtreeSplitPointCached(count);
 		const T &item = begin[mid];
 
-		// Get the common prefix length between next and prev
-		// Since mid is between them, we can skip that length to determine the common prefix length
-		// between mid and prev and between mid and next.
-		int nextPrevCommon = prev->getCommonPrefixLen(*next, 0);
-		int commonWithPrev = item.getCommonPrefixLen(*prev, nextPrevCommon);
-		int commonWithNext = item.getCommonPrefixLen(*next, nextPrevCommon);
+		int commonWithPrev = item.getCommonPrefixLen(*prev, subtreeCommon);
+		int commonWithNext = item.getCommonPrefixLen(*next, subtreeCommon);
 
 		bool prefixSourcePrev;
 		int commonPrefix;
@@ -391,7 +387,7 @@ private:
 
 		// Serialize left child
 		if(count > 1) {
-			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item);
+			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item, commonWithPrev);
 			root.leftChildOffset = deltaSize;
 		}
 		else {
@@ -401,7 +397,7 @@ private:
 		// Serialize right child
 		if(count > 2) {
 			root.rightChildOffset = wptr - (uint8_t *)&root.delta();
-			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next);
+			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next, commonWithNext);
 		}
 		else {
 			root.rightChildOffset = 0;

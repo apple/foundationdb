@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.2.6
+6.2.7
 =====
 
 Performance
@@ -39,7 +39,6 @@ Fixes
 * File descriptors opened by clients and servers set close-on-exec, if available on the platform. `(PR #1581) <https://github.com/apple/foundationdb/pull/1581>`_.
 * ``fdbrestore`` commands other than ``start`` required a default cluster file to be found but did not actually use it. `(PR #1912) <https://github.com/apple/foundationdb/pull/1912>`_.
 * Unneeded network connections were not being closed because peer reference counts were handled improperly. `(PR #1768) <https://github.com/apple/foundationdb/pull/1768>`_.
-* Under certain conditions, cross region replication could stall for 10 minute periods. `(PR #1818) <https://github.com/apple/foundationdb/pull/1818>`_.
 * In very rare scenarios, master recovery would restart because system metadata was loaded incorrectly. `(PR #1919) <https://github.com/apple/foundationdb/pull/1919>`_.
 * Ratekeeper will aggressively throttle when unable to fetch the list of storage servers for a considerable period of time. `(PR #1858) <https://github.com/apple/foundationdb/pull/1858>`_.
 * Proxies could become overloaded when all storage servers on a team fail. [6.2.1] `(PR #1976) <https://github.com/apple/foundationdb/pull/1976>`_.
@@ -58,6 +57,10 @@ Fixes
 * Committing transactions larger than 1 MB could cause the proxy to stall for up to a second. [6.2.6] `(PR #2250) <https://github.com/apple/foundationdb/pull/2250>`_.
 * The cluster controller could become saturated in clusters with large numbers of connected clients using TLS. [6.2.6] `(PR #2252) <https://github.com/apple/foundationdb/pull/2252>`_.
 * Backup and DR would not share a mutation stream if they were started on different versions of FoundationDB. Either backup or DR must be restarted to resolve this issue. [6.2.6] `(PR #2202) <https://github.com/apple/foundationdb/pull/2202>`_.
+* Don't track batch priority GRV requests in latency bands. [6.2.7] `(PR #2279) <https://github.com/apple/foundationdb/pull/2279>`_.
+* Transaction log processes used twice their normal memory when switching spill types. [6.2.7] `(PR #2256) <https://github.com/apple/foundationdb/pull/2256>`_.
+* Under certain conditions, cross region replication could stall for 10 minute periods. [6.2.7] `(PR #1818) <https://github.com/apple/foundationdb/pull/1818>`_ `(PR #2276) <https://github.com/apple/foundationdb/pull/2276>`_.
+* When dropping a remote region from the configuration after processes in the region have failed, data distribution would create teams from the dead servers for one minute. [6.2.7] `(PR #2286) <https://github.com/apple/foundationdb/pull/1818>`_.
 
 Status
 ------
@@ -134,6 +137,7 @@ Fixes only impacting 6.2.0+
 * A storage server could crash if it took longer than 10 minutes to fetch a key range from another server. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 * Excluding or including servers would restart the data distributor. [6.2.5] `(PR #2170) <https://github.com/apple/foundationdb/pull/2170>`_.
 * The data distributor could read invalid memory when estimating database size. [6.2.6] `(PR #2225) <https://github.com/apple/foundationdb/pull/2225>`_.
+* Status could incorrectly report that backup and DR were not sharing a mutation stream. [6.2.7] `(PR #2274) <https://github.com/apple/foundationdb/pull/2274>`_.
 
 Earlier release notes
 ---------------------
