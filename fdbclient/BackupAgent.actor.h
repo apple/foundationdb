@@ -848,5 +848,38 @@ ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, St
                                   bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
                                   Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
 
+// Helper class for reading restore data from a buffer and throwing the right errors.
+struct StringRefReader {
+	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
+
+	// Return remainder of data as a StringRef
+	StringRef remainder() { return StringRef(rptr, end - rptr); }
+
+	// Return a pointer to len bytes at the current read position and advance read pos
+	const uint8_t* consume(unsigned int len) {
+		if (rptr == end && len != 0) throw end_of_stream();
+		const uint8_t* p = rptr;
+		rptr += len;
+		if (rptr > end) throw failure_error;
+		return p;
+	}
+
+	// Return a T from the current read position and advance read pos
+	template <typename T>
+	const T consume() {
+		return *(const T*)consume(sizeof(T));
+	}
+
+	// Functions for consuming big endian (network byte order) integers.
+	// Consumes a big endian number, swaps it to little endian, and returns it.
+	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+
+	bool eof() { return rptr == end; }
+
+	const uint8_t *rptr, *end;
+	Error failure_error;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

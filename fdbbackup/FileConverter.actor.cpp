@@ -26,9 +26,11 @@
 #include <cstdio>
 #include <vector>
 
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbrpc/simulator.h"
 #include "flow/flow.h"
+#include "flow/serialize.h"
 
 void printConvertUsage() {
 	printf("\n");
@@ -102,17 +104,74 @@ struct ConvertParams {
 	}
 };
 
+ACTOR Future<std::vector<Reference<IAsyncFile>>> openLogFiles(Reference<IBackupContainer> container,
+                                                              std::vector<LogFile> files) {
+	state std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
+	for (const auto& file : files) {
+		asyncFiles.push_back(container->readFile(file.fileName));
+	}
+
+	wait(waitForAll(asyncFiles));
+
+	std::vector<Reference<IAsyncFile>> results;
+	for (const auto& file : asyncFiles) {
+		results.push_back(file.get());
+	}
+	return results;
+}
+
+ACTOR Future<Void> decodeLogFile(Reference<IAsyncFile> file, int64_t fileSize) {
+	state int len = (1 << 20);
+	state int offset = 0;
+	state Standalone<StringRef> buf = makeString(len);
+	int rLen = wait(file->read(mutateString(buf), len, offset));
+
+	StringRef block(buf.begin(), rLen);
+	state StringRefReader reader(block, restore_corrupted_data());
+
+	try {
+		while (1) {
+			// If eof reached or first key len bytes is 0xFF then end of block was reached.
+			if (reader.eof() || *reader.rptr == 0xFF) break;
+
+			// Deserialize messages written in saveMutationsToFile().
+			Version version = reader.consume<Version>();
+			uint32_t sub = reader.consume<uint32_t>();
+			int msgSize = reader.consume<int>();
+			const uint8_t* message = reader.consume(msgSize);
+
+			BinaryReader rd(message, msgSize, AssumeVersion(currentProtocolVersion));
+			MutationRef m;
+			rd >> m;
+			std::cout << version << ":" << sub << " m = " << m.toString() << "\n";
+		}
+
+		return Void();
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "FileConvertCorruptLogFileBlock")
+		    .error(e)
+		    .detail("Filename", file->getFilename())
+		    .detail("BlockOffset", offset)
+		    .detail("BlockLen", len)
+		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
+		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		throw;
+	}
+}
+
 ACTOR Future<Void> test_container(ConvertParams params) {
 	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
 	state BackupFileList listing = wait(container->dumpFileList());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	printLogFiles("Container has", listing.logs);
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
 	// state BackupDescription desc = wait(container->describeBackup());
 	// std::cout << "\n" << desc.toString() << "\n";
 
 	std::vector<LogFile> v1 = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", v1);
+
+	std::vector<Reference<IAsyncFile>> files = wait(openLogFiles(container, v1));
+	wait(decodeLogFile(files[0], listing.logs[0].fileSize));
 
 	return Void();
 }
@@ -210,17 +269,14 @@ int main(int argc, char** argv) {
 		Error::init();
 
 		StringRef url(param.container_url);
-		if (url.startsWith(LiteralStringRef("file://"))) {
-			// For container starts with "file://", create a simulated network.
-			startNewSimulator();
-		} else {
-			setupNetwork(0, true);
-		}
+		setupNetwork(0, true);
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "convert", param.trace_log_group);
 
 		auto f = stopAfter(test_container(param));
+
+		runNetwork();
 		return status;
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s\n", e.what());

@@ -166,17 +166,17 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	    wait(self->container->writeTaggedLogFile(self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
 	state int idx = 0;
 	for (; idx < numMsg; idx++) {
-		// TODO: Endianness for version.version & version.sub
+		// TODO: Endianness for version.version, version.sub, and msgSize
 		if (!isBackupMessage(self->messages[idx])) continue;
 		wait(logFile->append((void*)&self->messages[idx].version.version, sizeof(Version)));
-		wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(int32_t)));
-		wait(logFile->append(self->messages[idx].message.begin(), self->messages[idx].message.size()));
+		wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(uint32_t)));
+		state int msgSize = self->messages[idx].message.size();
+		wait(logFile->append((void*)&msgSize, sizeof(msgSize)));
+		wait(logFile->append(self->messages[idx].message.begin(), msgSize));
 	}
 
 	self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 	wait(logFile->finish());
-	// TODO: save this somewhere with tag info.
-	// std::string logFilename = logFile->getFileName();
 	return Void();
 }
 

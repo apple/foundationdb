@@ -34,7 +34,6 @@ enum {
 	OPT_TRACE_FORMAT,
 	OPT_TRACE_LOG_GROUP,
 	OPT_HELP
-
 };
 
 CSimpleOpt::SOption gConverterOptions[] = {
@@ -53,7 +52,5 @@ CSimpleOpt::SOption gConverterOptions[] = {
 	{ OPT_HELP,            "--help",         SO_NONE },
 	SO_END_OF_OPTIONS
 };
-
-void printConvertUsage();
 
 #endif  // FDBBACKUP_FILECONVERTER_H
