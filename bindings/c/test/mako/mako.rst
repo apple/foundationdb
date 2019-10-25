@@ -38,6 +38,9 @@ Arguments
   | - ``build``:  Populate data
   | - ``run``:  Run the benchmark
 
+- | ``-a | --api_version <api_version>``
+  | FDB API version to use (Default: Latest)
+
 - | ``-c | --cluster <cluster file>``
   | FDB cluster file (Required)
 
@@ -48,7 +51,7 @@ Arguments
   | Number of threads per worker process (Default: 1)
 
 - | ``-r | --rows <rows>``
-  | Number of rows populated (Default: 10000)
+  | Number of rows populated (Default: 100000)
 
 - | ``-s | --seconds <seconds>``
   | Test duration in seconds (Default: 30)
@@ -58,12 +61,23 @@ Arguments
   | Specify the number of operations to be executed.
   | This option cannot be set with ``--seconds``.
 
-- | ``--tps <tps>``
-  | Target total transaction-per-second (TPS) of all worker processes/threads
+- | ``--tps|--tpsmax <tps>``
+  | Target total transaction-per-second (TPS) of all worker processes/threads.
+  | When --tpsmin is also specified, this defines the upper-bound TPS.
   | (Default: Unset / Unthrottled)
 
+- | ``--tpsmin <tps>``
+  | Target total lower-bound TPS of all worker processes/threads
+  | (Default: Unset / Unthrottled)
+
+- | ``--tpsinterval <seconds>``
+  | Time period TPS oscillates between --tpsmax and --tpsmin (Default: 10)
+
+- | ``--tpschange <sin|square|pulse>``
+  | Shape of the TPS change (Default: sin)
+
 - | ``--keylen <num>``
-  | Key string length in bytes (Default and Minimum: 16)
+  | Key string length in bytes (Default and Minimum: 32)
 
 - | ``--vallen <num>``
   | Value string length in bytes (Default and Minimum: 16)
@@ -75,22 +89,19 @@ Arguments
   | Generate a skewed workload based on Zipf distribution (Default: Unset = Uniform)
 
 - | ``--sampling <num>``
-  | Sampling rate (1 sample / <num> ops) for latency stats
+  | Sampling rate (1 sample / <num> ops) for latency stats (Default: 1000)
 
 - | ``--trace``
-  | Enable tracing.  The trace file will be created in the current directory.
+  | Enable tracing.  The trace file will be created in the current directory.  (Default: Unset)
 
 - | ``--tracepath <path>``
   | Enable tracing and set the trace file path.
 
 - | ``--knobs <knobs>``
-  | Set client knobs
-
-- | ``--flatbuffers``
-  | Enable flatbuffers
+  | Set client knobs (comma-separated)
 
 - | ``--commitget``
-  | Force commit for read-only transactions
+  | Force commit for read-only transactions (Default: Unset)
 
 - | ``-v | --verbose <level>``
   | Set verbose level (Default: 1)
