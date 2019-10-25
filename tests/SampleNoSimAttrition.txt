@@ -1,0 +1,19 @@
+testTitle=Temp
+    testName=Cycle
+    transactionsPerSecond=2500.0
+    testDuration=10.0
+    expectedRate=0
+
+    testName=Attrition
+    killDc=true
+    targetId=2
+    reboot=true
+    testDuration=10.0
+    suspendDuration=5.0
+
+    testName=Attrition
+    killMachine=true
+    targetId=1
+    reboot=true
+    testDuration=10.0
+    suspendDuration=2.0

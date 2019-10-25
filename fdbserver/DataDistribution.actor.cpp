@@ -5002,7 +5002,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state int teamSize = 3;
-	state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
 	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);

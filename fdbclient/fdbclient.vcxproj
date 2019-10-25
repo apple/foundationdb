@@ -89,6 +89,9 @@
     <ClInclude Include="StorageServerInterface.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="SystemData.h" />
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+        <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="TaskBucket.h" />
     <ClInclude Include="ThreadSafeTransaction.h" />
     <ClInclude Include="Tuple.h" />

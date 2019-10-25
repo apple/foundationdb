@@ -3502,7 +3502,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Data distribution is turned off.\n");
 						} else if (tokencmp(tokens[1], "disable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
+								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
 								printf("Data distribution is disabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
@@ -3514,7 +3514,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						} else if (tokencmp(tokens[1], "enable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(clearHealthyZone(db, false, true)));
+								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
 								printf("Data distribution is enabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));

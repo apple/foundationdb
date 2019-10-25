@@ -1,5 +1,5 @@
 /*
- * RestoreWorkerInterface.h
+ * RestoreWorkerInterface.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,8 +22,11 @@
 // which are RestoreMaster, RestoreLoader, and RestoreApplier
 
 #pragma once
-#ifndef FDBSERVER_RESTORE_WORKER_INTERFACE_H
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
+	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H
+	#include "fdbclient/RestoreWorkerInterface.actor.g.h"
+#elif !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H)
+	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include "flow/Stats.h"
@@ -35,6 +38,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class RestoreConfigFR;
 
@@ -467,7 +471,8 @@ struct RestoreRequest {
 std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
-Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
-Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
+ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality);
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality);
 
+#include "flow/unactorcompiler.h"
 #endif

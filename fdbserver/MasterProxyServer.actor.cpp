@@ -236,6 +236,7 @@ struct ProxyCommitData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
@@ -1052,7 +1053,9 @@ ACTOR Future<Void> commitBatch(
 ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
+	self->updateCommitRequests++;
 	wait(self->logSystem->confirmEpochLive(debugID));
+	self->updateCommitRequests--;
 	self->lastCommitLatency = now()-confirmStart;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
 	return Void();
@@ -1135,7 +1138,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
-		stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		}
 		request.reply.send(reply);
 	}
 
@@ -1460,7 +1465,12 @@ ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future
 		if(elapsed < interval) {
 			wait( delay(interval + 0.0001 - elapsed) );
 		} else {
-			addActor.send(updateLastCommit(self));
+			if(self->updateCommitRequests < SERVER_KNOBS->MAX_COMMIT_UPDATES) {
+				addActor.send(updateLastCommit(self));
+			} else {
+				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TooManyLastCommitUpdates").suppressFor(1.0);
+				self->lastStartCommit = now();
+			}
 		}
 	}
 }

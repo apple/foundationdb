@@ -92,7 +92,8 @@ target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS}
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
 endif()
-if(NOT WITH_TLS)
+# TODO(atn34) Re-enable TLS for OPEN_FOR_IDE build once #2201 is resolved
+if(NOT WITH_TLS OR OPEN_FOR_IDE)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
   target_link_libraries(flow PUBLIC FDBLibTLS)

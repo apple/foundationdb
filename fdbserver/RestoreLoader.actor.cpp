@@ -39,9 +39,9 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 void _parseSerializedMutation(VersionedMutationsMap* kvOps, SerializedMutationListMap* mutationMap,
                               bool isSampling = false);
 
-ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self);
-ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req,
-                                                         Reference<RestoreLoaderData> self);
+void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
+void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
+                                           Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self,
                                          bool isSampling = false);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
@@ -72,12 +72,12 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreSysInfoRequest req = waitNext(loaderInterf.updateRestoreSysInfo.getFuture())) {
 					requestTypeStr = "updateRestoreSysInfo";
-					actors.add(handleRestoreSysInfoRequest(req, self));
+					handleRestoreSysInfoRequest(req, self);
 				}
 				when(RestoreSetApplierKeyRangeVectorRequest req =
 				         waitNext(loaderInterf.setApplierKeyRangeVectorRequest.getFuture())) {
 					requestTypeStr = "setApplierKeyRangeVectorRequest";
-					actors.add(handleSetApplierKeyRangeVectorRequest(req, self));
+					handleSetApplierKeyRangeVectorRequest(req, self);
 				}
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
@@ -86,11 +86,12 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					actors.add(handleInitVersionBatchRequest(req, self));
+					handleInitVersionBatchRequest(req, self);
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
-					exitRole = handleFinishRestoreRequest(req, self);
+					handleFinishRestoreRequest(req, self);
+					exitRole = Void();
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
@@ -109,31 +110,28 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 }
 
 // Assume: Only update the local data if it (applierInterf) has not been set
-ACTOR Future<Void> handleRestoreSysInfoRequest(RestoreSysInfoRequest req, Reference<RestoreLoaderData> self) {
+void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
 	TraceEvent("FastRestore").detail("HandleRestoreSysInfoRequest", self->id());
 	ASSERT(self.isValid());
 
 	// The loader has received the appliers interfaces
 	if (!self->appliersInterf.empty()) {
 		req.reply.send(RestoreCommonReply(self->id()));
-		return Void();
+		return;
 	}
 
 	self->appliersInterf = req.sysInfo.appliers;
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return Void();
 }
 
-ACTOR Future<Void> handleSetApplierKeyRangeVectorRequest(RestoreSetApplierKeyRangeVectorRequest req,
-                                                         Reference<RestoreLoaderData> self) {
+void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
+                                           Reference<RestoreLoaderData> self) {
 	// Idempodent operation. OK to re-execute the duplicate cmd
 	if (self->rangeToApplier.empty()) {
 		self->rangeToApplier = req.rangeToApplier;
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
-
-	return Void();
 }
 
 ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoaderData> self) {
@@ -345,8 +343,6 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 		mvector.push_back_deep(mvector_arena, curm);
 		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
 	}
-
-	return;
 }
 
 // key_input format:
