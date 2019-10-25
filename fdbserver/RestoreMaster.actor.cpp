@@ -193,7 +193,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			RestoreRequest& request = restoreRequests[restoreIndex];
 			TraceEvent("FastRestore").detail("RestoreRequestInfo", request.toString());
-			Version ver = wait(processRestoreRequest(self, cx, request));
+			wait(success(processRestoreRequest(self, cx, request)));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "FastRestoreFailed").detail("RestoreRequest", restoreRequests[restoreIndex].toString());
