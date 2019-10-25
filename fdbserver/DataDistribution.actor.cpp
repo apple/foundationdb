@@ -2839,6 +2839,70 @@ bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team
 	return false;
 }
 
+void teamTrackerSendRelocateShards(DDTeamCollection* self, Reference<TCTeamInfo> team, bool redundantTeam,
+                                   bool containsFailed, int serversLeft) {
+	vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
+	    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
+	for (int i = 0; i < shards.size(); i++) {
+		// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
+		int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
+		// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
+		// so we need to recalculate the shard's priority
+		if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
+			auto teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+			for (int j = 0; j < teams.first.size() + teams.second.size(); j++) {
+				// t is the team in primary DC or the remote DC
+				auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j - teams.first.size()];
+				if (!t.servers.size()) {
+					maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+					break;
+				}
+
+				auto tc = self->teamCollections[t.primary ? 0 : 1];
+				ASSERT(tc->primary == t.primary);
+				if (tc->server_info.count(t.servers[0])) {
+					auto& info = tc->server_info[t.servers[0]];
+
+					bool found = false;
+					for (int k = 0; k < info->teams.size(); k++) {
+						if (info->teams[k]->getServerIDs() == t.servers) {
+							maxPriority = std::max(maxPriority, info->teams[k]->getPriority());
+							found = true;
+							break;
+						}
+					}
+
+					// If we cannot find the team, it could be a bad team so assume unhealthy priority
+					if (!found) {
+						// If the input team (in function parameters) is a redundant team, found will be
+						// false We want to differentiate the redundant_team from unhealthy_team in
+						// terms of relocate priority
+						maxPriority = std::max<int>(maxPriority, redundantTeam ? SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT
+						                                                       : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+					}
+				} else {
+					TEST(true); // A removed server is still associated with a team in SABTF
+				}
+			}
+		}
+
+		RelocateShard rs;
+		rs.keys = shards[i];
+		rs.priority = maxPriority;
+
+		self->output.send(rs);
+		if (deterministicRandom()->random01() < 0.01) {
+			TraceEvent("SendRelocateToDDQx100", self->distributorId)
+			    .detail("Team", team->getDesc())
+			    .detail("KeyBegin", rs.keys.begin)
+			    .detail("KeyEnd", rs.keys.end)
+			    .detail("Priority", rs.priority)
+			    .detail("TeamFailedMachines", team->size() - serversLeft)
+			    .detail("TeamOKMachines", serversLeft);
+		}
+	}
+}
+
 // Track a team and issue RelocateShards when the level of degradation changes
 // A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
@@ -2852,7 +2916,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 	state bool firstCheck = true;
-
+	state int serversLeft = 0;
 	if(logTeamEvents) {
 		TraceEvent("TeamTrackerStarting", self->distributorId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 	}
@@ -2871,7 +2935,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			state vector<Future<Void>> change;
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
-			int serversLeft = 0;
+			serversLeft = 0;
 
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
@@ -3015,67 +3079,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
 				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed) {
-					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
-
-					for(int i=0; i<shards.size(); i++) {
-						// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
-						int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
-						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
-						// so we need to recalculate the shard's priority
-						if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
-							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
-								// t is the team in primary DC or the remote DC
-								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
-								if( !t.servers.size() ) {
-									maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-									break;
-								}
-
-								auto tc = self->teamCollections[t.primary ? 0 : 1];
-								ASSERT(tc->primary == t.primary);
-								if( tc->server_info.count( t.servers[0] ) ) {
-									auto& info = tc->server_info[t.servers[0]];
-
-									bool found = false;
-									for( int k = 0; k < info->teams.size(); k++ ) {
-										if( info->teams[k]->getServerIDs() == t.servers ) {
-											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
-											found = true;
-											break;
-										}
-									}
-
-									//If we cannot find the team, it could be a bad team so assume unhealthy priority
-									if(!found) {
-										// If the input team (in function parameters) is a redundant team, found will be
-										// false We want to differentiate the redundant_team from unhealthy_team in
-										// terms of relocate priority
-										maxPriority =
-										    std::max<int>(maxPriority, redundantTeam ? SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT
-										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
-									}
-								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
-								}
-							}
-						}
-
-						RelocateShard rs;
-						rs.keys = shards[i];
-						rs.priority = maxPriority;
-
-						self->output.send(rs);
-						if(deterministicRandom()->random01() < 0.01) {
-							TraceEvent("SendRelocateToDDQx100", self->distributorId)
-								.detail("Team", team->getDesc())
-								.detail("KeyBegin", rs.keys.begin)
-								.detail("KeyEnd", rs.keys.end)
-								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->size() - serversLeft)
-								.detail("TeamOKMachines", serversLeft);
-						}
-					}
+					teamTrackerSendRelocateShards(self, team, redundantTeam, containsFailed, serversLeft);
 				} else {
 					if(logTeamEvents) {
 						TraceEvent("TeamHealthNotReady", self->distributorId).detail("HealthyTeamCount", self->healthyTeamCount);
@@ -3090,6 +3094,18 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 	} catch(Error& e) {
 		if(logTeamEvents) {
 			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
+		}
+
+		try {
+			bool containsFailed = teamContainsFailedServer(self, team);
+			// If server is marked as failed, a lost race condition could result in RelocateShards not being sent
+			// This is implemented as a safety net so we do not have orphaned shards sitting around
+			if (containsFailed && e.code() == error_code_actor_cancelled) {
+				TraceEvent("TeamTrackerStoppedSendRelocateToDDQ", self->distributorId).detail("Team", team->getDesc());
+				teamTrackerSendRelocateShards(self, team, redundantTeam, containsFailed, serversLeft);
+			}
+		} catch (Error& e) {
+			TraceEvent("TeamTrackerStoppedSendRelocateError").error(e);
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
