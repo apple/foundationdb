@@ -3095,18 +3095,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 		if(logTeamEvents) {
 			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
 		}
-
-		try {
-			bool containsFailed = teamContainsFailedServer(self, team);
-			// If server is marked as failed, a lost race condition could result in RelocateShards not being sent
-			// This is implemented as a safety net so we do not have orphaned shards sitting around
-			if (containsFailed && e.code() == error_code_actor_cancelled) {
-				TraceEvent("TeamTrackerStoppedSendRelocateToDDQ", self->distributorId).detail("Team", team->getDesc());
-				teamTrackerSendRelocateShards(self, team, redundantTeam, containsFailed, serversLeft);
-			}
-		} catch (Error& e) {
-			TraceEvent("TeamTrackerStoppedSendRelocateError").error(e);
-		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
 			self->healthyTeamCount--;
@@ -3122,7 +3110,20 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			ASSERT( self->optimalTeamCount >= 0 );
 			self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 		}
-		throw;
+		try {
+			bool containsFailed = teamContainsFailedServer(self, team);
+			// If server is marked as failed, a lost race condition could result in RelocateShards not being sent
+			// This is implemented as a safety net so we do not have orphaned shards sitting around
+			if (containsFailed && e.code() == error_code_actor_cancelled) {
+				TraceEvent("TeamTrackerStoppedSendRelocateToDDQ", self->distributorId).detail("Team", team->getDesc());
+				teamTrackerSendRelocateShards(self, team, redundantTeam, containsFailed, serversLeft);
+			}
+			TraceEvent("TeamTrackerStopped", self->distributorId).error(e);
+			throw e;
+		} catch (Error& err) {
+			TraceEvent("TeamTrackerStoppedSendRelocateError", self->distributorId).error(err);
+			throw err;
+		}
 	}
 }
 
