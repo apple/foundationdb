@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Benchmarking &#8212; FoundationDB 6.1</title>
+    <title>Benchmarking &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,7 +31,7 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Engineering" href="engineering.html" />
+    <link rel="next" title="DTrace Probes" href="dtrace-probes.html" />
     <link rel="prev" title="Performance" href="performance.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -107,7 +107,7 @@
     </a>
   </li>
   <li>
-    <a href="engineering.html" title="Next Chapter: Engineering"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Engineering &raquo;</span>
+    <a href="dtrace-probes.html" title="Next Chapter: DTrace Probes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">DTrace Probes &raquo;</span>
     </a>
   </li>
               
@@ -287,6 +287,14 @@
 <h2>Next steps</h2>
 <p>So how should you go about benchmarking FoundationDB for your own system?</p>
 <p>Begin with the peak throughput your system needs to handle. From here, use the data on our <a class="reference internal" href="performance.html"><span class="doc">performance page</span></a> as a starting point for your cluster configuration and workload design. From our numbers for per-core throughput, you can derive an initial estimate of the number of cores you&#8217;ll need. Construct a workload that reflects your pattern of reads and writes, making sure to use a large enough number of operations per transaction and/or clients to achieve high concurrency.</p>
+<p>To find bottlenecks there are several tools at your disposal:</p>
+<ul class="simple">
+<li>You can find several useful metrics in the trace files that FoundationDB emits</li>
+<li>Your standard Linux operating system tools (like perf) might come in handy</li>
+<li>FoundationDB also emits dtrace probes (<a class="reference internal" href="dtrace-probes.html"><span class="doc">DTrace Probes</span></a>) that you can look at using perf or System Tap</li>
+</ul>
+<div class="toctree-wrapper compound">
+</div>
 </div>
 </div>
 
@@ -310,7 +318,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Developer Guide &#8212; FoundationDB 6.1</title>
+    <title>Developer Guide &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -473,7 +473,7 @@
 <h2>Transaction basics</h2>
 <div class="section" id="transactions-in-foundationdb">
 <h3>Transactions in FoundationDB</h3>
-<p>FoundationDB provides concurrency control via transactions, allowing multiple clients to concurrently read and write data in the database with strong guarantees about how they affect each other. Specifically, FoundationDB provides global, ACID transactions with serializable isolation using optimistic concurrency.</p>
+<p>FoundationDB provides concurrency control via transactions, allowing multiple clients to concurrently read and write data in the database with strong guarantees about how they affect each other. Specifically, FoundationDB provides global, ACID transactions with strict serializability using optimistic concurrency.</p>
 <p>All reads and modifications of key-value pairs in FoundationDB are done within the context of a transaction. A transaction is a small unit of work that is both reliably performed and logically independent of other transactions.</p>
 <p>In Python, a simple transaction looks like this:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
@@ -662,7 +662,7 @@ of the data while concurrently writing the new version.</p>
 <p>Atomic operations do not expose the current value of the key to the client but simply send the database the transformation to apply. In regard to conflict checking, an atomic operation is equivalent to a write without a read. It can only cause <em>other</em> transactions performing reads of the key to conflict. By combining its logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction performing the atomic operation will not conflict due to that operation.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
+<p class="last">If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
 </div>
 </div>
 <div class="section" id="transactions-with-unknown-results">
@@ -697,11 +697,11 @@ of the data while concurrently writing the new version.</p>
 </div>
 <div class="section" id="conflict-ranges">
 <span id="id2"></span><h3>Conflict ranges</h3>
-<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="#acid"><span class="std std-ref">serializable isolation</span></a>, which results in a state that <em>could</em> have been produced by executing transactions one at a time, even though they may actually have been executed concurrently. FoundationDB maintains serializable isolation by detecting conflicts among concurrent transactions and allowing only a non-conflicting subset of them to succeed. Two concurrent transactions conflict if the first to commit writes a value that the second reads. In this case, the second transaction will fail. Clients will usually retry failed transactions.</p>
-<p>To detect conflicts, FoundationDB tracks the ranges of keys each transaction reads and writes. While most applications will use the serializable isolation that transactions provide by default, FoundationDB also provides several API features that manipulate conflict ranges to allow more precise control.</p>
+<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="#acid"><span class="std std-ref">strict serializability</span></a>, which results in a state that <em>could</em> have been produced by executing transactions one at a time, even though they may actually have been executed concurrently. FoundationDB maintains strict serializability by detecting conflicts among concurrent transactions and allowing only a non-conflicting subset of them to succeed. Two concurrent transactions conflict if the first to commit writes a value that the second reads. In this case, the second transaction will fail. Clients will usually retry failed transactions.</p>
+<p>To detect conflicts, FoundationDB tracks the ranges of keys each transaction reads and writes. While most applications will use the strictly serializable isolation that transactions provide by default, FoundationDB also provides several API features that manipulate conflict ranges to allow more precise control.</p>
 <p>Conflicts can be <em>avoided</em>, reducing isolation, in two ways:</p>
 <ul class="simple">
-<li>Instead of ordinary (serializable) reads, you can perform <a class="reference internal" href="#snapshot-isolation"><span class="std std-ref">snapshot reads</span></a>, which do not add read conflict ranges.</li>
+<li>Instead of ordinary (strictly serializable) reads, you can perform <a class="reference internal" href="#snapshot-isolation"><span class="std std-ref">snapshot reads</span></a>, which do not add read conflict ranges.</li>
 <li>You can use <a class="reference internal" href="api-python.html#api-python-transaction-options"><span class="std std-ref">transaction options</span></a> to disable conflict ranges for writes.</li>
 </ul>
 <p>Conflicts can be <em>created</em>, increasing isolation, by <a class="reference internal" href="api-python.html#api-python-conflict-ranges"><span class="std std-ref">explicitly adding</span></a> read or write conflict ranges.</p>
@@ -709,7 +709,7 @@ of the data while concurrently writing the new version.</p>
 <p class="first admonition-title">Note</p>
 <p class="last"><em>add read conflict range</em> behaves as if the client is reading the range. This means <em>add read conflict range</em> will not add conflict ranges for keys that have been written earlier in the same transaction. This is the intended behavior, as it allows users to compose transactions together without introducing unnecessary conflicts.</p>
 </div>
-<p>For example, suppose you have a transactional function that increments a set of counters using atomic addition. <a class="reference internal" href="#developer-guide-atomic-operations"><span class="std std-ref">Atomic operations</span></a> do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose:</p>
+<p>For example, suppose you have a transactional function that increments a set of counters using atomic addition. <a class="reference internal" href="#developer-guide-atomic-operations"><span class="std std-ref">Atomic operations</span></a> do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. More precisely, the read version for an atomic operation is the same as transaction&#8217;s commit version, and thus no conflicting write from other transactions could be serialized between the read and write of the key. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
 <span class="k">def</span> <span class="nf">guarded_increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counters</span><span class="p">):</span>
     <span class="k">for</span> <span class="n">counter</span> <span class="ow">in</span> <span class="n">counters</span><span class="p">:</span>
@@ -721,8 +721,8 @@ of the data while concurrently writing the new version.</p>
 <div class="section" id="snapshot-reads">
 <span id="snapshot-isolation"></span><h3>Snapshot reads</h3>
 <p>Snapshot reads selectively relax FoundationDB&#8217;s isolation property, reducing <a class="reference internal" href="#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but making it harder to reason about concurrency.</p>
-<p>The serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case.</p>
-<p>Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using serializable isolation) would be:</p>
+<p>The strictly serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case.</p>
+<p>Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using strictly serializable isolation) would be:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
 <span class="k">def</span> <span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
     <span class="n">all_kv</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="nb">range</span><span class="p">]</span>
@@ -742,7 +742,7 @@ of the data while concurrently writing the new version.</p>
 </pre></div>
 </div>
 <p>This transaction accomplishes the same task but won&#8217;t conflict with the insert of a key elsewhere in the range. It will only conflict with a modification to the key it actually returns.</p>
-<p>By default, snapshot reads see the effects of prior writes in the same transaction. (This read-your-writes behavior is the same as for ordinary, serializable reads.) Read-your-writes allows transactional functions (such as the above example) to be easily composed within a single transaction because each function will see the writes of previously invoked functions.</p>
+<p>By default, snapshot reads see the effects of prior writes in the same transaction. (This read-your-writes behavior is the same as for ordinary, strictly serializable reads.) Read-your-writes allows transactional functions (such as the above example) to be easily composed within a single transaction because each function will see the writes of previously invoked functions.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <div class="last line-block">
@@ -761,7 +761,7 @@ of the data while concurrently writing the new version.</p>
 <ul class="simple">
 <li>A particular read of frequently written values causes too many conflicts.</li>
 <li>There isn&#8217;t an easy way to reduce conflicts by splitting up data more granularly.</li>
-<li>Any necessary invariants can be validated with added conflict ranges or more narrowly targeted serializable reads.</li>
+<li>Any necessary invariants can be validated with added conflict ranges or more narrowly targeted strictly serializable reads.</li>
 </ul>
 </div>
 <div class="section" id="transaction-cancellation">
@@ -930,7 +930,7 @@ of the data while concurrently writing the new version.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

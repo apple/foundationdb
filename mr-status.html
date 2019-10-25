@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Machine-Readable Status &#8212; FoundationDB 6.1</title>
+    <title>Machine-Readable Status &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -203,6 +203,7 @@
          <span class="s2">&quot;roles&quot;</span><span class="o">:</span><span class="p">[</span>
             <span class="p">{</span>
                <span class="s2">&quot;query_queue_max&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+               <span class="s2">&quot;local_rate&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
                <span class="s2">&quot;input_bytes&quot;</span><span class="o">:</span><span class="p">{</span>
                   <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
                   <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
@@ -232,7 +233,8 @@
                      <span class="s2">&quot;cluster_controller&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;data_distributor&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;ratekeeper&quot;</span><span class="p">,</span>
-                     <span class="s2">&quot;router&quot;</span>
+                     <span class="s2">&quot;router&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;coordinator&quot;</span>
                   <span class="p">]</span>
                <span class="p">},</span>
                <span class="s2">&quot;data_version&quot;</span><span class="o">:</span><span class="mi">12341234</span><span class="p">,</span>
@@ -354,7 +356,8 @@
             <span class="s2">&quot;megabits_received&quot;</span><span class="o">:</span><span class="p">{</span>
                <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
             <span class="p">}</span>
-         <span class="p">}</span>
+         <span class="p">},</span>
+         <span class="s2">&quot;run_loop_busy&quot;</span><span class="o">:</span><span class="mf">0.2</span> <span class="c1">// fraction of time the run loop was busy</span>
       <span class="p">}</span>
    <span class="p">},</span>
    <span class="s2">&quot;old_logs&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -377,8 +380,8 @@
       <span class="p">}</span>
    <span class="p">],</span>
    <span class="s2">&quot;fault_tolerance&quot;</span><span class="o">:</span><span class="p">{</span>
-      <span class="s2">&quot;max_machine_failures_without_losing_availability&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
-      <span class="s2">&quot;max_machine_failures_without_losing_data&quot;</span><span class="o">:</span><span class="mi">0</span>
+      <span class="s2">&quot;max_zone_failures_without_losing_availability&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+      <span class="s2">&quot;max_zone_failures_without_losing_data&quot;</span><span class="o">:</span><span class="mi">0</span>
    <span class="p">},</span>
    <span class="s2">&quot;qos&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;worst_queue_bytes_log_server&quot;</span><span class="o">:</span><span class="mi">460</span><span class="p">,</span>
@@ -396,7 +399,8 @@
                <span class="s2">&quot;storage_server_min_free_space&quot;</span><span class="p">,</span>
                <span class="s2">&quot;storage_server_min_free_space_ratio&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span>
+               <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;storage_server_durability_lag&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -415,7 +419,8 @@
                <span class="s2">&quot;storage_server_min_free_space&quot;</span><span class="p">,</span>
                <span class="s2">&quot;storage_server_min_free_space_ratio&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span>
+               <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;storage_server_durability_lag&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -427,11 +432,30 @@
       <span class="s2">&quot;limiting_queue_bytes_storage_server&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;worst_queue_bytes_storage_server&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;limiting_version_lag_storage_server&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
-      <span class="s2">&quot;worst_version_lag_storage_server&quot;</span><span class="o">:</span><span class="mi">0</span>
+      <span class="s2">&quot;worst_version_lag_storage_server&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+      <span class="s2">&quot;limiting_data_lag_storage_server&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+         <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+      <span class="p">},</span>
+      <span class="s2">&quot;worst_data_lag_storage_server&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+         <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+      <span class="p">},</span>
+      <span class="s2">&quot;limiting_durability_lag_storage_server&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+         <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+      <span class="p">},</span>
+      <span class="s2">&quot;worst_durability_lag_storage_server&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+         <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+      <span class="p">}</span>
    <span class="p">},</span>
    <span class="s2">&quot;incompatible_connections&quot;</span><span class="o">:</span><span class="p">[</span>
    <span class="p">],</span>
-   <span class="s2">&quot;datacenter_version_difference&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+   <span class="s2">&quot;datacenter_lag&quot;</span><span class="o">:</span><span class="p">{</span>
+      <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">1.0</span><span class="p">,</span>
+      <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mi">1000000</span>
+   <span class="p">},</span>
    <span class="s2">&quot;degraded_processes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
    <span class="s2">&quot;database_available&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;database_locked&quot;</span><span class="o">:</span><span class="kc">false</span><span class="p">,</span>
@@ -454,11 +478,22 @@
                       <span class="s2">&quot;log_group&quot;</span><span class="o">:</span><span class="s2">&quot;default&quot;</span>
                   <span class="p">}</span>
               <span class="p">],</span>
+              <span class="s2">&quot;max_protocol_clients&quot;</span><span class="o">:</span><span class="p">[</span>
+                  <span class="p">{</span>
+                      <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;127.0.0.1:9898&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;log_group&quot;</span><span class="o">:</span><span class="s2">&quot;default&quot;</span>
+                  <span class="p">}</span>
+              <span class="p">],</span>
               <span class="s2">&quot;count&quot;</span> <span class="o">:</span> <span class="mi">1</span><span class="p">,</span>
+              <span class="s2">&quot;max_protocol_count&quot;</span> <span class="o">:</span> <span class="mi">1</span><span class="p">,</span>
               <span class="s2">&quot;protocol_version&quot;</span> <span class="o">:</span> <span class="s2">&quot;fdb00a400050001&quot;</span><span class="p">,</span>
               <span class="s2">&quot;source_version&quot;</span> <span class="o">:</span> <span class="s2">&quot;9430e1127b4991cbc5ab2b17f41cfffa5de07e9d&quot;</span>
           <span class="p">}</span>
       <span class="p">]</span>
+   <span class="p">},</span>
+   <span class="s2">&quot;page_cache&quot;</span><span class="o">:</span><span class="p">{</span>
+      <span class="s2">&quot;log_hit_rate&quot;</span><span class="o">:</span><span class="mf">0.5</span><span class="p">,</span>
+      <span class="s2">&quot;storage_hit_rate&quot;</span><span class="o">:</span><span class="mf">0.5</span>
    <span class="p">},</span>
    <span class="s2">&quot;messages&quot;</span><span class="o">:</span><span class="p">[</span>
       <span class="p">{</span>
@@ -489,7 +524,9 @@
                <span class="s2">&quot;storage_servers_error&quot;</span><span class="p">,</span>
                <span class="s2">&quot;status_incomplete&quot;</span><span class="p">,</span>
                <span class="s2">&quot;layer_status_incomplete&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;database_availability_timeout&quot;</span>
+               <span class="s2">&quot;database_availability_timeout&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;consistencycheck_suspendkey_fetch_timeout&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;consistencycheck_disabled&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;issues&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -574,6 +611,21 @@
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
             <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
          <span class="p">},</span>
+         <span class="s2">&quot;started_immediate_priority&quot;</span><span class="o">:</span><span class="p">{</span>
+            <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+            <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+         <span class="p">},</span>
+         <span class="s2">&quot;started_default_priority&quot;</span><span class="o">:</span><span class="p">{</span>
+            <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+            <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+         <span class="p">},</span>
+         <span class="s2">&quot;started_batch_priority&quot;</span><span class="o">:</span><span class="p">{</span>
+            <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+            <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+         <span class="p">},</span>
          <span class="s2">&quot;conflicted&quot;</span><span class="o">:</span><span class="p">{</span>
             <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
@@ -592,6 +644,9 @@
    <span class="s2">&quot;full_replication&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;maintenance_zone&quot;</span><span class="o">:</span><span class="s2">&quot;0ccb4e0fdbdb5583010f6b77d9d10ece&quot;</span><span class="p">,</span>
    <span class="s2">&quot;maintenance_seconds_remaining&quot;</span><span class="o">:</span><span class="mf">1.0</span><span class="p">,</span>
+   <span class="s2">&quot;data_distribution_disabled_for_ss_failures&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
+   <span class="s2">&quot;data_distribution_disabled_for_rebalance&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
+   <span class="s2">&quot;data_distribution_disabled&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;configuration&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;log_anti_quorum&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;log_replicas&quot;</span><span class="o">:</span><span class="mi">2</span><span class="p">,</span>
@@ -610,7 +665,8 @@
       <span class="s2">&quot;datacenters&quot;</span><span class="o">:</span><span class="p">[{</span>
           <span class="s2">&quot;id&quot;</span><span class="o">:</span><span class="s2">&quot;mr&quot;</span><span class="p">,</span>
           <span class="s2">&quot;priority&quot;</span><span class="o">:</span><span class="mi">1</span><span class="p">,</span>
-          <span class="s2">&quot;satellite&quot;</span><span class="o">:</span><span class="mi">1</span>
+          <span class="s2">&quot;satellite&quot;</span><span class="o">:</span><span class="mi">1</span><span class="p">,</span>
+          <span class="s2">&quot;satellite_logs&quot;</span><span class="o">:</span><span class="mi">2</span>
       <span class="p">}],</span>
       <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -689,6 +745,7 @@
       <span class="s2">&quot;max_machine_failures_without_losing_availability&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;total_disk_used_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;total_kv_size_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// estimated</span>
+      <span class="s2">&quot;system_kv_size_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// estimated</span>
       <span class="s2">&quot;partitions_count&quot;</span><span class="o">:</span><span class="mi">2</span><span class="p">,</span>
       <span class="s2">&quot;moving_data&quot;</span><span class="o">:</span><span class="p">{</span>
          <span class="s2">&quot;total_written_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
@@ -1023,6 +1080,9 @@
 <tr class="row-odd"><td>log_server_min_free_space_ratio</td>
 <td>Log server running out of space (approaching 5% limit).</td>
 </tr>
+<tr class="row-even"><td>storage_server_durability_lag</td>
+<td>Storage server durable version falling behind.</td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -1049,7 +1109,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

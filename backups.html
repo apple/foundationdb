@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 6.1</title>
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -98,6 +98,7 @@
 <li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
 <li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
 <li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
@@ -170,6 +171,7 @@
 <li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
 <li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
 <li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
@@ -489,6 +491,19 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd>This a shortened Backup URL which looks just like a Backup URL but without the backup &lt;name&gt; so that the list command will discover and list all of the backups in the bucket.</dd>
 </dl>
 </div>
+<div class="section" id="cleanup">
+<h3><code class="docutils literal"><span class="pre">cleanup</span></code></h3>
+<p>The <code class="docutils literal"><span class="pre">cleanup</span></code> subcommand will list orphaned backups and DRs and optionally remove their mutations.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C &lt;CLUSTER_FILE&gt;]
+</pre></div>
+</div>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">--delete_data</span></code></dt>
+<dd>This flag will cause <code class="docutils literal"><span class="pre">cleanup</span></code> to remove mutations for the most stale backup or DR.</dd>
+<dt><code class="docutils literal"><span class="pre">--min_cleanup_seconds</span></code></dt>
+<dd>Specifies the amount of time a backup or DR needs to be stale before <code class="docutils literal"><span class="pre">cleanup</span></code> will remove mutations for it. By default this is set to one hour.</dd>
+</dl>
+</div>
 </div>
 <div class="section" id="fdbrestore-command-line-tool">
 <h2><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</h2>
@@ -513,11 +528,8 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </dd>
 <dt><code class="docutils literal"><span class="pre">--blob_credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
 <dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
-</dl>
-<p>The following options apply to all commands except <code class="docutils literal"><span class="pre">start</span></code>:</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-C</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</dd>
+<dt><code class="docutils literal"><span class="pre">--dest_cluster_file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
+<dd>Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.</dd>
 </dl>
 <div class="section" id="restore-start">
 <span id="id2"></span><h3><code class="docutils literal"><span class="pre">start</span></code></h3>
@@ -527,8 +539,6 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd>user&#64;host$ fdbrestore start -r &lt;BACKUP_URL&gt; [OPTIONS]</dd>
 <dt><code class="docutils literal"><span class="pre">-r</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
 <dd>Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the <code class="docutils literal"><span class="pre">backup_agent</span></code> processes for the cluster.</dd>
-<dt><code class="docutils literal"><span class="pre">--dest_cluster_file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
-<dd>Required.  The backup data will be restored into this cluster.</dd>
 <dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
 <dd>Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</dd>
 <dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">&lt;KEYS&gt;</span></code></dt>
@@ -667,7 +677,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

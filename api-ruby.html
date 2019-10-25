@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Ruby API &#8212; FoundationDB 6.1</title>
+    <title>Ruby API &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -229,7 +229,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="function">
 <dt id="FDB.api_version">
 <code class="descclassname">FDB.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 610.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 620.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -244,13 +244,13 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 14 and 610 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+<p>For API changes between version 14 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">610</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">620</span>
 <span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
@@ -658,6 +658,30 @@ value of the key is also retrieved, using network bandwidth.</p>
 </dd></dl>
 
 <dl class="method">
+<dt id="FDB::Database.options.set_transaction_size_limit">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_size_limit</code><span class="sig-paren">(</span><em>size_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the default maximum transaction size in bytes. This is equivalent to calling <a class="reference internal" href="#FDB::Database.options.set_transaction_size_limit" title="FDB::Database.options.set_transaction_size_limit"><code class="xref rb rb-func docutils literal"><span class="pre">Database.options.set_transaction_size_limit</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_causal_read_risky">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_causal_read_risky</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Transactions do not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Enabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_causal_read_risky" title="FDB::Transaction.options.set_causal_read_risky"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_causal_read_risky</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_include_port_in_address">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. Enabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_include_port_in_address" title="FDB::Transaction.options.set_include_port_in_address"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_include_port_in_address</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_transaction_logging_max_field_length">
+<code class="descclassname">Database.options.</code><code class="descname">set_transaction_logging_max_field_length</code><span class="sig-paren">(</span><em>size_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_transaction_logging_max_field_length" title="FDB::Transaction.options.set_transaction_logging_max_field_length"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_transaction_logging_max_field_length</span></code></a> on each transaction created by this database.</p>
+</dd></dl>
+
+<dl class="method">
 <dt id="FDB::Database.options.set_snapshot_ryw_enable">
 <code class="descclassname">Database.options.</code><code class="descname">set_snapshot_ryw_enable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>If this option has been set an equal or more times with this database than the disable option, snapshot reads <em>will</em> see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling <a class="reference internal" href="#FDB::Transaction.options.set_snapshot_ryw_enable" title="FDB::Transaction.options.set_snapshot_ryw_enable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_snapshot_ryw_enable</span></code></a> on each transaction created by this database.</p>
@@ -764,8 +788,8 @@ both the caching and the increased network bandwidth.</p>
 <dt id="snapshot">
 <code class="descclassname">Transaction.</code><code class="descname">snapshot</code></dt>
 <dd><p>Snapshot reads selectively relax FoundationDB&#8217;s isolation property, reducing <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but making it harder to reason about concurrency.</p>
-<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">serializable isolation</span></a>, resulting in a state that is <em>as if</em> transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.</p>
-<p>Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case. Like serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a>.</p>
+<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">strictly serializable isolation</span></a>, resulting in a state that is <em>as if</em> transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.</p>
+<p>Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case. Like strictly serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a>.</p>
 <p>Snapshot reads also interact with transaction commit a little differently than normal reads. If a snapshot read is outstanding when transaction commit is called that read will immediately return an error. (Normally, transaction commit will wait until outstanding reads return before committing.)</p>
 </dd></dl>
 
@@ -808,7 +832,7 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="FDB::Transaction.snapshot.get_read_version">
 <code class="descclassname">Transaction.snapshot.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Version</dt>
-<dd><p>Identical to <a class="reference internal" href="#FDB::Transaction.get_read_version" title="FDB::Transaction.get_read_version"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_read_version</span></code></a> (since snapshot and serializable reads use the same read version).</p>
+<dd><p>Identical to <a class="reference internal" href="#FDB::Transaction.get_read_version" title="FDB::Transaction.get_read_version"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_read_version</span></code></a> (since snapshot and strictly serializable reads use the same read version).</p>
 </dd></dl>
 
 </div>
@@ -860,7 +884,7 @@ both the caching and the increased network bandwidth.</p>
 <p>By combining these logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction will not conflict due to the operation. This makes atomic operations ideal for operating on keys that are frequently modified. A common example is the use of a key-value pair as a counter.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
+<p class="last">If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
 </div>
 <p>In each of the methods below, <code class="docutils literal"><span class="pre">param</span></code> should be a string appropriately packed to represent the desired value. For example:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># wrong</span>
@@ -1020,7 +1044,7 @@ both the caching and the increased network bandwidth.</p>
 <h3>Conflict ranges</h3>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
+<p class="last">Most applications will use the strictly serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
 </div>
 <p>The following make it possible to add <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflict ranges</span></a> to a transaction.</p>
 <dl class="method">
@@ -1110,7 +1134,13 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="FDB::Transaction.options.set_causal_read_risky">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_causal_read_risky</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
-<dd><p>This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version of the transaction will be a committed version, and usually will be the latest committed, but it might be an older version in the event of a fault or network partition.</p>
+<dd><p>This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_causal_read_risky" title="FDB::Database.options.set_transaction_causal_read_risky"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_causal_read_risky</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_include_port_in_address">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. One can set this for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_include_port_in_address" title="FDB::Database.options.set_transaction_include_port_in_address"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_include_port_in_address</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1179,11 +1209,23 @@ both the caching and the increased network bandwidth.</p>
 </dd></dl>
 
 <dl class="method">
+<dt id="FDB::Transaction.options.set_size_limit">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_size_limit</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster&#8217;s performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.</p>
+</dd></dl>
+
+<dl class="method">
 <dt id="FDB::Transaction.options.set_timeout">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_timeout</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Set a timeout duration in milliseconds after which the transaction automatically to be cancelled. The time is measured from transaction creation (or the most call to <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>, if any). Valid parameter values are [0, INT_MAX]. If set to 0, all timeouts will be disabled. Once a transaction has timed out, all pending or future uses of the transaction will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_timed_out</span></a> exception. The transaction can be used again after it is <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>.</p>
 <p>Timeouts employ transaction cancellation, so you should note the issues raised by <a class="reference internal" href="#FDB::Transaction.cancel" title="FDB::Transaction.cancel"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.cancel</span></code></a> when using timeouts.</p>
-<p>Prior to API version 610, like all other transaction options, a timeout must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>. Note that at all API versions, it is safe and legal to call this option after each call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>.</p>
+<p>Prior to API version 610, like all other transaction options, a timeout must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>. Note that at all API versions, it is safe and legal to call this option after each call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops. One can set the default timeout for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_timeout" title="FDB::Database.options.set_transaction_timeout"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_timeout</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_transaction_logging_max_field_length">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_transaction_logging_max_field_length</code><span class="sig-paren">(</span><em>size_limit</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_logging_max_field_length" title="FDB::Database.options.set_transaction_logging_max_field_length"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_logging_max_field_length</span></code></a>.</p>
 </dd></dl>
 
 </div>
@@ -1804,7 +1846,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

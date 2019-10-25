@@ -14,6 +14,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`data-modeling` explains recommended techniques for representing application data in the key-value store.
 
+* :doc:`client-testing` Explains how one can use workloads to test client code.
+
 * :doc:`api-general` contains information on FoundationDB clients applicable across all language bindings.
 
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
@@ -29,5 +31,6 @@ FoundationDB supports language bindings for application development using the or
     downloads
     developer-guide
     data-modeling
+    client-testing
     api-general
     known-limitations

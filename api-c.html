@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>C API &#8212; FoundationDB 6.1</title>
+    <title>C API &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -201,8 +201,8 @@
 </div>
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 610.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 610</span>
+<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 620.</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 620</span>
 <span class="cp">#include</span> <span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
 </pre></div>
 </div>
@@ -234,7 +234,7 @@
 <p class="last">Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">header_version</span></code></dt>
-<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 610). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
+<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 620). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
 </dl>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -402,9 +402,9 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 </dd></dl>
 
 <dl class="function">
-<dt id="c.fdb_future_get_version">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_version</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, int64_t*<em>&nbsp;out_version</em><span class="sig-paren">)</span></dt>
-<dd><p>Extracts a version from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="docutils literal"><span class="pre">int64_t</span></code>. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<dt id="c.fdb_future_get_int64">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_int64</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, int64_t*<em>&nbsp;out</em><span class="sig-paren">)</span></dt>
+<dd><p>Extracts a 64-bit integer from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture*</span></code></a> into a caller-provided variable of type <code class="docutils literal"><span class="pre">int64_t</span></code>. <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
 <p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 </dd></dl>
 
@@ -570,13 +570,13 @@ void <code class="descname">fdb_transaction_destroy</code><span class="sig-paren
 <dl class="function">
 <dt id="c.fdb_transaction_set_read_version">
 void <code class="descname">fdb_transaction_set_read_version</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, int64_t<em>&nbsp;version</em><span class="sig-paren">)</span></dt>
-<dd><p>Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_past_version; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of <code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_*()</span></code> have been called on this transaction already, the result is undefined.</p>
+<dd><p>Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_transaction_too_old; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of <code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_*()</span></code> have been called on this transaction already, the result is undefined.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="c.fdb_transaction_get_read_version">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_read_version</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em><span class="sig-paren">)</span></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the transaction snapshot read version. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_version" title="fdb_future_get_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_version()</span></code></a> to extract the version into an int64_t that you provide, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the transaction snapshot read version. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the version into an int64_t that you provide, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <p>The transaction obtains a snapshot read version automatically at the time of the first call to <code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_*()</span></code> (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.</p>
 </dd></dl>
 
@@ -731,7 +731,7 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <p>By combining these logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction will not conflict due to the operation. This makes atomic operations ideal for operating on keys that are frequently modified. A common example is the use of a key-value pair as a counter.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
+<p class="last">If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
 </div>
 <p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
 <dl class="docutils">
@@ -810,6 +810,13 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 </dd></dl>
 
 <dl class="function">
+<dt id="c.fdb_transaction_get_approximate_size">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_approximate_size</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em><span class="sig-paren">)</span></dt>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<p>This can be called multiple times before the transaction is committed.</p>
+</dd></dl>
+
+<dl class="function">
 <dt id="c.fdb_transaction_get_versionstamp">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_versionstamp</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em><span class="sig-paren">)</span></dt>
 <dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the versionstamp which was used by any versionstamp operations in this transaction. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_key" title="fdb_future_get_key"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_key()</span></code></a> to extract the key, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
@@ -873,7 +880,7 @@ void <code class="descname">fdb_transaction_cancel</code><span class="sig-paren"
 <dd><p>Adds a <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflict range</span></a> to a transaction without performing the associated read or write.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
+<p class="last">Most applications will use the strictly serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
 </div>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">begin_key_name</span></code></dt>
@@ -902,8 +909,8 @@ void <code class="descname">fdb_transaction_cancel</code><span class="sig-paren"
 <div class="section" id="snapshot-reads">
 <span id="snapshots"></span><h3>Snapshot reads</h3>
 <p>Snapshot reads selectively relax FoundationDB&#8217;s isolation property, reducing <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but making it harder to reason about concurrency.</p>
-<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">serializable isolation</span></a>, resulting in a state that is <em>as if</em> transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.</p>
-<p>Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case. Like serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a>.</p>
+<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">strictly serializable isolation</span></a>, resulting in a state that is <em>as if</em> transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.</p>
+<p>Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case. Like strictly serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a>.</p>
 <p>In the C API, snapshot reads are performed by passing a non-zero value to the <code class="docutils literal"><span class="pre">snapshot</span></code> parameter of any of <code class="docutils literal"><span class="pre">fdb_transaction_get_*</span></code> (see for example <a class="reference internal" href="#c.fdb_transaction_get" title="fdb_transaction_get"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get()</span></code></a>).  Snapshot reads also interact with transaction commit a little differently than normal reads. If a snapshot read is outstanding when transaction commit is called that read will immediately return an error. (Normally, transaction commit will wait until outstanding reads return before committing.)</p>
 </div>
 </div>
@@ -990,7 +997,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

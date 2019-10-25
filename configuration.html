@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 6.1</title>
+    <title>Configuration &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -404,23 +404,51 @@ Coordinators changed
 <div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## foundationdb.conf</span>
 <span class="c1">##</span>
 <span class="c1">## Configuration file for FoundationDB server processes</span>
-<span class="c1">## Full documentation is available in the FoundationDB Administration document.</span>
 
 <span class="k">[fdbmonitor]</span>
-<span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
 <span class="na">user</span> <span class="o">=</span> <span class="s">foundationdb</span>
 <span class="na">group</span> <span class="o">=</span> <span class="s">foundationdb</span>
 </pre></div>
 </div>
-<p>Contains basic configuration parameters of the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process. <code class="docutils literal"><span class="pre">restart_delay</span></code> specifies the number of seconds that <code class="docutils literal"><span class="pre">fdbmonitor</span></code> waits before restarting a failed process. <code class="docutils literal"><span class="pre">user</span></code> and <code class="docutils literal"><span class="pre">group</span></code> are used on Linux systems to control the privilege level of child processes.</p>
+<p>Contains basic configuration parameters of the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process. <code class="docutils literal"><span class="pre">user</span></code> and <code class="docutils literal"><span class="pre">group</span></code> are used on Linux systems to control the privilege level of child processes.</p>
 </div>
 <div class="section" id="general-section">
 <h3><code class="docutils literal"><span class="pre">[general]</span></code> section</h3>
 <div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[general]</span>
 <span class="na">cluster_file</span> <span class="o">=</span> <span class="s">/etc/foundationdb/fdb.cluster</span>
+<span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
+<span class="c1">## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay</span>
+<span class="c1"># initial_restart_delay = 0</span>
+<span class="c1"># restart_backoff = 60.0</span>
+<span class="c1"># restart_delay_reset_interval = 60</span>
+<span class="c1"># delete_envvars =</span>
+<span class="c1"># kill_on_configuration_change = true</span>
+<span class="c1"># disable_lifecycle_logging = false</span>
 </pre></div>
 </div>
-<p>Contains settings applicable to all processes (e.g. fdbserver, backup_agent). The main setting of interest is <code class="docutils literal"><span class="pre">cluster_file</span></code>, which specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the [fdbmonitor] section).</p>
+<p>Contains settings applicable to all processes (e.g. fdbserver, backup_agent).</p>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">cluster_file</span></code>: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the <code class="docutils literal"><span class="pre">[fdbmonitor]</span></code> section).</li>
+<li><code class="docutils literal"><span class="pre">delete_envvars</span></code>: A space separated list of environment variables to remove from the environments of child processes. This can be used if the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process needs to be run with environment variables that are undesired in its children.</li>
+<li><code class="docutils literal"><span class="pre">kill_on_configuration_change</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, affected processes will be restarted whenever the configuration file changes. Defaults to <code class="docutils literal"><span class="pre">true</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">disable_lifecycle_logging</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> will not write log events when processes start or terminate. Defaults to <code class="docutils literal"><span class="pre">false</span></code>.</li>
+</ul>
+<p>The <code class="docutils literal"><span class="pre">[general]</span></code> section also contains some parameters to control how processes are restarted when they die. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.</p>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">restart_delay</span></code>: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.</li>
+<li><code class="docutils literal"><span class="pre">initial_restart_delay</span></code>: The number of seconds <code class="docutils literal"><span class="pre">fdbmonitor</span></code> waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately).</li>
+<li><code class="docutils literal"><span class="pre">restart_backoff</span></code>: Controls how quickly <code class="docutils literal"><span class="pre">fdbmonitor</span></code> backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by <code class="docutils literal"><span class="pre">restart_backoff</span></code> to get the next delay, maxing out at the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>, meaning that the second and subsequent failures will all delay <code class="docutils literal"><span class="pre">restart_delay</span></code> between restarts.</li>
+<li><code class="docutils literal"><span class="pre">restart_delay_reset_interval</span></code>: The number of seconds a process must be running before resetting the backoff back to the value of <code class="docutils literal"><span class="pre">initial_restart_delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>.</li>
+</ul>
+<p>As an example, let&#8217;s say the following parameters have been set:</p>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
+<span class="na">initial_restart_delay</span> <span class="o">=</span> <span class="s">0</span>
+<span class="na">restart_backoff</span> <span class="o">=</span> <span class="s">2.0</span>
+<span class="na">restart_delay_reset_interval</span> <span class="o">=</span> <span class="s">180</span>
+</pre></div>
+</div>
+<p>The progression of delays for a process that fails repeatedly would be <code class="docutils literal"><span class="pre">0,</span> <span class="pre">2,</span> <span class="pre">4,</span> <span class="pre">8,</span> <span class="pre">16,</span> <span class="pre">32,</span> <span class="pre">60,</span> <span class="pre">60,</span> <span class="pre">...</span></code>, each subject to a 10% random jitter. After the process stays alive for 180 seconds, the backoff would reset and the next failure would restart the process immediately.</p>
+<p>Using the default parameters, a process will restart immediately if it fails and then delay <code class="docutils literal"><span class="pre">restart_delay</span></code> seconds if it fails again within <code class="docutils literal"><span class="pre">restart_delay</span></code> seconds.</p>
 </div>
 <div class="section" id="fdbserver-section">
 <span id="foundationdb-conf-fdbserver"></span><h3><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</h3>
@@ -436,6 +464,7 @@ Coordinators changed
 <span class="c1"># class =</span>
 <span class="c1"># memory = 8GiB</span>
 <span class="c1"># storage_memory = 1GiB</span>
+<span class="c1"># cache_memory = 2GiB</span>
 <span class="c1"># locality_machineid =</span>
 <span class="c1"># locality_zoneid =</span>
 <span class="c1"># locality_data_hall =</span>
@@ -461,8 +490,9 @@ Coordinators changed
 <li><code class="docutils literal"><span class="pre">logsize</span></code>: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.</li>
 <li><code class="docutils literal"><span class="pre">maxlogssize</span></code>: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.</li>
 <li><code class="docutils literal"><span class="pre">class</span></code>: Process class specifying the roles that will be taken in the cluster. Recommended options are <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">stateless</span></code>. See <a class="reference internal" href="#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a> for process class config recommendations.</li>
-<li><code class="docutils literal"><span class="pre">memory</span></code>: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is <em>not</em> recommended to decrease the value of this parameter below its default value. It may be <em>increased</em> if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the <code class="docutils literal"><span class="pre">storage_memory</span></code> parameter is increased, the <code class="docutils literal"><span class="pre">memory</span></code> parameter should be increased by an equal amount.</li>
-<li><code class="docutils literal"><span class="pre">storage_memory</span></code>: Maximum memory used for data storage. This parameter is used <em>only</em> with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the <code class="docutils literal"><span class="pre">storage_memory</span></code>, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
+<li><code class="docutils literal"><span class="pre">memory</span></code>: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is <em>not</em> recommended to decrease the value of this parameter below its default value. It may be <em>increased</em> if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the <code class="docutils literal"><span class="pre">storage_memory</span></code>  or <code class="docutils literal"><span class="pre">cache_memory</span></code> parameters are increased, the <code class="docutils literal"><span class="pre">memory</span></code> parameter should be increased by an equal amount.</li>
+<li><code class="docutils literal"><span class="pre">storage_memory</span></code>: Maximum memory used for data storage. This parameter is used <em>only</em> with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the <code class="docutils literal"><span class="pre">storage_memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
+<li><code class="docutils literal"><span class="pre">cache_memory</span></code>: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the <code class="docutils literal"><span class="pre">cache_memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
 <li><code class="docutils literal"><span class="pre">locality_machineid</span></code>: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.</li>
 <li><code class="docutils literal"><span class="pre">locality_zoneid</span></code>: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.</li>
 <li><code class="docutils literal"><span class="pre">locality_dcid</span></code>: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.</li>
@@ -533,37 +563,37 @@ Configuration changed.
 <td>3-4 machines</td>
 <td>5+ machines</td>
 </tr>
-<tr class="row-odd"><td>Replication</td>
+<tr class="row-odd"><td>Total Replicas</td>
 <td>&#160;</td>
 <td>1 copy</td>
-<td>2 copy</td>
-<td>3 copy</td>
+<td>2 copies</td>
+<td>3 copies</td>
 </tr>
-<tr class="row-even"><td># live machines
+<tr class="row-even"><td>Live machines required
 to make progress</td>
 <td>&#160;</td>
 <td>1</td>
 <td>2</td>
 <td>3</td>
 </tr>
-<tr class="row-odd"><td>Minimum # of machines
+<tr class="row-odd"><td>Required machines
 for fault tolerance</td>
 <td>&#160;</td>
 <td>impossible</td>
 <td>3</td>
 <td>4</td>
 </tr>
-<tr class="row-even"><td>Ideal # of
+<tr class="row-even"><td>Ideal number of
 coordination servers</td>
 <td>&#160;</td>
 <td>1</td>
 <td>3</td>
 <td>5</td>
 </tr>
-<tr class="row-odd"><td># simultaneous failures
+<tr class="row-odd"><td>Simultaneous failures
 after which data may be lost</td>
 <td>&#160;</td>
-<td>any machine</td>
+<td>any process</td>
 <td>2+ machines</td>
 <td>3+ machines</td>
 </tr>
@@ -760,7 +790,7 @@ Disk identifier: 0xe5169faa
 <p>This is made possible by combining two features. The first is asynchronous replication between two regions. By not waiting for the commits to become durable in the remote region before reporting a commit as successful, it means the remote region will slightly lag behind the primary.  This is similar to <code class="docutils literal"><span class="pre">fdbdr</span></code>, except that the asynchronous replication is done within a single cluster instead of between different FoundationDB clusters.</p>
 <p>The second feature is the ability to add one or more synchronous replicas of the mutation log in a different datacenter. Because this datacenter is only holding a transient copy of the mutations being committed to the database, only a few FoundationDB processes are required to fulfill this role.  If the primary datacenter fails, the external mutation log replicas will still allow access to the most recent commits. This allows the lagging remote replica to catch up to the primary. Once the remote replica has applied all the mutations, it can start accepting new commits without suffering any data loss.</p>
 <p>An example configuration would be four total datacenters, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter on each coast would only have a few FoundationDB processes.</p>
-<p>While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from the each coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.</p>
+<p>While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from east coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.</p>
 <p>If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.</p>
 <p>The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, to bring the west coast back online FoundationDB will have to copy all the data between the regions.</p>
 <p>If a region failover occurs, clients will generally only see a latency spike of a few seconds.</p>
@@ -787,7 +817,8 @@ Configuration changed.
     <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
         <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC1&quot;</span><span class="p">,</span>
         <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
-        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span>
+        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
     <span class="p">}],</span>
     <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span><span class="p">,</span>
     <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
@@ -828,7 +859,7 @@ Configuration changed.
 </div>
 <div class="section" id="asymmetric-configurations">
 <h3>Asymmetric configurations</h3>
-<p>The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoudnationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenter have failed, FoundationDB will fail over to the east coast datacenter. Because this region does not a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However this is justifiable because the region will only be active if a datacenter has already been lost.</p>
+<p>The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoundationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenters has failed, FoundationDB will fail over to the east coast datacenter. Because this region does not have a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However, this is justifiable because the region will only be active if a datacenter has already been lost.</p>
 <p>This is the region configuration that implements the example:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;regions&quot;</span><span class="p">:[{</span>
     <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
@@ -837,7 +868,8 @@ Configuration changed.
     <span class="p">},{</span>
         <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC2&quot;</span><span class="p">,</span>
         <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
-        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span>
+        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
     <span class="p">}],</span>
     <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span>
 <span class="p">},{</span>
@@ -874,7 +906,7 @@ Configuration changed.
 <li>Configure the region configuration. The datacenter with all the existing processes should have a non-negative priority. The region which will eventually store the remote replica should be added with a negative priority.</li>
 <li>Add processes to the cluster in the remote region. These processes will not take data yet, but need to be added to the cluster. If they are added before the region configuration is set they will be assigned data like any other FoundationDB process, which will lead to high latencies.</li>
 <li>Configure <code class="docutils literal"><span class="pre">usable_regions=2</span></code>. This will cause the cluster to start copying data between the regions.</li>
-<li>Watch <code class="docutils literal"><span class="pre">status</span></code> and wait until data movement is complete. This will mean signal that the remote datacenter has a full replica of all of the data in the database.</li>
+<li>Watch <code class="docutils literal"><span class="pre">status</span></code> and wait until data movement is complete. This will signal that the remote datacenter has a full replica of all of the data in the database.</li>
 <li>Change the region configuration to have a non-negative priority for the primary datacenters in both regions. This will enable automatic failover between regions.</li>
 </ol>
 </div></blockquote>
@@ -886,7 +918,7 @@ Configuration changed.
 <p class="first admonition-title">Warning</p>
 <p class="last">While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed, so that once the other datacenter comes back online, it can replay history to catch back up.</p>
 </div>
-<p>To drop the dead datacenter do the follow steps:</p>
+<p>To drop the dead datacenter do the following steps:</p>
 <blockquote>
 <div><ol class="arabic simple">
 <li>Configure the region configuration so that the dead datacenter has a negative priority.</li>
@@ -979,7 +1011,7 @@ Configuration changed.
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

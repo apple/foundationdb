@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>CAP Theorem &#8212; FoundationDB 6.1</title>
+    <title>CAP Theorem &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.1.8',
+        VERSION:     '6.2.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -165,7 +165,7 @@
 <div class="section" id="what-does-choosing-availability-mean">
 <h2>What does choosing Availability mean?</h2>
 <p>Let&#8217;s consider an <strong>AP</strong> database. In such a database, reads and writes would always succeed, even when network connectivity is unavailable between nodes. If possible, these would certainly seem like desirable properties!</p>
-<p>However, the downside is stark. Imagine a simple distributed database consisting of two nodes and a network partition making them unable communicate. To be Available, each of the two nodes must continue to accept writes from clients.</p>
+<p>However, the downside is stark. Imagine a simple distributed database consisting of two nodes and a network partition making them unable to communicate. To be Available, each of the two nodes must continue to accept writes from clients.</p>
 <div class="figure" id="id2">
 <img alt="_images/AP_Partition.png" src="_images/AP_Partition.png" />
 <p class="caption"><span class="caption-text">Data divergence in an AP system during partition</span></p>
@@ -222,7 +222,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 03, 2019.<br/>
+      Last updated on Oct 25, 2019.<br/>
     </p>
   </div>
 </footer>

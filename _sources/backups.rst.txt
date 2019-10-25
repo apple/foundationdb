@@ -380,6 +380,24 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
 
+.. program:: fdbbackup cleanup
+
+``cleanup``
+------------
+
+The ``cleanup`` subcommand will list orphaned backups and DRs and optionally remove their mutations.
+
+::
+
+   user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C <CLUSTER_FILE>] 
+
+``--delete_data``
+  This flag will cause ``cleanup`` to remove mutations for the most stale backup or DR.
+
+``--min_cleanup_seconds``
+  Specifies the amount of time a backup or DR needs to be stale before ``cleanup`` will remove mutations for it. By default this is set to one hour.
+
+
 ``fdbrestore`` command line tool
 ================================
 
@@ -406,10 +424,8 @@ The following options apply to all commands:
 ``--blob_credentials <FILE>``
   Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
-The following options apply to all commands except ``start``:
-
-``-C <CLUSTER_FILE>``
-  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+``--dest_cluster_file <CONNFILE>``
+  Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.
 
 .. _restore-start:
 
@@ -423,10 +439,6 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``-r <BACKUP_URL>``
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
-
-``--dest_cluster_file <CONNFILE>``
-  Required.  The backup data will be restored into this cluster.
-
 
 ``-w``
   Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
