@@ -61,7 +61,7 @@ private:
 class MemoryPagerSnapshot : public IPagerSnapshot, ReferenceCounted<MemoryPagerSnapshot> {
 public:
 	MemoryPagerSnapshot(MemoryPager *pager, Version version) : pager(pager), version(version) {}
-	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
+	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable);
 	virtual Version getVersion() const {
 		return version;
 	}
@@ -155,7 +155,7 @@ int MemoryPage::size() const {
 
 const int MemoryPage::PAGE_BYTES = 4096;
 
-Future<Reference<const IPage>> MemoryPagerSnapshot::getPhysicalPage(LogicalPageID pageID) {
+Future<Reference<const IPage>> MemoryPagerSnapshot::getPhysicalPage(LogicalPageID pageID, bool cacheable) {
 	return pager->getPage(pageID, version);
 }
 
@@ -367,7 +367,7 @@ ACTOR Future<Void> read(IPager *pager, LogicalPageID pageID, Version version, Ve
 	state int myRead = readNum++;
 	state Reference<IPagerSnapshot> readSnapshot = pager->getReadSnapshot(version);
 	debug_printf("Read%d\n", myRead);
-	Reference<const IPage> readPage = wait(readSnapshot->getPhysicalPage(pageID));
+	Reference<const IPage> readPage = wait(readSnapshot->getPhysicalPage(pageID, true));
 	debug_printf("FinishedRead%d\n", myRead);
 	ASSERT(validatePage(readPage, pageID, expectedVersion >= 0 ? expectedVersion : version));
 	return Void();
