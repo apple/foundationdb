@@ -68,6 +68,7 @@ struct LogFile {
 	uint32_t blockSize;
 	std::string fileName;
 	int64_t fileSize;
+	int tagId = -1; // Log router tag. Non-negative for new backup format.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const LogFile &rhs) const {
@@ -76,9 +77,10 @@ struct LogFile {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion) <<
-		      " blockSize:" << std::to_string(blockSize) << " filename:" << fileName <<
-		      " fileSize:" << std::to_string(fileSize);
+		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion)
+		   << " blockSize:" << std::to_string(blockSize) << " filename:" << fileName
+		   << " fileSize:" << std::to_string(fileSize)
+		   << " tagId: " << (tagId >= 0 ? std::to_string(tagId) : std::string("(None)"));
 		return ss.str();
 	}
 };

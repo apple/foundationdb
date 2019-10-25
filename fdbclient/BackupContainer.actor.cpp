@@ -377,6 +377,11 @@ public:
 		if(sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
 			out = f;
 			return true;
+		} else if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u,%d%n", &f.beginVersion, &f.endVersion,
+		                  &f.blockSize, &f.tagId, &len) == 4 &&
+		           len == name.size() && f.tagId >= 0) {
+			out = f;
+			return true;
 		}
 		return false;
 	}
