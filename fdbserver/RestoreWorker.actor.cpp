@@ -183,7 +183,7 @@ void initRestoreWorkerConfig() {
 	opConfig.num_loaders = g_network->isSimulated() ? 3 : opConfig.num_loaders;
 	opConfig.num_appliers = g_network->isSimulated() ? 3 : opConfig.num_appliers;
 	opConfig.transactionBatchSizeThreshold =
-	    g_network->isSimulated() ? 1 : opConfig.transactionBatchSizeThreshold; // Byte
+	    g_network->isSimulated() ? 512 : opConfig.transactionBatchSizeThreshold; // Byte
 	TraceEvent("FastRestore")
 	    .detail("InitOpConfig", "Result")
 	    .detail("NumLoaders", opConfig.num_loaders)
