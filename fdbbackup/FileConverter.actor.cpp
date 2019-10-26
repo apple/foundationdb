@@ -32,6 +32,8 @@
 #include "flow/flow.h"
 #include "flow/serialize.h"
 
+namespace file_converter {
+
 void printConvertUsage() {
 	printf("\n");
 	printf("  -r, --container Container URL.\n");
@@ -173,6 +175,12 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 	std::vector<Reference<IAsyncFile>> files = wait(openLogFiles(container, v1));
 	wait(decodeLogFile(files[0], listing.logs[0].fileSize));
 
+	// Build a heap of mutation list from "files"
+	// while (!heap.empty()) {
+	//    emit a mutation and write to a batch;
+	//    pop the mutation (add a new block if needed)
+	// }
+
 	return Void();
 }
 
@@ -240,14 +248,16 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 	return FDB_EXIT_SUCCESS;
 }
 
+}  // namespace file_converter
+
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args = new CSimpleOpt(argc, argv, gConverterOptions, SO_O_EXACT);
-		ConvertParams param;
-		int status = parseCommandLine(&param, args);
+		CSimpleOpt* args = new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT);
+		file_converter::ConvertParams param;
+		int status = file_converter::parseCommandLine(&param, args);
 		std::cout << "Params: " << param.toString() << "\n";
 		if (status != FDB_EXIT_SUCCESS || !param.isValid()) {
-			printConvertUsage();
+			file_converter::printConvertUsage();
 			return status;
 		}
 

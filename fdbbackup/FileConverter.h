@@ -24,6 +24,8 @@
 
 #include "flow/SimpleOpt.h"
 
+namespace file_converter {
+
 // File format convertion constants
 enum {
 	OPT_CONTAINER,
@@ -52,5 +54,7 @@ CSimpleOpt::SOption gConverterOptions[] = {
 	{ OPT_HELP,            "--help",         SO_NONE },
 	SO_END_OF_OPTIONS
 };
+
+}  // namespace file_converter
 
 #endif  // FDBBACKUP_FILECONVERTER_H
