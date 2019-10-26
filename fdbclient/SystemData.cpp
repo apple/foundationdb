@@ -678,7 +678,7 @@ const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
 	wr << randomID;
 	return wr.toValue();
 }
-const int decodeRestoreRequestTriggerValue(ValueRef const& value) {
+int decodeRestoreRequestTriggerValue(ValueRef const& value) {
 	int s;
 	UID randomID;
 	BinaryReader reader(value, IncludeVersion());

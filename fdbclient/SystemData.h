@@ -302,7 +302,7 @@ const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
 const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
-const int decodeRestoreRequestTriggerValue(ValueRef const& value);
+int decodeRestoreRequestTriggerValue(ValueRef const& value);
 const Value restoreRequestDoneVersionValue(Version readVersion);
 Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
 const Key restoreRequestKeyFor(int const& index);
