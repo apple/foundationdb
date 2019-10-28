@@ -246,16 +246,13 @@ ACTOR Future<Void> getKeyValues(GetKeyValuesRequest _req, Database cx) {
 
 	try {
 		state Promise<std::pair<Key, Key>> conflictRange;
-		GetRangeResult result = wait(
-		    NativeAPI::getRange(cx, Reference<TransactionLogInfo>(), Future<Version>(_req.version), begin, end, limits,
-		                        conflictRange, false, reverse, TransactionInfo(TaskPriority::DefaultOnMainThread)));
+		GetRangeResult result = wait(NativeAPI::getRange(
+		    cx, Reference<TransactionLogInfo>(), Future<Version>(_req.version), begin, end, limits, conflictRange,
+		    false, reverse, TransactionInfo(TaskPriority::DefaultOnMainThread), true));
 		GetKeyValuesReply finalReply;
 		finalReply.version = result.version;
 		finalReply.more = result.output.more;
 		finalReply.data = result.output;
-		finalReply.usingReadProxy = true;
-		finalReply.readToBegin = result.output.readToBegin;
-		finalReply.readThroughEnd = result.output.readThroughEnd;
 		_req.reply.send(finalReply);
 		return Void();
 	} catch (Error& e) {

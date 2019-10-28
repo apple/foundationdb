@@ -337,12 +337,10 @@ struct GetRangeResult {
 };
 
 namespace NativeAPI {
-Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, TransactionInfo info);
-
 Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
                                 KeySelector begin, KeySelector end, GetRangeLimits limits,
                                 Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-                                TransactionInfo info);
+                                TransactionInfo info, bool isReadProxyRequest);
 } // namespace NativeAPI
 
 #include "flow/unactorcompiler.h"

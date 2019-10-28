@@ -189,19 +189,13 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
-	bool usingReadProxy;
-
-	// 'readToBegin' and 'readThroughEnd' are set only if we are using read proxies.
-	bool readToBegin;
-	bool readThroughEnd;
 
 	GetKeyValuesReply()
-	  : version(invalidVersion), more(false), usingReadProxy(false), readToBegin(false), readThroughEnd(false) {}
+	  : version(invalidVersion), more(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, usingReadProxy,
-		           readToBegin, readThroughEnd, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
 	}
 };
 

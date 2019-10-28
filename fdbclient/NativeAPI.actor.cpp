@@ -1171,7 +1171,8 @@ Future<Standalone<RangeResultRef>> getRange(
 	KeySelector const& end,
 	GetRangeLimits const& limits,
 	bool const& reverse,
-	TransactionInfo const& info);
+	TransactionInfo const& info,
+	bool const& isReadProxyRequest);
 
 ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
                                        Reference<TransactionLogInfo> trLogInfo);
@@ -1651,12 +1652,26 @@ void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesReque
 ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRange keys, GetRangeLimits limits,
                                            bool reverse, TransactionInfo info) {
 	state GetRangeResult result;
+	state bool enabledReadProxy = true;
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
-		ASSERT( locations.size() );
+		state bool usingReadProxy = false;
+
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations;
+		if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
+			vector<pair<KeyRange, Reference<LocationInfo>>> _locations = wait(getKeyRangeLocations(
+			    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
+			locations = _locations;
+			usingReadProxy = true;
+		} else {
+		    vector<pair<KeyRange, Reference<LocationInfo>>> _locations = wait(getKeyRangeLocations(
+			    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
+			locations = _locations;
+			usingReadProxy = false;
+			ASSERT(locations.size());
+		}
+
 		state int shard = 0;
 		loop {
 			const KeyRangeRef& range = locations[shard].first;
@@ -1686,13 +1701,26 @@ ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRang
 				}
 				++cx->transactionPhysicalReads;
 				state GetKeyValuesReply rep;
-				choose {
-					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-					when(GetKeyValuesReply _rep =
-					         wait(loadBalance(locations[shard].second, &StorageServerInterface::getKeyValues, req,
-					                          TaskPriority::DefaultPromiseEndpoint, false,
-					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
-						rep = _rep;
+				if (usingReadProxy) ASSERT(cx->readProxiesEnabled() && info.useReadProxies);
+				if (usingReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
+					choose {
+						when(GetKeyValuesReply _rep =
+						         wait(loadBalance(cx->getReadProxies(), &ReadProxyInterface::getKeyValues, req,
+						                          TaskPriority::DefaultPromiseEndpoint, false,
+						                          cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
+							rep = _rep;
+						}
+						when(wait(cx->onReadProxiesChanged())) { throw transaction_too_old(); }
+					}
+				} else {
+					choose {
+						when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
+						when(GetKeyValuesReply _rep =
+						         wait(loadBalance(locations[shard].second, &StorageServerInterface::getKeyValues, req,
+						                          TaskPriority::DefaultPromiseEndpoint, false,
+						                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+							rep = _rep;
+						}
 					}
 				}
 				if( info.debugID.present() )
@@ -1901,10 +1929,10 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 	}
 }
 
-ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo,
-                                                  Future<Version> fVersion, KeySelector begin, KeySelector end,
-                                                  GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
-                                                  bool snapshot, bool reverse, TransactionInfo info) {
+ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
+                                      KeySelector begin, KeySelector end, GetRangeLimits limits,
+                                      Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
+                                      TransactionInfo info, bool isReadProxyRequest) {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
@@ -2053,11 +2081,6 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 					result.output.readToBegin = readToBegin;
 					result.output.readThroughEnd = readThroughEnd;
 
-					if (usingReadProxy) {
-						result.output.readToBegin = rep.readToBegin;
-						result.output.readThroughEnd = rep.readThroughEnd;
-					}
-
 					if( BUGGIFY && limits.hasByteLimit() && result.output.size() > std::max(1, originalLimits.minRows) ) {
 						result.output.more = true;
 						result.output.resize(result.output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows), result.output.size()));
@@ -2078,11 +2101,6 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 				result.output.append(result.output.arena(), rep.data.begin(), rep.data.size());
 
 				if( finished ) {
-					if (usingReadProxy) {
-						result.output.readToBegin = rep.readToBegin;
-						result.output.readThroughEnd = rep.readThroughEnd;
-					}
-
 					if( readThrough ) {
 						result.output.arena().dependsOn( shard.arena() );
 						result.output.readThrough = reverse ? shard.begin : shard.end;
@@ -2099,8 +2117,9 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 					TEST(true);  // !GetKeyValuesReply.more and modifiedSelectors in getRange
 
 					if( !rep.data.size() ) {
-						ASSERT(!usingReadProxy); // We should never reach here when using Read Proxy as it should take
-						                         // care of fallback scenario.
+						if (isReadProxyRequest) {
+							throw wrong_shard_server();
+						}
 						GetRangeResult result = wait(
 						    getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange,
@@ -2128,7 +2147,6 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 				}
 
 				if (e.code() == error_code_transaction_too_old && usingReadProxy == true) {
-					TraceEvent("ReadProxyRequestGetRangeFailed").error(e);
 					enabledReadProxy = false;
 				} else if (e.code() == error_code_wrong_shard_server ||
 				           e.code() == error_code_all_alternatives_failed ||
@@ -2137,6 +2155,11 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 					                    reverse ? (end - 1).isBackward() : begin.isBackward());
 
 					if (e.code() == error_code_wrong_shard_server) {
+						if (isReadProxyRequest) {
+							// If this getRange() was called by ReadProxy, we propogate it back to the client and let it
+							// call the fallback.
+							throw e;
+						}
 						GetRangeResult result = wait(
 						    getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info));
 						getRangeFinished(trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange,
@@ -2165,9 +2188,9 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 
 ACTOR Future<Standalone<RangeResultRef>> getRange(Database cx, Future<Version> fVersion, KeySelector begin,
                                                   KeySelector end, GetRangeLimits limits, bool reverse,
-                                                  TransactionInfo info) {
+                                                  TransactionInfo info, bool isReadProxyRequest) {
 	GetRangeResult result = wait(getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits,
-	                                      Promise<std::pair<Key, Key>>(), true, reverse, info));
+	                                      Promise<std::pair<Key, Key>>(), true, reverse, info, isReadProxyRequest));
 	return result.output;
 }
 
@@ -2330,7 +2353,8 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 
 	state Key ksKey = keyServersKey(key);
-	Future<Standalone<RangeResultRef>> futureServerUids = getRange(cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info);
+	Future<Standalone<RangeResultRef>> futureServerUids =
+	    getRange(cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info, false);
 	Standalone<RangeResultRef> serverUids = wait( futureServerUids );
 
 	ASSERT( serverUids.size() ); // every shard needs to have a team
@@ -2425,7 +2449,8 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 		extraConflictRanges.push_back( conflictRange.getFuture() );
 	}
 
-	return extractRangeRefFromResult(::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info));
+	return extractRangeRefFromResult(
+	    ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, false));
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getRange(
@@ -3569,7 +3594,8 @@ namespace NativeAPI {
 Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
                                 KeySelector begin, KeySelector end, GetRangeLimits limits,
                                 Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-                                TransactionInfo info) {
-	return ::getRange(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse, info);
+                                TransactionInfo info, bool isReadProxyRequest) {
+	return ::getRange(cx, trLogInfo, fVersion, begin, end, limits, conflictRange, snapshot, reverse, info,
+	                  isReadProxyRequest);
 }
 } // namespace NativeAPI
