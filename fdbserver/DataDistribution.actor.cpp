@@ -3110,18 +3110,27 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			ASSERT( self->optimalTeamCount >= 0 );
 			self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 		}
+		state bool sendShardsPath = false;
 		try {
-			bool containsFailed = teamContainsFailedServer(self, team);
 			// If server is marked as failed, a lost race condition could result in RelocateShards not being sent
 			// This is implemented as a safety net so we do not have orphaned shards sitting around
-			if (containsFailed && e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled && teamContainsFailedServer(self, team)) {
 				TraceEvent("TeamTrackerStoppedSendRelocateToDDQ", self->distributorId).detail("Team", team->getDesc());
-				teamTrackerSendRelocateShards(self, team, redundantTeam, containsFailed, serversLeft);
+				sendShardsPath = true;
+				teamTrackerSendRelocateShards(self, team, redundantTeam, teamContainsFailedServer(self, team), serversLeft);
 			}
-			TraceEvent("TeamTrackerStopped", self->distributorId).error(e);
+			// Trace the type of error that stopped the tracker, even if it is actor_cancelled
+			if (logTeamEvents) {
+				TraceEvent("TeamTrackerStopped", self->distributorId).error(e, true);
+			}
 			throw e;
 		} catch (Error& err) {
-			TraceEvent("TeamTrackerStoppedSendRelocateError", self->distributorId).error(err);
+			// This should only be logged as an error if an error was thrown due to the sending of
+			// RelocateShard requests. This avoids falsely logging an error on rethrows with
+			// actor_cancelled, since .error will not log actor_cancelled by default.
+			if (sendShardsPath) {
+				TraceEvent(SevError, "TeamTrackerStoppedSendRelocateError", self->distributorId).error(err);
+			}
 			throw err;
 		}
 	}
