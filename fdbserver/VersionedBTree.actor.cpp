@@ -3495,24 +3495,22 @@ private:
 			int changes = 0;
 
 			// Now, process each mutation range and merge changes with existing data.
+			bool firstMutationBoundary = true;
 			while(iMutationBoundary != iMutationBoundaryEnd) {
 				debug_printf("%s New mutation boundary: '%s': %s\n", context.c_str(), printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
 
 				SingleKeyMutationsByVersion::const_iterator iMutations;
 
-				// If the mutation boundary key is less than the lower bound key then skip startKeyMutations for
-				// this bounary, we're only processing this mutation range here to apply any clears to existing data.
-				if(iMutationBoundary->first < lowerBound->key) {
+				// For the first mutation boundary only, if the boundary key is less than the lower bound for the page
+				// then skip startKeyMutations for this boundary, we're only processing this mutation range here to apply
+				// a possible clear to existing data.
+				if(firstMutationBoundary && iMutationBoundary->first < lowerBound->key) {
 					iMutations = iMutationBoundary->second.startKeyMutations.end();
-				}
-				// If the mutation boundary key is the same as the page lowerBound key then start reading single
-				// key mutations at the first version greater than the lowerBound key's version.
-				else if(!self->singleVersion && iMutationBoundary->first == lowerBound->key) {
-					iMutations = iMutationBoundary->second.startKeyMutations.upper_bound(lowerBound->version);
 				}
 				else {
 					iMutations = iMutationBoundary->second.startKeyMutations.begin();
 				}
+				firstMutationBoundary = false;
 
 				SingleKeyMutationsByVersion::const_iterator iMutationsEnd = iMutationBoundary->second.startKeyMutations.end();
 
