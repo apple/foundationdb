@@ -1310,7 +1310,7 @@ public:
 	}
 
 	// Get the number of pages in use but not by the pager itself.
-	int64_t getUserPageCount() {
+	int64_t getUserPageCount() override {
 		int userPages = pHeader->pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages - delayedFreeList.numEntries;
 		debug_printf("COWPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64 " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64 "\n", filename.c_str(), userPages, pHeader->pageCount, freeList.numPages, freeList.numEntries, delayedFreeList.numPages, delayedFreeList.numEntries);
 		return userPages;
@@ -2716,10 +2716,13 @@ public:
 			// When starting a new mutation buffer its start version must be greater than the last write version
 			ASSERT(v > m_writeVersion);
 			m_pBuffer = &m_mutationBuffers[v];
+
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
 			// because now all existing keys are within some range in the mutation map.
-			(*m_pBuffer)[dbBegin.key];
-			(*m_pBuffer)[dbEnd.key];
+			(*m_pBuffer)[dbBegin.key] = RangeMutation();
+			// Setting the dbEnd key to be cleared prevents having to treat a range clear to dbEnd as a special
+			// case in order to avoid traversing down the rightmost edge of the tree.
+			(*m_pBuffer)[dbEnd.key].startKeyMutations[0] = SingleKeyMutation();
 		}
 		else {
 			// It's OK to set the write version to the same version repeatedly so long as m_pBuffer is not null
@@ -2750,14 +2753,19 @@ public:
 			self->setWriteVersion(self->getLatestVersion() + 1);
 		}
 
+		// The lazy delete queue should now be empty and contain only the new page to start writing to
+		// on the next commit.
 		LazyDeleteQueueT::QueueState s = self->m_lazyDeleteQueue.getState();
 		ASSERT(s.numEntries == 0);
 		ASSERT(s.numPages == 1);
 
-		debug_printf("rootPageCount %d\n", self->m_header.root.count);
+		// The btree should now be a single non-oversized root page.
 		ASSERT(self->m_header.height == 1);
-		// All that should be in use now is the root page and the lazy delete queue empty page.
-		ASSERT(((COWPager *)self->m_pager)->getUserPageCount() == self->m_header.root.count + 1);
+		ASSERT(self->m_header.root.count == 1);
+
+		// From the pager's perspective the only pages that should be in use are the btree root and
+		// the previously mentioned lazy delete queue page.
+		ASSERT(self->m_pager->getUserPageCount() == 2);
 
 		return Void();
 	}
@@ -3032,22 +3040,6 @@ private:
 
 	LazyDeleteQueueT m_lazyDeleteQueue;
 	int m_maxPartSize;
-
-	void printMutationBuffer(MutationBufferT::const_iterator begin, MutationBufferT::const_iterator end) const {
-#if REDWOOD_DEBUG
-		debug_printf("-------------------------------------\n");
-		debug_printf("BUFFER\n");
-		while(begin != end) {
-			debug_printf("'%s':  %s\n", printable(begin->first).c_str(), begin->second.toString().c_str());
-			++begin;
-		}
-		debug_printf("-------------------------------------\n");
-#endif
-	}
-
-	void printMutationBuffer(MutationBufferT *buf) const {
-		return printMutationBuffer(buf->begin(), buf->end());
-	}
 
 	// Find or create a mutation buffer boundary for bound and return an iterator to it
 	MutationBufferT::iterator insertMutationBoundary(Key boundary) {
@@ -3413,7 +3405,16 @@ private:
 		state MutationBufferT::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBound->key);
 
 		if(REDWOOD_DEBUG) {
-			self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
+			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
+			auto begin = iMutationBoundary;
+			while(1) {
+				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin->first).c_str(), begin->second.toString().c_str());
+				if(begin == iMutationBoundaryEnd) {
+					break;
+				}
+				++begin;
+			}
+			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
 		// If the boundary range iterators are the same then upperbound and lowerbound have the same key.
@@ -3437,6 +3438,8 @@ private:
 			return results;
 		}
 
+		// If one mutation range covers the entire subtree, then check if the entire subtree is modified,
+		// unmodified, or possibly/partially modified.
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
 		++iMutationBoundaryNext;
 		// If one mutation range covers the entire page
@@ -3479,20 +3482,13 @@ private:
 		cursor.moveFirst();
 
 		state Version writeVersion;
-		state bool isRoot = (rootID == self->m_header.root.get());
 
 		// Leaf Page
 		if(page->flags & BTreePage::IS_LEAF) {
 			ASSERT(isLeaf);
 			state Standalone<VectorRef<RedwoodRecordRef>> merged;
 
-			debug_printf("%s MERGING EXISTING DATA WITH MUTATIONS:\n", context.c_str());
-			if(REDWOOD_DEBUG) {
-				self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
-			}
-
-			// It's a given that the mutation map is not empty so it's safe to do this
-			Key mutationRangeStart = iMutationBoundary->first;
+			debug_printf("%s Leaf page, merging changes.\n", context.c_str());
 
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = invalidVersion;
@@ -3635,7 +3631,7 @@ private:
 			writeVersion = self->singleVersion ? self->getLastCommittedVersion() + 1 : minVersion;
 			// If everything in the page was deleted then this page should be deleted as of the new version
 			// Note that if a single range clear covered the entire page then we should not get this far
-			if(merged.empty() && !isRoot) {
+			if(merged.empty()) {
 				debug_printf("%s All leaf page contents were cleared, returning %s\n", context.c_str(), toString(results).c_str());
 				self->freeBtreePage(rootID, writeVersion);
 				return results;
@@ -3811,10 +3807,6 @@ private:
 		// Get the latest version from the pager, which is what we will read at
 		state Version latestVersion = self->m_pager->getLatestVersion();
 		debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
-
-		if(REDWOOD_DEBUG) {
-			self->printMutationBuffer(mutations);
-		}
 
 		state Standalone<BTreePageID> rootPageID = self->m_header.root.get();
 		state RedwoodRecordRef lowerBound = dbBegin.withPageID(rootPageID);
@@ -4368,11 +4360,11 @@ private:
 				return Void();
 			}
 
+			debug_printf("readFullKVPair:  Split, first record %s\n", rec.toString().c_str());
+
 			// Split value, need to coalesce split value parts into a buffer in arena,
 			// after which cur1 will point to the first part and kv.key will reference its key
 			ASSERT(rec.chunk.start + rec.value.get().size() == rec.chunk.total);
-
-			debug_printf("readFullKVPair:  Split, totalsize %d  %s\n", rec.chunk.total, self->toString().c_str());
 
 			// Allocate space for the entire value in the same arena as the key
 			state int bytesLeft = rec.chunk.total;
@@ -5401,6 +5393,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
 	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
+	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
 	state double coldStartProbability = deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
 	state double maxWallClockDuration = 60;
@@ -5415,6 +5408,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("mutationBytesTarget: %d\n", mutationBytesTarget);
 	printf("clearProbability: %f\n", clearProbability);
+	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
 	printf("\n");
@@ -5518,6 +5512,22 @@ TEST_CASE("!/redwood/correctness/btree") {
 			}
 
 			btree->clear(range);
+
+			// Sometimes set the range start after the clear
+			if(deterministicRandom()->random01() < clearPostSetProbability) {
+				KeyValue kv = randomKV(0, maxValueSize);
+				kv.key = range.begin;
+				btree->set(kv);
+				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
+			}
+
+			// Sometimes set the range end after the clear
+			if(deterministicRandom()->random01() < clearPostSetProbability) {
+				KeyValue kv = randomKV(0, maxValueSize);
+				kv.key = range.end;
+				btree->set(kv);
+				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
+			}
 		}
 		else {
 			// Set a key

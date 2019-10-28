@@ -209,6 +209,9 @@ public:
 
 	virtual StorageBytes getStorageBytes() = 0;
 
+	// Count of pages in use by the pager client
+	virtual int64_t getUserPageCount() = 0;
+
 	// Future returned is ready when pager has been initialized from disk and is ready for reads and writes.
 	// It is invalid to call most other functions until init() is ready.
 	// TODO: Document further.
