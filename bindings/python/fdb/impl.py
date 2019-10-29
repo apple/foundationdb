@@ -44,6 +44,13 @@ _thread_local_storage = threading.local()
 import weakref
 
 
+class Hook(set):
+
+    def run(*args, **kwargs):
+        for func in self:
+            func(*args, **kwargs)
+
+
 class _NetworkOptions(object):
     def __init__(self, parent):
         self._parent = parent
@@ -239,9 +246,12 @@ def transactional(*tr_args, **tr_kwargs):
                 largs = list(args)
                 tr = largs[index] = args[index].create_transaction()
 
+                tr.db.hook_on_transaction_begin(tr)
+
                 while True:
                     try:
                         ret = yield asyncio.From(func(*largs, **kwargs))
+                        tr.db.hook_on_transaction_commit(tr)
                         yield asyncio.From(tr.commit())
                         raise asyncio.Return(ret)
                     except FDBError as e:
@@ -255,6 +265,7 @@ def transactional(*tr_args, **tr_kwargs):
 
                 largs = list(args)
                 tr = largs[index] = args[index].create_transaction()
+                tr.db.hook_on_transaction_begin(tr)
 
                 committed = False
                 # retries = 0
@@ -264,6 +275,7 @@ def transactional(*tr_args, **tr_kwargs):
                 while not committed:
                     try:
                         ret = func(*largs, **kwargs)
+                        tr.db.hook_on_transaction_commit(tr)
                         tr.commit().wait()
                         committed = True
                     except FDBError as e:
@@ -605,7 +617,7 @@ class Future(_FDBBase):
         if not self.is_ready():
             # Blocking in the native client from the main thread prevents Python from handling signals.
             # To avoid that behavior, we implement the blocking in Python using semaphores and on_ready.
-            # Using a Semaphore is faster than an Event, and we create only one per thread to avoid the 
+            # Using a Semaphore is faster than an Event, and we create only one per thread to avoid the
             # cost of creating one every time.
             semaphore = getattr(_thread_local_storage, 'future_block_semaphore', None)
             if semaphore is None:
@@ -899,6 +911,8 @@ class Database(_FDBBase):
     def __init__(self, dpointer):
         self.dpointer = dpointer
         self.options = _DatabaseOptions(self)
+        self.hook_on_transaction_begin = Hook()
+        self.hook_on_transaction_commit = Hook()
 
     def __del__(self):
         # print('Destroying database 0x%x' % self.dpointer)
@@ -1674,7 +1688,7 @@ def open(cluster_file=None, event_model=None):
             open_databases[cluster_file] = create_database(cluster_file)
 
         return open_databases[(cluster_file)]
-    
+
 
 def open_v609(cluster_file=None, database_name=b'DB', event_model=None):
     if database_name != b'DB':
