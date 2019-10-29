@@ -2980,10 +2980,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						address_interface.clear();
+						state Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
 						for( auto it : kvs ) {
-							auto ip_port = it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
-							address_interface[ip_port] = it.value;
+							try {
+								state Key ip_port_key = it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+								auto parsedAddress = NetworkAddress::parse(ip_port_key.toString());
+								state Value it_value = it.value;
+								choose {
+									// Checking network connection before adding workers in the list (address_interface) of processes that can be killed
+									when (Reference<IConnection> conn = wait( timeout( INetworkConnections::net()->connect(parsedAddress), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) )) {
+										address_interface[ip_port_key] = it_value;
+										conn->close();
+									}
+								}
+							} catch (Error& e) {
+									//When connection lost, Remove the worker from address_interface if already exists in the list (address_interface)
+									address_interface.erase(ip_port_key);
+							}
 						}
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
@@ -2999,13 +3013,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
-						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
-						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
 						} else {
 							printf("Attempted to kill %zu processes\n", address_interface.size());
+							for( auto it = address_interface.begin(); it != address_interface.end();) {
+								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it->second);
+								//Remove the workers one by one from address_interface after sending kill command
+								it = address_interface.erase(it);
+							}
 						}
 					} else {
 						for(int i = 1; i < tokens.size(); i++) {
@@ -3019,6 +3035,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]]);
+								address_interface.erase(tokens[i]);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
