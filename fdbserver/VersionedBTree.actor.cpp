@@ -2950,6 +2950,18 @@ private:
 		// A clear range version, if cleared, for the range starting immediately AFTER the start key
 		Optional<Version> rangeClearVersion;
 
+		bool keyCleared() const {
+			return startKeyMutations.size() == 1 && startKeyMutations.begin()->second.isClear();
+		}
+
+		bool keyChanged() const {
+			return !startKeyMutations.empty();
+		}
+
+		bool rangeCleared() const {
+			return rangeClearVersion.present();
+		}
+
 		// Returns true if this RangeMutation doesn't actually mutate anything
 		bool noChanges() const {
 			return !rangeClearVersion.present() && startKeyMutations.empty();
@@ -3417,10 +3429,15 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		// If the boundary range iterators are the same then upperbound and lowerbound have the same key.
-		// If the key is being mutated, them remove this subtree.
+		// iMutationBoundary is greatest boundary <= lowerBound->key
+		// iMutationBoundaryEnd is least boundary >= upperBound->key
+
+		// If the boundary range iterators are the same then this subtree only has one unique key, which is the same key as the boundary
+		// record the iterators are pointing to.  There only two outcomes possible:  Clearing the subtree or leaving it alone.
+		// If there are any changes to the one key then the entire subtree should be deleted as the changes for the key
+		// do not go into this subtree.
 		if(iMutationBoundary == iMutationBoundaryEnd) {
-			if(!iMutationBoundary->second.startKeyMutations.empty()) {
+			if(iMutationBoundary->second.keyChanged()) {
 				debug_printf("%s lower and upper bound key/version match and key is modified so deleting page, returning %s\n", context.c_str(), toString(results).c_str());
 				Version firstKeyChangeVersion = self->singleVersion ? self->getLastCommittedVersion() + 1 : iMutationBoundary->second.startKeyMutations.begin()->first;
 				if(isLeaf) {
@@ -3442,25 +3459,60 @@ private:
 		// unmodified, or possibly/partially modified.
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
 		++iMutationBoundaryNext;
-		// If one mutation range covers the entire page
 		if(iMutationBoundaryNext == iMutationBoundaryEnd) {
-			// If there are no changes in the range (no clear, no boundary key mutations)
-			// OR there are changes but for a key that is less than the page lower boundary and therefore not part of this page
-			if(iMutationBoundary->second.noChanges() ||  
-				( !iMutationBoundary->second.rangeClearVersion.present() && iMutationBoundary->first < lowerBound->key)
-			) {
+			// Cleared means the entire range covering the subtree was cleared.  It is assumed true
+			// if the range starting after the lower mutation boundary was cleared, and then proven false
+			// below if possible.
+			bool cleared = iMutationBoundary->second.rangeCleared();
+			// Unchanged means the entire range covering the subtree was unchanged, it is assumed to be the
+			// opposite of cleared() and then proven false below if possible.
+			bool unchanged = !cleared;
+			debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
+
+			// If the lower mutation boundary key is the same as the subtree lower bound then whether or not
+			// that key is being changed or cleared affects this subtree.
+			if(iMutationBoundary->first == lowerBound->key) {
+				// If subtree will be cleared (so far) but the lower boundary key is not cleared then the subtree is not cleared
+				if(cleared && !iMutationBoundary->second.keyCleared()) {
+					cleared = false;
+					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
+				}
+				// If the subtree looked unchanged (so far) but the lower boundary is is changed then the subtree is changed
+				if(unchanged && iMutationBoundary->second.keyChanged()) {
+					unchanged = false;
+					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
+				}
+			}
+
+			// If the higher mutation boundary key is the same as the subtree upper bound key then whether 
+			// or not it is being changed or cleared affects this subtree.
+			if((cleared || unchanged) && iMutationBoundaryEnd->first == upperBound->key) {
+				// If the key is being changed then the records in this subtree with the same key must be removed
+				// so the subtree is definitely not unchanged, though it may be cleared to achieve the same effect.
+				if(iMutationBoundaryEnd->second.keyChanged()) {
+					unchanged = false;
+					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
+				}
+				else {
+					// If the key is not being changed then the records in this subtree can't be removed so the
+					// subtree is not being cleared.
+					cleared = false;
+					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
+				}
+			}
+
+			// The subtree cannot be both cleared and unchanged.
+			ASSERT(!(cleared && unchanged));
+
+			// If no changes in subtree
+			if(unchanged) {
 				results.push_back_deep(results.arena(), VersionAndChildrenRef(0, VectorRef<RedwoodRecordRef>((RedwoodRecordRef *)decodeLowerBound, 1), *decodeUpperBound));
 				debug_printf("%s no changes on this subtree, returning %s\n", context.c_str(), toString(results).c_str());
 				return results;
 			}
 
-			// If the range is cleared and there either no sets or the sets aren't relevant to this subtree then delete it
-			// The last if subexpression is checking that either the next key in the mutation buffer is being changed or
-			// the upper bound key of this page isn't the same.
-			if(iMutationBoundary->second.rangeClearVersion.present()
-				&& (iMutationBoundary->second.startKeyMutations.empty() || iMutationBoundary->first < lowerBound->key)
-				&& (!iMutationBoundaryEnd->second.startKeyMutations.empty() || upperBound->key != iMutationBoundaryEnd->first)
-			) {
+			// If subtree is cleared
+			if(cleared) {
 				debug_printf("%s %s cleared, deleting it, returning %s\n", context.c_str(), isLeaf ? "Page" : "Subtree", toString(results).c_str());
 				Version clearVersion = self->singleVersion ? self->getLastCommittedVersion() + 1 : iMutationBoundary->second.rangeClearVersion.get();
 				if(isLeaf) {
@@ -3492,7 +3544,6 @@ private:
 
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = invalidVersion;
-			int changes = 0;
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
@@ -3515,11 +3566,13 @@ private:
 				SingleKeyMutationsByVersion::const_iterator iMutationsEnd = iMutationBoundary->second.startKeyMutations.end();
 
 				// Iterate over old versions of the mutation boundary key, outputting if necessary
+				bool boundaryKeyWritten = false;
 				while(cursor.valid() && cursor.get().key == iMutationBoundary->first) {
 					// If not in single version mode or there were no changes to the key
 					if(!self->singleVersion || iMutationBoundary->second.noChanges()) {
 						merged.push_back(merged.arena(), cursor.get());
 						debug_printf("%s Added %s [existing, boundary start]\n", context.c_str(), merged.back().toString().c_str());
+						boundaryKeyWritten = true;
 					}
 					else {
 						ASSERT(self->singleVersion);
@@ -3534,16 +3587,26 @@ private:
 				while(iMutations != iMutationsEnd) {
 					const SingleKeyMutation &m = iMutations->second;
 					if(m.isClear() || m.value.size() <= self->m_maxPartSize) {
-						if(iMutations->first < minVersion || minVersion == invalidVersion)
-							minVersion = iMutations->first;
-						++changes;
-						merged.push_back(merged.arena(), m.toRecord(iMutationBoundary->first, iMutations->first));
-						debug_printf("%s Added non-split %s [mutation, boundary start]\n", context.c_str(), merged.back().toString().c_str());
+						// If the boundary key was not yet written to the merged list then clears can be skipped.
+						// Note that in a more complex scenario where there are multiple sibling pages for the same key, with different
+						// versions and/or part numbers, this is still a valid thing to do.  This is because a changing boundary 
+						// key (set or clear) will result in any instances (different versions, split parts) of this key
+						// on sibling pages to the left of this page to be removed, so an explicit clear need only be stored
+						// if a record with the mutation boundary key was already written to this page.
+						if(!boundaryKeyWritten && iMutations->second.isClear()) {
+							debug_printf("%s Skipped %s [mutation, unnecessary boundary key clear]\n", context.c_str(), m.toRecord(iMutationBoundary->first, iMutations->first).toString().c_str());
+						}
+						else {
+							merged.push_back(merged.arena(), m.toRecord(iMutationBoundary->first, iMutations->first));
+							debug_printf("%s Added non-split %s [mutation, boundary start]\n", context.c_str(), merged.back().toString().c_str());
+							if(iMutations->first < minVersion || minVersion == invalidVersion)
+								minVersion = iMutations->first;
+							boundaryKeyWritten = true;
+						}
 					}
 					else {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
-						++changes;
 						int bytesLeft = m.value.size();
 						int start = 0;
 						RedwoodRecordRef whole(iMutationBoundary->first, iMutations->first, m.value);
@@ -3555,6 +3618,7 @@ private:
 							start += partSize;
 							debug_printf("%s Added split %s [mutation, boundary start] bytesLeft %d\n", context.c_str(), merged.back().toString().c_str(), bytesLeft);
 						}
+						boundaryKeyWritten = true;
 					}
 					++iMutations;
 				}
@@ -3595,7 +3659,6 @@ private:
 							Version clearVersion = clearRangeVersion.get();
 							if(clearVersion < minVersion || minVersion == invalidVersion)
 								minVersion = clearVersion;
-							++changes;
 							merged.push_back(merged.arena(), RedwoodRecordRef(cursor.get().key, clearVersion));
 							debug_printf("%s Added %s [existing, middle clear]\n", context.c_str(), merged.back().toString().c_str());
 						}
@@ -3608,7 +3671,17 @@ private:
 			}
 
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
+			bool upperMutationBoundaryKeyChanged = iMutationBoundaryEnd->second.keyChanged();
 			while(cursor.valid()) {
+				// If the upper mutation boundary is being changed and the cursor's key matches it then stop because none of the earlier
+				// versions or fragments of that key should be written.
+				if(upperMutationBoundaryKeyChanged && cursor.get().key == iMutationBoundaryEnd->first) {
+					debug_printf("%s Skipped %s and beyond [existing, matches changed upper mutation boundary]\n", context.c_str(), cursor.get().toString().c_str());
+					Version changedVersion = iMutationBoundaryEnd->second.startKeyMutations.begin()->first;
+					if(changedVersion < minVersion || minVersion == invalidVersion)
+						minVersion = changedVersion;
+					break;
+				}
 				merged.push_back(merged.arena(), cursor.get());
 				debug_printf("%s Added %s [existing, tail]\n", context.c_str(), merged.back().toString().c_str());
 				cursor.moveNext();
@@ -3620,7 +3693,6 @@ private:
 			if(minVersion == invalidVersion) {
 				results.push_back_deep(results.arena(), VersionAndChildrenRef(0, VectorRef<RedwoodRecordRef>((RedwoodRecordRef *)decodeLowerBound, 1), *decodeUpperBound));
 				debug_printf("%s No changes were made during mutation merge, returning %s\n", context.c_str(), toString(results).c_str());
-				ASSERT(changes == 0);
 				return results;
 			}
 
@@ -5641,6 +5713,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 	// Check for errors
 	if(errorCount != 0)
 		throw internal_error();
+
+	wait(btree->destroyAndCheckSanity());
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
