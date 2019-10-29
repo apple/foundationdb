@@ -152,6 +152,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
 					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
+				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
+					throw timed_out();
+				}
+			} else if (self->futureResults.size() == 1) {
+				self->randomID = deterministicRandom()->randomUniqueID();
+				self->sequence = 0;
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}
@@ -985,8 +991,16 @@ void ILogSystem::BufferedCursor::advanceTo(LogMessageVersion n) {
 }
 
 ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, TaskPriority taskID ) {
+	if(cursor->version().version >= maxVersion) {
+		return Void();
+	}
 	loop {
 		wait(yield());
+		wait(cursor->getMore(taskID));
+		self->poppedVersion = std::max(self->poppedVersion, cursor->popped());
+		if(self->canDiscardPopped) {
+			self->initialPoppedVersion = std::max(self->initialPoppedVersion, cursor->popped());
+		}
 		if(cursor->version().version >= maxVersion) {
 			return Void();
 		}
@@ -996,11 +1010,6 @@ ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Refe
 			if(cursor->version().version >= maxVersion) {
 				return Void();
 			}
-		}
-		wait(cursor->getMore(taskID));
-		self->poppedVersion = std::max(self->poppedVersion, cursor->popped());
-		if(self->canDiscardPopped) {
-			self->initialPoppedVersion = std::max(self->initialPoppedVersion, cursor->popped());
 		}
 	}
 }

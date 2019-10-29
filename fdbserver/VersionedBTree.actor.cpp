@@ -1290,10 +1290,6 @@ public:
 		return closedPromise.getFuture();
 	}
 
-	Future<Void> onClose() override {
-		return closedPromise.getFuture();
-	}
-
 	StorageBytes getStorageBytes() override {
 		ASSERT(recoverFuture.isReady());
 		int64_t free;

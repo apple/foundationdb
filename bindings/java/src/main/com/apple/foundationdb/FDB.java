@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * The starting point for accessing FoundationDB.
  *  <br>
- *  <h3>Setting API version</h3>
+ *  <h2>Setting API version</h2>
  *  The FoundationDB API is accessed with a call to {@link #selectAPIVersion(int)}.
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
@@ -49,11 +49,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   being used to connect to the cluster. In particular, you should not advance
  *   the API version of your application after upgrading your client until the 
  *   cluster has also been upgraded.<br>
- *  <h3>Getting a database</h3>
+ *  <h2>Getting a database</h2>
  *  Once the API version has been set, the easiest way to get a {@link Database} object to use is
  *   to call {@link #open}.
  *  <br>
- *  <h3>Client networking</h3>
+ *  <h2>Client networking</h2>
  *  The network is started either implicitly with a call to a variant of {@link #open()}
  *  or started explicitly with a call to {@link #startNetwork()}.
  *  <br>

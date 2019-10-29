@@ -262,6 +262,7 @@ struct TLogData : NonCopyable {
 	int64_t instanceID;
 	int64_t bytesInput;
 	int64_t bytesDurable;
+	int64_t targetVolatileBytes;  // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 
@@ -288,7 +289,7 @@ struct TLogData : NonCopyable {
 			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0), queueCommitEnd(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
+			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS),
 			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped()
 		{
@@ -697,7 +698,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state FlowLock::Releaser commitLockReleaser;
 
 	if(logData->stopped) {
-		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
+		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
 				totalSize = 0;
 				Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
@@ -742,7 +743,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 		} else {
 			Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
 			while( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT && sizeItr != logData->version_sizes.end()
-					&& (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD || sizeItr->value.first == 0) )
+					&& (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >= self->targetVolatileBytes || sizeItr->value.first == 0) )
 			{
 				totalSize += sizeItr->value.first + sizeItr->value.second;
 				++sizeItr;
@@ -1036,6 +1037,9 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		try {
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+				throw timed_out();
+			}
 			auto& trackerData = logData->peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
 				trackerData.sequence_version[0].send(std::make_pair(req.begin, req.onlySpilled));
@@ -2312,8 +2316,18 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	return Void();
 }
 
+ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<AsyncVar<UID>> activeSharedTLog) {
+	wait(delay(10));
+	if (activeSharedTLog->get() != tlogId) {
+		// TODO: This should fully spill, but currently doing so will cause us to no longer update poppedVersion
+		// and QuietDatabase will hang thinking our TLog is behind.
+		self->targetVolatileBytes = SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT * 2;
+	}
+	return Void();
+}
+
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded) {
+ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog) {
 	state TLogData self( tlogId, persistentData, persistentQueue, db, degraded, folder );
 	state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
@@ -2334,6 +2348,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 		self.sharedActors.send( commitQueue(&self) );
 		self.sharedActors.send( updateStorageLoop(&self) );
+		state Future<Void> activeSharedChange = Void();
 
 		loop {
 			choose {
@@ -2346,6 +2361,14 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 					}
 				}
 				when ( wait( error ) ) { throw internal_error(); }
+				when ( wait( activeSharedChange ) ) {
+					if (activeSharedTLog->get() == tlogId) {
+						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+					} else {
+						self.sharedActors.send( startSpillingInTenSeconds(&self, tlogId, activeSharedTLog) );
+					}
+					activeSharedChange = activeSharedTLog->onChange();
+				}
 			}
 		}
 	} catch (Error& e) {
