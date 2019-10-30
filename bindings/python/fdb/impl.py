@@ -246,12 +246,12 @@ def transactional(*tr_args, **tr_kwargs):
                 largs = list(args)
                 tr = largs[index] = args[index].create_transaction()
 
-                tr.db.hook_on_transaction_begin(tr)
+                tr.db.hook_on_transaction_begin.run(tr)
 
                 while True:
                     try:
                         ret = yield asyncio.From(func(*largs, **kwargs))
-                        tr.db.hook_on_transaction_commit(tr)
+                        tr.db.hook_on_transaction_commit.run(tr)
                         yield asyncio.From(tr.commit())
                         raise asyncio.Return(ret)
                     except FDBError as e:
@@ -265,7 +265,7 @@ def transactional(*tr_args, **tr_kwargs):
 
                 largs = list(args)
                 tr = largs[index] = args[index].create_transaction()
-                tr.db.hook_on_transaction_begin(tr)
+                tr.db.hook_on_transaction_begin.run(tr)
 
                 committed = False
                 # retries = 0
@@ -275,7 +275,7 @@ def transactional(*tr_args, **tr_kwargs):
                 while not committed:
                     try:
                         ret = func(*largs, **kwargs)
-                        tr.db.hook_on_transaction_commit(tr)
+                        tr.db.hook_on_transaction_commit.run(tr)
                         tr.commit().wait()
                         committed = True
                     except FDBError as e:
