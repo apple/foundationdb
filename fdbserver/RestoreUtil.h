@@ -34,20 +34,11 @@
 #include <cstdint>
 #include <cstdarg>
 
-#define FR_DEBUG 1
-#define FR_VERBOSE_DEBUG 1
+#define FR_DEBUG_SEVERITY 		  SevDebug
+#define FR_VERBOSE_DEBUG_SEVERITY SevDebugVerbose
 
-#ifdef FR_DEBUG
-#define FRTraceEvent(...) TraceEvent(SevDebugVerbose, "FastRestoreDebug", UID())
-#else
-#define FRTraceEvent(...) TraceEvent(SevDebugVerbose, "FastRestoreDebug", UID())
-#endif
-
-#ifdef FR_VERBOSE_DEBUG
-#define FRVBTraceEvent(...) TraceEvent(SevDebugVerbose, "FastRestoreDebugVerbose", UID())
-#else
-#define FRVBTraceEvent(...) TraceEvent(SevDebugVerbose, "FastRestoreDebugVerbose", UID())
-#endif
+#define FRTraceEvent(...) TraceEvent(FR_DEBUG_SEVERITY, "FastRestoreDebug", UID())
+#define FRVBTraceEvent(...) TraceEvent(FR_VERBOSE_DEBUG_SEVERITY, "FastRestoreDebugVerbose", UID())
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
