@@ -402,6 +402,7 @@ Future<Void> shardMerger(
 	bool forwardComplete = false;
 	KeyRangeRef merged;
 	StorageMetrics endingStats = shardSize->get().get();
+	int64_t systemBytes = keys.begin >= systemKeys.begin ? shardSize->get().get().bytes : 0; 
 
 	loop {
 		Optional<StorageMetrics> newMetrics;
@@ -439,6 +440,9 @@ Future<Void> shardMerger(
 
 		merged = KeyRangeRef( prevIter->range().begin, nextIter->range().end );
 		endingStats += newMetrics.get();
+		if((forwardComplete ? prevIter->range().begin : nextIter->range().begin) >= systemKeys.begin) {
+			systemBytes += newMetrics.get().bytes;
+		}
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds( merged, maxShardSize );
@@ -457,6 +461,9 @@ Future<Void> shardMerger(
 
 			// If going forward, remove most recently added range
 			endingStats -= newMetrics.get();
+			if(nextIter->range().begin >= systemKeys.begin) {
+				systemBytes -= newMetrics.get().bytes;
+			}
 			shardsMerged--;
 			--nextIter;
 			merged = KeyRangeRef( prevIter->range().begin, nextIter->range().end );
@@ -473,6 +480,9 @@ Future<Void> shardMerger(
 		.detail("EndingSize", endingStats.bytes)
 		.detail("BatchedMerges", shardsMerged);
 
+	if(mergeRange.begin < systemKeys.begin) {
+		self->systemSizeEstimate -= systemBytes;
+	}
 	restartShardTrackers( self, mergeRange, endingStats );
 	self->shardsAffectedByTeamFailure->defineShard( mergeRange );
 	self->output.send( RelocateShard( mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD ) );
