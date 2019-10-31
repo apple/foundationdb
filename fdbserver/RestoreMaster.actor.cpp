@@ -60,12 +60,19 @@ void dummySampleWorkload(Reference<RestoreMasterData> self);
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
 	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
 
-	// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
-	wait(recruitRestoreRoles(masterWorker, self));
+	try {
+		// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
+		wait(recruitRestoreRoles(masterWorker, self));
 
-	wait(distributeRestoreSysInfo(masterWorker, self));
+		wait(distributeRestoreSysInfo(masterWorker, self));
 
-	wait(startProcessRestoreRequests(self, cx));
+		wait(startProcessRestoreRequests(self, cx));
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestore")
+		    .detail("StartRestoreMaster", "Unexpectedly unhandled error")
+		    .detail("Error", e.what())
+		    .detail("ErrorCode", e.code());
+	}
 
 	return Void();
 }
@@ -158,7 +165,28 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
 
 	// lock DB for restore
-	wait(lockDatabase(cx, randomUID));
+	state int numTries = 0;
+	loop {
+		try {
+			wait(lockDatabase(cx, randomUID));
+			state Reference<ReadYourWritesTransaction> tr =
+			    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(checkDatabaseLock(tr, randomUID));
+			TraceEvent("FastRestore").detail("DBIsLocked", randomUID);
+			break;
+		} catch (Error& e) {
+			TraceEvent("FastRestore").detail("CheckLockError", e.what());
+			TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
+			    .detail("Reason", "DB is not properly locked")
+			    .detail("ExpectedLockID", randomUID);
+			numTries++;
+			wait(delay(5.0));
+		}
+	}
+
 	wait(clearDB(cx));
 
 	// Step: Perform the restore requests
@@ -167,7 +195,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			RestoreRequest& request = restoreRequests[restoreIndex];
 			TraceEvent("FastRestore").detail("RestoreRequestInfo", request.toString());
-			Version ver = wait(processRestoreRequest(self, cx, request));
+			wait(success(processRestoreRequest(self, cx, request)));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "FastRestoreFailed").detail("RestoreRequest", restoreRequests[restoreIndex].toString());
@@ -179,8 +207,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		wait(unlockDatabase(cx, randomUID));
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "UnlockDBFailed").detail("UID", randomUID.toString());
+		TraceEvent(SevError, "UnlockDBFailed").detail("UID", randomUID.toString());
+		ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
 	}
+
 
 	TraceEvent("FastRestore").detail("RestoreMasterComplete", self->id());
 
@@ -202,6 +232,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
 		wait(initializeVersionBatch(self));
 		wait(distributeWorkloadPerVersionBatch(self, cx, request, versionBatch->second));
+		self->batchIndex++;
 	}
 
 	TraceEvent("FastRestore").detail("RestoreToVersion", request.targetVersion);
@@ -225,23 +256,30 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		mutationLogPrefix = restoreConfig->mutationLogPrefix();
 	}
 
+	// sort files in increasing order of beginVersion
+	std::sort(files->begin(), files->end());
+
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
-	Version prevVersion = versionBatch.beginVersion;
+	// TODO: Remove files that are empty before proceed
+	// ASSERT(files->size() > 0); // files should not be empty
 
+	Version prevVersion = 0;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
-		// drive applier's NotifiedVersion (e.g., logVersion and rangeVersion)
+		// drive applier's NotifiedVersion.
 		if (loader == self->loadersInterf.end()) {
 			loader = self->loadersInterf.begin();
 		}
 		// Prepare loading
 		LoadingParam param;
-		param.url = request.url;
-		param.prevVersion = prevVersion;
+
+		param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
 		param.endVersion = file.isRange ? file.version : file.endVersion;
-		prevVersion = param.endVersion;
+		param.fileIndex = file.fileIndex;
+
+		param.url = request.url;
 		param.isRangeFile = file.isRange;
 		param.version = file.version;
 		param.filename = file.fileName;
@@ -252,14 +290,17 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		param.addPrefix = request.addPrefix;
 		param.removePrefix = request.removePrefix;
 		param.mutationLogPrefix = mutationLogPrefix;
+
+		prevVersion = param.endVersion;
+
+		// Log file to be loaded
+		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
 		ASSERT_WE_THINK(param.length >= 0); // we may load an empty file
 		ASSERT_WE_THINK(param.offset >= 0);
 		ASSERT_WE_THINK(param.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.prevVersion <= param.endVersion);
 
 		requests.push_back(std::make_pair(loader->first, RestoreLoadFileRequest(param)));
-		// Log file to be loaded
-		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
 		loader++;
 	}
 

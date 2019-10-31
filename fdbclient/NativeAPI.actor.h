@@ -319,5 +319,8 @@ int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::num
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+// Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
+ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+
 #include "flow/unactorcompiler.h"
 #endif

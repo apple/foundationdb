@@ -572,8 +572,8 @@ namespace fileBackup {
 
 		// Functions for consuming big endian (network byte order) integers.
 		// Consumes a big endian number, swaps it to little endian, and returns it.
-		const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-		const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
+		int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
+		uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
 
 		bool eof() { return rptr == end; }
 
@@ -3618,13 +3618,18 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1) {
-			state Key destUidLookupPath = BinaryWriter::toValue(normalizedRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-			Optional<Key> existingDestUidValue = wait(tr->get(destUidLookupPath));
-			if (existingDestUidValue.present()) {
-				destUidValue = existingDestUidValue.get();
-			} else {
+			Standalone<RangeResultRef> existingDestUidValues = wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+			bool found = false;
+			for(auto it : existingDestUidValues) {
+				if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == normalizedRanges[0] ) {
+					destUidValue = it.value;
+					found = true;
+					break;
+				}
+			}
+			if( !found ) {
 				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-				tr->set(destUidLookupPath, destUidValue);
+				tr->set(BinaryWriter::toValue(normalizedRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 			}
 		}
 

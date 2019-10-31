@@ -3948,7 +3948,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
                                   bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
                                   Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix) {
-	Version targetVersion =
+	Version result =
 	    wait(_fastRestore(cx, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix));
-	return targetVersion;
+	return result;
 }

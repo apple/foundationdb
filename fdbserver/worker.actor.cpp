@@ -964,8 +964,10 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
+				// Also a useful trace to have even if suspendDuration is 0
+				TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
 				if(req.waitForDuration) {
-					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
 					flushTraceFileVoid();
 					setProfilingEnabled(0);
 					g_network->stop();

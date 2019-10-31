@@ -34,7 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -75,7 +75,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
-		RestoreRoleData::resetPerVersionBatch();
 		rangeToApplier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;

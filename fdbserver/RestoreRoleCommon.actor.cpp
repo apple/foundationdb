@@ -39,11 +39,10 @@ struct RestoreWorkerData;
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	wait(delayJittered(5.0)); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id));
-
 	return Void();
 }
 
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
 	if (self->versionBatchStart) {
 		self->versionBatchStart = false;
 	}
@@ -54,23 +53,16 @@ ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Re
 	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
-
-	return Void();
 }
 
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	if (!self->versionBatchStart) {
-		self->versionBatchStart = true;
-		self->resetPerVersionBatch();
-	}
+void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
+	self->resetPerVersionBatch();
 	TraceEvent("FastRestore")
 	    .detail("InitVersionBatch", req.batchID)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("Node", self->id());
 
 	req.reply.send(RestoreCommonReply(self->id()));
-
-	return Void();
 }
 
 //-------Helper functions

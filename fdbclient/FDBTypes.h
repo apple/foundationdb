@@ -93,7 +93,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {

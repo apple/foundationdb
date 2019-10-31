@@ -26,7 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -137,6 +137,12 @@ extern const KeyRangeRef excludedServersKeys;
 extern const KeyRef excludedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the excluded servers list
 const AddressExclusion decodeExcludedServersKey( KeyRef const& key ); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey( AddressExclusion const& );
+
+extern const KeyRef failedServersPrefix;
+extern const KeyRangeRef failedServersKeys;
+extern const KeyRef failedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the failed servers list
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
+std::string encodeFailedServersKey( AddressExclusion const& );
 
 //    "\xff/workers/[[processID]]" := ""
 //    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
@@ -288,11 +294,15 @@ extern const KeyRef restoreStatusKey; // To be used when we measure fast restore
 extern const KeyRef restoreRequestTriggerKey;
 extern const KeyRef restoreRequestDoneKey;
 extern const KeyRangeRef restoreRequestKeys;
+extern const KeyRangeRef restoreApplierKeys;
+extern const KeyRef restoreApplierTxnValue;
+
+const Key restoreApplierKeyFor(UID const& applierID, Version version);
 const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
 const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
-const int decodeRestoreRequestTriggerValue(ValueRef const& value);
+int decodeRestoreRequestTriggerValue(ValueRef const& value);
 const Value restoreRequestDoneVersionValue(Version readVersion);
 Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
 const Key restoreRequestKeyFor(int const& index);

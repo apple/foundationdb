@@ -732,6 +732,10 @@ void Net2::run() {
 	#ifdef WIN32
 	timeEndPeriod(1);
 	#endif
+
+	// clean up memory
+	delete this;
+	thread_network = nullptr;
 }
 
 void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
