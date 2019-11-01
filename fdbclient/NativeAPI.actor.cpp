@@ -1658,18 +1658,13 @@ ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRang
 	loop {
 		state bool usingReadProxy = false;
 
-		state vector<pair<KeyRange, Reference<LocationInfo>>> locations;
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
+		ASSERT(locations.size());
 		if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
-			vector<pair<KeyRange, Reference<LocationInfo>>> _locations = wait(getKeyRangeLocations(
-			    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
-			locations = _locations;
 			usingReadProxy = true;
 		} else {
-		    vector<pair<KeyRange, Reference<LocationInfo>>> _locations = wait(getKeyRangeLocations(
-			    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
-			locations = _locations;
 			usingReadProxy = false;
-			ASSERT(locations.size());
 		}
 
 		state int shard = 0;
@@ -1710,6 +1705,7 @@ ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRang
 						                          cx->enableLocalityLoadBalance ? &cx->queueModel : NULL))) {
 							rep = _rep;
 						}
+						when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 						when(wait(cx->onReadProxiesChanged())) { throw transaction_too_old(); }
 					}
 				} else {
