@@ -153,7 +153,6 @@ struct TransactionInfo {
 		if (CLIENT_BUGGIFY_WITH_PROB(0.10)) {
 			useReadProxies = true;
 		}
-		useReadProxies = true;
 	}
 };
 
