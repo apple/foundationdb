@@ -106,6 +106,25 @@ public:
 	double INFLIGHT_PENALTY_ONE_LEFT;
 	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
 
+	// Higher priorities are executed first
+	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
+	//   is possible within but not between priority groups; fewer priority groups
+	//   mean better worst case time bounds
+	// Maximum allowable priority is 999.
+	int PRIORITY_RECOVER_MOVE;
+	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_TEAM_HEALTHY;
+	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	int PRIORITY_TEAM_REDUNDANT;
+	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_TEAM_UNHEALTHY;
+	int PRIORITY_TEAM_2_LEFT;
+	int PRIORITY_TEAM_1_LEFT;
+	int PRIORITY_TEAM_FAILED;         // Priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_0_LEFT;
+	int PRIORITY_SPLIT_SHARD;
+
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -113,6 +132,8 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_BYTES_READ_PER_KSEC;
+	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
@@ -145,6 +166,9 @@ public:
 	double DEBOUNCE_RECRUITING_DELAY;
 	int REBALANCE_MAX_RETRIES;
 	int DD_OVERLAP_PENALTY;
+	int DD_EXCLUDE_MIN_REPLICAS;
+	bool DD_VALIDATE_LOCALITY;
+	int DD_CHECK_INVALID_LOCALITY_DELAY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -245,6 +269,7 @@ public:
 	double ENFORCED_MIN_RECOVERY_DURATION;
 	double REQUIRED_MIN_RECOVERY_DURATION;
 	bool ALWAYS_CAUSAL_READ_RISKY;
+	int MAX_COMMIT_UPDATES;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -361,15 +386,17 @@ public:
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
 	double DURABILITY_LAG_REDUCTION_RATE;
 	double DURABILITY_LAG_INCREASE_RATE;
-	
+
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
-	
+
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t EMPTY_READ_PENALTY;
 
 	//Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -425,6 +452,7 @@ public:
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	double MAX_STATUS_REQUESTS_PER_SECOND;
 	int CONFIGURATION_ROWS_TO_FETCH;
+	bool DISABLE_DUPLICATE_LOG_WARNING;
 
 	// IPager
 	int PAGER_RESERVED_PAGES;

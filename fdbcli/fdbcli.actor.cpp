@@ -472,11 +472,14 @@ void initHelp() {
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] =
-	    CommandHelp("exclude [no_wait] <ADDRESS>*", "exclude servers from the database",
+	    CommandHelp("exclude [FORCE] [failed] [no_wait] <ADDRESS>*", "exclude servers from the database",
 	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
 	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
 	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
-	                "command returns \nimmediately without checking if the exclusions have completed successfully.");
+	                "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
+	                "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
+	                "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
+	                "for data movement to finish and the server cannot be included again.");
 	helpMap["include"] = CommandHelp(
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
@@ -2041,11 +2044,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
 		state bool waitForAllExcluded = true;
+		state bool markFailed = false;
 		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
 			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
 			} else if (*t == LiteralStringRef("no_wait")) {
 				waitForAllExcluded = false;
+			} else if (*t == LiteralStringRef("failed")) {
+				markFailed = true;
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
@@ -2060,6 +2066,26 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		}
 
 		if(!force) {
+			if (markFailed) {
+				state bool safe;
+				try {
+					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, addresses)));
+					safe = _safe;
+				} catch (Error& e) {
+					TraceEvent("CheckSafeExclusionsError").error(e);
+					safe = false;
+				}
+				if (!safe) {
+					std::string errorStr =
+					    "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+					    "Please check that this exclusion does not bring down an entire storage team.\n"
+					    "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+					    "You may add more storage processes or coordinators to make the operation safe.\n"
+					    "Type `exclude FORCE failed <ADDRESS>*' to exclude without performing safety checks.\n";
+					printf("%s", errorStr.c_str());
+					return true;
+				}
+			}
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
@@ -2145,7 +2171,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 		}
 
-		wait( makeInterruptable(excludeServers(db,addresses)) );
+		wait(makeInterruptable(excludeServers(db, addresses, markFailed)));
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -2215,6 +2241,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
 	state Standalone<StringRef> snapCmd;
+	state UID snapUID = deterministicRandom()->randomUniqueID();
 	for ( int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
@@ -2222,11 +2249,11 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
 		}
 	}
 	try {
-		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
+		wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, snapUID)));
 		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
 	} catch (Error& e) {
-		fprintf(stderr, "Snapshot create failed %d (%s)."
-				" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+		fprintf(stderr, "Snapshot command failed %d (%s)."
+				" Please cleanup any instance level snapshots created with UID %s.\n", e.code(), e.what(), snapUID.toString().c_str());
 		return true;
 	}
 	return false;
@@ -3483,7 +3510,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Data distribution is turned off.\n");
 						} else if (tokencmp(tokens[1], "disable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
+								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
 								printf("Data distribution is disabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
@@ -3495,7 +3522,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						} else if (tokencmp(tokens[1], "enable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(clearHealthyZone(db, false, true)));
+								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
 								printf("Data distribution is enabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));

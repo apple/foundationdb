@@ -225,7 +225,7 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	}
 
 	template <int i, class Alternative, class Context>
-	static const void assign(Member& m, const Alternative& a, Context&) {
+	static void assign(Member& m, const Alternative& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {

@@ -29,17 +29,22 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-    "MinSizeRel" "RelWithDebInfo")
+  if (OPEN_FOR_IDE)
+    message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
+  else()
+    message(STATUS "Setting build type to 'Release' as none was specified")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+      "MinSizeRel" "RelWithDebInfo")
+  endif()
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 
 ################################################################################
 # Packages used for bindings

@@ -236,6 +236,7 @@ struct ProxyCommitData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
@@ -450,34 +451,42 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-void adddBackupMutations(ProxyCommitData* self, const std::map<Key, MutationListRef>& logRangeMutations,
+ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
                          LogPushData* toCommit, Version commitVersion) {
-	Key val;
-	MutationRef backupMutation;
-	uint32_t* partBuffer = NULL;
-	const int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
+	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	state int yieldBytes = 0;
 
 	// Serialize the log range mutations within the map
-	for (const auto& logRangeMutation : logRangeMutations) {
+	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
+	{
+		if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+			yieldBytes = 0;
+			wait(yield());
+		}
+
+		yieldBytes += logRangeMutation->second.expectedSize();
+		
 		BinaryWriter wr(Unversioned());
 
 		// Serialize the log destination
-		wr.serializeBytes(logRangeMutation.first);
+		wr.serializeBytes( logRangeMutation->first );
 
 		// Write the log keys and version information
 		wr << (uint8_t)hashlittle(&version, sizeof(version), 0);
 		wr << bigEndian64(commitVersion);
 
+		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
-		partBuffer = NULL;
+		uint32_t* partBuffer = NULL;
 
-		val = BinaryWriter::toValue(logRangeMutation.second, IncludeVersion());
+		Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
+
 			// Assign the second parameter as the part
-			backupMutation.param2 = val.substr(
-			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
+			backupMutation.param2 = val.substr(part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
+				std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
 
 			// Write the last part of the mutation to the serialization, if the buffer is not defined
 			if (!partBuffer) {
@@ -485,29 +494,28 @@ void adddBackupMutations(ProxyCommitData* self, const std::map<Key, MutationList
 				wr << bigEndian32(part);
 
 				// Define the last buffer part
-				partBuffer = (uint32_t*)((char*)wr.getData() + wr.getLength() - sizeof(uint32_t));
-			} else {
+				partBuffer = (uint32_t*) ((char*) wr.getData() + wr.getLength() - sizeof(uint32_t));
+			}
+			else {
 				*partBuffer = bigEndian32(part);
 			}
 
 			// Define the mutation type and and location
 			backupMutation.param1 = wr.toValue();
-			ASSERT(backupMutation.param1.startsWith(
-			    logRangeMutation.first)); // We are writing into the configured destination
-
+			ASSERT( backupMutation.param1.startsWith(logRangeMutation->first) );  // We are writing into the configured destination
+				
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
 			toCommit->addTypedMessage(backupMutation);
 
-			//				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
-			//					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
-			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 						.detail("BackupMutationSize",
-			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-			//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
-			//backupMutation.param1);
-			//				}
+//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
+//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
+//					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
+//			}
 		}
 	}
+	return Void();
 }
 
 ACTOR Future<Void> commitBatch(
@@ -869,7 +877,7 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-		adddBackupMutations(self, logRangeMutations, &toCommit, commitVersion);
+		wait( adddBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
 	}
 
 	self->stats.mutations += mutationCount;
@@ -1045,7 +1053,9 @@ ACTOR Future<Void> commitBatch(
 ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
+	self->updateCommitRequests++;
 	wait(self->logSystem->confirmEpochLive(debugID));
+	self->updateCommitRequests--;
 	self->lastCommitLatency = now()-confirmStart;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
 	return Void();
@@ -1128,7 +1138,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
-		stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+		}
 		request.reply.send(reply);
 	}
 
@@ -1453,7 +1465,12 @@ ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future
 		if(elapsed < interval) {
 			wait( delay(interval + 0.0001 - elapsed) );
 		} else {
-			addActor.send(updateLastCommit(self));
+			if(self->updateCommitRequests < SERVER_KNOBS->MAX_COMMIT_UPDATES) {
+				addActor.send(updateLastCommit(self));
+			} else {
+				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TooManyLastCommitUpdates").suppressFor(1.0);
+				self->lastStartCommit = now();
+			}
 		}
 	}
 }
@@ -1502,7 +1519,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 
 		// send a snap request to DD
 		if (!commitData->db->get().distributor.present()) {
-			TraceEvent(SevWarnAlways, "DataDistributorNotPresent");
+			TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
 			throw operation_failed();
 		}
 		state Future<ErrorOr<Void>> ddSnapReq =
@@ -1531,6 +1548,34 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	TraceEvent("SnapMasterProxy_SnapReqExit")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);
+	return Void();
+}
+
+ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db, ExclusionSafetyCheckRequest req) {
+	TraceEvent("SafetyCheckMasterProxyBegin");
+	state ExclusionSafetyCheckReply reply(false);
+	if (!db->get().distributor.present()) {
+		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
+		req.reply.send(reply);
+		return Void();
+	}
+	try {
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
+		        DistributorExclusionSafetyCheckRequest(req.exclusions));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		reply.safe = _reply.safe;
+	} catch (Error& e) {
+		TraceEvent("SafetyCheckMasterProxyResponseError").error(e);
+		if (e.code() != error_code_operation_cancelled) {
+			req.reply.sendError(e);
+			return Void();
+		} else {
+			throw e;
+		}
+	}
+	TraceEvent("SafetyCheckMasterProxyFinish");
+	req.reply.send(reply);
 	return Void();
 }
 
@@ -1674,6 +1719,9 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
 			TraceEvent(SevDebug, "SnapMasterEnqueue");
 			addActor.send(proxySnapCreate(snapReq, &commitData));
+		}
+		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
+			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;

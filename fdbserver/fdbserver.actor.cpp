@@ -34,7 +34,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -197,12 +197,6 @@ extern uint8_t *g_extra_memory;
 bool enableFailures = true;
 
 #define test_assert(x) if (!(x)) { cout << "Test failed: " #x << endl; return false; }
-
-template <class X> vector<X> vec( X x ) { vector<X> v; v.push_back(x); return v; }
-template <class X> vector<X> vec( X x, X y ) { vector<X> v; v.push_back(x); v.push_back(y); return v; }
-template <class X> vector<X> vec( X x, X y, X z ) { vector<X> v; v.push_back(x); v.push_back(y); v.push_back(z); return v; }
-
-//KeyRange keyRange( const Key& a, const Key& b ) { return std::make_pair(a,b); }
 
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
@@ -685,7 +679,7 @@ static void printUsage( const char *name, bool devhelp ) {
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-	void* operator new (std::size_t size) throw(std::bad_alloc) {
+	void* operator new (std::size_t size)  {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -709,7 +703,7 @@ extern bool g_crashOnError;
 	}
 
 	//array throwing new and matching delete[]
-	void* operator new  [](std::size_t size) throw(std::bad_alloc) {
+	void* operator new  [](std::size_t size) {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -1576,6 +1570,11 @@ int main(int argc, char* argv[]) {
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+
+		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
 
 		if (role == SkipListTest) {
 			skipListTest();

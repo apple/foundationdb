@@ -146,7 +146,7 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without necessarily waiting for
 // the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the given IP.
-ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers );
+ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers, bool failed = false );
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
 // all servers (don't exclude anything)
@@ -200,7 +200,7 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
-ACTOR Future<UID> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd);
+ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif

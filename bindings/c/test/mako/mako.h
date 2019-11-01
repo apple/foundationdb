@@ -17,8 +17,6 @@
 #include <limits.h>
 #endif
 
-#define DEFAULT_RETRY_COUNT 3
-
 #define VERBOSE_NONE 0
 #define VERBOSE_DEFAULT 1
 #define VERBOSE_ANNOYING 2
@@ -29,44 +27,64 @@
 #define MODE_BUILD 1
 #define MODE_RUN 2
 
-/* we set mako_txn_t and mako_args_t only once in the master process,
- * and won't be touched by child processes.
- */
+#define FDB_SUCCESS 0
+#define FDB_ERROR_RETRY -1
+#define FDB_ERROR_ABORT -2
+#define FDB_ERROR_CONFLICT -3
+
 
 /* transaction specification */
-#define OP_GETREADVERSION 0
-#define OP_GET 1
-#define OP_GETRANGE 2
-#define OP_SGET 3
-#define OP_SGETRANGE 4
-#define OP_UPDATE 5
-#define OP_INSERT 6
-#define OP_INSERTRANGE 7
-#define OP_CLEAR 8
-#define OP_SETCLEAR 9
-#define OP_CLEARRANGE 10
-#define OP_SETCLEARRANGE 11
-#define OP_COMMIT 12
-#define MAX_OP 13 /* update this when adding a new operation */
+enum Operations {
+  OP_GETREADVERSION,
+  OP_GET,
+  OP_GETRANGE,
+  OP_SGET,
+  OP_SGETRANGE,
+  OP_UPDATE,
+  OP_INSERT,
+  OP_INSERTRANGE,
+  OP_CLEAR,
+  OP_SETCLEAR,
+  OP_CLEARRANGE,
+  OP_SETCLEARRANGE,
+  OP_COMMIT,
+  MAX_OP /* must be the last item */
+};
 
 #define OP_COUNT 0
 #define OP_RANGE 1
 #define OP_REVERSE 2
 
-/* for arguments */
-#define ARG_KEYLEN 1
-#define ARG_VALLEN 2
-#define ARG_TPS 3
-#define ARG_COMMITGET 4
-#define ARG_SAMPLING 5
-#define ARG_VERSION 6
-#define ARG_KNOBS 7
-#define ARG_FLATBUFFERS 8
-#define ARG_TRACE 9
-#define ARG_TRACEPATH 10
+/* for long arguments */
+enum Arguments {
+  ARG_KEYLEN,
+  ARG_VALLEN,
+  ARG_TPS,
+  ARG_COMMITGET,
+  ARG_SAMPLING,
+  ARG_VERSION,
+  ARG_KNOBS,
+  ARG_FLATBUFFERS,
+  ARG_TRACE,
+  ARG_TRACEPATH,
+  ARG_TPSMAX,
+  ARG_TPSMIN,
+  ARG_TPSINTERVAL,
+  ARG_TPSCHANGE
+};
+
+enum TPSChangeTypes {
+  TPS_SIN,
+  TPS_SQUARE,
+  TPS_PULSE
+};
 
 #define KEYPREFIX "mako"
 #define KEYPREFIXLEN 4
+
+/* we set mako_txnspec_t and mako_args_t only once in the master process,
+ * and won't be touched by child processes.
+ */
 
 typedef struct {
   /* for each operation, it stores "count", "range" and "reverse" */
@@ -77,6 +95,7 @@ typedef struct {
 
 /* benchmark parameters */
 typedef struct {
+  int api_version;
   int json;
   int num_processes;
   int num_threads;
@@ -84,7 +103,10 @@ typedef struct {
   int rows; /* is 2 billion enough? */
   int seconds;
   int iteration;
-  int tps;
+  int tpsmax;
+  int tpsmin;
+  int tpsinterval;
+  int tpschange;
   int sampling;
   int key_length;
   int value_length;
@@ -107,6 +129,7 @@ typedef struct {
 typedef struct {
   int signal;
   int readycount;
+  double throttle_factor;
 } mako_shmhdr_t;
 
 typedef struct {

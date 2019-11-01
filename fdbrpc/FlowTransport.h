@@ -125,7 +125,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int outstandingReplies;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
-	  : transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0),
+	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
 	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
 

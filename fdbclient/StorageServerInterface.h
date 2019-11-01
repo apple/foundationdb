@@ -285,35 +285,40 @@ struct StorageMetrics {
 	int64_t bytes;				// total storage
 	int64_t bytesPerKSecond;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond;
+	int64_t bytesReadPerKSecond;
 
 	static const int64_t infinity = 1LL<<60;
 
-	StorageMetrics() : bytes(0), bytesPerKSecond(0), iosPerKSecond(0) {}
+	StorageMetrics() : bytes(0), bytesPerKSecond(0), iosPerKSecond(0), bytesReadPerKSecond(0) {}
 
 	bool allLessOrEqual( const StorageMetrics& rhs ) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond;
+		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
+		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
 	}
 	void operator += ( const StorageMetrics& rhs ) {
 		bytes += rhs.bytes;
 		bytesPerKSecond += rhs.bytesPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
+		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 	}
 	void operator -= ( const StorageMetrics& rhs ) {
 		bytes -= rhs.bytes;
 		bytesPerKSecond -= rhs.bytesPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
+		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 	}
 	template <class F>
 	void operator *= ( F f ) {
 		bytes *= f;
 		bytesPerKSecond *= f;
 		iosPerKSecond *= f;
+		bytesReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond; }
+	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond);
+		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -323,11 +328,13 @@ struct StorageMetrics {
 	template <class F> StorageMetrics operator * ( F f ) const { StorageMetrics x(*this); x*=f; return x; }
 
 	bool operator == ( StorageMetrics const& rhs ) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond;
+		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
+		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld", bytes, bytesPerKSecond, iosPerKSecond);
+		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld", bytes, bytesPerKSecond,
+		              iosPerKSecond, bytesReadPerKSecond);
 	}
 };
 

@@ -35,7 +35,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -54,8 +54,8 @@ struct RestoreSimpleRequest;
 typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutationsMap;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-ACTOR Future<Void> handleFinishRestoreRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
+void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -90,12 +90,12 @@ struct StringRefReaderMX {
 
 	// Functions for consuming big endian (network byte oselfer) integers.
 	// Consumes a big endian number, swaps it to little endian, and returns it.
-	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
 
 	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
-	const int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
-	const uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
+	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
+	uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
 
 	bool eof() { return rptr == end; }
 
@@ -124,7 +124,7 @@ public:
 
 	UID id() const { return nodeID; }
 
-	void resetPerVersionBatch() { inProgressFlag = 0; }
+	virtual void resetPerVersionBatch() = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();

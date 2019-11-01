@@ -102,10 +102,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-		for(int c=0; c<actorCount; c++)
-		clients.push_back(
-			timeout(
-				atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
+		for (int c = 0; c < actorCount; c++) {
+			clients.push_back(
+			    timeout(atomicOpWorker(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
+		}
+
 		return delay(testDuration);
 	}
 
@@ -121,6 +122,29 @@ struct AtomicOpsWorkload : TestWorkload {
 	Key logKey( int group ) { return StringRef(format("log%08x%08x%08x",group,clientId,opNum++));}
 
 	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
+		// Sanity check if log keyspace has elements
+		state ReadYourWritesTransaction tr1(cx);
+		loop {
+			try {
+				Key begin(std::string("log"));
+				Standalone<RangeResultRef> log =
+				    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+				if (!log.empty()) {
+					TraceEvent(SevError, "AtomicOpSetup")
+					    .detail("LogKeySpace", "Not empty")
+					    .detail("Result", log.toString());
+					for (auto& kv : log) {
+						TraceEvent(SevWarn, "AtomicOpSetup")
+						    .detail("K", kv.key.toString())
+						    .detail("V", kv.value.toString());
+					}
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr1.onError(e));
+			}
+		}
+
 		state int g = 0;
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
@@ -151,7 +175,17 @@ struct AtomicOpsWorkload : TestWorkload {
 					uint64_t intValue = deterministicRandom()->randomInt( 0, 10000000 );
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
-					tr.atomicOp(StringRef(format("ops%08x%08x",group,deterministicRandom()->randomInt(0,self->nodeCount/100))), val, self->opType);
+					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
+					tr.atomicOp(StringRef(format("ops%08x%08x", group, nodeIndex)), val, self->opType);
+					// TraceEvent(SevDebug, "AtomicOpWorker")
+					//     .detail("LogKey", self->logKey(group))
+					//     .detail("Value", val)
+					//     .detail("ValueInt", intValue);
+					// TraceEvent(SevDebug, "AtomicOpWorker")
+					//     .detail("OpKey", format("ops%08x%08x", group, nodeIndex))
+					//     .detail("Value", val)
+					//     .detail("ValueInt", intValue)
+					//     .detail("AtomicOp", self->opType);
 					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
@@ -170,6 +204,7 @@ struct AtomicOpsWorkload : TestWorkload {
 			loop {
 				try {
 					{
+						// Calculate the accumulated value in the log keyspace for the group g
 						Key begin(format("log%08x", g));
 						Standalone<RangeResultRef> log_ = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 						log = log_;
@@ -183,6 +218,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					}
 
 					{
+						// Calculate the accumulated value in the ops keyspace for the group g
 						Key begin(format("ops%08x", g));
 						Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 						uint64_t zeroValue = 0;
@@ -194,7 +230,14 @@ struct AtomicOpsWorkload : TestWorkload {
 						}
 
 						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-							TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+							Optional<Standalone<StringRef>> logResult = tr.get(LiteralStringRef("xlogResult")).get();
+							Optional<Standalone<StringRef>> opsResult = tr.get(LiteralStringRef("xopsResult")).get();
+							ASSERT(logResult.present());
+							ASSERT(opsResult.present());
+							TraceEvent(SevError, "LogMismatch")
+							    .detail("Index", format("log%08x", g))
+							    .detail("LogResult", printable(logResult))
+							    .detail("OpsResult", printable(opsResult));
 						}
 
 						if( self->opType == MutationRef::AddValue ) {

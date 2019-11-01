@@ -50,6 +50,29 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 	return Void();
 }
 
+TEST_CASE("/flow/buggifiedDelay") {
+	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
+		return Void();
+	}
+	loop {
+		state double x = deterministicRandom()->random01();
+		state int last = 0;
+		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+			*last = 1;
+			return Void();
+		});
+		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+			*last = 2;
+			return Void();
+		});
+		wait(f1 && f2);
+		if (last == 1) {
+			TEST(true); // Delays can become ready out of order
+			return Void();
+		}
+	}
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;

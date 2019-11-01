@@ -482,11 +482,17 @@ namespace dbBackup {
 
 			wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
 
-			Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
-
-			wait(eraseLogData(taskBucket->src, task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::destUid], Optional<Version>(endVersion), true, BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
-
-			return Void();
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(taskBucket->src));
+			loop {
+				try {
+					Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
+					wait(eraseLogData(tr, task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::destUid], Optional<Version>(endVersion), true, BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
+					wait(tr->commit());
+					return Void();
+				} catch( Error &e ) {
+					wait(tr->onError(e));
+				}
+			}
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version endVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
@@ -833,8 +839,7 @@ namespace dbBackup {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(taskBucket->src));
 			state Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 			state Key destUidValue = task->params[BackupAgentBase::destUid];
-			state Version beginVersion;
-			state Version endVersion;
+			state Version backupUid = BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned());
 
 			loop {
 				try {
@@ -844,25 +849,13 @@ namespace dbBackup {
 					if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
 						return Void();
 
-					state Key latestVersionKey = logUidValue.withPrefix(task->params[BackupAgentBase::destUid].withPrefix(backupLatestVersionsPrefix));
-					state Optional<Key> bVersion = wait(tr->get(latestVersionKey));
-
-					if (!bVersion.present()) {
-						return Void();
-					}
-					beginVersion = BinaryReader::fromStringRef<Version>(bVersion.get(), Unversioned());
-
-					endVersion = tr->getReadVersion().get();
-					break;
+					wait(eraseLogData(tr, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
+					wait(tr->commit());
+					return Void();
 				} catch(Error &e) {
 					wait(tr->onError(e));
 				}
 			}
-
-			Version backupUid = BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned());
-			wait(eraseLogData(taskBucket->src, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
-
-			return Void();
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
@@ -1303,19 +1296,25 @@ namespace dbBackup {
 					}
 
 					if (backupRanges.size() == 1) {
-						state Key destUidLookupPath = BinaryWriter::toValue(backupRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-						Optional<Key> existingDestUidValue = wait(srcTr->get(destUidLookupPath));
-						if (existingDestUidValue.present()) {
-							if (destUidValue == existingDestUidValue.get()) {
-								// due to unknown commit result
-								break;
-							} else {
-								// existing backup/DR is running
-								return Void();
+						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+						bool found = false;
+						for(auto it : existingDestUidValues) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+								if(destUidValue != it.value) {
+									// existing backup/DR is running
+									return Void();
+								} else {
+									// due to unknown commit result
+									found = true;
+									break;
+								}
 							}
 						}
-						
-						srcTr->set(destUidLookupPath, destUidValue);
+						if(found) {
+							break;
+						}
+
+						srcTr->set(BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 					}
 
 					Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
@@ -1473,13 +1472,18 @@ namespace dbBackup {
 
 					// Initialize destUid
 					if (backupRanges.size() == 1) {
-						state Key destUidLookupPath = BinaryWriter::toValue(backupRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-						Optional<Key> existingDestUidValue = wait(srcTr->get(destUidLookupPath));
-						if (existingDestUidValue.present()) {
-							destUidValue = existingDestUidValue.get();
-						} else {
+						Standalone<RangeResultRef> existingDestUidValues = wait(srcTr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+						bool found = false;
+						for(auto it : existingDestUidValues) {
+							if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == backupRanges[0] ) {
+								destUidValue = it.value;
+								found = true;
+								break;
+							}
+						}
+						if( !found ) {
 							destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-							srcTr->set(destUidLookupPath, destUidValue);
+							srcTr->set(BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 						}
 					}
 
@@ -2179,22 +2183,23 @@ public:
 			}
 		}
 
-		if(partial)
-			return Void();
+		state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
 
 		state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
 		state Version beginVersion;
 		state Version endVersion;
-		state bool clearSrcDb = true;
 
 		loop {
 			try {
 				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> v = wait( srcTr->get( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId) ) );
+				state Future<Optional<Value>> backupVersionF = srcTr->get( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId) );
+				wait(success(backupVersionF) || partialTimeout);
+				if(partialTimeout.isReady()) {
+					return Void();
+				}
 
-				if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > BinaryReader::fromStringRef<Version>(backupUid, Unversioned())) {
-					clearSrcDb = false;
+				if(backupVersionF.get().present() && BinaryReader::fromStringRef<Version>(backupVersionF.get().get(), Unversioned()) > BinaryReader::fromStringRef<Version>(backupUid, Unversioned())) {
 					break;
 				}
 
@@ -2208,18 +2213,31 @@ public:
 
 				Key latestVersionKey = logUidValue.withPrefix(destUidValue.withPrefix(backupLatestVersionsPrefix));
 
-				Optional<Key> bVersion = wait(srcTr->get(latestVersionKey));
-				if (bVersion.present()) {
-					beginVersion = BinaryReader::fromStringRef<Version>(bVersion.get(), Unversioned());
+				state Future<Optional<Key>> bVersionF = srcTr->get(latestVersionKey);
+				wait(success(bVersionF) || partialTimeout);
+				if(partialTimeout.isReady()) {
+					return Void();
+				}
+
+				if (bVersionF.get().present()) {
+					beginVersion = BinaryReader::fromStringRef<Version>(bVersionF.get().get(), Unversioned());
 				} else {
-					clearSrcDb = false;
 					break;
 				}
 
 				srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED) ));
 				srcTr->set( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid );
+				
+				wait( eraseLogData(srcTr, logUidValue, destUidValue) || partialTimeout );
+				if(partialTimeout.isReady()) {
+					return Void();
+				}
 
-				wait(srcTr->commit());
+				wait(srcTr->commit() || partialTimeout);
+				if(partialTimeout.isReady()) {
+					return Void();
+				}
+				
 				endVersion = srcTr->getCommittedVersion() + 1;
 
 				break;
@@ -2227,10 +2245,6 @@ public:
 			catch (Error &e) {
 				wait(srcTr->onError(e));
 			}
-		}
-
-		if (clearSrcDb && !abortOldBackup) {
-			wait(eraseLogData(backupAgent->taskBucket->src, logUidValue, destUidValue));
 		}
 
 		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));

@@ -32,6 +32,7 @@
 struct SatelliteInfo {
 	Key dcId;
 	int32_t priority;
+	int32_t satelliteDesiredTLogCount = -1;
 
 	SatelliteInfo() : priority(0) {}
 
@@ -41,7 +42,7 @@ struct SatelliteInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority);
+		serializer(ar, dcId, priority, satelliteDesiredTLogCount);
 	}
 };
 

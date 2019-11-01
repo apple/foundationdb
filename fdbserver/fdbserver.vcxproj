@@ -69,6 +69,7 @@
     <ClCompile Include="LatencyBandConfig.cpp" />
     <ActorCompiler Include="OldTLogServer_4_6.actor.cpp" />
     <ActorCompiler Include="OldTLogServer_6_0.actor.cpp" />
+    <ActorCompiler Include="OldTLogServer_6_2.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />

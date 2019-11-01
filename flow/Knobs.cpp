@@ -67,7 +67,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
-	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+	init( CONNECTION_ACCEPT_DELAY,                             0.5 );
 	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
@@ -86,6 +86,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
+
+	//AsyncFileEIO
+	init( EIO_MAX_PARALLELISM,                                  4  );
+	init( EIO_USE_ODIRECT,                                      0  );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
@@ -216,6 +220,7 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 			}
 			*bool_knobs[knob] = v;
 		}
+		return true;
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
 		int64_t v;

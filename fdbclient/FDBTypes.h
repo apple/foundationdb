@@ -93,7 +93,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {
@@ -685,10 +685,11 @@ struct TLogVersion {
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
+		V5 = 5, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V4,
-		MIN_RECRUITABLE = V2,
-		DEFAULT = V3,
+		MAX_SUPPORTED = V5,
+		MIN_RECRUITABLE = V3,
+		DEFAULT = V4,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -709,6 +710,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
+		if (s == LiteralStringRef("5")) return V5;
 		return default_error_or();
 	}
 };
@@ -757,7 +759,6 @@ struct TLogSpillType {
 		return default_error_or();
 	}
 
-private:
 	uint32_t type;
 };
 
