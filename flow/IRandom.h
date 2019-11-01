@@ -90,7 +90,6 @@ namespace std {
 
 class IRandom {
 public:
-	virtual ~IRandom() = default;
 	virtual double random01() = 0; // return random value in [0, 1]
 	virtual int randomInt(int min, int maxPlusOne) = 0;
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
