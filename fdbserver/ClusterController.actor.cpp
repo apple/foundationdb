@@ -572,16 +572,16 @@ public:
 		std::string toString() const { return format("%d %d %d %d", bestFit, worstFit, count, worstIsDegraded); }
 	};
 
-	struct RoleFitnessPair {
+	struct RoleFitnessTuple {
 		RoleFitness proxy;
 		RoleFitness resolver;
 		RoleFitness readProxy;
 
-		RoleFitnessPair() {}
-		RoleFitnessPair(RoleFitness const& proxy, RoleFitness const& resolver, RoleFitness const& readProxy)
+		RoleFitnessTuple() {}
+		RoleFitnessTuple(RoleFitness const& proxy, RoleFitness const& resolver, RoleFitness const& readProxy)
 		  : proxy(proxy), resolver(resolver), readProxy(readProxy) {}
 
-		bool operator < (RoleFitnessPair const& r) const {
+		bool operator<(RoleFitnessTuple const& r) const {
 			if(proxy.betterFitness(r.proxy)) {
 				return true;
 			}
@@ -609,7 +609,7 @@ public:
 			return readProxy.count > r.readProxy.count;
 		}
 
-		bool operator==(RoleFitnessPair const& r) const {
+		bool operator==(RoleFitnessTuple const& r) const {
 			return proxy == r.proxy && resolver == r.resolver && readProxy == r.readProxy;
 		}
 	};
@@ -832,7 +832,7 @@ public:
 
 			auto datacenters = getDatacenters( req.configuration );
 
-			RoleFitnessPair bestFitness;
+			RoleFitnessTuple bestFitness;
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
@@ -855,9 +855,9 @@ public:
 					readProxies.push_back(first_read_proxy.worker);
 					resolvers.push_back(first_resolver.worker);
 
-					RoleFitnessPair fitness(RoleFitness(proxies, ProcessClass::Proxy),
-					                        RoleFitness(resolvers, ProcessClass::Resolver),
-					                        RoleFitness(readProxies, ProcessClass::ReadProxy));
+					RoleFitnessTuple fitness(RoleFitness(proxies, ProcessClass::Proxy),
+					                         RoleFitness(resolvers, ProcessClass::Resolver),
+					                         RoleFitness(readProxies, ProcessClass::ReadProxy));
 
 					if(dcId == clusterControllerDcId) {
 						bestFitness = fitness;
@@ -1188,9 +1188,9 @@ public:
 		}
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 		// Check proxy/resolver fitness
-		RoleFitnessPair oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy),
-		                         RoleFitness(resolverClasses, ProcessClass::Resolver),
-								 RoleFitness(readProxyClasses, ProcessClass::ReadProxy));
+		RoleFitnessTuple oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy),
+		                          RoleFitness(resolverClasses, ProcessClass::Resolver),
+		                          RoleFitness(readProxyClasses, ProcessClass::ReadProxy));
 
 		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
 		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
@@ -1206,9 +1206,9 @@ public:
 		readProxies.push_back(first_read_proxy.worker);
 		resolvers.push_back(first_resolver.worker);
 
-		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy),
-		                         RoleFitness(resolvers, ProcessClass::Resolver),
-		                         RoleFitness(readProxies, ProcessClass::ReadProxy));
+		RoleFitnessTuple newInFit(RoleFitness(proxies, ProcessClass::Proxy),
+		                          RoleFitness(resolvers, ProcessClass::Resolver),
+		                          RoleFitness(readProxies, ProcessClass::ReadProxy));
 		if (oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver) ||
 		    oldInFit.readProxy.betterFitness(newInFit.readProxy)) {
 			return false;
