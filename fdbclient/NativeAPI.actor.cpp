@@ -1652,7 +1652,6 @@ void transformRangeLimits(GetRangeLimits limits, bool reverse, GetKeyValuesReque
 ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRange keys, GetRangeLimits limits,
                                            bool reverse, TransactionInfo info) {
 	state GetRangeResult result;
-	state bool enabledReadProxy = true;
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
@@ -1661,7 +1660,7 @@ ACTOR Future<GetRangeResult> getExactRange(Database cx, Version version, KeyRang
 		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
 		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
 		ASSERT(locations.size());
-		if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
+		if (cx->readProxiesEnabled() && info.useReadProxies) {
 			usingReadProxy = true;
 		} else {
 			usingReadProxy = false;
@@ -1933,9 +1932,6 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state GetRangeResult result;
-	state bool enabledReadProxy = true;
-
-	// if (begin.toString() == "-5+lastLessThan(0000000018)") enabledReadProxy = false;
 
 	try {
 		state Version version = wait( fVersion );
@@ -1966,7 +1962,7 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
 			state pair<KeyRange, Reference<LocationInfo>> beginServer;
-			if (enabledReadProxy && cx->readProxiesEnabled() && info.useReadProxies) {
+			if (cx->readProxiesEnabled() && info.useReadProxies) {
 				beginServer.first = allKeys;
 				usingReadProxy = true;
 			} else {
@@ -2142,11 +2138,8 @@ ACTOR Future<GetRangeResult> getRange(Database cx, Reference<TransactionLogInfo>
 					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 				}
 
-				if (e.code() == error_code_transaction_too_old && usingReadProxy == true) {
-					enabledReadProxy = false;
-				} else if (e.code() == error_code_wrong_shard_server ||
-				           e.code() == error_code_all_alternatives_failed ||
-				           (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
 					cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
 					                    reverse ? (end - 1).isBackward() : begin.isBackward());
 
