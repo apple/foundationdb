@@ -2131,8 +2131,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
-// copy data from old gene to new gene without desiarlzing 
-ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted, bool parallelGetMore ) {
+ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
@@ -2150,7 +2149,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( logData->logId, tagAt, endVersion, tags, parallelGetMore );
+						r = logData->logSystem->get()->peek( logData->logId, tagAt, endVersion, tags, true );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -2287,7 +2286,7 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	if(!logData->isPrimary) {
 		std::vector<Tag> tags;
 		tags.push_back(logData->remoteTag);
-		logData->addActor.send( pullAsyncData(self, logData, tags, pulledRecoveryVersions ? logData->recoveredAt + 1 : logData->unrecoveredBefore, Optional<Version>(), true, true) );
+		logData->addActor.send( pullAsyncData(self, logData, tags, pulledRecoveryVersions ? logData->recoveredAt + 1 : logData->unrecoveredBefore, Optional<Version>(), true) );
 	}
 
 	try {
@@ -2682,10 +2681,10 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
-					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true, false) || logData->removed);
+					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) || logData->removed);
 				} else if(!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
-					wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false, true) || logData->removed);
+					wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = req.recoverAt;
