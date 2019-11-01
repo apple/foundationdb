@@ -1173,6 +1173,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( InitializeReadProxyRequest req = waitNext(interf.readProxy.getFuture()) ) {
 				ReadProxyInterface recruited;
+				recruited.locality = locality;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;

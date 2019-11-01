@@ -27,8 +27,9 @@
 #include "fdbclient/StorageServerInterface.h"
 
 struct ReadProxyInterface {
-	constexpr static FileIdentifier file_identifier = 9348383; // FIXME: Fix this
+	constexpr static FileIdentifier file_identifier = 9348383; // FIXME (Vishesh): What's the convention to pick this?
 
+	LocalityData locality;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
@@ -38,7 +39,7 @@ struct ReadProxyInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getValue, getKey, getKeyValues, watchValue, waitFailure);
+		serializer(ar, locality, getValue, getKey, getKeyValues, watchValue, waitFailure);
 	}
 
 	void initEndpoints() {

@@ -1060,7 +1060,7 @@ public:
 
 		// Get readproxy classes
 		std::vector<WorkerDetails> readProxyClasses;
-		for(auto& it : dbi.resolvers ) {
+		for(auto& it : dbi.client.readProxies ) {
 			auto readProxyWorker = id_worker.find(it.locality.processId());
 			if ( readProxyWorker == id_worker.end() )
 				return false;
