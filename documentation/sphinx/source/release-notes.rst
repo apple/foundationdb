@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.8
+=====
+
+Fixes
+-----
+
+* The ``system_kv_size_bytes`` status field could report a size much larger than the actual size of the system keyspace. `(PR #2305) <https://github.com/apple/foundationdb/pull/2305>`_.
+
 6.2.7
 =====
 
