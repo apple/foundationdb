@@ -538,7 +538,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	Reference<IPeekCursor> peekRemote( UID dbgid, Version begin, Tag tag, bool parallelGetMore ) {
+	Reference<IPeekCursor> peekRemote( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore ) {
 		int bestSet = -1;
 		Version lastBegin = recoveredAt.present() ? recoveredAt.get() + 1 : 0;
 		for(int t = 0; t < tLogs.size(); t++) {
@@ -557,7 +557,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		if(begin >= lastBegin) {
 			TraceEvent("TLogPeekRemoteBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("BestSet", bestSet).detail("BestSetStart", lastBegin).detail("LogRouterIds", tLogs[bestSet]->logRouterString());
-			return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, begin, getPeekEnd(), parallelGetMore, std::vector<LocalityData>(), Reference<IReplicationPolicy>(), 0 ) );
+			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
+			for ( const auto& logRouter : tLogs[bestSet]->logRouters ) {
+				cursors.emplace_back(new ILogSystem::ServerPeekCursor( logRouter, tag, begin, end.present() ? end.get() : getPeekEnd(), false, parallelGetMore));
+			}
+			return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, getPeekEnd(), true, false, false) );
+			// return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, begin, getPeekEnd(), parallelGetMore, std::vector<LocalityData>(), Reference<IReplicationPolicy>(), 0 ) );
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
@@ -602,14 +607,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Tag tag, bool parallelGetMore ) {
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore ) {
 		if(!tLogs.size()) {
 			TraceEvent("TLogPeekNoLogSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		}
 
 		if(tag.locality == tagLocalityRemoteLog) {
-			return peekRemote(dbgid, begin, tag, parallelGetMore);
+			return peekRemote(dbgid, begin, end, tag, parallelGetMore);
 		} else {
 			return peekAll(dbgid, begin, getPeekEnd(), tag, parallelGetMore);
 		}
@@ -622,12 +627,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		if(tags.size() == 1) {
-			return peek(dbgid, begin, tags[0], parallelGetMore);
+			return peek(dbgid, begin, end, tags[0], parallelGetMore);
 		}
 
 		std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 		for(auto tag : tags) {
-			cursors.push_back(peek(dbgid, begin, tag, parallelGetMore));
+			cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
 		}
 		return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, tLogs[0]->locality == tagLocalityUpgraded, false) );
 	}

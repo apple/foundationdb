@@ -579,6 +579,7 @@ struct ILogSystem {
 		bool hasNextMessage;
 		bool withTags;
 		Version poppedVersion;
+		Version minKnownCommittedVersion;
 		Version initialPoppedVersion;
 		bool canDiscardPopped;
 		Future<Void> more;
@@ -589,6 +590,7 @@ struct ILogSystem {
 		void combineMessages();
 
 		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
+		//BufferedCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -644,7 +646,7 @@ struct ILogSystem {
 		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
 		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Tag tag, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
