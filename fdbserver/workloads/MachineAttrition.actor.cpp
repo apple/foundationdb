@@ -66,6 +66,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool killDc;
 	bool killMachine;
 	bool killDatahall;
+	bool killProcess;
 	bool killSelf;
 	Standalone<StringRef> targetId;
 	bool replacement;
@@ -88,6 +89,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		killDc = getOption( options, LiteralStringRef("killDc"), deterministicRandom()->random01() < 0.25 );
 		killMachine = getOption( options, LiteralStringRef("killMachine"), false);
 		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
+		killProcess = getOption( options, LiteralStringRef("killProcess"), false);
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
 		targetId = getOption( options, LiteralStringRef("targetId"), LiteralStringRef(""));
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
@@ -147,8 +149,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	}
 
 	static bool noSimIsViableKill(WorkerDetails worker) {
-		if (worker.processClass == ProcessClass::ClassType::TesterClass) return false;
-		return true;
+		return (worker.processClass == ProcessClass::ClassType::TesterClass);
 	}
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
@@ -200,6 +201,17 @@ struct MachineAttritionWorkload : TestWorkload {
 			for (const auto& worker : workers) {
 				// kill all matching datahall workers
 				if (worker.interf.locality.dataHallId().present() && worker.interf.locality.dataHallId() == killDatahallId) {
+					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
+					worker.interf.clientInterface.reboot.send(rbReq);
+				}
+			}
+		} else if (self->killProcess) {
+			// Pick a process to kill
+			Optional<Standalone<StringRef>> killProcessId = self->targetId.toString().empty() ? workers.back().interf.locality.processId() : self->targetId;
+			TraceEvent("Assassination").detail("TargetProcessId", killProcessId);
+			for (const auto& worker : workers) {
+				// kill matching processes
+				if (worker.interf.locality.processId().present() && worker.interf.locality.processId() == killProcessId) {
 					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
