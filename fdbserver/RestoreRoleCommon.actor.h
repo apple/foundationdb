@@ -32,6 +32,7 @@
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -113,6 +114,8 @@ public:
 	std::map<UID, RestoreLoaderInterface> loadersInterf;
 	std::map<UID, RestoreApplierInterface> appliersInterf;
 	RestoreApplierInterface masterApplierInterf;
+
+	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
 
 	bool versionBatchStart = false;
 

@@ -56,11 +56,17 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 }
 
 void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
-	self->resetPerVersionBatch();
-	TraceEvent("FastRestore")
-	    .detail("InitVersionBatch", req.batchID)
-	    .detail("Role", getRoleStr(self->role))
-	    .detail("Node", self->id());
+	// batchId is continuous. (req.batchID-1) is the id of the just finished batch.
+	self->versionBatchId.whenAtLeast(req.batchID - 1);
+
+	if (self->versionBatchId.get() == req.batchID - 1) {
+		self->resetPerVersionBatch();
+		TraceEvent("FastRestore")
+		    .detail("InitVersionBatch", req.batchID)
+		    .detail("Role", getRoleStr(self->role))
+		    .detail("Node", self->id());
+		self->versionBatchId.set(req.batchID);
+	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
 }
