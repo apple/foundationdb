@@ -33,6 +33,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
+	uint64_t lbsum, ubsum; // Tell if setup txn fails when opType = AddValue
 
 	AtomicOpsWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), opNum(0)
@@ -47,7 +48,10 @@ struct AtomicOpsWorkload : TestWorkload {
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
 		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
-		int64_t randNum = sharedRandomNumber / 10;
+		lbsum = 0;
+		ubsum = 0;
+
+		    int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
 			opType = randNum % 8;
 
@@ -119,7 +123,13 @@ struct AtomicOpsWorkload : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 	}
 
-	Key logKey( int group ) { return StringRef(format("log%08x%08x%08x",group,clientId,opNum++));}
+	// Key logKey( int group ) { return StringRef(format("log%08x%08x%08x",group,clientId,opNum++));}
+	std::pair<Key, Key> logDebugKey(int group) {
+		Key logKey(format("log%08x%08x%08x", group, clientId, opNum));
+		Key debugKey(format("debug%08x%08x%08x", group, clientId, opNum));
+		opNum++;
+		return std::make_pair(logKey, debugKey);
+	}
 
 	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
 		// Sanity check if log keyspace has elements
@@ -172,27 +182,136 @@ struct AtomicOpsWorkload : TestWorkload {
 			loop {
 				try {
 					int group = deterministicRandom()->randomInt(0,100);
-					uint64_t intValue = deterministicRandom()->randomInt( 0, 10000000 );
+					state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
-					tr.set(self->logKey(group), val);
+					std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
-					tr.atomicOp(StringRef(format("ops%08x%08x", group, nodeIndex)), val, self->opType);
-					// TraceEvent(SevDebug, "AtomicOpWorker")
-					//     .detail("LogKey", self->logKey(group))
-					//     .detail("Value", val)
-					//     .detail("ValueInt", intValue);
-					// TraceEvent(SevDebug, "AtomicOpWorker")
-					//     .detail("OpKey", format("ops%08x%08x", group, nodeIndex))
-					//     .detail("Value", val)
-					//     .detail("ValueInt", intValue)
-					//     .detail("AtomicOp", self->opType);
+					Key opsKey(format("ops%08x%08x", group, nodeIndex));
+					tr.set(logDebugKey.first, val); // set log key
+					tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
+					tr.atomicOp(opsKey, val, self->opType);
 					wait( tr.commit() );
+					if (self->opType == MutationRef::AddValue) {
+						self->lbsum += intValue;
+						self->ubsum += intValue;
+					}
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
+					if (self->opType == MutationRef::AddValue) {
+						self->ubsum += intValue;
+					}
 				}
 			}
 		}
+	}
+
+	ACTOR Future<Void> dumpLogKV(Database cx, int g) {
+		ReadYourWritesTransaction tr(cx);
+		Key begin(format("log%08x", g));
+		Standalone<RangeResultRef> log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		uint64_t sum = 0;
+		for (auto& kv : log) {
+			uint64_t intValue = 0;
+			memcpy(&intValue, kv.value.begin(), kv.value.size());
+			sum += intValue;
+			TraceEvent("AtomicOpLog")
+			    .detail("Key", kv.key)
+			    .detail("Val", kv.value)
+			    .detail("IntValue", intValue)
+			    .detail("CurSum", sum);
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> dumpDebugKV(Database cx, int g) {
+		ReadYourWritesTransaction tr(cx);
+		Key begin(format("debug%08x", g));
+		Standalone<RangeResultRef> log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		for (auto& kv : log) {
+			TraceEvent("AtomicOpDebug").detail("Key", kv.key).detail("Val", kv.value);
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> dumpOpsKV(Database cx, int g) {
+		ReadYourWritesTransaction tr(cx);
+		Key begin(format("ops%08x", g));
+		Standalone<RangeResultRef> ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		uint64_t sum = 0;
+		for (auto& kv : ops) {
+			uint64_t intValue = 0;
+			memcpy(&intValue, kv.value.begin(), kv.value.size());
+			sum += intValue;
+			TraceEvent("AtomicOpOps")
+			    .detail("Key", kv.key)
+			    .detail("Val", kv.value)
+			    .detail("IntVal", intValue)
+			    .detail("CurSum", sum);
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> validateOpsKey(Database cx, AtomicOpsWorkload* self, int g) {
+		// Get mapping between opsKeys and debugKeys
+		state ReadYourWritesTransaction tr1(cx);
+		state std::map<Key, Key> records; // <ops, debugKey>
+		Key begin(format("debug%08x", g));
+		Standalone<RangeResultRef> debuglog =
+		    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		for (auto& kv : debuglog) {
+			records[kv.value] = kv.key;
+		}
+
+		// Get log key's value and assign it to the associated debugKey
+		state ReadYourWritesTransaction tr2(cx);
+		state std::map<Key, int64_t> logVal; // debugKey, log's value
+		Key begin(format("log%08x", g));
+		Standalone<RangeResultRef> log = wait(tr2.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		for (auto& kv : log) {
+			uint64_t intValue = 0;
+			memcpy(&intValue, kv.value.begin(), kv.value.size());
+			logVal[kv.key.removePrefix(LiteralStringRef("log")).withPrefix(LiteralStringRef("debug"))] = intValue;
+		}
+
+		// Get opsKeys and validate if it has correct value
+		state ReadYourWritesTransaction tr3(cx);
+		state std::map<Key, int64_t> opsVal; // ops key, ops value
+		Key begin(format("ops%08x", g));
+		Standalone<RangeResultRef> ops = wait(tr3.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		// Validate if ops' key value is consistent with logs' key value
+		for (auto& kv : ops) {
+			bool inRecord = records.find(kv.key) != records.end();
+			uint64_t intValue = 0;
+			memcpy(&intValue, kv.value.begin(), kv.value.size());
+			opsVal[kv.key] = intValue;
+			if (!inRecord) {
+				TraceEvent(SevError, "MissingLogKey").detail("OpsKey", kv.key);
+			}
+			if (inRecord && intValue == 0) {
+				TraceEvent(SevError, "MissingOpsKey1").detail("OpsKey", kv.key).detail("DebugKey", records[kv.key]);
+			}
+			if (inRecord && (self->actorCount == 1 && intValue != logVal[records[kv.key]])) {
+				// When multiple actors exist, 1 opsKey can have multiple log keys
+				TraceEvent(SevError, "InconsistentOpsKeyValue")
+				    .detail("OpsKey", kv.key)
+				    .detail("DebugKey", records[kv.key])
+				    .detail("LogValue", logVal[records[kv.key]])
+				    .detail("OpValue", intValue);
+			}
+		}
+
+		// Validate if there is any ops key missing
+		for (auto& kv : records) {
+			uint64_t intValue = opsVal[kv.first];
+			if (intValue <= 0) {
+				TraceEvent(SevError, "MissingOpsKey2")
+				    .detail("OpsKey", kv.first)
+				    .detail("OpsVal", intValue)
+				    .detail("DebugKey", kv.second);
+			}
+		}
+		return Void();
 	}
 
 	ACTOR Future<bool> _check( Database cx, AtomicOpsWorkload* self ) {
@@ -251,7 +370,17 @@ struct AtomicOpsWorkload : TestWorkload {
 								logResult += intValue;
 							}
 							if(logResult != opsResult) {
-								TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
+								TraceEvent(SevError, "LogAddMismatch")
+								    .detail("LogResult", logResult)
+								    .detail("OpResult", opsResult)
+								    .detail("OpsResultStr", printable(opsResultStr))
+								    .detail("Size", opsResultStr.size())
+								    .detail("LowerBoundSum", self->lbsum)
+								    .detail("UperBoundSum", self->ubsum);
+								wait(self->dumpLogKV(cx, g));
+								wait(self->dumpDebugKV(cx, g));
+								wait(self->dumpOpsKV(cx, g));
+								wait(self->validateOpsKey(cx, self, g));
 							}
 						}
 						break;
