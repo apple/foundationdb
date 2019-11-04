@@ -287,7 +287,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					std::pair<UID, Version> applierInfo = decodeRestoreApplierKey(kv.key);
 					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
 					    .detail("Applier", applierInfo.first)
-					    .detail("ResidueTxnID", applierInfo.second);
+					    .detail("ResidueTxnID", bigEndian64(applierInfo.second));
 				}
 			}
 			break;

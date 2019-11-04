@@ -68,8 +68,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-		batchIndex =
-		    1; // batchIndex must starts with 1 because NotifiedVersion batchId in loaders and appliers start with 0
+		batchIndex = 1; // starts with 1 because batchId (NotifiedVersion) in loaders and appliers start with 0
 	}
 
 	~RestoreMasterData() = default;
