@@ -2812,6 +2812,7 @@ public:
 			}
 		}
 
+		debug_printf("LazyDelete: freed %d pages, %s has %" PRId64 " entries\n", freedPages, self->m_lazyDeleteQueue.name.c_str(), self->m_lazyDeleteQueue.numEntries);
 		return freedPages;
 	}
 
@@ -2923,10 +2924,10 @@ public:
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
 
 		loop {
-			int freedPages = wait(self->incrementalSubtreeClear(self));
-			debug_printf("incrementalSubtreeClear freed %d\n", freedPages);
+			state int freedPages = wait(self->incrementalSubtreeClear(self));
 			wait(self->commit());
-			if(self->m_lazyDeleteQueue.numEntries == 0) {
+			// Keep looping until the last commit doesn't do anything at all
+			if(self->m_lazyDeleteQueue.numEntries == 0 && freedPages == 0) {
 				break;
 			}
 			self->setWriteVersion(self->getLatestVersion() + 1);
