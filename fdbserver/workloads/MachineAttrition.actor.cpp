@@ -134,9 +134,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				testDuration, Void() );
 		}
 		if (!clientId && !g_network->isSimulated()) {
-			double meanDelay = testDuration / machinesToKill;
 			return timeout(
-				reportErrorsExcept(noSimMachineKillWorker(this, meanDelay, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
+				reportErrorsExcept(noSimMachineKillWorker(this, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
 			    testDuration, Void());
 		}
 		if(killSelf)
@@ -152,10 +151,9 @@ struct MachineAttritionWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, double meanDelay, Database cx) {
+	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
 		ASSERT(!g_network->isSimulated());
 		state int killedMachines = 0;
-		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 		state std::vector<WorkerDetails> allWorkers =
 		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
 		// Can reuse reboot request to send to each interface since no reply promise needed
@@ -174,7 +172,6 @@ struct MachineAttritionWorkload : TestWorkload {
 		}
 		deterministicRandom()->randomShuffle(workers);
 		if (self->killDc) {
-			wait(delay(delayBeforeKill));
 			// Pick a dcId to kill
 			Optional<Standalone<StringRef>> killDcId = self->targetId.toString().empty() ? workers.back().interf.locality.dcId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetDataCenterId", killDcId);
@@ -186,7 +183,6 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 			}
 		} else if (self->killMachine) {
-			wait(delay(delayBeforeKill));
 			// Pick a machine to kill
 			Optional<Standalone<StringRef>> killMachineId = self->targetId.toString().empty() ? workers.back().interf.locality.machineId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetMachineId", killMachineId);
@@ -198,7 +194,6 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 			}
 		} else if (self->killDatahall) {
-			wait(delay(delayBeforeKill));
 			// Pick a datahall to kill
 			Optional<Standalone<StringRef>> killDatahallId = self->targetId.toString().empty() ? workers.back().interf.locality.dataHallId() : self->targetId;
 			TraceEvent("Assassination").detail("TargetDatahallId", killDatahallId);
@@ -216,8 +211,6 @@ struct MachineAttritionWorkload : TestWorkload {
 				    .detail("MachinesToKill", self->machinesToKill)
 				    .detail("MachinesToLeave", self->machinesToLeave)
 				    .detail("Machines", workers.size());
-				wait(delay(delayBeforeKill));
-				TraceEvent("WorkerKillAfterDelay").detail("Delay", delayBeforeKill);
 				if (self->waitForVersion) {
 					state Transaction tr(cx);
 					loop {
@@ -244,9 +237,6 @@ struct MachineAttritionWorkload : TestWorkload {
 				targetMachine.interf.clientInterface.reboot.send(rbReq);
 				killedMachines++;
 				workers.pop_back();
-				wait(delay(meanDelay - delayBeforeKill));
-				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}
 		}
 		return Void();
