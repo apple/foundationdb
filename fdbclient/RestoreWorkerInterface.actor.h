@@ -360,7 +360,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "fileIndex" << fileIndex << "prevVersion:" << prevVersion << " version:" << version
+		ss << "fileIndex" << fileIndex << " prevVersion:" << prevVersion << " version:" << version
 		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
