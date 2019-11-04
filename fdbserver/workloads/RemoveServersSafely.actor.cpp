@@ -452,18 +452,35 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// Swap coordinator with one server in the kill set to ensure the number of processes to kill does not increase.
 		// This is needed only if a new coordinator is added to the toKill set in this function and safety check passes
 		if (markExcludeAsFailed && coordExcl.isValid()) {
+			// Situation where the entirety of original kill set is selected and extra coordinator is added
+			// Shrink down failed vector to maintain size guarantees
+			if (toKillMarkFailedArray.size() > toKillArray.size()) {
+				auto removeServer = toKillMarkFailedArray.begin();
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "ShrinkFailedKillSet")
+				    .detail("Removing", removeServer->toString());
+				toKillMarkFailedArray.erase(removeServer);
+			}
 			auto removeServer = toKill.begin();
 			TraceEvent("RemoveAndKill", functionId)
-				.detail("Step", "ReplaceKillSet")
+				.detail("Step", "ReplaceNonFailedKillSet")
 				.detail("Removing", removeServer->toString())
 				.detail("Adding", coordExcl.toString());
-			toKill.erase(removeServer);
-			toKill.insert(coordExcl);
 			toKillArray.erase(std::remove(toKillArray.begin(), toKillArray.end(), *removeServer), toKillArray.end());
 			toKillArray.push_back(coordExcl);
+			toKill.erase(removeServer);
+			toKill.insert(coordExcl);
 		}
 		killProcArray = self->getProcesses(toKill);
-		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
+		TraceEvent("RemoveAndKill", functionId)
+		    .detail("Step", "Activate Server Exclusion")
+		    .detail("KillAddrs", toKill.size())
+		    .detail("KillProcs", killProcArray.size())
+		    .detail("MissingProcs", toKill.size() != killProcArray.size())
+		    .detail("ToKill", describe(toKill))
+		    .detail("Addresses", describe(toKillArray))
+		    .detail("FailedAddresses", describe(toKillMarkFailedArray))
+		    .detail("ClusterAvailable", g_simulator.isAvailable());
 		if (markExcludeAsFailed) {
 			wait( excludeServers( cx, toKillMarkFailedArray, true ) );
 		}
