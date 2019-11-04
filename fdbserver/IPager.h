@@ -29,7 +29,8 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_always(...) { fprintf(stdout, "%s %f (%s:%d) ", g_network->getLocalAddress().toString().c_str(), now(), __FUNCTION__, __LINE__), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
+#define debug_printf_stream stderr
+#define debug_printf_always(...) { fprintf(debug_printf_stream, "%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__); fprintf(debug_printf_stream, __VA_ARGS__); fflush(debug_printf_stream); }
 
 #define debug_printf_noop(...)
 
@@ -44,8 +45,8 @@
 	#define debug_printf printf
 #endif
 
-#define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
-#define TRACE fprintf(stderr, "%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
+#define BEACON debug_printf_always("HERE\n")
+#define TRACE debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
@@ -53,7 +54,7 @@
 #endif
 
 typedef uint32_t LogicalPageID; // uint64_t?
-static const int invalidLogicalPageID = LogicalPageID(-1);
+static const LogicalPageID invalidLogicalPageID = std::numeric_limits<LogicalPageID>::max();
 
 class IPage {
 public:
@@ -208,6 +209,9 @@ public:
 	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() = 0;
+
+	// Count of pages in use by the pager client
+	virtual Future<int64_t> getUserPageCount() = 0;
 
 	// Future returned is ready when pager has been initialized from disk and is ready for reads and writes.
 	// It is invalid to call most other functions until init() is ready.
