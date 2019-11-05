@@ -45,7 +45,7 @@ inline static bool TRACE_SAMPLE() { return false; }
 extern thread_local int g_trace_depth;
 
 enum Severity {
-	SevNoInfo = 0,
+	SevVerbose = 0,
 	SevSample = 1,
 	SevDebug = 5,
 	SevInfo = 10,

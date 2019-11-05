@@ -34,8 +34,8 @@
 #include <cstdint>
 #include <cstdarg>
 
-// #define SevFRMutationInfo  SevNoInfo
-#define SevFRMutationInfo SevInfo
+#define SevFRMutationInfo SevVerbose
+//#define SevFRMutationInfo SevInfo
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
