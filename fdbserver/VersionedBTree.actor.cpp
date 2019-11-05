@@ -1335,19 +1335,12 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> commit_impl(DWALPager *self) {
-		debug_printf("DWALPager(%s) commit begin\n", self->filename.c_str());
-
-		// Write old committed header to Page 1
-		self->operations.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
-
-		// Trigger the remap eraser to stop and then wait for it.
-		self->remapUndoStop = true;
-		wait(self->remapUndoFuture);
+	// Flush all queues so they have no operations pending.
+	ACTOR static Future<Void> flushQueues(DWALPager *self) {
+		ASSERT(self->remapUndoFuture.isReady());
 
 		// Flush remap queue separately, it's not involved in free page management
 		wait(self->remapQueue.flush());
-		self->pHeader->remapQueue = self->remapQueue.getState();
 
 		// Flush the free list and delayed free list queues together as they are used by freePage() and newPageID()
 		loop {
@@ -1364,6 +1357,22 @@ public:
 		self->freeList.finishFlush();
 		self->delayedFreeList.finishFlush();
 
+		return Void();
+	}
+
+	ACTOR static Future<Void> commit_impl(DWALPager *self) {
+		debug_printf("DWALPager(%s) commit begin\n", self->filename.c_str());
+
+		// Write old committed header to Page 1
+		self->operations.add(self->writeHeaderPage(1, self->lastCommittedHeaderPage));
+
+		// Trigger the remap eraser to stop and then wait for it.
+		self->remapUndoStop = true;
+		wait(self->remapUndoFuture);
+
+		wait(flushQueues(self));
+
+		self->pHeader->remapQueue = self->remapQueue.getState();
 		self->pHeader->freeList = self->freeList.getState();
 		self->pHeader->delayedFreeList = self->delayedFreeList.getState();
 
@@ -1476,9 +1485,19 @@ public:
 		return StorageBytes(free, total, pagerSize, free + reusable);
 	}
 
-	// Get the number of pages in use but not by the pager itself.
+	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager *self) {
+		// Wait for the remap eraser to finish all of its work (not triggering stop)
+		wait(self->remapUndoFuture);
+
+		// Flush queues so there are no pending freelist operations
+		wait(flushQueues(self));
+	
+		return Void();
+	}
+
+	// Get the number of pages in use by the pager's user
 	Future<int64_t> getUserPageCount() override {
-		return map(remapUndoFuture, [=](Void) {
+		return map(getUserPageCount_cleanup(this), [=](Void) {
 			int64_t userPages = pHeader->pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages - delayedFreeList.numEntries - remapQueue.numPages;
 			debug_printf("DWALPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64 " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64 " remapQueuePages=%" PRId64 " remapQueueCount=%" PRId64 "\n",
 				filename.c_str(), userPages, pHeader->pageCount, freeList.numPages, freeList.numEntries, delayedFreeList.numPages, delayedFreeList.numEntries, remapQueue.numPages, remapQueue.numEntries);
