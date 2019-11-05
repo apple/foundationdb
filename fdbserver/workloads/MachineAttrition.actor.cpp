@@ -86,7 +86,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
-		killDc = getOption( options, LiteralStringRef("killDc"), deterministicRandom()->random01() < 0.25 );
+		killDc = getOption( options, LiteralStringRef("killDc"), g_network->isSimulated() && deterministicRandom()->random01() < 0.25 );
 		killMachine = getOption( options, LiteralStringRef("killMachine"), false);
 		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
 		killProcess = getOption( options, LiteralStringRef("killProcess"), false);
