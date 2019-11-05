@@ -196,7 +196,7 @@ add_subdirectory(tests)
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
-add_subdirectory(monitoring)
+add_subdirectory(contrib/monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)
