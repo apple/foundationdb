@@ -1032,7 +1032,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	ACTOR static Future<Void> popFromLog( TagPartitionedLogSystem* self, Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag, double time ) {
 		state Version last = 0;
 		loop {
-			wait( delay(time) );
+			wait( delay(time, TaskPriority::TLogPop) );
 
 			state std::pair<Version,Version> to = self->outstandingPops[ std::make_pair(log->get().id(),tag) ];
 
@@ -1044,7 +1044,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			try {
 				if( !log->get().present() )
 					return Void();
-				wait(log->get().interf().popMessages.getReply( TLogPopRequest( to.first, to.second, tag ) ) );
+				wait(log->get().interf().popMessages.getReply( TLogPopRequest( to.first, to.second, tag ), TaskPriority::TLogPop ) );
 
 				last = to.first;
 			} catch (Error& e) {
