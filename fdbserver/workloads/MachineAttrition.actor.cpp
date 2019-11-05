@@ -149,7 +149,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	}
 
 	static bool noSimIsViableKill(WorkerDetails worker) {
-		return (worker.processClass == ProcessClass::ClassType::TesterClass);
+		return (worker.processClass != ProcessClass::ClassType::TesterClass);
 	}
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
