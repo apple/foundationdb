@@ -920,14 +920,14 @@ Version ILogSystem::MultiCursor::popped() {
 }
 
 ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped ) : cursors(cursors), messageVersion(begin), end(end), withTags(withTags), collectTags(collectTags), hasNextMessage(false), messageIndex(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped), knownUnique(false), randomID(deterministicRandom()->randomUniqueID()) {
-	targetQueueSize = 5000/cursors.size();
-	messages.reserve(10000);
+	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES/cursors.size();
+	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(cursors.size());
 }
 
 ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, Tag tag, Version begin, Version end, bool parallelGetMore ) : messageVersion(begin), end(end), withTags(true), collectTags(false), hasNextMessage(false), messageIndex(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(false), knownUnique(true), randomID(deterministicRandom()->randomUniqueID()) {
-	targetQueueSize = 5000/logServers.size();
-	messages.reserve(10000);
+	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES/logServers.size();
+	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(logServers.size());
 	for( int i = 0; i < logServers.size(); i++ ) {
 		Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logServers[i], tag, begin, end, false, parallelGetMore ) );
@@ -1051,7 +1051,7 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	state Future<Void> allLoaders = waitForAll(loaders);
 	state Version minVersion;
 	loop {
-		wait( allLoaders || delay(0.005, taskID) );
+		wait( allLoaders || delay(SERVER_KNOBS->DESIRED_GET_MORE_DELAY, taskID) );
 		minVersion = self->end;
 		for(auto& cursor : self->cursors) {
 			minVersion = std::min(minVersion, cursor->version().version);
