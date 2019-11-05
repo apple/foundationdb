@@ -134,7 +134,7 @@ void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVector
 	if (self->rangeToApplier.empty()) {
 		self->rangeToApplier = req.rangeToApplier;
 	} else {
-		ASSERT_WE_THINK(self->rangeToApplier == req.rangeToApplier);
+		ASSERT(self->rangeToApplier == req.rangeToApplier);
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
 }
