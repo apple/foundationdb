@@ -438,6 +438,7 @@ struct ILogSystem {
 		bool hasNextMessage;
 		UID randomID;
 		int tLogReplicationFactor;
+		Future<Void> more;
 
 		MergedPeekCursor( std::vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
@@ -484,6 +485,7 @@ struct ILogSystem {
 		bool hasNextMessage;
 		bool useBestSet;
 		UID randomID;
+		Future<Void> more;
 
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, std::vector< std::vector< Reference<IPeekCursor> > > const& serverCursors, LogMessageVersion const& messageVersion, int bestSet, int bestServer, Optional<LogMessageVersion> nextVersion, bool useBestSet );
@@ -572,16 +574,20 @@ struct ILogSystem {
 		};
 
 		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<Deque<BufferedMessage>> cursorMessages;
 		std::vector<BufferedMessage> messages;
 		int messageIndex;
 		LogMessageVersion messageVersion;
 		Version end;
 		bool hasNextMessage;
 		bool withTags;
+		bool knownUnique;
 		Version poppedVersion;
 		Version initialPoppedVersion;
 		bool canDiscardPopped;
 		Future<Void> more;
+		int targetQueueSize;
+		UID randomID;
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
@@ -589,6 +595,7 @@ struct ILogSystem {
 		void combineMessages();
 
 		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
+		BufferedCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, Tag tag, Version begin, Version end, bool parallelGetMore );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -644,7 +651,7 @@ struct ILogSystem {
 		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
 		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Tag tag, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
