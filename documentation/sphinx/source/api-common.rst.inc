@@ -242,6 +242,9 @@
 .. |option-trace-format-blurb| replace::
     Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.
 
+.. |option-trace-clock-source-blurb| replace::
+    Select clock source for trace files. now (the default) or realtime are supported.
+
 .. |network-options-warning| replace::
 
     It is an error to set these options after the first call to |open-func| anywhere in your application.

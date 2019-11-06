@@ -51,6 +51,9 @@ description is not currently required but encouraged.
     <Option name="trace_format" code="34"
             paramType="String" paramDescription="Format of trace files"
             description="Select the format of the log files. xml (the default) and json are supported."/>
+    <Option name="trace_clock_source" code="35"
+            paramType="String" paramDescription="Trace clock source"
+            description="Select clock source for trace files. now (the default) or realtime are supported." />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
