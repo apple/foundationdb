@@ -937,17 +937,17 @@ void ILogSystem::BufferedCursor::combineMessages() {
 		return;
 	}
 
-	std::vector<Tag> tempTags;
-	tempTags.push_back(messages[messageIndex].tags[0]);
+	tags.clear();
+	tags.push_back(messages[messageIndex].tags[0]);
 	for(int i = messageIndex + 1; i < messages.size() && messages[messageIndex].version == messages[i].version; i++) {
-		tempTags.push_back(messages[i].tags[0]);
+		tags.push_back(messages[i].tags[0]);
 		messageIndex = i;
 	}
 	auto& msg = messages[messageIndex];
 	BinaryWriter messageWriter(Unversioned());
-	messageWriter << uint32_t(msg.message.size() + sizeof(uint32_t) + sizeof(uint16_t) + tempTags.size()*sizeof(Tag)) << msg.version.sub << uint16_t(tags.size());
+	messageWriter << uint32_t(msg.message.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag)) << msg.version.sub << uint16_t(tags.size());
 	msg.tags = VectorRef<Tag>((Tag*)(((uint8_t*)messageWriter.getData())+messageWriter.getLength()), tags.size());
-	for(auto t : tempTags) {
+	for(auto t : tags) {
 		messageWriter << t;
 	}
 	messageWriter.serializeBytes(msg.message);
