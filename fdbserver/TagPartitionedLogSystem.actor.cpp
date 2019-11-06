@@ -1269,7 +1269,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations) {
+	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
 			if(log->isLocal && log->logServers.size()) {
@@ -1906,7 +1906,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector<int> locations;
 			for( Tag tag : localTags ) {
 				locations.clear();
-				logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				logSet->getPushLocations( VectorRef<Tag>(&tag, 1), locations, 0 );
 				for(int loc : locations)
 					remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 			}
@@ -1922,7 +1922,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 					Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%self->txsTags);
 					locations.clear();
-					logSet->getPushLocations( {pushTag}, locations, 0 );
+					logSet->getPushLocations( VectorRef<Tag>(&pushTag, 1), locations, 0 );
 					for(int loc : locations)
 						remoteTLogReqs[ loc ].recoverTags.push_back( tag );
 				}
@@ -2116,7 +2116,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<int> locations;
 		for( Tag tag : localTags ) {
 			locations.clear();
-			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+			logSystem->tLogs[0]->getPushLocations( VectorRef<Tag>(&tag, 1), locations, 0 );
 			for(int loc : locations)
 				reqs[ loc ].recoverTags.push_back( tag );
 		}
@@ -2130,7 +2130,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 				Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 				locations.clear();
-				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, pushTag), locations, 0 );
+				logSystem->tLogs[0]->getPushLocations( VectorRef<Tag>(&pushTag, 1), locations, 0 );
 				for(int loc : locations)
 					reqs[ loc ].recoverTags.push_back( tag );
 			}
@@ -2182,7 +2182,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					// are the preferred location for id%logRouterTags.
 					Tag pushLocation = Tag(tagLocalityLogRouter, i%logSystem->logRouterTags);
 					locations.clear();
-					logSystem->tLogs[1]->getPushLocations( {pushLocation}, locations, 0 );
+					logSystem->tLogs[1]->getPushLocations( VectorRef<Tag>(&pushLocation,1), locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}
@@ -2192,7 +2192,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					Tag tag = i==-1 ? txsTag : Tag(tagLocalityTxs, i);
 					Tag pushTag = (i==-1 || nonShardedTxs) ? txsTag : Tag(tagLocalityTxs, i%logSystem->txsTags);
 					locations.clear();
-					logSystem->tLogs[1]->getPushLocations( {pushTag}, locations, 0 );
+					logSystem->tLogs[1]->getPushLocations( VectorRef<Tag>(&pushTag,1), locations, 0 );
 					for(int loc : locations)
 						sreqs[ loc ].recoverTags.push_back( tag );
 				}

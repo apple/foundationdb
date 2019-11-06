@@ -245,6 +245,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
+		state Arena arena;
 		while (true) {
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
@@ -260,6 +261,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 				lastVer = ver;
 				ver = r->version().version;
 				messages.clear();
+				arena = Arena();
 
 				if (!foundMessage) {
 					ver--; //ver is the next possible version we will get data for
@@ -277,8 +279,9 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
+			tagAndMsg.tags.reserve(arena, tags.size());
 			for (const auto& t : tags) {
-				tagAndMsg.tags.emplace_back(tagLocalityRemoteLog, t);
+				tagAndMsg.tags.push_back(arena, Tag(tagLocalityRemoteLog, t));
 			}
 			messages.push_back(std::move(tagAndMsg));
 

@@ -110,10 +110,10 @@ enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
-	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 };
 
 struct KeyRangeRef;

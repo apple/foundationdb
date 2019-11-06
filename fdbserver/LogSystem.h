@@ -231,7 +231,7 @@ public:
 		return resultEntries.size() == 0;
 	}
 
-	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset,
+	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, int locationOffset,
 	                      bool allLocations = false) {
 		if(locality == tagLocalitySatellite) {
 			for(auto& t : tags) {
@@ -309,7 +309,7 @@ struct ILogSystem {
 
 		//pre: only callable if hasMessage() returns true
 		//return the tags associated with the message for the current sequence
-		virtual const std::vector<Tag>& getTags() = 0;
+		virtual VectorRef<Tag> getTags() = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//returns the arena containing the contents of getMessage(), getMessageWithTags(), and reader()
@@ -382,7 +382,7 @@ struct ILogSystem {
 		LogMessageVersion messageVersion, end;
 		Version poppedVersion;
 		int32_t messageLength, rawLength;
-		std::vector<Tag> tags;
+		VectorRef<Tag> tags;
 		bool hasMsg;
 		Future<Void> more;
 		UID randomID;
@@ -405,7 +405,7 @@ struct ILogSystem {
 		virtual void nextMessage();
 		virtual StringRef getMessage();
 		virtual StringRef getMessageWithTags();
-		virtual const std::vector<Tag>& getTags();
+		virtual VectorRef<Tag> getTags();
 		virtual void advanceTo(LogMessageVersion n);
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
@@ -454,7 +454,7 @@ struct ILogSystem {
 		virtual void nextMessage();
 		virtual StringRef getMessage();
 		virtual StringRef getMessageWithTags();
-		virtual const std::vector<Tag>& getTags();
+		virtual VectorRef<Tag> getTags();
 		virtual void advanceTo(LogMessageVersion n);
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
@@ -500,7 +500,7 @@ struct ILogSystem {
 		virtual void nextMessage();
 		virtual StringRef getMessage();
 		virtual StringRef getMessageWithTags();
-		virtual const std::vector<Tag>& getTags();
+		virtual VectorRef<Tag> getTags();
 		virtual void advanceTo(LogMessageVersion n);
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
@@ -534,7 +534,7 @@ struct ILogSystem {
 		virtual void nextMessage();
 		virtual StringRef getMessage();
 		virtual StringRef getMessageWithTags();
-		virtual const std::vector<Tag>& getTags();
+		virtual VectorRef<Tag> getTags();
 		virtual void advanceTo(LogMessageVersion n);
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
@@ -557,12 +557,12 @@ struct ILogSystem {
 		struct BufferedMessage {
 			Arena arena;
 			StringRef message;
-			std::vector<Tag> tags;
+			VectorRef<Tag> tags;
 			LogMessageVersion version;
 
 			BufferedMessage() {}
 			explicit BufferedMessage( Version version ) : version(version) {}
-			BufferedMessage( Arena arena, StringRef message, const std::vector<Tag>& tags, const LogMessageVersion& version ) : arena(arena), message(message), tags(tags), version(version) {}
+			BufferedMessage( Arena arena, StringRef message, const VectorRef<Tag>& tags, const LogMessageVersion& version ) : arena(arena), message(message), tags(tags), version(version) {}
 
 			bool operator < (BufferedMessage const& r) const {
 				return version < r.version;
@@ -582,6 +582,7 @@ struct ILogSystem {
 		bool hasNextMessage;
 		bool withTags;
 		bool knownUnique;
+		Version minKnownCommittedVersion;
 		Version poppedVersion;
 		Version initialPoppedVersion;
 		bool canDiscardPopped;
@@ -591,7 +592,7 @@ struct ILogSystem {
 
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
-		std::vector<Tag> tags;
+		VectorRef<Tag> tags;
 		void combineMessages();
 
 		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool withTags, bool collectTags, bool canDiscardPopped );
@@ -605,7 +606,7 @@ struct ILogSystem {
 		virtual void nextMessage();
 		virtual StringRef getMessage();
 		virtual StringRef getMessageWithTags();
-		virtual const std::vector<Tag>& getTags();
+		virtual VectorRef<Tag> getTags();
 		virtual void advanceTo(LogMessageVersion n);
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply);
 		virtual Future<Void> onFailed();
@@ -717,7 +718,11 @@ struct ILogSystem {
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 		// Returns when the log system configuration has changed due to a tlog rejoin.
 
-	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) = 0;
+	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations = false) = 0;
+
+	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) {
+		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations);
+	}
 
 	virtual bool hasRemoteLogs() const = 0;
 
