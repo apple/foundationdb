@@ -946,7 +946,6 @@ void ILogSystem::BufferedCursor::combineMessages() {
 	auto& msg = messages[messageIndex];
 	BinaryWriter messageWriter(Unversioned());
 	messageWriter << uint32_t(msg.message.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag)) << msg.version.sub << uint16_t(tags.size());
-	msg.tags = VectorRef<Tag>((Tag*)(((uint8_t*)messageWriter.getData())+messageWriter.getLength()), tags.size());
 	for(auto t : tags) {
 		messageWriter << t;
 	}
@@ -954,6 +953,10 @@ void ILogSystem::BufferedCursor::combineMessages() {
 	Standalone<StringRef> val = messageWriter.toValue();
 	msg.arena = val.arena();
 	msg.message = val;
+	msg.tags = VectorRef<Tag>();
+	for(auto t : tags) {
+		msg.tags.push_back(msg.arena, t);
+	}
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::BufferedCursor::cloneNoMore() {
