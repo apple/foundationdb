@@ -33,7 +33,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
-	uint64_t lbsum, ubsum; // Tell if setup txn fails when opType = AddValue
+	uint64_t logsum; // The sum of operations when opType = AddValue
 
 	AtomicOpsWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), opNum(0)
@@ -48,8 +48,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
 		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
-		lbsum = 0;
-		ubsum = 0;
+		logsum = 0;
 
 		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
@@ -183,23 +182,25 @@ struct AtomicOpsWorkload : TestWorkload {
 					int group = deterministicRandom()->randomInt(0,100);
 					state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
-					std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
+					state std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
-					Key opsKey(format("ops%08x%08x", group, nodeIndex));
+					state Key opsKey(format("ops%08x%08x", group, nodeIndex));
 					tr.set(logDebugKey.first, val); // set log key
 					tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
 					tr.atomicOp(opsKey, val, self->opType);
 					wait( tr.commit() );
 					if (self->opType == MutationRef::AddValue) {
-						self->lbsum += intValue;
-						self->ubsum += intValue;
+						self->logsum += intValue;
 					}
 					break;
 				} catch( Error &e ) {
-					wait( tr.onError(e) );
-					if (self->opType == MutationRef::AddValue) {
-						self->ubsum += intValue;
+					if (e.code() == 1021) {
+						TraceEvent(SevWarnAlways, "TxnCommitUnknownResult")
+						    .detail("Value", intValue)
+						    .detail("LogKey", logDebugKey.first)
+						    .detail("OpsKey", opsKey);
 					}
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -273,7 +274,10 @@ struct AtomicOpsWorkload : TestWorkload {
 		Key begin(format("debug%08x", g));
 		Standalone<RangeResultRef> debuglog =
 		    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!debuglog.more);
+		if (debuglog.more) {
+			TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
+			return Void();
+		}
 		for (auto& kv : debuglog) {
 			records[kv.value] = kv.key;
 		}
@@ -283,7 +287,10 @@ struct AtomicOpsWorkload : TestWorkload {
 		state std::map<Key, int64_t> logVal; // debugKey, log's value
 		Key begin(format("log%08x", g));
 		Standalone<RangeResultRef> log = wait(tr2.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!log.more);
+		if (log.more) {
+			TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
+			return Void();
+		}
 		for (auto& kv : log) {
 			uint64_t intValue = 0;
 			memcpy(&intValue, kv.value.begin(), kv.value.size());
@@ -295,7 +302,10 @@ struct AtomicOpsWorkload : TestWorkload {
 		state std::map<Key, int64_t> opsVal; // ops key, ops value
 		Key begin(format("ops%08x", g));
 		Standalone<RangeResultRef> ops = wait(tr3.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!ops.more);
+		if (ops.more) {
+			TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
+			return Void();
+		}
 		// Validate if ops' key value is consistent with logs' key value
 		for (auto& kv : ops) {
 			bool inRecord = records.find(kv.key) != records.end();
@@ -304,9 +314,6 @@ struct AtomicOpsWorkload : TestWorkload {
 			opsVal[kv.key] = intValue;
 			if (!inRecord) {
 				TraceEvent(SevError, "MissingLogKey").detail("OpsKey", kv.key);
-			}
-			if (inRecord && intValue == 0) {
-				TraceEvent(SevError, "MissingOpsKey1").detail("OpsKey", kv.key).detail("DebugKey", records[kv.key]);
 			}
 			if (inRecord && (self->actorCount == 1 && intValue != logVal[records[kv.key]])) {
 				// When multiple actors exist, 1 opsKey can have multiple log keys
@@ -390,8 +397,7 @@ struct AtomicOpsWorkload : TestWorkload {
 								    .detail("OpResult", opsResult)
 								    .detail("OpsResultStr", printable(opsResultStr))
 								    .detail("Size", opsResultStr.size())
-								    .detail("LowerBoundSum", self->lbsum)
-								    .detail("UpperBoundSum", self->ubsum);
+								    .detail("Sum", self->logsum);
 								wait(self->dumpLogKV(cx, g));
 								wait(self->dumpDebugKV(cx, g));
 								wait(self->dumpOpsKV(cx, g));
