@@ -937,7 +937,7 @@ void ILogSystem::BufferedCursor::combineMessages() {
 		return;
 	}
 
-	tags.clear();
+	std::vector<Tag> tags;
 	tags.push_back(messages[messageIndex].tags[0]);
 	for(int i = messageIndex + 1; i < messages.size() && messages[messageIndex].version == messages[i].version; i++) {
 		tags.push_back(messages[i].tags[0]);
