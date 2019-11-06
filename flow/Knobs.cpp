@@ -27,6 +27,7 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
+// clang-format off
 FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
@@ -140,7 +141,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
@@ -183,6 +184,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
 }
+// clang-format on
 
 static std::string toLower( std::string const& name ) {
 	std::string lower_name;

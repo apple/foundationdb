@@ -453,7 +453,9 @@ void _parseSerializedMutation(VersionedMutationsMap* pkvOps, SerializedMutationL
 			const uint8_t* v = vReader.consume(vLen);
 
 			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
-			//TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", commitVersion).detail("ParsedMutation", mutation.toString());
+			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			    .detail("CommitVersion", commitVersion)
+			    .detail("ParsedMutation", mutation.toString());
 			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
 			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
@@ -515,7 +517,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
-		//TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", version).detail("ParsedMutationKV", m.toString());
+		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+		    .detail("CommitVersion", version)
+		    .detail("ParsedMutationKV", m.toString());
 
 		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
 		kvOps[version].push_back_deep(kvOps[version].arena(), m);
