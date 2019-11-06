@@ -344,6 +344,7 @@ struct TLogData : NonCopyable {
 	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
                                        // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
+	std::vector<TagsAndMessage> tempTagMessages;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
 			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
@@ -1178,13 +1179,13 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
-	std::vector<TagsAndMessage> msgs;
+	self->tempTagMessages.clear();
 	while(!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
 		tagsAndMsg.loadFromArena(&rd, nullptr);
-		msgs.push_back(std::move(tagsAndMsg));
+		self->tempTagMessages.push_back(std::move(tagsAndMsg));
 	}
-	commitMessages(self, logData, version, msgs);
+	commitMessages(self, logData, version, self->tempTagMessages);
 }
 
 Version poppedVersion( Reference<LogData> self, Tag tag) {
@@ -1633,6 +1634,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, st
 	self->queueCommitBegin = commitNumber;
 	logData->queueCommittingVersion = ver;
 
+	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
 	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
