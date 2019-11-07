@@ -3416,12 +3416,17 @@ private:
 
 			// If flush then write a page using records from start to i.  It's guaranteed that pageUpperBound has been set above.
 			if(flush) {
-				end = i == entries.size();  // i could have been moved above
-
+				int remaining = entries.size() - i;
+				end = remaining == 0;  // i could have been moved above
 				int count = i - start;
-				// If not writing the final page, reduce entry count of page by a third
-				if(!end) {
-					i -= count / 3;
+
+				// If
+				//    - this is not the last page
+				//    - the number of entries remaining after this page is less than the count of the current page
+				//    - the page that would be written ends on a user key boundary
+				// Then adjust the current page item count to half the amount remaining after the start position.
+				if(!end && remaining < count && entries[i - 1].key != entries[i].key) {
+					i = (start + entries.size()) / 2;
 					pageUpperBound = entries[i].withoutValue();
 				}
 
