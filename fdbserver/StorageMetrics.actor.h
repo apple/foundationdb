@@ -209,9 +209,11 @@ struct StorageServerMetrics {
 	// Notifies waiting WaitMetricsRequests through waitMetricsMap, and updates metricsAverageQueue and metricsSampleMap
 	void notify( KeyRef key, StorageMetrics& metrics ) {
 		ASSERT (metrics.bytes == 0); // ShardNotifyMetrics
-		TEST (metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
-		TEST (metrics.iosPerKSecond != 0); // ShardNotifyMetrics
-		TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
+		if (g_network->isSimulated()) {
+			TEST (metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
+			TEST (metrics.iosPerKSecond != 0); // ShardNotifyMetrics
+			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
+		}
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 
@@ -227,7 +229,8 @@ struct StorageServerMetrics {
 		if (!notifyMetrics.allZero()) {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
-				TEST( true ); // ShardNotifyMetrics
+				if (g_network->isSimulated()) TEST( true );
+				// ShardNotifyMetrics
 				v[i].send( notifyMetrics );
 			}
 		}
