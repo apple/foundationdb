@@ -143,6 +143,7 @@ endfunction()
 
 set(TEST_PACKAGE_INCLUDE ".*" CACHE STRING "A regex of all tests that should be included in the test package")
 set(TEST_PACKAGE_EXCLUDE ".^" CACHE STRING "A regex of all tests that shouldn't be added to the test package")
+set(TEST_PACKAGE_ADD_DIRECTORIES "" CACHE STRING "A ;-separated list of directories. All files within each directory will be added to the test package")
 
 function(create_test_package)
   string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
@@ -163,12 +164,23 @@ function(create_test_package)
       endforeach()
     endif()
   endforeach()
+  foreach(dir IN LISTS TEST_PACKAGE_ADD_DIRECTORIES)
+    file(GLOB_RECURSE files ${dir}/*)
+    string(LENGTH ${dir} dir_len)
+    foreach(file IN LISTS files)
+      get_filename_component(src_dir ${file} DIRECTORY)
+      string(SUBSTRING ${src_dir} ${dir_len} -1 dest_dir)
+      string(SUBSTRING ${file} ${dir_len} -1 out_file)
+      list(APPEND external_files ${CMAKE_BINARY_DIR}/packages/${out_file})
+      file(COPY ${file} DESTINATION ${CMAKE_BINARY_DIR}/packages/${dest_dir})
+    endforeach()
+  endforeach()
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     DEPENDS ${out_files}
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
-                                                    ${out_files}
+    ${out_files} ${external_files}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
     COMMENT "Package correctness archive"
     )
