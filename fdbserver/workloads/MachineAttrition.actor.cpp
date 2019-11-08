@@ -195,22 +195,22 @@ struct MachineAttritionWorkload : TestWorkload {
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
 		} else if (self->killMachine) {
-			TraceEvent("Assassination").detail("TargetMachineId", describe(self->targetIds));
+			TraceEvent("Assassination").detail("TargetMachineIds", describe(self->targetIds));
 			sendRebootRequests(workers, self->targetIds, rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
 		} else if (self->killDatahall) {
-			TraceEvent("Assassination").detail("TargetDatahallId", describe(self->targetIds));
+			TraceEvent("Assassination").detail("TargetDatahallIds", describe(self->targetIds));
 			sendRebootRequests(workers, self->targetIds, rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
 		} else if (self->killProcess) {
-			TraceEvent("Assassination").detail("TargetProcessId", describe(self->targetIds));
+			TraceEvent("Assassination").detail("TargetProcessIds", describe(self->targetIds));
 			sendRebootRequests(workers, self->targetIds, rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
 		} else if (self->killZone) {
-			TraceEvent("Assassination").detail("TargetProcessId", describe(self->targetIds));
+			TraceEvent("Assassination").detail("TargetZoneIds", describe(self->targetIds));
 			sendRebootRequests(workers, self->targetIds, rbReq,
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
