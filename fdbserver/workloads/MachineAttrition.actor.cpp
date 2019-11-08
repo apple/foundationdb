@@ -67,6 +67,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool killMachine;
 	bool killDatahall;
 	bool killProcess;
+	bool killZone;
 	bool killSelf;
 	std::vector<std::string> targetIds;
 	bool replacement;
@@ -86,11 +87,13 @@ struct MachineAttritionWorkload : TestWorkload {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
-		killDc = getOption( options, LiteralStringRef("killDc"), g_network->isSimulated() && deterministicRandom()->random01() < 0.25 );
-		killMachine = getOption( options, LiteralStringRef("killMachine"), false);
-		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
-		killProcess = getOption( options, LiteralStringRef("killProcess"), false);
-		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
+		killDc = getOption(options, LiteralStringRef("killDc"),
+		                   g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
+		killMachine = getOption(options, LiteralStringRef("killMachine"), false);
+		killDatahall = getOption(options, LiteralStringRef("killDatahall"), false);
+		killProcess = getOption(options, LiteralStringRef("killProcess"), false);
+		killZone = getOption(options, LiteralStringRef("killZone"), false);
+		killSelf = getOption(options, LiteralStringRef("killSelf"), false);
 		targetIds = getOption(options, LiteralStringRef("targetIds"), std::vector<std::string>());
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
@@ -152,6 +155,19 @@ struct MachineAttritionWorkload : TestWorkload {
 		return (worker.processClass != ProcessClass::ClassType::TesterClass);
 	}
 
+	template <typename Proc>
+	static void sendRebootRequests(std::vector<WorkerDetails> workers, std::vector<std::string> targets,
+	                               RebootRequest rbReq, Proc idAccess) {
+		for (const auto& worker : workers) {
+			// kill all matching workers
+			if (idAccess(worker).present() &&
+			    std::count(targets.begin(), targets.end(), idAccess(worker).get().toString())) {
+				TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
+				worker.interf.clientInterface.reboot.send(rbReq);
+			}
+		}
+	}
+
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
 		ASSERT(!g_network->isSimulated());
 		state int killedMachines = 0;
@@ -175,48 +191,29 @@ struct MachineAttritionWorkload : TestWorkload {
 		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
 		if (self->killDc) {
 			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
-			for (const auto& worker : workers) {
-				// kill all matching dcId workers
-				if (worker.interf.locality.dcId().present() &&
-				    std::count(self->targetIds.begin(), self->targetIds.end(),
-				               worker.interf.locality.dcId().get().toString())) {
-					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
-					worker.interf.clientInterface.reboot.send(rbReq);
-				}
-			}
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
 		} else if (self->killMachine) {
 			TraceEvent("Assassination").detail("TargetMachineId", describe(self->targetIds));
-			for (const auto& worker : workers) {
-				// kill all matching machine workers
-				if (worker.interf.locality.machineId().present() &&
-				    std::count(self->targetIds.begin(), self->targetIds.end(),
-				               worker.interf.locality.machineId().get().toString())) {
-					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
-					worker.interf.clientInterface.reboot.send(rbReq);
-				}
-			}
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
 		} else if (self->killDatahall) {
 			TraceEvent("Assassination").detail("TargetDatahallId", describe(self->targetIds));
-			for (const auto& worker : workers) {
-				// kill all matching datahall workers
-				if (worker.interf.locality.dataHallId().present() &&
-				    std::count(self->targetIds.begin(), self->targetIds.end(),
-				               worker.interf.locality.dataHallId().get().toString())) {
-					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
-					worker.interf.clientInterface.reboot.send(rbReq);
-				}
-			}
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
 		} else if (self->killProcess) {
 			TraceEvent("Assassination").detail("TargetProcessId", describe(self->targetIds));
-			for (const auto& worker : workers) {
-				// kill matching processes
-				if (worker.interf.locality.processId().present() &&
-				    std::count(self->targetIds.begin(), self->targetIds.end(),
-				               worker.interf.locality.processId().get().toString())) {
-					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
-					worker.interf.clientInterface.reboot.send(rbReq);
-				}
-			}
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
+		} else if (self->killZone) {
+			TraceEvent("Assassination").detail("TargetProcessId", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
 		} else {
 			while (killedMachines < self->machinesToKill && workers.size() > self->machinesToLeave) {
 				TraceEvent("WorkerKillBegin")
