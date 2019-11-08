@@ -461,6 +461,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Removing", removeServer->toString());
 				toKillMarkFailedArray.erase(removeServer);
 			}
+			ASSERT(toKillMarkFailedArray.size() <= toKillArray.size());
 			auto removeServer = toKill.begin();
 			TraceEvent("RemoveAndKill", functionId)
 				.detail("Step", "ReplaceNonFailedKillSet")
