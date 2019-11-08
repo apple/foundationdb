@@ -174,6 +174,10 @@ function(create_test_package)
     string(LENGTH ${dir} dir_len)
     foreach(file IN LISTS files)
       get_filename_component(src_dir ${file} DIRECTORY)
+      # We need to make sure that ${src_dir} is at least
+      # as long as ${dir}. Otherwise the later call to
+      # SUBSTRING will fail
+      set(src_dir "${src_dir}/")
       string(SUBSTRING ${src_dir} ${dir_len} -1 dest_dir)
       string(SUBSTRING ${file} ${dir_len} -1 out_file)
       list(APPEND external_files ${CMAKE_BINARY_DIR}/packages/${out_file})
