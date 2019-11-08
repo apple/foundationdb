@@ -1079,7 +1079,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount;
-	state int64_t readSize;
 	//state UID rrid = deterministicRandom()->randomUniqueID();
 	//state int originalLimit = limit;
 	//state int originalLimitBytes = *pLimitBytes;
@@ -1156,7 +1155,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 			for (auto i = &result.data[prevSize]; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
-				readSize += sizeof(KeyValueRef) + i->expectedSize();
 			}
 
 			// Setup for the next iteration
@@ -1246,7 +1244,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 			for (auto i = &result.data[prevSize]; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
-				readSize += sizeof(KeyValueRef) + i->expectedSize();
 			}
 
 			vStart = vEnd;
@@ -1261,9 +1258,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	}
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
-	StorageMetrics metrics;
-	metrics.bytesReadPerKSecond = std::max(readSize, SERVER_KNOBS->EMPTY_READ_PENALTY);
-	data->metrics.notify(limit >= 0 ? range.begin : range.end, metrics);
 	return result;
 }
 
