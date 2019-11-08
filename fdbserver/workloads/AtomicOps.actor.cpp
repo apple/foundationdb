@@ -33,7 +33,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
-	uint64_t logsum; // The sum of operations when opType = AddValue
+	uint64_t lbsum, ubsum; // The lower bound and upper bound sum of operations when opType = AddValue
 
 	AtomicOpsWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), opNum(0)
@@ -48,7 +48,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
 		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
-		logsum = 0;
+		lbsum = 0;
+		ubsum = 0;
 
 		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
@@ -190,11 +191,13 @@ struct AtomicOpsWorkload : TestWorkload {
 					tr.atomicOp(opsKey, val, self->opType);
 					wait( tr.commit() );
 					if (self->opType == MutationRef::AddValue) {
-						self->logsum += intValue;
+						self->lbsum += intValue;
+						self->ubsum += intValue;
 					}
 					break;
 				} catch( Error &e ) {
 					if (e.code() == 1021) {
+						self->ubsum += intValue;
 						TraceEvent(SevWarnAlways, "TxnCommitUnknownResult")
 						    .detail("Value", intValue)
 						    .detail("LogKey", logDebugKey.first)
@@ -211,6 +214,9 @@ struct AtomicOpsWorkload : TestWorkload {
 			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("log%08x", g));
 			Standalone<RangeResultRef> log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			if (log.more) {
+				TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
+			}
 			uint64_t sum = 0;
 			for (auto& kv : log) {
 				uint64_t intValue = 0;
@@ -233,8 +239,12 @@ struct AtomicOpsWorkload : TestWorkload {
 		try {
 			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("debug%08x", g));
-			Standalone<RangeResultRef> log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
-			for (auto& kv : log) {
+			Standalone<RangeResultRef> debuglog =
+			    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			if (debuglog.more) {
+				TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
+			}
+			for (auto& kv : debuglog) {
 				TraceEvent("AtomicOpDebug").detail("Key", kv.key).detail("Val", kv.value);
 			}
 		} catch( Error &e ) {
@@ -249,6 +259,9 @@ struct AtomicOpsWorkload : TestWorkload {
 			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("ops%08x", g));
 			Standalone<RangeResultRef> ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			if (ops.more) {
+				TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
+			}
 			uint64_t sum = 0;
 			for (auto& kv : ops) {
 				uint64_t intValue = 0;
@@ -397,7 +410,8 @@ struct AtomicOpsWorkload : TestWorkload {
 								    .detail("OpResult", opsResult)
 								    .detail("OpsResultStr", printable(opsResultStr))
 								    .detail("Size", opsResultStr.size())
-								    .detail("Sum", self->logsum);
+								    .detail("LowerBoundSum", self->lbsum)
+								    .detail("UpperBoundSum", self->ubsum);
 								wait(self->dumpLogKV(cx, g));
 								wait(self->dumpDebugKV(cx, g));
 								wait(self->dumpOpsKV(cx, g));
