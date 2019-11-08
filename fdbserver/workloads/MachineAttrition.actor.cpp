@@ -68,7 +68,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool killDatahall;
 	bool killProcess;
 	bool killSelf;
-	Standalone<StringRef> targetId;
+	std::vector<std::string> targetIds;
 	bool replacement;
 	bool waitForVersion;
 	bool allowFaultInjection;
@@ -91,7 +91,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		killDatahall = getOption( options, LiteralStringRef("killDatahall"), false);
 		killProcess = getOption( options, LiteralStringRef("killProcess"), false);
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
-		targetId = getOption( options, LiteralStringRef("targetId"), LiteralStringRef(""));
+		targetIds = getOption(options, LiteralStringRef("targetIds"), std::vector<std::string>());
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
 		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
@@ -172,46 +172,47 @@ struct MachineAttritionWorkload : TestWorkload {
 			}
 		}
 		deterministicRandom()->randomShuffle(workers);
+		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
 		if (self->killDc) {
-			// Pick a dcId to kill
-			Optional<Standalone<StringRef>> killDcId = self->targetId.toString().empty() ? workers.back().interf.locality.dcId() : self->targetId;
-			TraceEvent("Assassination").detail("TargetDataCenterId", killDcId);
+			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
 			for (const auto& worker : workers) {
 				// kill all matching dcId workers
-				if (worker.interf.locality.dcId().present() && worker.interf.locality.dcId() == killDcId) {
+				if (worker.interf.locality.dcId().present() &&
+				    std::count(self->targetIds.begin(), self->targetIds.end(),
+				               worker.interf.locality.dcId().get().toString())) {
 					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
 		} else if (self->killMachine) {
-			// Pick a machine to kill
-			Optional<Standalone<StringRef>> killMachineId = self->targetId.toString().empty() ? workers.back().interf.locality.machineId() : self->targetId;
-			TraceEvent("Assassination").detail("TargetMachineId", killMachineId);
+			TraceEvent("Assassination").detail("TargetMachineId", describe(self->targetIds));
 			for (const auto& worker : workers) {
 				// kill all matching machine workers
-				if (worker.interf.locality.machineId().present() && worker.interf.locality.machineId() == killMachineId) {
+				if (worker.interf.locality.machineId().present() &&
+				    std::count(self->targetIds.begin(), self->targetIds.end(),
+				               worker.interf.locality.machineId().get().toString())) {
 					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
 		} else if (self->killDatahall) {
-			// Pick a datahall to kill
-			Optional<Standalone<StringRef>> killDatahallId = self->targetId.toString().empty() ? workers.back().interf.locality.dataHallId() : self->targetId;
-			TraceEvent("Assassination").detail("TargetDatahallId", killDatahallId);
+			TraceEvent("Assassination").detail("TargetDatahallId", describe(self->targetIds));
 			for (const auto& worker : workers) {
 				// kill all matching datahall workers
-				if (worker.interf.locality.dataHallId().present() && worker.interf.locality.dataHallId() == killDatahallId) {
+				if (worker.interf.locality.dataHallId().present() &&
+				    std::count(self->targetIds.begin(), self->targetIds.end(),
+				               worker.interf.locality.dataHallId().get().toString())) {
 					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
 			}
 		} else if (self->killProcess) {
-			// Pick a process to kill
-			Optional<Standalone<StringRef>> killProcessId = self->targetId.toString().empty() ? workers.back().interf.locality.processId() : self->targetId;
-			TraceEvent("Assassination").detail("TargetProcessId", killProcessId);
+			TraceEvent("Assassination").detail("TargetProcessId", describe(self->targetIds));
 			for (const auto& worker : workers) {
 				// kill matching processes
-				if (worker.interf.locality.processId().present() && worker.interf.locality.processId() == killProcessId) {
+				if (worker.interf.locality.processId().present() &&
+				    std::count(self->targetIds.begin(), self->targetIds.end(),
+				               worker.interf.locality.processId().get().toString())) {
 					TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
