@@ -1448,10 +1448,15 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				data->metrics.notify(r.data[i].key, m);
 			}*/
 
+			// For performance concerns, the cost of a range read is billed to the start key of the range.
+			int64_t totalByteSize = 0;
 			for (int i = 0; i < r.data.size(); i++) {
+				totalByteSize += r.data[i].expectedSize();
+			}
+			if (totalByteSize > 0) {
 				StorageMetrics m;
-				m.bytesReadPerKSecond = std::max((int64_t)r.data[i].expectedSize(), SERVER_KNOBS->EMPTY_READ_PENALTY);
-				data->metrics.notify(r.data[i].key, m);
+				m.bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY);
+				data->metrics.notify(r.data[0].key, m);
 			}
 
 			r.penalty = data->getPenalty();
