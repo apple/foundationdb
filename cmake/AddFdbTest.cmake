@@ -130,9 +130,48 @@ function(add_fdb_test)
     ${VALGRIND_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-	get_filename_component(test_dir_full ${first_file} DIRECTORY)
-	if(NOT ${test_dir_full} STREQUAL "")
-		get_filename_component(test_dir ${test_dir_full} NAME)
-		set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
-	endif()
+  get_filename_component(test_dir_full ${first_file} DIRECTORY)
+  if(NOT ${test_dir_full} STREQUAL "")
+    get_filename_component(test_dir ${test_dir_full} NAME)
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+  endif()
+  # set variables used for generating test packages
+  set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
+  set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+  set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+endfunction()
+
+set(TEST_PACKAGE_INCLUDE ".*" CACHE STRING "A regex of all tests that should be included in the test package")
+set(TEST_PACKAGE_EXCLUDE ".^" CACHE STRING "A regex of all tests that shouldn't be added to the test package")
+
+function(create_test_package)
+  string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
+  foreach(test IN LISTS TEST_NAMES)
+    if(("${TEST_TYPE_${test}}" STREQUAL "simulation") AND
+        (${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
+        (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
+      foreach(file IN LISTS TEST_FILES_${test})
+        string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
+        set(out_file ${CMAKE_BINARY_DIR}/packages/tests/${rel_out_file})
+        list(APPEND out_files ${out_file})
+        get_filename_component(test_dir ${out_file} DIRECTORY)
+        file(MAKE_DIRECTORY packages/tests/${test_dir})
+        add_custom_command(
+          OUTPUT ${out_file}
+          DEPENDS ${file}
+          COMMAND ${CMAKE_COMMAND} -E copy ${file} ${out_file})
+      endforeach()
+    endif()
+  endforeach()
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    DEPENDS ${out_files}
+    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                                    ${out_files}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
+    COMMENT "Package correctness archive"
+    )
+  add_custom_target(package_tests DEPENDS ${tar_file})
+  add_dependencies(package_tests strip_fdbserver)
 endfunction()
