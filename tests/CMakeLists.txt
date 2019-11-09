@@ -215,3 +215,4 @@ add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
 
 
 verify_testing()
+create_test_package()
