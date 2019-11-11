@@ -5766,7 +5766,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
 	state double coldStartProbability = deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
-	state double maxWallClockDuration = 60;
+	state double maxDuration = 60;
 
 	printf("\n");
 	printf("serialTest: %d\n", serialTest);
@@ -5787,7 +5787,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	deleteFile(pagerFile);
 
 	printf("Initializing...\n");
-	state double startTime = timer();
+	state double startTime = now();
 	pager = new DWALPager(pageSize, pagerFile, 0);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, singleVersion);
 	wait(btree->init());
@@ -5817,7 +5817,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	state Future<Void> commit = Void();
 
-	while(mutationBytes.get() < mutationBytesTarget && (timer() - startTime) < maxWallClockDuration) {
+	while(mutationBytes.get() < mutationBytesTarget && (now() - startTime) < maxDuration) {
 		if(now() - startTime > 600) {
 			mutationBytesTarget = mutationBytes.get();
 		}
