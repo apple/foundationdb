@@ -123,6 +123,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
+			// TODO: What if log file's mutations are delivered out-of-order (behind) the range file's mutations?!
 		}
 		curFilePos.set(req.version);
 	}

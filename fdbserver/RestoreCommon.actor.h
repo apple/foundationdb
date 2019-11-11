@@ -236,7 +236,7 @@ struct RestoreFileFR {
 		ss << "version:" << std::to_string(version) << " fileName:" << fileName
 		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
 		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
-		   << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor)
+		   << " beginVersion:" << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor)
 		   << " fileIndex:" << std::to_string(fileIndex);
 		return ss.str();
 	}
