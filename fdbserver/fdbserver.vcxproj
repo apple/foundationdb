@@ -46,7 +46,6 @@
     <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
     <ActorCompiler Include="SimulatedCluster.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
-    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ClCompile Include="Knobs.cpp" />
     <ActorCompiler Include="FDBExecHelper.actor.cpp" />
     <ActorCompiler Include="QuietDatabase.actor.cpp" />
@@ -57,7 +56,6 @@
     <ActorCompiler Include="Restore.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
-    <ActorCompiler Include="MemoryPager.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ClCompile Include="LatencyBandConfig.cpp" />
     <ActorCompiler Include="OldTLogServer_4_6.actor.cpp" />
@@ -179,7 +177,6 @@
     </ActorCompiler>
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="IKeyValueStore.h" />
-    <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="IPager.h" />
     <ClInclude Include="IVersionedStore.h" />
     <ClInclude Include="LatencyBandConfig.h" />
@@ -189,7 +186,6 @@
     <ClInclude Include="LogSystemConfig.h" />
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
-    <ClInclude Include="MemoryPager.h" />
     <ActorCompiler Include="MoveKeys.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
