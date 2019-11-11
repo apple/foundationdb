@@ -277,8 +277,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Key begin = restoreApplierKeyFor(
-			    self->id(), bigEndian64(0)); // Integer must be BigEndian to maintain ordering in lexical order
+			// Version integer must be BigEndian to maintain ordering in lexical order
+			Key begin = restoreApplierKeyFor(self->id(), bigEndian64(0));
 			Key end = restoreApplierKeyFor(self->id(), bigEndian64(std::numeric_limits<int64_t>::max()));
 			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
 			if (txnIds.size() > 0) {
