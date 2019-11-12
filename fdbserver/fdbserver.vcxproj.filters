@@ -197,6 +197,7 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="StorageCache.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="Orderer.actor.h" />
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp">

@@ -84,6 +84,7 @@ set(FDBSERVER_SRCS
   SkipList.cpp
   Status.actor.cpp
   Status.h
+  StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp

@@ -54,6 +54,7 @@
     <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="StorageCache.actor.cpp" />
     <ActorCompiler Include="RestoreWorker.actor.cpp" />
     <ActorCompiler Include="RestoreUtil.actor.cpp" />
     <ActorCompiler Include="RestoreCommon.actor.cpp" />
