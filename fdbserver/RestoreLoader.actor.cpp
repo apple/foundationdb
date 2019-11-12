@@ -86,7 +86,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					handleInitVersionBatchRequest(req, self);
+					wait(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";

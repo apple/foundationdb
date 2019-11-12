@@ -298,6 +298,7 @@ extern const KeyRangeRef restoreApplierKeys;
 extern const KeyRef restoreApplierTxnValue;
 
 const Key restoreApplierKeyFor(UID const& applierID, Version version);
+std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key);
 const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
