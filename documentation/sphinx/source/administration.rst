@@ -213,6 +213,10 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     
     If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
 
+	Excluding a server with the ``failed`` flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command ``exclude FORCE failed``.
+
+	In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the ``include failed`` command.
+
 4) On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the :ref:`instructions for your platform <administration-running-foundationdb>`. For example, on Ubuntu::
 
     user@host3$ sudo service foundationdb stop
@@ -222,7 +226,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 6) You can optionally :ref:`uninstall <administration-removing>` the FoundationDB server package entirely and/or delete database files on removed servers.
 
-7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded machines.
+7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
 Moving a cluster
 ================
