@@ -65,7 +65,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					handleInitVersionBatchRequest(req, self);
+					wait(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -277,9 +277,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			// Version integer must be BigEndian to maintain ordering in lexical order
-			Key begin = restoreApplierKeyFor(self->id(), bigEndian64(0));
-			Key end = restoreApplierKeyFor(self->id(), bigEndian64(std::numeric_limits<int64_t>::max()));
+			Key begin = restoreApplierKeyFor(self->id(), 0);
+			Key end = restoreApplierKeyFor(self->id(), std::numeric_limits<int64_t>::max());
 			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
 			if (txnIds.size() > 0) {
 				TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
@@ -287,7 +286,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					std::pair<UID, Version> applierInfo = decodeRestoreApplierKey(kv.key);
 					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
 					    .detail("Applier", applierInfo.first)
-					    .detail("ResidueTxnID", bigEndian64(applierInfo.second));
+					    .detail("ResidueTxnID", applierInfo.second);
 				}
 			}
 			break;
@@ -303,8 +302,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> txnSucceeded =
-				    wait(tr->get(restoreApplierKeyFor(self->id(), bigEndian64(progress.curTxnId))));
+				Optional<Value> txnSucceeded = wait(tr->get(restoreApplierKeyFor(self->id(), progress.curTxnId)));
 				if (!txnSucceeded.present()) {
 					progress.rollback();
 					continue;
@@ -330,7 +328,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				    .detail("Version", progress.curItInCurTxn->first);
 
 				// restoreApplierKeyFor(self->id(), curTxnId) to tell if txn succeeds at an unknown error
-				tr->set(restoreApplierKeyFor(self->id(), bigEndian64(progress.curTxnId)), restoreApplierTxnValue);
+				tr->set(restoreApplierKeyFor(self->id(), progress.curTxnId), restoreApplierTxnValue);
 
 				while (1) { // Loop: Accumulate mutations in a transaction
 					MutationRef m = progress.getCurrentMutation();
@@ -409,8 +407,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Clear txnIds in [0, progress.curTxnId). We add 100 to curTxnId just to be safe.
-			tr->clear(KeyRangeRef(restoreApplierKeyFor(self->id(), bigEndian64(0)),
-			                      restoreApplierKeyFor(self->id(), bigEndian64(progress.curTxnId + 100))));
+			tr->clear(KeyRangeRef(restoreApplierKeyFor(self->id(), 0),
+			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 100)));
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {

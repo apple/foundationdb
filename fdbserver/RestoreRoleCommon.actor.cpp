@@ -55,9 +55,9 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
-void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
+ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	// batchId is continuous. (req.batchID-1) is the id of the just finished batch.
-	self->versionBatchId.whenAtLeast(req.batchID - 1);
+	wait(self->versionBatchId.whenAtLeast(req.batchID - 1));
 
 	if (self->versionBatchId.get() == req.batchID - 1) {
 		self->resetPerVersionBatch();
@@ -69,6 +69,7 @@ void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Refere
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
+	return Void();
 }
 
 //-------Helper functions
