@@ -269,8 +269,6 @@ public:
 
 #pragma pack(push, 1)
 		struct RawPage {
-			static constexpr int FORMAT_VERSION = 1;
-			uint16_t formatVersion;
 			LogicalPageID nextPageID;
 			uint16_t nextOffset;
 			uint16_t endOffset;
@@ -305,7 +303,6 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) loadPage\n", toString().c_str());
 			return map(queue->pager->readPage(pageID, true), [=](Reference<IPage> p) {
 				page = p;
-				ASSERT(raw()->formatVersion == RawPage::FORMAT_VERSION);
 				debug_printf("FIFOQueue::Cursor(%s) loadPage done\n", toString().c_str());
 				return Void();
 			});
@@ -345,7 +342,6 @@ public:
 				page = queue->pager->newPageBuffer();
 				setNext(0, 0);
 				auto p = raw();
-				p->formatVersion = RawPage::FORMAT_VERSION;
 				ASSERT(newOffset == 0);
 				p->endOffset = 0;
 			}
@@ -1002,8 +998,18 @@ public:
 			}
 
 			self->pHeader = (Header *)self->headerPage->begin();
-			self->setPageSize(self->pHeader->pageSize);
 
+			if(self->pHeader->formatVersion != Header::FORMAT_VERSION) {
+				Error e = internal_error();  // TODO:  Something better?
+				TraceEvent(SevError, "DWALPagerRecoveryFailedWrongVersion")
+					.detail("Filename", self->filename)
+					.detail("Version", self->pHeader->formatVersion)
+					.detail("ExpectedVersion", Header::FORMAT_VERSION)
+					.error(e);
+				throw e;
+			}
+
+			self->setPageSize(self->pHeader->pageSize);
 			if(self->logicalPageSize != self->desiredPageSize) {
 				TraceEvent(SevWarn, "DWALPagerPageSizeNotDesired")
 					.detail("Filename", self->filename)
@@ -1579,7 +1585,7 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 1;
+		static constexpr int FORMAT_VERSION = 2;
 		uint16_t formatVersion;
 		uint32_t pageSize;
 		int64_t pageCount;
@@ -1598,7 +1604,6 @@ private:
 			ASSERT(key.size() < (smallestPhysicalBlock - sizeof(Header)));
 			metaKeySize = key.size();
 			memcpy(this + 1, key.begin(), key.size());
-			ASSERT(formatVersion == FORMAT_VERSION);
 		}
 
 		int size() const {
@@ -2467,10 +2472,8 @@ struct BTreePage {
 	typedef DeltaTree<RedwoodRecordRef> BinaryTree;
 	typedef DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly> ValueTree;
 
-	static constexpr int FORMAT_VERSION = 1;
 #pragma pack(push,1)
 	struct {
-		uint16_t formatVersion;
 		uint8_t height;
 		uint16_t itemCount;
 		uint32_t kvBytes;
@@ -2545,7 +2548,6 @@ struct BTreePage {
 
 static void makeEmptyRoot(Reference<IPage> page) {
 	BTreePage *btpage = (BTreePage *)page->begin();
-	btpage->formatVersion = BTreePage::FORMAT_VERSION;
 	btpage->height = 1;
 	btpage->kvBytes = 0;
 	btpage->itemCount = 0;
@@ -2649,7 +2651,8 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 1;
+		static constexpr int FORMAT_VERSION = 2;
+		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
 		LazyDeleteQueueT::QueueState lazyDeleteQueue;
@@ -3470,7 +3473,6 @@ private:
 					btPage = (BTreePage *)new uint8_t[size];
 				}
 
-				btPage->formatVersion = BTreePage::FORMAT_VERSION;
 				btPage->height = height;
 				btPage->kvBytes = kvBytes;
 				btPage->itemCount = i - start;
@@ -3645,7 +3647,6 @@ private:
 
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage *pTreePage = (const BTreePage *)page->begin();
-		ASSERT(pTreePage->formatVersion == BTreePage::FORMAT_VERSION);
 
 		if(!forLazyDelete && page->userData == nullptr) {
 			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(), snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
