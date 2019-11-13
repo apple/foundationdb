@@ -20,12 +20,88 @@
 
 #pragma once
 
-#include "fdbserver/PrefixTree.h"
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include <string.h>
+
+typedef uint64_t Word;
+static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
+	int i = 0;
+	const int wordEnd = cl - sizeof(Word) + 1;
+
+	for(; i < wordEnd; i += sizeof(Word)) {
+		Word a = *(Word *)ap;
+		Word b = *(Word *)bp;
+		if(a != b) {
+			return i + ctzll(a ^ b) / 8;
+		}
+		ap += sizeof(Word);
+		bp += sizeof(Word);
+	}
+
+	for (; i < cl; i++) {
+		if (*ap != *bp) {
+			return i;
+		}
+		++ap;
+		++bp;
+	}
+	return cl;
+}
+
+static int commonPrefixLength(StringRef a, StringRef b) {
+	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
+}
+
+// This appears to be the fastest version
+static int lessOrEqualPowerOfTwo(int n) {
+	int p;
+	for (p = 1; p+p <= n; p+=p);
+	return p;
+}
+
+/*
+static int _lessOrEqualPowerOfTwo(uint32_t n) {
+	if(n == 0)
+		return n;
+	int trailing = __builtin_ctz(n);
+	int leading = __builtin_clz(n);
+	if(trailing + leading == ((sizeof(n) * 8) - 1))
+		return n;
+	return 1 << ( (sizeof(n) * 8) - leading - 1);
+}
+
+static int __lessOrEqualPowerOfTwo(unsigned int n) {
+	int p = 1;
+	for(; p <= n; p <<= 1);
+	return p >> 1;
+}
+*/
+
+static int perfectSubtreeSplitPoint(int subtree_size) {
+	// return the inorder index of the root node in a subtree of the given size
+	// consistent with the resulting binary search tree being "perfect" (having minimal height 
+	// and all missing nodes as far right as possible).
+	// There has to be a simpler way to do this.
+	int s = lessOrEqualPowerOfTwo((subtree_size - 1) / 2 + 1) - 1;
+	return std::min(s * 2 + 1, subtree_size - s - 1);
+}
+
+static int perfectSubtreeSplitPointCached(int subtree_size) {
+	static uint16_t *points = nullptr;
+	static const int max = 500;
+	if(points == nullptr) {
+		points = new uint16_t[max];
+		for(int i = 0; i < max; ++i)
+			points[i] = perfectSubtreeSplitPoint(i);
+	}
+
+	if(subtree_size < max)
+		return points[subtree_size];
+	return perfectSubtreeSplitPoint(subtree_size);
+}
 
 // Delta Tree is a memory mappable binary tree of T objects such that each node's item is
 // stored as a Delta which can reproduce the node's T item given the node's greatest
