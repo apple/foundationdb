@@ -12,6 +12,7 @@ Fixes
 * The data distributor and ratekeeper could be recruited on non-optimal processes. `(PR #2344) <https://github.com/apple/foundationdb/pull/2344>`_.
 * A ``kill`` command from ``fdbcli`` could take a long time before being executed by a busy process. `(PR #2339) <https://github.com/apple/foundationdb/pull/2339>`_.
 * Committing transactions larger than 1 MB could cause the proxy to stall for up to a second. `(PR #2350) <https://github.com/apple/foundationdb/pull/2350>`_.
+* Transaction timeouts would use memory for the entire duration of the timeout, regardless of whether the transaction had been destroyed. `(PR #2353) <https://github.com/apple/foundationdb/pull/2353>`_.
 
 6.2.8
 =====
