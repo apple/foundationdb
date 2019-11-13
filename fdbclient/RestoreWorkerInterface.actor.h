@@ -49,7 +49,6 @@ struct RestoreLoadFileRequest;
 struct RestoreVersionBatchRequest;
 struct RestoreSendMutationsToAppliersRequest;
 struct RestoreSendMutationVectorVersionedRequest;
-struct RestoreSetApplierKeyRangeVectorRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 
@@ -126,8 +125,6 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
-	// TODO: delete setApplierKeyRangeVectorRequest because sendMutations does the job
-	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 	RequestStream<RestoreLoadFileRequest> loadFile;
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
@@ -147,7 +144,6 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	void initEndpoints() {
 		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		updateRestoreSysInfo.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		setApplierKeyRangeVectorRequest.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
@@ -157,8 +153,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, setApplierKeyRangeVectorRequest,
-		           loadFile, sendMutations, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
+		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 
@@ -416,30 +412,6 @@ struct RestoreVersionBatchRequest : TimedRequest {
 	std::string toString() {
 		std::stringstream ss;
 		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
-		return ss.str();
-	}
-};
-
-// TODO: To delete this request
-struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 92038306;
-
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSetApplierKeyRangeVectorRequest() = default;
-	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> rangeToApplier)
-	  : rangeToApplier(rangeToApplier) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, reply);
-	}
-
-	std::string toString() {
-		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest rangeToApplierSize:" << rangeToApplier.size();
 		return ss.str();
 	}
 };

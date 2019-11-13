@@ -51,7 +51,6 @@ ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> 
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
-ACTOR static Future<Void> notifyLoaderAppliersKeyRange(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
@@ -329,7 +328,6 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(self->appliersInterf.size() > 0);
 
 	dummySampleWorkload(self); // TODO: Delete
-	wait(notifyLoaderAppliersKeyRange(self)); // TODO: Delete
 
 	// Parse log files and send mutations to appliers before we parse range files
 	// TODO: Allow loading both range and log files in parallel
@@ -479,17 +477,6 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterD
 	wait(sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests));
 
 	TraceEvent("FastRestore").detail("Master", self->id()).detail("ApplyToDB", "Completed");
-	return Void();
-}
-
-// Send the map of key-range to applier to each loader
-ACTOR static Future<Void> notifyLoaderAppliersKeyRange(Reference<RestoreMasterData> self) {
-	std::vector<std::pair<UID, RestoreSetApplierKeyRangeVectorRequest>> requests;
-	for (auto& loader : self->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreSetApplierKeyRangeVectorRequest(self->rangeToApplier)));
-	}
-	wait(sendBatchRequests(&RestoreLoaderInterface::setApplierKeyRangeVectorRequest, self->loadersInterf, requests));
-
 	return Void();
 }
 

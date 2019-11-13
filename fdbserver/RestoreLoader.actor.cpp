@@ -40,8 +40,6 @@ void _parseSerializedMutation(VersionedMutationsMap* kvOps, SerializedMutationLi
                               bool isSampling = false);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
-void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
-                                           Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self,
                                          bool isSampling = false);
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
@@ -75,11 +73,6 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				when(RestoreSysInfoRequest req = waitNext(loaderInterf.updateRestoreSysInfo.getFuture())) {
 					requestTypeStr = "updateRestoreSysInfo";
 					handleRestoreSysInfoRequest(req, self);
-				}
-				when(RestoreSetApplierKeyRangeVectorRequest req =
-				         waitNext(loaderInterf.setApplierKeyRangeVectorRequest.getFuture())) {
-					requestTypeStr = "setApplierKeyRangeVectorRequest";
-					handleSetApplierKeyRangeVectorRequest(req, self);
 				}
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
@@ -128,20 +121,6 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 
 	self->appliersInterf = req.sysInfo.appliers;
 
-	req.reply.send(RestoreCommonReply(self->id()));
-}
-
-void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
-                                           Reference<RestoreLoaderData> self) {
-	TraceEvent("FastRestore")
-	    .detail("Loader", self->id())
-	    .detail("SetApplierKeyRangeVector", req.rangeToApplier.size());
-	// Idempodent operation. OK to re-execute the duplicate cmd
-	if (self->rangeToApplier.empty()) {
-		self->rangeToApplier = req.rangeToApplier;
-	} else {
-		ASSERT(self->rangeToApplier == req.rangeToApplier);
-	}
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
@@ -207,6 +186,11 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self) {
+	if (self->rangeToApplier.empty()) {
+		self->rangeToApplier = req.rangeToApplier;
+	} else {
+		ASSERT(self->rangeToApplier == req.rangeToApplier);
+	}
 	state int i = 0;
 	for (; i <= 1; i++) {
 		state bool useRangeFile = (i == 1);
