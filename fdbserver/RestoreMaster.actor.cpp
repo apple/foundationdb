@@ -308,6 +308,19 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	return Void();
 }
 
+// Ask loaders to send its buffered mutations to appliers
+ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> self) {
+	TraceEvent("FastRestore").detail("SendMutationsFromLoaders", self->batchIndex);
+
+	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
+	for (auto& loader : self->loadersInterf) {
+		requests.push_back(std::make_pair(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier)));
+	}
+	wait(sendBatchRequests(&RestoreLoaderInterface::sendMutations, self->loadersInterf, requests));
+
+	return Void();
+}
+
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx,
                                                             RestoreRequest request, VersionBatch versionBatch) {
 	ASSERT(!versionBatch.isEmpty());
@@ -315,12 +328,15 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(self->loadersInterf.size() > 0);
 	ASSERT(self->appliersInterf.size() > 0);
 
-	dummySampleWorkload(self);
-	wait(notifyLoaderAppliersKeyRange(self));
+	dummySampleWorkload(self); // TODO: Delete
+	wait(notifyLoaderAppliersKeyRange(self)); // TODO: Delete
 
 	// Parse log files and send mutations to appliers before we parse range files
+	// TODO: Allow loading both range and log files in parallel
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, false));
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, true));
+
+	wait(sendMutationsFromLoaders(self));
 
 	wait(notifyApplierToApplyMutations(self));
 
