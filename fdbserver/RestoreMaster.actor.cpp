@@ -352,19 +352,20 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 // Produce the key-range for each applier
 void dummySampleWorkload(Reference<RestoreMasterData> self) {
 	int numAppliers = self->appliersInterf.size();
-	std::vector<UID> keyrangeSplitter;
+	std::vector<Key> keyrangeSplitter;
 	// We will use the splitter at [1, numAppliers - 1]. The first splitter is normalKeys.begin
 	int i;
-	for (i = 0; i < numAppliers - 1; i++) {
-		keyrangeSplitter.push_back(deterministicRandom()->randomUniqueID());
+	for (i = 0; i < numAppliers; i++) {
+		keyrangeSplitter.push_back(Key(deterministicRandom()->randomUniqueID().toString()));
 	}
 	std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
 	i = 0;
+	self->rangeToApplier.clear();
 	for (auto& applier : self->appliersInterf) {
 		if (i == 0) {
 			self->rangeToApplier[normalKeys.begin] = applier.first;
 		} else {
-			self->rangeToApplier[StringRef(keyrangeSplitter[i].toString())] = applier.first;
+			self->rangeToApplier[Key(keyrangeSplitter[i])] = applier.first;
 		}
 		i++;
 	}
