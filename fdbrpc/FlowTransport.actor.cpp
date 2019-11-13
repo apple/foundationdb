@@ -497,7 +497,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						.detail("PeerAddr", self->destination);
 			}
 
-			if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+			if(self->destination.isPublic() 
+				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+				&& !FlowTransport::transport().isClient()) 
+			{
 				auto& it = self->transport->closedPeers[self->destination];
 				if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
 					it.first = now();
