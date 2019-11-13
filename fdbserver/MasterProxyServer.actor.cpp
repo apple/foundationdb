@@ -817,6 +817,7 @@ ACTOR Future<Void> commitBatch(
 		// Serialize the log range mutations within the map
 		for (; logRangeMutation != logRangeMutations.end(); ++logRangeMutation)
 		{
+			//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
 			valueWriter = BinaryWriter(IncludeVersion());
 			valueWriter << logRangeMutation->second.totalSize();
 

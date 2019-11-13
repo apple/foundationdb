@@ -141,6 +141,8 @@ public:
 			blob_begin->data = StringRef((const uint8_t*)ar.arenaRead(totalBytes), totalBytes); // Zero-copy read when deserializing from an ArenaReader
 		}
 	}
+
+	//FIXME: this is re-implemented on the master proxy to include a yield, any changes to this function should also done there
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
 		serializer(ar, totalBytes);
