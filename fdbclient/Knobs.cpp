@@ -97,6 +97,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MUTATION_BLOCK_SIZE,	            	  10000 );
 
 	// TaskBucket
+	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
 	init( TASKBUCKET_MAX_PRIORITY,                   1 );
 	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
