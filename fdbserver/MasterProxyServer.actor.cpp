@@ -461,6 +461,7 @@ ACTOR Future<Void> commitBatch(
 	state double t1 = now();
 	state Optional<UID> debugID;
 	state bool forceRecovery = false;
+	state BinaryWriter valueWriter(Unversioned());
 
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
 
@@ -816,12 +817,21 @@ ACTOR Future<Void> commitBatch(
 		// Serialize the log range mutations within the map
 		for (; logRangeMutation != logRangeMutations.end(); ++logRangeMutation)
 		{
-			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				yieldBytes = 0;
-				wait(yield());
+			valueWriter = BinaryWriter(IncludeVersion());
+			valueWriter << logRangeMutation->second.totalSize();
+
+			state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
+			while(blobIter) {
+				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+					yieldBytes = 0;
+					wait(yield());
+				}
+				valueWriter.serializeBytes(blobIter->data);
+				yieldBytes += blobIter->data.size();
+				blobIter = blobIter->next;
 			}
 
-			yieldBytes += logRangeMutation->second.expectedSize();
+			Key val = valueWriter.toValue();
 			
 			BinaryWriter wr(Unversioned());
 
@@ -835,8 +845,6 @@ ACTOR Future<Void> commitBatch(
 			MutationRef backupMutation;
 			backupMutation.type = MutationRef::SetValue;
 			uint32_t* partBuffer = NULL;
-
-			Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 			for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 

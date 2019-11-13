@@ -28,12 +28,13 @@
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and
 	// quickly serialized, (forward) iterated or appended to.
-
-private:
+public:
 	struct Blob {
 		StringRef data;
 		Blob* next;
 	};
+	Blob *blob_begin;
+private:
 	struct Header {
 		int type, p1len, p2len;
 		const uint8_t* p1begin() const { return (const uint8_t*)(this+1); }
@@ -172,7 +173,7 @@ private:
 		return b;
 	}
 
-	Blob *blob_begin, *blob_end;
+	Blob *blob_end;
 	int totalBytes;
 };
 typedef Standalone<MutationListRef> MutationList;
