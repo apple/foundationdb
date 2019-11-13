@@ -140,6 +140,8 @@ add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.txt)
 add_fdb_test(TEST_FILES rare/RYWDisable.txt)
 add_fdb_test(TEST_FILES rare/RandomReadWriteTest.txt)
 add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.txt)
+add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.txt)
+
 add_fdb_test(
   TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
              restarting/from_7.0.0/ConfigureTestRestart-2.txt)
