@@ -360,6 +360,7 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
 			wait( tr.commit() );
@@ -1092,11 +1093,12 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		// do we handle a failure here?
 	}
 
-	printf("\n%d tests passed; %d tests failed, waiting for DD to end...\n\n", passCount, failCount);
-	
+	printf("\n%d tests passed; %d tests failed.\n", passCount, failCount);
+
 	//If the database was deleted during the workload we need to recreate the database
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
+			printf("Waiting for DD to end...\n");
 			try {
 				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
 				     (databasePingDelay == 0.0 ? Never()
@@ -1107,6 +1109,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			}
 		}
 	}
+	printf("\n");
 
 	return Void();
 }

@@ -1,10 +1,10 @@
 testTitle=BackupAndParallelRestoreWithAtomicOp
     testName=AtomicOps
-;    nodeCount=30000
+    nodeCount=30000
 ; Make ops space only 1 key per group
-    nodeCount=100
-;    transactionsPerSecond=2500.0
-    transactionsPerSecond=500.0
+;    nodeCount=100
+    transactionsPerSecond=2500.0
+;    transactionsPerSecond=500.0
 ;    transactionsPerSecond=100.0
 ;    nodeCount=4
 ;    transactionsPerSecond=250.0

@@ -86,7 +86,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					handleInitVersionBatchRequest(req, self);
+					wait(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -127,9 +127,14 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 
 void handleSetApplierKeyRangeVectorRequest(const RestoreSetApplierKeyRangeVectorRequest& req,
                                            Reference<RestoreLoaderData> self) {
+	TraceEvent("FastRestore")
+	    .detail("Loader", self->id())
+	    .detail("SetApplierKeyRangeVector", req.rangeToApplier.size());
 	// Idempodent operation. OK to re-execute the duplicate cmd
 	if (self->rangeToApplier.empty()) {
 		self->rangeToApplier = req.rangeToApplier;
+	} else {
+		ASSERT(self->rangeToApplier == req.rangeToApplier);
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
 }
@@ -185,6 +190,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		TraceEvent("FastRestore").detail("Loader", self->id()).detail("ProcessLoadParam", req.param.toString());
 		self->processedFileParams[req.param] = Never();
 		self->processedFileParams[req.param] = _processLoadingParam(req.param, self);
+	} else {
+		TraceEvent("FastRestore").detail("Loader", self->id()).detail("WaitOnProcessLoadParam", req.param.toString());
 	}
 	ASSERT(self->processedFileParams.find(req.param) != self->processedFileParams.end());
 	wait(self->processedFileParams[req.param]); // wait on the processing of the req.param.
@@ -453,7 +460,9 @@ void _parseSerializedMutation(VersionedMutationsMap* pkvOps, SerializedMutationL
 			const uint8_t* v = vReader.consume(vLen);
 
 			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
-			//TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", commitVersion).detail("ParsedMutation", mutation.toString());
+			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			    .detail("CommitVersion", commitVersion)
+			    .detail("ParsedMutation", mutation.toString());
 			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
 			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
@@ -515,7 +524,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(VersionedMutationsM
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
-		//TraceEvent(SevDebug, "FastRestore_VerboseDebug").detail("CommitVersion", version).detail("ParsedMutationKV", m.toString());
+		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+		    .detail("CommitVersion", version)
+		    .detail("ParsedMutationKV", m.toString());
 
 		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
 		kvOps[version].push_back_deep(kvOps[version].arena(), m);

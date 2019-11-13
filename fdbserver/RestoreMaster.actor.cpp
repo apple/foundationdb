@@ -412,11 +412,13 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent("FastRestore").detail("RangeFile", f.toString());
 		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
+		TraceEvent("FastRestore").detail("RangeFileFR", file.toString());
 		files->push_back(file);
 	}
 	for (const LogFile& f : restorable.get().logs) {
 		TraceEvent("FastRestore").detail("LogFile", f.toString());
 		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
+		TraceEvent("FastRestore").detail("LogFileFR", file.toString());
 		files->push_back(file);
 	}
 

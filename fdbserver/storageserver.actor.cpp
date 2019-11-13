@@ -516,6 +516,8 @@ public:
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
 			specialCounter(cc, "LocalRate", [self]{ return self->currentRate() * 100; });
 
+			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
+
 			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
 
@@ -890,9 +892,10 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		}
 
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = v.present() ? std::max((int64_t)(req.key.size() + v.get().size()),
-		                                                     SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE)
-		                                          : SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		// If the read yields no value, randomly sample the empty read.
+		metrics.bytesReadPerKSecond =
+		    v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
+		                : SERVER_KNOBS->EMPTY_READ_PENALTY;
 		data->metrics.notify(req.key, metrics);
 
 		if( req.debugID.present() )
@@ -1271,7 +1274,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
 	StorageMetrics metrics;
-	metrics.bytesReadPerKSecond = std::max(readSize, SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+	metrics.bytesReadPerKSecond = std::max(readSize, SERVER_KNOBS->EMPTY_READ_PENALTY);
 	data->metrics.notify(limit >= 0 ? range.begin : range.end, metrics);
 	return result;
 }
@@ -1327,14 +1330,13 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 		*pOffset = 0;
 
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond =
-		    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE);
+		metrics.bytesReadPerKSecond = std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
 		data->metrics.notify(sel.getKey(), metrics);
 
 		return rep.data[ index ].key;
 	} else {
 		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+		metrics.bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
 		data->metrics.notify(sel.getKey(), metrics);
 
 		// FIXME: If range.begin=="" && !forward, return success?
@@ -1466,7 +1468,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 			for (int i = 0; i < r.data.size(); i++) {
 				StorageMetrics m;
-				m.bytesReadPerKSecond = r.data[i].expectedSize();
+				m.bytesReadPerKSecond = std::max((int64_t)r.data[i].expectedSize(), SERVER_KNOBS->EMPTY_READ_PENALTY);
 				data->metrics.notify(r.data[i].key, m);
 			}
 
