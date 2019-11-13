@@ -346,21 +346,23 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 68827305;
 
 	std::map<Key, UID> rangeToApplier;
+	bool useRangeFile; // Send mutations parsed from range file?
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationsToAppliersRequest() = default;
-	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier)
-	  : rangeToApplier(rangeToApplier) {}
+	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, reply);
+		serializer(ar, rangeToApplier, useRangeFile, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size();
+		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
+		   << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };

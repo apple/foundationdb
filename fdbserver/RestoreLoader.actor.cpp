@@ -191,19 +191,17 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	} else {
 		ASSERT(self->rangeToApplier == req.rangeToApplier);
 	}
-	state int i = 0;
-	for (; i <= 1; i++) {
-		state bool useRangeFile = (i == 1);
-		// Send mutations from log files first to ensure log mutation at the same version is before the range kv
-		state std::map<LoadingParam, VersionedMutationsMap>::iterator item = self->kvOpsPerLP.begin();
-		for (; item != self->kvOpsPerLP.end(); item++) {
-			if (item->first.isRangeFile == useRangeFile) {
-				// Send the parsed mutation to applier who will apply the mutation to DB
-				wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile, item->first.prevVersion,
-				                            item->first.endVersion, item->first.fileIndex));
-			}
+
+	// Send mutations from log files first to ensure log mutation at the same version is before the range kv
+	state std::map<LoadingParam, VersionedMutationsMap>::iterator item = self->kvOpsPerLP.begin();
+	for (; item != self->kvOpsPerLP.end(); item++) {
+		if (item->first.isRangeFile == req.useRangeFile) {
+			// Send the parsed mutation to applier who will apply the mutation to DB
+			wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile, item->first.prevVersion,
+			                            item->first.endVersion, item->first.fileIndex));
 		}
 	}
+
 	req.reply.send(RestoreCommonReply(self->id()));
 	return Void();
 }

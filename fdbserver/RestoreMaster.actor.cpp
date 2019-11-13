@@ -308,12 +308,15 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 }
 
 // Ask loaders to send its buffered mutations to appliers
-ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> self) {
-	TraceEvent("FastRestore").detail("SendMutationsFromLoaders", self->batchIndex);
+ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> self, bool useRangeFile) {
+	TraceEvent("FastRestore")
+	    .detail("SendMutationsFromLoaders", self->batchIndex)
+	    .detail("UseRangeFiles", useRangeFile);
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier)));
+		requests.push_back(
+		    std::make_pair(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier, useRangeFile)));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::sendMutations, self->loadersInterf, requests));
 
@@ -334,7 +337,11 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, false));
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, true));
 
-	wait(sendMutationsFromLoaders(self));
+	// Loaders should ensure log files' mutations sent to appliers before range files' mutations
+	// TODO: Let applier buffer mutations from log and range files differently so that loaders can send mutations in
+	// parallel
+	wait(sendMutationsFromLoaders(self, false));
+	wait(sendMutationsFromLoaders(self, true));
 
 	wait(notifyApplierToApplyMutations(self));
 
@@ -359,6 +366,7 @@ void dummySampleWorkload(Reference<RestoreMasterData> self) {
 		} else {
 			self->rangeToApplier[StringRef(keyrangeSplitter[i].toString())] = applier.first;
 		}
+		i++;
 	}
 	self->logApplierKeyRange();
 }

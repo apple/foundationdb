@@ -42,11 +42,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// Buffer for mutations parsed from a backup file
-// struct ParsedMutationBuffer {
-// 	VersionedMutationsMap kvOps;
-// }
-
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
