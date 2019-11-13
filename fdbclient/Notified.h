@@ -45,9 +45,9 @@ struct Notified {
 
 	void initMetric(const StringRef& name, const StringRef& id) {
 		if constexpr (IsMetricHandle<T>::value) {
-			Version version = val;
+			ValueType v = val;
 			val.init(name, id);
-			val = version;
+			val = v;
 		} else {
 			TraceEvent(SevError, "InvalidNotifiedOperation")
 			    .detail("Reason", "Notified<T> where T is not a metric: Can't use initMetric");
