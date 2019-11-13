@@ -32,10 +32,10 @@
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const std::vector<Tag>& t, const Arena& a)
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
 	  : version(v), message(m), tags(t), arena(a) {}
 	const Version getVersion() const { return version.version; }
 	const uint32_t getSubVersion() const { return version.sub; }
@@ -159,7 +159,7 @@ bool isBackupMessage(const VersionedMessage& msg) {
 }
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
-// messages.
+// messages. The file format is a sequence of (Version, sub#, msgSize, message),
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	const int blockSize = 1 << 20;
 	state Reference<IBackupFile> logFile =
