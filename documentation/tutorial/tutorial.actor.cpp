@@ -53,15 +53,14 @@ ACTOR Future<Void> simpleTimer() {
 // A actor that demonstrates how choose-when
 // blocks work.
 ACTOR Future<Void> someFuture(Future<int> ready) {
-	loop {
-		choose {
-			when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
-			when(int r = wait(ready)) {
-				std::cout << format("Ready %d\n", r);
-				wait(delay(double(r)));
-				std::cout << "Done\n";
-				return Void();
-			}
+	// loop choose {} works as well here - the braces are optional
+	loop choose {
+		when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
+		when(int r = wait(ready)) {
+			std::cout << format("Ready %d\n", r);
+			wait(delay(double(r)));
+			std::cout << "Done\n";
+			return Void();
 		}
 	}
 }
@@ -76,12 +75,9 @@ ACTOR Future<Void> promiseDemo() {
 }
 
 ACTOR Future<Void> eventLoop(AsyncTrigger* trigger) {
-	loop {
-
-		choose {
-			when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
-			when(wait(trigger->onTrigger())) { std::cout << "Triggered!\n"; }
-		}
+	loop choose {
+		when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
+		when(wait(trigger->onTrigger())) { std::cout << "Triggered!\n"; }
 	}
 }
 
@@ -418,14 +414,14 @@ int main(int argc, char* argv[]) {
 		if (arg == "-p") {
 			isServer = true;
 			if (i + 1 >= argc) {
-				std::cout << "Excpecting an argument after -p\n";
+				std::cout << "Expecting an argument after -p\n";
 				return 1;
 			}
 			port = std::string(argv[++i]);
 			continue;
 		} else if (arg == "-s") {
 			if (i + 1 >= argc) {
-				std::cout << "Excpecting an argument after -s\n";
+				std::cout << "Expecting an argument after -s\n";
 				return 1;
 			}
 			serverAddress = NetworkAddress::parse(argv[++i]);
