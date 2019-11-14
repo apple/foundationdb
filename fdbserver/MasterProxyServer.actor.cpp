@@ -451,21 +451,32 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
+ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
                          LogPushData* toCommit, Version commitVersion) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
+	state BinaryWriter valueWriter(Unversioned());
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
 	{
-		if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-			yieldBytes = 0;
-			wait(yield());
+		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
+		valueWriter = BinaryWriter(IncludeVersion());
+		valueWriter << logRangeMutation->second.totalSize();
+
+		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
+		while(blobIter) {
+			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				yieldBytes = 0;
+				wait(yield());
+			}
+			valueWriter.serializeBytes(blobIter->data);
+			yieldBytes += blobIter->data.size();
+			blobIter = blobIter->next;
 		}
 
-		yieldBytes += logRangeMutation->second.expectedSize();
+		Key val = valueWriter.toValue();
 		
 		BinaryWriter wr(Unversioned());
 
@@ -479,8 +490,6 @@ ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, Muta
 		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
 		uint32_t* partBuffer = NULL;
-
-		Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
@@ -877,7 +886,7 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-		wait( adddBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
+		wait( addBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
 	}
 
 	self->stats.mutations += mutationCount;

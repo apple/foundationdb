@@ -1246,6 +1246,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	bool requiresExtraDBMachines = extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	std::vector<ProcessClass::ClassType> processClassesSubSet = {ProcessClass::UnsetClass, ProcessClass::ResolutionClass, ProcessClass::MasterClass};
 	for( int dc = 0; dc < dataCenters; dc++ ) {
 		//FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -1270,7 +1271,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) deterministicRandom()->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
 				else if(assignedMachines == 4 && !simconfig.db.regions.size())
-					processClass = ProcessClass((ProcessClass::ClassType) (deterministicRandom()->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
+					processClass = ProcessClass(processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())], ProcessClass::CommandLineSource); //Unset or Resolution or Master
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) deterministicRandom()->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
 				if (processClass == ProcessClass::ResolutionClass)  // *can't* be assigned to other roles, even in an emergency

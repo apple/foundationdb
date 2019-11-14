@@ -497,7 +497,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						.detail("PeerAddr", self->destination);
 			}
 
-			if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+			if(self->destination.isPublic() 
+				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+				&& !FlowTransport::transport().isClient()) 
+			{
 				auto& it = self->transport->closedPeers[self->destination];
 				if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
 					it.first = now();
@@ -686,7 +689,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+			TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
 
@@ -740,7 +743,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
 				.suppressFor(1.0)
 				.detail("FromPeer", peerAddress.toString())
 				.detail("Length", (int)packetLen)
@@ -767,7 +770,7 @@ static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const Netw
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 		throw platform_error();
 	}
 	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
@@ -1216,11 +1219,11 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 	}
 
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	}
 	else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
 			.suppressFor(1.0)
 			.detail("ToPeer", destination.getPrimaryAddress())
 			.detail("Length", (int)len)
