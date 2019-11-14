@@ -515,7 +515,7 @@ public:
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
 		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
-
+		taskBucket->metricLogger = traceCounters("TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
 		loop {
 			while(paused->get()) {
 				wait(paused->onChange() || watchPausedFuture);
@@ -809,7 +809,6 @@ TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBa
 	, dispatchEmptyTasks("DispatchEmptyTasks", cc)
 	, dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc)
 {
-	metricLogger = traceCounters("TaskBucketMetrics", dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &cc);
 }
 
 TaskBucket::~TaskBucket() {

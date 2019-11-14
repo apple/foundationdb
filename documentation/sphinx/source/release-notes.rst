@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.10
+======
+
+Fixes
+-----
+
+* ``backup_agent`` crashed on startup. `(PR #2356) <https://github.com/apple/foundationdb/pull/2356>`_.
+
 6.2.9
 =====
 
