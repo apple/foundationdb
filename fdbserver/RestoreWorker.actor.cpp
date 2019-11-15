@@ -54,8 +54,8 @@ void initRestoreWorkerConfig();
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self,
                                                  RestoreWorkerInterface workerInterf, Database cx);
 ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self);
-ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
-                                            ActorCollection* actors, Database cx);
+Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
+                                      ActorCollection* actors, Database cx);
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx,
                                                  int min_num_workers = 2);
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
@@ -80,8 +80,8 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 
 // Assume only 1 role on a restore worker.
 // Future: Multiple roles in a restore worker
-ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
-                                            ActorCollection* actors, Database cx) {
+Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
+                                      ActorCollection* actors, Database cx) {
 	// Already recruited a role
 	// Future: Allow multiple restore roles on a restore worker. The design should easily allow this.
 	if (self->loaderInterf.present()) {
