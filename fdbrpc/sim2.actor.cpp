@@ -293,6 +293,7 @@ private:
 	void closeInternal() {
 		if(peer) {
 			peer->peerClosed();
+			stopReceive = delay(1.0);
 		}
 		leakedConnectionTracker.cancel();
 		peer.clear();
