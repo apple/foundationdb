@@ -32,6 +32,7 @@
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -54,7 +55,7 @@ struct RestoreSimpleRequest;
 typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutationsMap;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
-void handleInitVersionBatchRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
@@ -113,6 +114,8 @@ public:
 	std::map<UID, RestoreLoaderInterface> loadersInterf;
 	std::map<UID, RestoreApplierInterface> appliersInterf;
 	RestoreApplierInterface masterApplierInterf;
+
+	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
 
 	bool versionBatchStart = false;
 

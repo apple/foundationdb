@@ -65,7 +65,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					handleInitVersionBatchRequest(req, self);
+					wait(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -272,6 +272,29 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	}
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	// Sanity check the restoreApplierKeys, which should be empty at this point
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key begin = restoreApplierKeyFor(self->id(), 0);
+			Key end = restoreApplierKeyFor(self->id(), std::numeric_limits<int64_t>::max());
+			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
+			if (txnIds.size() > 0) {
+				TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
+				for (auto& kv : txnIds) {
+					std::pair<UID, Version> applierInfo = decodeRestoreApplierKey(kv.key);
+					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
+					    .detail("Applier", applierInfo.first)
+					    .detail("ResidueTxnID", applierInfo.second);
+				}
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 
 	loop { // Transaction retry loop
 		try {
@@ -384,8 +407,9 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// Clear txnIds in [0, progress.curTxnId). We add 100 to curTxnId just to be safe.
 			tr->clear(KeyRangeRef(restoreApplierKeyFor(self->id(), 0),
-			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 1)));
+			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 100)));
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
