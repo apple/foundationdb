@@ -142,7 +142,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
-      <Command>echo const char *SourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
+      <Command>echo const char *sourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
       <Message>Checking source version</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
