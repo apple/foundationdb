@@ -43,7 +43,7 @@
 #undef min
 
 extern "C" int g_expect_full_pointermap;
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 const int MACHINE_REBOOT_TIME = 10;
 
@@ -232,7 +232,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("Excluded", process->excluded)
 				.detail("UsingSSL", sslEnabled);
 			TraceEvent("ProgramStart").detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("SourceVersion", getHGVersion())
+				.detail("SourceVersion", getSourceVersion())
 				.detail("Version", FDB_VT_VERSION)
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("DataFolder", *dataFolder)
