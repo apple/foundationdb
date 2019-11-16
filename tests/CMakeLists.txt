@@ -165,10 +165,10 @@ add_fdb_test(
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
-             restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
+             restarting/from_5.1.7/DrUpgradeRestart-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
-             restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt IGNORE)
+             restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectness.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.txt)
