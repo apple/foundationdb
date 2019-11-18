@@ -84,7 +84,7 @@ std::string toString(const T *begin, const T *end) {
 
 template<typename T>
 std::string toString(const std::vector<T> &v) {
-	return toString(v.begin(), v.end());
+	return toString(&v.front(), &v.back() + 1);
 }
 
 template<typename T>
@@ -1540,12 +1540,12 @@ public:
 		g_network->getDiskBytes(parentDirectory(filename), free, total);
 		int64_t pagerSize = pHeader->pageCount * physicalPageSize;
 
-		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be,
-		// if each commit delayed entries that were freeable were shuffled from the delayed free queue to the free queue.
-		// but this doesn't seem necessary most of the time.
+		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be known,
+		// if each commit delayed entries that were freeable were shuffled from the delayed free queue to the free queue,
+		// but this doesn't seem necessary.
 		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize, free + reusable);
+		return StorageBytes(free, total, pagerSize - reusable, free + reusable);
 	}
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager *self) {
@@ -3337,8 +3337,9 @@ private:
 		ASSERT(ib != m_pBuffer->end());
 
 		// If we found the boundary we are looking for, return its iterator
-		if(ib->first == boundary)
+		if(ib->first == boundary) {
 			return ib;
+		}
 
 		// ib is our insert hint.  Insert the new boundary and set ib to its entry
 		ib = m_pBuffer->insert(ib, {boundary, RangeMutation()});
@@ -4853,7 +4854,7 @@ public:
 	}
 
     void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
-		debug_printf("SET %s\n", keyValue.key.printable().c_str());
+		debug_printf("SET %s\n", printable(keyValue).c_str());
 		m_tree->set(keyValue);
 	}
 
@@ -6126,6 +6127,7 @@ TEST_CASE("!/redwood/performance/set") {
 	state int minValueSize = 0;
 	state int maxValueSize = 500;
 	state int maxConsecutiveRun = 10;
+	state int minConsecutiveRun = 1000;
 	state char firstKeyChar = 'a';
 	state char lastKeyChar = 'b';
 
@@ -6135,6 +6137,7 @@ TEST_CASE("!/redwood/performance/set") {
 	printf("maxChangesPerVersion: %d\n", maxChangesPerVersion);
 	printf("minKeyPrefixBytes: %d\n", minKeyPrefixBytes);
 	printf("maxKeyPrefixBytes: %d\n", maxKeyPrefixBytes);
+	printf("minConsecutiveRun: %d\n", minConsecutiveRun);
 	printf("maxConsecutiveRun: %d\n", maxConsecutiveRun);
 	printf("minValueSize: %d\n", minValueSize);
 	printf("maxValueSize: %d\n", maxValueSize);
@@ -6165,7 +6168,7 @@ TEST_CASE("!/redwood/performance/set") {
 				KeyValue kv;
 				kv.key = randomString(kv.arena(), deterministicRandom()->randomInt(minKeyPrefixBytes + sizeof(uint32_t), maxKeyPrefixBytes + sizeof(uint32_t) + 1), firstKeyChar, lastKeyChar);
 				int32_t index = deterministicRandom()->randomInt(0, nodeCount);
-				int runLength = deterministicRandom()->randomInt(1, maxConsecutiveRun + 1);
+				int runLength = deterministicRandom()->randomInt(minConsecutiveRun, maxConsecutiveRun + 1);
 
 				while(runLength > 0 && changes > 0) {
 					*(uint32_t *)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
@@ -6263,3 +6266,254 @@ TEST_CASE("!/redwood/performance/set") {
 
 	return Void();
 }
+
+struct PrefixSegment {
+	int length;
+	int cardinality;
+
+	std::string toString() const {
+		return format("{%d bytes, %d choices}", length, cardinality);
+	}
+};
+
+// Utility class for generating kv pairs under a prefix pattern
+// It currently uses std::string in an abstraction breaking way.
+struct KVSource {
+	KVSource() {}
+
+	typedef VectorRef<uint8_t> PrefixRef;
+	typedef Standalone<PrefixRef> Prefix;
+
+	std::vector<PrefixSegment> desc;
+	std::vector<std::vector<std::string>> segments;
+	std::vector<Prefix> prefixes;
+	std::vector<Key> prefixesSorted;
+	std::string valueData;
+	int prefixLen;
+	int lastIndex;
+
+	KVSource(const std::vector<PrefixSegment> &desc, int numPrefixes = 0) : desc(desc) {
+		if(numPrefixes == 0) {
+			numPrefixes = 1;
+			for(auto &p : desc) {
+				numPrefixes *= p.cardinality;
+			}
+		}
+
+		prefixLen = 0;
+		for(auto &s : desc) {
+			prefixLen += s.length;
+			std::vector<std::string> parts;
+			while(parts.size() < s.cardinality) {
+				parts.push_back(deterministicRandom()->randomAlphaNumeric(s.length));
+			}
+			std::sort(parts.begin(), parts.end());
+			segments.push_back(std::move(parts));
+		}
+
+		while(prefixes.size() < numPrefixes) {
+			std::string p;
+			for(auto &s : segments) {
+				p.append(s[deterministicRandom()->randomInt(0, s.size())]);
+			}
+			prefixes.push_back(PrefixRef((uint8_t *)p.data(), p.size()));
+			prefixesSorted.push_back(KeyRef((uint8_t *)p.data(), p.size()));
+		}
+		std::sort(prefixesSorted.begin(), prefixesSorted.end());
+		valueData = deterministicRandom()->randomAlphaNumeric(100000);
+		lastIndex = 0;
+	}
+
+	// Expands the chosen prefix in the prefix list to hold suffix,
+	// fills suffix with random bytes, and returns a reference to the string
+	KeyRef getKeyRef(int suffixLen) {
+		return makeKey(randomPrefix(), suffixLen);
+	}
+
+	// Like getKeyRef but uses the same prefix as the last randomly chosen prefix
+	KeyRef getAnotherKeyRef(int suffixLen) {
+		return makeKey(prefixes[lastIndex], suffixLen);
+	}
+
+	// Get a KeyRangeRef covering the given number of adjacent prefixes
+	KeyRangeRef getRangeRef(int prefixesCovered) {
+		prefixesCovered = std::min<int>(prefixesCovered, prefixes.size());
+		int i = deterministicRandom()->randomInt(0, prefixesSorted.size() - prefixesCovered);
+		KeyRef begin = prefixesSorted[i];
+		KeyRef end = prefixesSorted[i + prefixesCovered];
+		return KeyRangeRef(begin, end);
+	}
+
+	KeyRef getValue(int len) {
+		return KeyRef(valueData).substr(0, len);
+	}
+
+	// Move lastIndex to the next position, wrapping around to 0
+	void nextPrefix() {
+		++lastIndex;
+		if(lastIndex == prefixes.size()) {
+			lastIndex = 0;
+		}
+	}
+
+	Prefix & randomPrefix() {
+		lastIndex = deterministicRandom()->randomInt(0, prefixes.size());
+		return prefixes[lastIndex];
+	}
+
+	static KeyRef makeKey(Prefix &p, int suffixLen) {
+		p.reserve(p.arena(), p.size() + suffixLen);
+		uint8_t *wptr = p.end();
+		for(int i = 0; i < suffixLen; ++i) {
+			*wptr++ = (uint8_t)deterministicRandom()->randomAlphaNumeric();
+		}
+		return KeyRef(p.begin(), p.size() + suffixLen);
+	}
+
+	int numPrefixes() const {
+		return prefixes.size();
+	};
+
+	std::string toString() const {
+		return format("{prefixLen=%d prefixes=%d format=%s}", prefixLen, numPrefixes(), ::toString(desc).c_str());
+	}
+};
+
+std::string toString(const StorageBytes &sb) {
+	return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used}", sb.total / 1e6, sb.free / 1e6, sb.available / 1e6, sb.used / 1e6);
+}
+
+ACTOR Future<StorageBytes> getStableStorageBytes(IKeyValueStore *kvs) {
+	state StorageBytes sb = kvs->getStorageBytes();
+
+	// Wait for StorageBytes used metric to stabilize
+	loop {
+		wait(kvs->commit());
+		StorageBytes sb2 = kvs->getStorageBytes();
+		bool stable = sb2.used == sb.used;
+		sb = sb2;
+		if(stable) {
+			break;
+		}
+	}
+
+	return sb;
+}
+
+ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, int valueSize, KVSource source, int recordCountTarget) {
+	state int commitTarget = 5e6;
+
+	state int recordSize = source.prefixLen + suffixSize + valueSize;
+	state int64_t kvBytesTarget = (int64_t)recordCountTarget * recordSize;
+	state int recordsPerPrefix = recordCountTarget / source.numPrefixes();
+
+	printf("\nstoreType: %d\n", kvs->getType());
+	printf("commitTarget: %d\n", commitTarget);
+	printf("prefixSource: %s\n", source.toString().c_str());
+	printf("suffixSize: %d\n", suffixSize);
+	printf("valueSize: %d\n", valueSize);
+	printf("recordSize: %d\n", recordSize);
+	printf("recordsPerPrefix: %d\n", recordsPerPrefix);
+	printf("recordCountTarget: %d\n", recordCountTarget);
+	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
+
+	state int64_t kvBytes = 0;
+	state int64_t kvBytesTotal = 0;
+	state int records = 0;
+	state Future<Void> commit = Void();
+	state std::string value = deterministicRandom()->randomAlphaNumeric(1e6);
+
+	wait(kvs->init());
+
+	state double intervalStart = timer();
+	state double start = intervalStart;
+
+	state std::function<void()> stats = [&]() {
+		double elapsed = timer() - start;
+		printf("Cumulative stats: %.2f seconds  %.2f MB keyValue bytes  %d records  %.2f MB/s  %.2f rec/s\r", elapsed, kvBytesTotal / 1e6, records, kvBytesTotal / elapsed / 1e6, records / elapsed);
+		fflush(stdout);
+	};
+
+	while(kvBytesTotal < kvBytesTarget) {
+		wait(yield());
+
+		state int i;
+		for(i = 0; i < recordsPerPrefix; ++i) {
+			KeyValueRef kv(source.getAnotherKeyRef(4), source.getValue(valueSize));
+			kvs->set(kv);
+			kvBytes += kv.expectedSize();
+			++records;
+
+			if(kvBytes >= commitTarget) {
+				wait(commit);
+				stats();
+				commit = kvs->commit();
+				kvBytesTotal += kvBytes;
+				if(kvBytesTotal >= kvBytesTarget) {
+					break;
+				}
+				kvBytes = 0;
+			}
+		}
+
+		// Use every prefix, one at a time, random order
+		source.nextPrefix();
+	}
+
+	wait(commit);
+	stats();
+	printf("\n");
+
+	intervalStart = timer();
+	StorageBytes sb = wait(getStableStorageBytes(kvs));
+	printf("storageBytes: %s (stable after %.2f seconds)\n", toString(sb).c_str(), timer() - intervalStart);
+
+	printf("Clearing all keys\n");
+	intervalStart = timer();
+	kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+	state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
+	printf("Cleared all keys in %.2f seconds, final storageByte: %s\n", timer() - intervalStart, toString(sbClear).c_str());
+
+	return Void();
+}
+
+Future<Void> closeKVS(IKeyValueStore *kvs) {
+	Future<Void> closed = kvs->onClosed();
+	kvs->close();
+	return closed;
+}
+
+ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget, KVSource source) {
+	VersionedBTree::counts.clear();
+
+	deleteFile("test.sqlite");
+	deleteFile("test.sqlite-wal");
+	wait(delay(5));
+	state IKeyValueStore *sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
+	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget));
+	wait(closeKVS(sqlite));
+	printf("\n");
+
+	deleteFile("test.redwood");
+	wait(delay(5));
+	state IKeyValueStore *redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget));
+	wait(closeKVS(redwood));
+	printf("\n");
+
+	return Void();
+}
+
+TEST_CASE("!/redwood/performance/prefixSizeComparison") {
+	state int suffixSize = 4;
+	state int valueSize = 16;
+	state int recordCountTarget = 40e6;
+
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{3, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{16, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{32, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{4, 5}, {12, 1000}, {8, 5}, {8, 4}})));
+
+	return Void();
+}
+
