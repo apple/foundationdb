@@ -158,16 +158,49 @@ bool isBackupMessage(const VersionedMessage& msg) {
 	return true;
 }
 
+// Return a block of contiguous padding bytes, growing if needed.
+static Value makePadding(int size) {
+	static Value pad;
+	if (pad.size() < size) {
+		pad = makeString(size);
+		memset(mutateString(pad), '\xff', pad.size());
+	}
+
+	return pad.substr(0, size);
+}
+
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file format is a sequence of (Version, sub#, msgSize, message),
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
-	const int blockSize = 1 << 20;
+	state int blockSize = 1 << 20; // TODO: make this a knob.
 	state Reference<IBackupFile> logFile =
 	    wait(self->container->writeTaggedLogFile(self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
+	TraceEvent("OpenMutationFile", self->myId)
+	    .detail("StartVersion", self->messages[0].getVersion())
+	    .detail("EndVersion", popVersion)
+	    .detail("BlockSize", blockSize)
+	    .detail("TagId", self->tag.id)
+	    .detail("File", logFile->getFileName());
 	state int idx = 0;
+	state int64_t blockEnd = 0;
 	for (; idx < numMsg; idx++) {
-		// TODO: Endianness for version.version, version.sub, and msgSize
 		if (!isBackupMessage(self->messages[idx])) continue;
+
+		const int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + self->messages[idx].message.size();
+		// Start a new block if needed
+		if (logFile->size() + bytes > blockEnd) {
+			// Write padding if needed
+			const int bytesLeft = blockEnd - logFile->size();
+			if (bytesLeft > 0) {
+				state Value paddingFFs = makePadding(bytesLeft);
+				wait(logFile->append(paddingFFs.begin(), bytesLeft));
+			}
+
+			blockEnd += blockSize;
+			// TODO: add block header
+		}
+
+		// TODO: Endianness for version.version, version.sub, and msgSize
 		wait(logFile->append((void*)&self->messages[idx].version.version, sizeof(Version)));
 		wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(uint32_t)));
 		state int msgSize = self->messages[idx].message.size();
@@ -177,6 +210,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 
 	self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 	wait(logFile->finish());
+	TraceEvent("CloseMutationFile", self->myId)
+	    .detail("FileSize", logFile->size())
+	    .detail("TagId", self->tag.id)
+	    .detail("File", logFile->getFileName());
+
 	return Void();
 }
 
