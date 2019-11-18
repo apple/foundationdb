@@ -2844,55 +2844,70 @@ public:
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<int> incrementalSubtreeClear(VersionedBTree *self, bool *pStop = nullptr, unsigned int minPages = 0, int maxPages = std::numeric_limits<int>::max()) {
+	ACTOR static Future<int> incrementalSubtreeClear(VersionedBTree *self, bool *pStop = nullptr, int batchSize = 10, unsigned int minPages = 0, int maxPages = std::numeric_limits<int>::max()) {
 		// TODO: Is it contractually okay to always to read at the latest version?
 		state Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLatestVersion());
 		state int freedPages = 0;
+
 		loop {
-			// take a page from front of queue
-			state Optional<LazyDeleteQueueEntry> q = wait(self->m_lazyDeleteQueue.pop());
-			debug_printf("LazyDelete: popped %s\n", toString(q).c_str());
-			if(!q.present()) {
+			state std::vector<std::pair<LazyDeleteQueueEntry, Future<Reference<const IPage>>>> entries;
+
+			// Take up to batchSize pages from front of queue
+			while(entries.size() < batchSize) {
+				Optional<LazyDeleteQueueEntry> q = wait(self->m_lazyDeleteQueue.pop());
+				debug_printf("LazyDelete: popped %s\n", toString(q).c_str());
+				if(!q.present()) {
+					break;
+				}
+				// Start reading the page, without caching
+				entries.push_back(std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true)));
+			}
+
+			if(entries.empty()) {
 				break;
 			}
 
-			// Read the page without caching
-			Reference<const IPage> p = wait(self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true));
-			const BTreePage &btPage = *(BTreePage *)p->begin();
+			state int i;
+			for(i = 0; i < entries.size(); ++i) {
+				Reference<const IPage> p = wait(entries[i].second);
+				const LazyDeleteQueueEntry &entry = entries[i].first;
+				const BTreePage &btPage = *(BTreePage *)p->begin();
+				debug_printf("LazyDelete: processing %s\n", toString(entry).c_str());
 
-			// Level 1 (leaf) nodes should never be in the lazy delete queue
-			ASSERT(btPage.height > 1);
-			
-			// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
-			// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-			BTreePage::ValueTree::Reader reader(&btPage.valueTree(), &dbBegin, &dbEnd);
-			auto c = reader.getCursor();
-			ASSERT(c.moveFirst());
-			Version v = q.get().version;
-			while(1) {
-				if(c.get().value.present()) {
-					BTreePageID btChildPageID = c.get().getChildPage();
-					// If this page is height 2, then the children are leaves so free
-					if(btPage.height == 2) {
-						debug_printf("LazyDelete: freeing child %s\n", toString(btChildPageID).c_str());
-						self->freeBtreePage(btChildPageID, v);
-						freedPages += btChildPageID.size();
+				// Level 1 (leaf) nodes should never be in the lazy delete queue
+				ASSERT(btPage.height > 1);
+				
+				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
+				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
+				BTreePage::ValueTree::Reader reader(&btPage.valueTree(), &dbBegin, &dbEnd);
+				auto c = reader.getCursor();
+				ASSERT(c.moveFirst());
+				Version v = entry.version;
+				while(1) {
+					if(c.get().value.present()) {
+						BTreePageID btChildPageID = c.get().getChildPage();
+						// If this page is height 2, then the children are leaves so free
+						if(btPage.height == 2) {
+							debug_printf("LazyDelete: freeing child %s\n", toString(btChildPageID).c_str());
+							self->freeBtreePage(btChildPageID, v);
+							freedPages += btChildPageID.size();
+						}
+						else {
+							// Otherwise, queue them for lazy delete.
+							debug_printf("LazyDelete: queuing child %s\n", toString(btChildPageID).c_str());
+							self->m_lazyDeleteQueue.pushFront(LazyDeleteQueueEntry{v, btChildPageID});
+						}
 					}
-					else {
-						// Otherwise, queue them for lazy delete.
-						debug_printf("LazyDelete: queuing child %s\n", toString(btChildPageID).c_str());
-						self->m_lazyDeleteQueue.pushFront(LazyDeleteQueueEntry{v, btChildPageID});
+					if(!c.moveNext()) {
+						break;
 					}
 				}
-				if(!c.moveNext()) {
-					break;
-				}
+
+				// Free the page, now that its children have either been freed or queued
+				debug_printf("LazyDelete: freeing queue entry %s\n", toString(entry.pageID).c_str());
+				self->freeBtreePage(entry.pageID, v);
+				freedPages += entry.pageID.size();
 			}
-
-			// Free the page, now that its children have either been freed or queued
-			debug_printf("LazyDelete: freeing queue entry %s\n", toString(q.get().pageID).c_str());
-			self->freeBtreePage(q.get().pageID, v);
-			freedPages += q.get().pageID.size();
 
 			// If stop is set and we've freed the minimum number of pages required, or the maximum is exceeded, return.
 			if((freedPages >= minPages && pStop != nullptr && *pStop) || freedPages >= maxPages) {
