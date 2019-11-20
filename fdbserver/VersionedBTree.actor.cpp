@@ -6316,7 +6316,7 @@ struct KVSource {
 	std::vector<PrefixSegment> desc;
 	std::vector<std::vector<std::string>> segments;
 	std::vector<Prefix> prefixes;
-	std::vector<Key> prefixesSorted;
+	std::vector<Prefix *> prefixesSorted;
 	std::string valueData;
 	int prefixLen;
 	int lastIndex;
@@ -6336,7 +6336,6 @@ struct KVSource {
 			while(parts.size() < s.cardinality) {
 				parts.push_back(deterministicRandom()->randomAlphaNumeric(s.length));
 			}
-			std::sort(parts.begin(), parts.end());
 			segments.push_back(std::move(parts));
 		}
 
@@ -6346,9 +6345,15 @@ struct KVSource {
 				p.append(s[deterministicRandom()->randomInt(0, s.size())]);
 			}
 			prefixes.push_back(PrefixRef((uint8_t *)p.data(), p.size()));
-			prefixesSorted.push_back(KeyRef((uint8_t *)p.data(), p.size()));
 		}
-		std::sort(prefixesSorted.begin(), prefixesSorted.end());
+
+		for(auto &p : prefixes) {
+			prefixesSorted.push_back(&p);
+		}
+		std::sort(prefixesSorted.begin(), prefixesSorted.end(), [](const Prefix *a, const Prefix *b) {
+			return KeyRef((uint8_t *)a->begin(), a->size()) < KeyRef((uint8_t *)b->begin(), b->size());
+		});
+
 		valueData = deterministicRandom()->randomAlphaNumeric(100000);
 		lastIndex = 0;
 	}
@@ -6360,17 +6365,18 @@ struct KVSource {
 	}
 
 	// Like getKeyRef but uses the same prefix as the last randomly chosen prefix
-	KeyRef getAnotherKeyRef(int suffixLen) {
-		return makeKey(prefixes[lastIndex], suffixLen);
+	KeyRef getAnotherKeyRef(int suffixLen, bool sorted = false) {
+		Prefix &p = sorted ? *prefixesSorted[lastIndex] : prefixes[lastIndex];
+		return makeKey(p, suffixLen);
 	}
 
-	// Get a KeyRangeRef covering the given number of adjacent prefixes
-	KeyRangeRef getRangeRef(int prefixesCovered) {
+	// Like getKeyRef but gets a KeyRangeRef for two keys covering the given number of sorted adjacent prefixes
+	KeyRangeRef getRangeRef(int prefixesCovered, int suffixLen) {
 		prefixesCovered = std::min<int>(prefixesCovered, prefixes.size());
 		int i = deterministicRandom()->randomInt(0, prefixesSorted.size() - prefixesCovered);
-		KeyRef begin = prefixesSorted[i];
-		KeyRef end = prefixesSorted[i + prefixesCovered];
-		return KeyRangeRef(begin, end);
+		Prefix *begin = prefixesSorted[i];
+		Prefix *end = prefixesSorted[i + prefixesCovered];
+		return KeyRangeRef(makeKey(*begin, suffixLen), makeKey(*end, suffixLen));
 	}
 
 	KeyRef getValue(int len) {
@@ -6429,7 +6435,7 @@ ACTOR Future<StorageBytes> getStableStorageBytes(IKeyValueStore *kvs) {
 	return sb;
 }
 
-ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, int valueSize, KVSource source, int recordCountTarget) {
+ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, int valueSize, KVSource source, int recordCountTarget, bool usePrefixesInOrder) {
 	state int commitTarget = 5e6;
 
 	state int recordSize = source.prefixLen + suffixSize + valueSize;
@@ -6439,6 +6445,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, in
 	printf("\nstoreType: %d\n", kvs->getType());
 	printf("commitTarget: %d\n", commitTarget);
 	printf("prefixSource: %s\n", source.toString().c_str());
+	printf("usePrefixesInOrder: %d\n", usePrefixesInOrder);
 	printf("suffixSize: %d\n", suffixSize);
 	printf("valueSize: %d\n", valueSize);
 	printf("recordSize: %d\n", recordSize);
@@ -6468,7 +6475,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, in
 
 		state int i;
 		for(i = 0; i < recordsPerPrefix; ++i) {
-			KeyValueRef kv(source.getAnotherKeyRef(4), source.getValue(valueSize));
+			KeyValueRef kv(source.getAnotherKeyRef(4, usePrefixesInOrder), source.getValue(valueSize));
 			kvs->set(kv);
 			kvBytes += kv.expectedSize();
 			++records;
@@ -6485,7 +6492,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, in
 			}
 		}
 
-		// Use every prefix, one at a time, random order
+		// Use every prefix, one at a time
 		source.nextPrefix();
 	}
 
@@ -6512,36 +6519,37 @@ Future<Void> closeKVS(IKeyValueStore *kvs) {
 	return closed;
 }
 
-ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget, KVSource source) {
+ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget, bool usePrefixesInOrder, KVSource source) {
 	VersionedBTree::counts.clear();
+
+	deleteFile("test.redwood");
+	wait(delay(5));
+	state IKeyValueStore *redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+	wait(closeKVS(redwood));
+	printf("\n");
 
 	deleteFile("test.sqlite");
 	deleteFile("test.sqlite-wal");
 	wait(delay(5));
 	state IKeyValueStore *sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
-	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget));
+	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
 	wait(closeKVS(sqlite));
-	printf("\n");
-
-	deleteFile("test.redwood");
-	wait(delay(5));
-	state IKeyValueStore *redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
-	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget));
-	wait(closeKVS(redwood));
 	printf("\n");
 
 	return Void();
 }
 
 TEST_CASE("!/redwood/performance/prefixSizeComparison") {
-	state int suffixSize = 4;
-	state int valueSize = 16;
-	state int recordCountTarget = 40e6;
+	state int suffixSize = 12;
+	state int valueSize = 100;
+	state int recordCountTarget = 100e6;
+	state int usePrefixesInOrder = false;
 
-	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{3, 100000}})));
-	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{16, 100000}})));
-	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{32, 100000}})));
-	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, KVSource({{4, 5}, {12, 1000}, {8, 5}, {8, 4}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{10, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{16, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{32, 100000}})));
+	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{4, 5}, {12, 1000}, {8, 5}, {8, 4}})));
 
 	return Void();
 }
