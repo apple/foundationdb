@@ -108,11 +108,11 @@ struct ConvertParams {
 
 struct VersionedData {
 	LogMessageVersion version;
-	MutationRef mutation;
+	StringRef message; // Serialized mutation.
 	Arena arena; // The arena that contains mutation.
 
 	VersionedData() : version(invalidVersion, -1) {}
-	VersionedData(LogMessageVersion v, MutationRef m, Arena a) : version(v), mutation(m), arena(a) {}
+	VersionedData(LogMessageVersion v, StringRef m, Arena a) : version(v), message(m), arena(a) {}
 };
 
 struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProgress> {
@@ -127,11 +127,16 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 			if (mutations.empty()) return false;
 			return mutations[0].version < rhs.mutations[0].version;
 		}
+		bool operator<=(const FileProgress& rhs) const {
+			if (rhs.mutations.empty()) return true;
+			if (mutations.empty()) return false;
+			return mutations[0].version <= rhs.mutations[0].version;
+		}
 		bool empty() { return eof && mutations.empty(); }
 
 		// Decodes the block into mutations and save them if >= minVersion.
 		// Returns true if new mutations has been saved.
-		bool decodeBlock(Standalone<StringRef> buf, int len, Version minVersion) {
+		bool decodeBlock(const Standalone<StringRef>& buf, int len, Version minVersion) {
 			StringRef block(buf.begin(), len);
 			StringRefReader reader(block, restore_corrupted_data());
 
@@ -152,9 +157,11 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					rd >> m;
 					count++;
 					if (msgVersion >= minVersion) {
-						mutations.emplace_back(LogMessageVersion(msgVersion, sub), m, buf.arena());
+						mutations.emplace_back(LogMessageVersion(msgVersion, sub), StringRef(message, msgSize),
+						                       buf.arena());
 						inserted++;
-						// std::cout << msgVersion << ":" << sub << " m = " << m.toString() << "\n";
+						// std::cout << msgVersion << "." << sub << " m = " << m.toString() << " size=" << msgSize << "
+						// " << fd->getFilename() << "\n";
 					}
 				}
 				offset += len;
@@ -231,7 +238,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		} else {
 			// Keep fileProgress sorted
 			for (int i = 1; i < self->fileProgress.size(); i++) {
-				if (*self->fileProgress[i - 1] <= *self->fileProgress[i]) break;
+				if (*self->fileProgress[i - 1] <= *self->fileProgress[i]) {
+					break;
+				}
 				std::swap(self->fileProgress[i - 1], self->fileProgress[i]);
 			}
 		}
@@ -392,6 +401,8 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 	state BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
+	std::cout << "Using Protocol Version: 0x" << std::hex << currentProtocolVersion.version() << std::dec << "\n";
+
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
 
@@ -402,7 +413,10 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 	while (progress->hasMutations()) {
 		VersionedData data = wait(progress->getNextMutation());
 		// emit a mutation and write to a batch;
-		std::cout << data.version.toString() << " m = " << data.mutation.toString() << "\n";
+		BinaryReader rd(data.message, AssumeVersion(currentProtocolVersion));
+		MutationRef m;
+		rd >> m;
+		std::cout << data.version.toString() << " m = " << m.toString() << "\n";
 	}
 
 	return Void();
