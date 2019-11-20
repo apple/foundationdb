@@ -943,6 +943,8 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	return Void();
 }
 
+ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData );
+
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all CPU resources.
 // For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce latencies for more important
 // work (e.g. commits).
