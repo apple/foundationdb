@@ -684,6 +684,9 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
+	if(self->lastEpochEnd > 0) {
+		self->allTags.push_back(cacheTag);
+	}
 
 	if(self->forceRecovery) {
 		self->safeLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
@@ -1345,6 +1348,15 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
+	
+	//FIXME: remove this code, caching the entire normal keyspace as a test of functionality
+	//TODO: caching disabled for this merge
+	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
+	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.end), storageCacheValue({}));
+	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
+	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
+	//tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0), BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
+	//tr.set(recoveryCommitRequest.arena, cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for(auto& dc : self->primaryDcId) {
@@ -1356,7 +1368,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
-	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
+	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, nullptr, nullptr);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion;  // lastEpochEnd would make more sense, but isn't in the initial window of the resolver(s)
