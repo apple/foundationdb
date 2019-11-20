@@ -60,7 +60,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
-	int machinesToKill, machinesToLeave;
+	int machinesToKill, machinesToLeave, workersToKill, workersToLeave;
 	double testDuration, suspendDuration, liveDuration;
 	bool reboot;
 	bool killDc;
@@ -84,6 +84,8 @@ struct MachineAttritionWorkload : TestWorkload {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		machinesToKill = getOption( options, LiteralStringRef("machinesToKill"), 2 );
 		machinesToLeave = getOption( options, LiteralStringRef("machinesToLeave"), 1 );
+		workersToKill = getOption( options, LiteralStringRef("workersToKill"), 2 );
+		workersToLeave = getOption( options, LiteralStringRef("workersToLeave"), 1 );
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
 		liveDuration = getOption( options, LiteralStringRef("liveDuration"), 5.0);
@@ -163,7 +165,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			// kill all matching workers
 			if (idAccess(worker).present() &&
 			    std::count(targets.begin(), targets.end(), idAccess(worker).get().toString())) {
-				TraceEvent("SendingRebootRequest").detail("TargetMachine", worker.interf.locality.toString());
+				TraceEvent("SendingRebootRequest").detail("TargetWorker", worker.interf.locality.toString());
 				worker.interf.clientInterface.reboot.send(rbReq);
 			}
 		}
@@ -217,11 +219,11 @@ struct MachineAttritionWorkload : TestWorkload {
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
 		} else {
-			while (killedWorkers < self->machinesToKill && workers.size() > self->machinesToLeave) {
+			while (killedWorkers < self->workersToKill && workers.size() > self->workersToLeave) {
 				TraceEvent("WorkerKillBegin")
 				    .detail("KilledWorkers", killedWorkers)
-				    .detail("WorkersToKill", self->machinesToKill)
-				    .detail("WorkersToLeave", self->machinesToLeave)
+				    .detail("WorkersToKill", self->workersToKill)
+				    .detail("WorkersToLeave", self->workersToLeave)
 				    .detail("Workers", workers.size());
 				if (self->waitForVersion) {
 					state Transaction tr(cx);
@@ -243,8 +245,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				    .detail("TargetWorker", targetWorker.interf.locality.toString())
 				    .detail("ZoneId", targetWorker.interf.locality.zoneId())
 				    .detail("KilledWorkers", killedWorkers)
-				    .detail("WorkersToKill", self->machinesToKill)
-				    .detail("WorkersToLeave", self->machinesToLeave)
+				    .detail("WorkersToKill", self->workersToKill)
+				    .detail("WorkersToLeave", self->workersToLeave)
 				    .detail("Workers", workers.size());
 				targetWorker.interf.clientInterface.reboot.send(rbReq);
 				killedWorkers++;
