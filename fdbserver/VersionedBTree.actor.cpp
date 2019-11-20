@@ -742,6 +742,9 @@ class ObjectCache : NonCopyable {
 		int hits;
 	};
 
+	typedef std::unordered_map<IndexType, Entry> CacheT;
+	typedef boost::intrusive::list<Entry> EvictionOrderT;
+
 public:
 	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), cacheHits(0), cacheMisses(0), noHitEvictions(0) {
 	}
@@ -815,8 +818,8 @@ public:
 	// Clears the cache, saving the entries, and then waits for eachWaits for each item to be evictable and evicts it.
 	// The cache should not be Evicts all evictable entries
 	ACTOR static Future<Void> clear_impl(ObjectCache *self) {
-		state std::unordered_map<IndexType, Entry> cache;
-		state boost::intrusive::list<Entry> evictionOrder;
+		state ObjectCache::CacheT cache;
+		state EvictionOrderT evictionOrder;
 
 		// Swap cache contents to local state vars
 		// After this, no more entries will be added to or read from these 
@@ -825,8 +828,8 @@ public:
 		cache.swap(self->cache);
 		evictionOrder.swap(self->evictionOrder);
 
-		state typename boost::intrusive::list<Entry>::iterator i = evictionOrder.begin();
-		state typename boost::intrusive::list<Entry>::iterator iEnd = evictionOrder.begin();
+		state typename EvictionOrderT::iterator i = evictionOrder.begin();
+		state typename EvictionOrderT::iterator iEnd = evictionOrder.begin();
 
 		while(i != iEnd) {
 			if(!i->item.evictable()) {
@@ -856,9 +859,8 @@ private:
 	int64_t cacheMisses;
 	int64_t noHitEvictions;
 
-	// TODO:  Use boost intrusive unordered set instead, with a comparator that only considers entry.index
-	std::unordered_map<IndexType, Entry> cache;
-	boost::intrusive::list<Entry> evictionOrder;
+	CacheT cache;
+	EvictionOrderT evictionOrder;
 };
 
 ACTOR template<class T> Future<T> forwardError(Future<T> f, Promise<Void> target) {
