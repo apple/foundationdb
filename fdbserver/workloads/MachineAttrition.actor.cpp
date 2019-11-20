@@ -61,7 +61,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
 	int machinesToKill, machinesToLeave;
-	double testDuration, suspendDuration;
+	double testDuration, suspendDuration, liveDuration;
 	bool reboot;
 	bool killDc;
 	bool killMachine;
@@ -86,6 +86,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		machinesToLeave = getOption( options, LiteralStringRef("machinesToLeave"), 1 );
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
+		liveDuration = getOption( options, LiteralStringRef("liveDuration"), 5.0);
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
 		killDc = getOption(options, LiteralStringRef("killDc"),
 		                   g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
@@ -170,7 +171,7 @@ struct MachineAttritionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
 		ASSERT(!g_network->isSimulated());
-		state int killedMachines = 0;
+		state int killedWorkers = 0;
 		state std::vector<WorkerDetails> allWorkers =
 		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
 		// Can reuse reboot request to send to each interface since no reply promise needed
@@ -188,6 +189,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			}
 		}
 		deterministicRandom()->randomShuffle(workers);
+		wait(delay(self->liveDuration));
 		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
 		if (self->killDc) {
 			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
@@ -215,12 +217,12 @@ struct MachineAttritionWorkload : TestWorkload {
 			                   // idAccess lambda
 			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
 		} else {
-			while (killedMachines < self->machinesToKill && workers.size() > self->machinesToLeave) {
+			while (killedWorkers < self->machinesToKill && workers.size() > self->machinesToLeave) {
 				TraceEvent("WorkerKillBegin")
-				    .detail("KilledMachines", killedMachines)
-				    .detail("MachinesToKill", self->machinesToKill)
-				    .detail("MachinesToLeave", self->machinesToLeave)
-				    .detail("Machines", workers.size());
+				    .detail("KilledWorkers", killedWorkers)
+				    .detail("WorkersToKill", self->machinesToKill)
+				    .detail("WorkersToLeave", self->machinesToLeave)
+				    .detail("Workers", workers.size());
 				if (self->waitForVersion) {
 					state Transaction tr(cx);
 					loop {
@@ -234,18 +236,18 @@ struct MachineAttritionWorkload : TestWorkload {
 						}
 					}
 				}
-				// Pick a machine to kill
-				state WorkerDetails targetMachine;
-				targetMachine = workers.back();
+				// Pick a worker to kill
+				state WorkerDetails targetWorker;
+				targetWorker = workers.back();
 				TraceEvent("Assassination")
-				    .detail("TargetMachine", targetMachine.interf.locality.toString())
-				    .detail("ZoneId", targetMachine.interf.locality.zoneId())
-				    .detail("KilledMachines", killedMachines)
-				    .detail("MachinesToKill", self->machinesToKill)
-				    .detail("MachinesToLeave", self->machinesToLeave)
-				    .detail("Machines", workers.size());
-				targetMachine.interf.clientInterface.reboot.send(rbReq);
-				killedMachines++;
+				    .detail("TargetWorker", targetWorker.interf.locality.toString())
+				    .detail("ZoneId", targetWorker.interf.locality.zoneId())
+				    .detail("KilledWorkers", killedWorkers)
+				    .detail("WorkersToKill", self->machinesToKill)
+				    .detail("WorkersToLeave", self->machinesToLeave)
+				    .detail("Workers", workers.size());
+				targetWorker.interf.clientInterface.reboot.send(rbReq);
+				killedWorkers++;
 				workers.pop_back();
 			}
 		}
