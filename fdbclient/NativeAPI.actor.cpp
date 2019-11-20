@@ -2151,6 +2151,7 @@ ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self
 	cx->addWatch();
 	try {
 		self->watches.push_back(watch);
+		self = nullptr; // This actor may outlive *self
 
 		choose {
 			// RYOW write to value that is being watched (if applicable)

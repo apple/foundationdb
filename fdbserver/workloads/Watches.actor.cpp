@@ -129,38 +129,49 @@ struct WatchesWorkload : TestWorkload {
 		state Optional<Optional<Value>> lastValue;
 
 		loop {
-			state Transaction tr( cx );
 			loop {
+				state std::unique_ptr<Transaction> tr = std::make_unique<Transaction>(cx);
 				try {
-					state Future<Optional<Value>> setValueFuture = tr.get( setKey );
-					state Optional<Value> watchValue = wait( tr.get( watchKey ) );
+					state Future<Optional<Value>> setValueFuture = tr->get(setKey);
+					state Optional<Value> watchValue = wait(tr->get(watchKey));
 					Optional<Value> setValue = wait( setValueFuture );
 					
 					if( lastValue.present() && lastValue.get() == watchValue) {
-						TraceEvent(SevError, "WatcherTriggeredWithoutChanging").detail("WatchKey", printable( watchKey )).detail("SetKey", printable( setKey )).detail("WatchValue", printable( watchValue )).detail("SetValue", printable( setValue )).detail("ReadVersion", tr.getReadVersion().get());
+						TraceEvent(SevError, "WatcherTriggeredWithoutChanging")
+						    .detail("WatchKey", printable(watchKey))
+						    .detail("SetKey", printable(setKey))
+						    .detail("WatchValue", printable(watchValue))
+						    .detail("SetValue", printable(setValue))
+						    .detail("ReadVersion", tr->getReadVersion().get());
 					}
 
 					lastValue = Optional<Optional<Value>>();
 
 					if( watchValue != setValue ) {
 						if( watchValue.present() )
-							tr.set( setKey, watchValue.get() );
+							tr->set(setKey, watchValue.get());
 						else
-							tr.clear( setKey );
+							tr->clear(setKey);
 						//TraceEvent("WatcherSetStart").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) );
-						wait( tr.commit() );
-						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr.getCommittedVersion());
+						wait(tr->commit());
+						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr->getCommittedVersion());
 					} else {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
-						state Future<Void> watchFuture = tr.watch( Reference<Watch>( new Watch(watchKey, watchValue) ) );
-						wait( tr.commit() );
+						state Future<Void> watchFuture = tr->watch(Reference<Watch>(new Watch(watchKey, watchValue)));
+						wait(tr->commit());
+						if (BUGGIFY) {
+							// Make watch future outlive transaction
+							tr.reset();
+						}
 						wait( watchFuture );
 						if( watchValue.present() )
 							lastValue = watchValue;
 					}
 					break;
 				} catch( Error &e ) {
-					wait( tr.onError(e) );
+					if (tr != nullptr) {
+						wait(tr->onError(e));
+					}
 				}
 			}
 		}
