@@ -874,12 +874,14 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.emptyQueries;
 		}
 
-		StorageMetrics metrics;
-		// If the read yields no value, randomly sample the empty read.
-		metrics.bytesReadPerKSecond =
-		    v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
-		                : SERVER_KNOBS->EMPTY_READ_PENALTY;
-		data->metrics.notify(req.key, metrics);
+		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+			StorageMetrics metrics;
+			// If the read yields no value, randomly sample the empty read.
+			metrics.bytesReadPerKSecond =
+			    v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
+			                : SERVER_KNOBS->EMPTY_READ_PENALTY;
+			data->metrics.notify(req.key, metrics);
+		}
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1311,15 +1313,20 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 	if (index < rep.data.size()) {
 		*pOffset = 0;
 
-		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
-		data->metrics.notify(sel.getKey(), metrics);
+		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+			StorageMetrics metrics;
+			metrics.bytesReadPerKSecond =
+			    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
+			data->metrics.notify(sel.getKey(), metrics);
+		}
 
 		return rep.data[ index ].key;
 	} else {
-		StorageMetrics metrics;
-		metrics.bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
-		data->metrics.notify(sel.getKey(), metrics);
+		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+			StorageMetrics metrics;
+			metrics.bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
+			data->metrics.notify(sel.getKey(), metrics);
+		}
 
 		// FIXME: If range.begin=="" && !forward, return success?
 		*pOffset = index - rep.data.size() + 1;
@@ -1453,7 +1460,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			for (int i = 0; i < r.data.size(); i++) {
 				totalByteSize += r.data[i].expectedSize();
 			}
-			if (totalByteSize > 0) {
+			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_SWITCH) {
 				StorageMetrics m;
 				m.bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY);
 				data->metrics.notify(r.data[0].key, m);
