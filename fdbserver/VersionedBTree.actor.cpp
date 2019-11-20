@@ -743,10 +743,11 @@ class ObjectCache : NonCopyable {
 	};
 
 public:
-	ObjectCache(int sizeLimit = 0) : sizeLimit(sizeLimit), cacheHits(0), cacheMisses(0), noHitEvictions(0) {
+	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), cacheHits(0), cacheMisses(0), noHitEvictions(0) {
 	}
 
 	void setSizeLimit(int n) {
+		ASSERT(n > 0);
 		sizeLimit = n;
 	}
 
@@ -784,12 +785,20 @@ public:
 			// Insert the newly created Entry at the back of the eviction order
 			evictionOrder.push_back(entry);
 
-			// If the cache is too big, try to evict the first Entry in the eviction order
-			if(cache.size() > sizeLimit) {
+			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
+			while(cache.size() > sizeLimit) {
 				Entry &toEvict = evictionOrder.front();
 				debug_printf("Trying to evict %s to make room for %s\n", toString(toEvict.index).c_str(), toString(index).c_str());
-				// Don't evict the entry that was just added as then we can't return a reference to it.
-				if(toEvict.index != index && toEvict.item.evictable()) {
+
+				// It's critical that we do not evict the item we just added (or the reference we return would be invalid) but
+				// since sizeLimit must be > 0, entry was just added to the end of the evictionOrder, and this loop will end
+				// if we move anything to the end of the eviction order, we can be guaraunted that entry != toEvict, so we
+				// do not need to check.
+				if(!toEvict.item.evictable()) {
+					evictionOrder.erase(evictionOrder.iterator_to(toEvict));
+					evictionOrder.push_back(toEvict);
+					break;
+				} else {
 					if(toEvict.hits == 0) {
 						++noHitEvictions;
 					}
@@ -810,6 +819,9 @@ public:
 		state boost::intrusive::list<Entry> evictionOrder;
 
 		// Swap cache contents to local state vars
+		// After this, no more entries will be added to or read from these 
+		// structures so we know for sure that no page will become unevictable
+		// after it is either evictable or onEvictable() is ready.
 		cache.swap(self->cache);
 		evictionOrder.swap(self->evictionOrder);
 
