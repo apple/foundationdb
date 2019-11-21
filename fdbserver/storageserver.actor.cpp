@@ -874,7 +874,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.emptyQueries;
 		}
 
-		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			StorageMetrics metrics;
 			// If the read yields no value, randomly sample the empty read.
 			metrics.bytesReadPerKSecond =
@@ -1313,7 +1313,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 	if (index < rep.data.size()) {
 		*pOffset = 0;
 
-		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			StorageMetrics metrics;
 			metrics.bytesReadPerKSecond =
 			    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
@@ -1322,7 +1322,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 
 		return rep.data[ index ].key;
 	} else {
-		if (SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			StorageMetrics metrics;
 			metrics.bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
 			data->metrics.notify(sel.getKey(), metrics);
@@ -1455,15 +1455,16 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				data->metrics.notify(r.data[i].key, m);
 			}*/
 
-			// For performance concerns, the cost of a range read is billed to the start key of the range.
+			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
 			int64_t totalByteSize = 0;
 			for (int i = 0; i < r.data.size(); i++) {
 				totalByteSize += r.data[i].expectedSize();
 			}
-			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_SWITCH) {
+			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 				StorageMetrics m;
-				m.bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY);
+				m.bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
 				data->metrics.notify(r.data[0].key, m);
+				data->metrics.notify(r.data[r.data.size() - 1].key, m);
 			}
 
 			r.penalty = data->getPenalty();
