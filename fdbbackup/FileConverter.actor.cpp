@@ -166,9 +166,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					if (reader.eof() || *reader.rptr == 0xFF) break;
 
 					// Deserialize messages written in saveMutationsToFile().
-					msgVersion = reader.consume<Version>();
-					uint32_t sub = reader.consume<uint32_t>();
-					int msgSize = reader.consume<int>();
+					msgVersion = bigEndian64(reader.consume<Version>());
+					uint32_t sub = bigEndian32(reader.consume<uint32_t>());
+					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
 					BinaryReader rd(message, msgSize, AssumeVersion(currentProtocolVersion));

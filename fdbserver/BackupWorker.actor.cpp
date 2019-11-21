@@ -129,11 +129,24 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
+static std::string tagsToString(const VectorRef<Tag>& tags) {
+	std::string s;
+	bool first = true;
+	for (auto t = tags.begin(); t != tags.end(); t++) {
+		if (first) {
+			first = false;
+		} else {
+			s.append(", ");
+		}
+		s.append((*t).toString());
+	}
+	return s;
+}
+
 // Returns true if the message is a mutation that should be backuped, i.e.,
 // either key is not in system key space or is not a metadataVersionKey.
 bool isBackupMessage(const VersionedMessage& msg) {
-	// std::cout << msg.message.printable() << std::endl;
-	// std::cout << "Tags: " << describe(msg.tags) << ", Version: " << msg.version.toString() << std::endl;
+	// std::cout << "BK: " << msg.version.toString() << " " << msg.message.printable() << " " << tagsToString(msg.tags) << std::endl;
 
 	for (Tag tag : msg.tags) {
 		if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
@@ -151,6 +164,7 @@ bool isBackupMessage(const VersionedMessage& msg) {
 
 	// check for metadataVersionKey and special metadata mutations
 	if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey) {
+		// std::cout << "BKSkip: " << msg.version.toString() << " " << m.toString() << std::endl;
 		return false;
 	}
 
@@ -200,11 +214,18 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			// TODO: add block header
 		}
 
-		// TODO: Endianness for version.version, version.sub, and msgSize
-		wait(logFile->append((void*)&self->messages[idx].version.version, sizeof(Version)));
-		wait(logFile->append((void*)&self->messages[idx].version.sub, sizeof(uint32_t)));
+		// Convert to big Endianness for version.version, version.sub, and msgSize
+		// The decoder assumes 0xFF is the end, so little endian can easily be
+		// mistaken as the end. In contrast, big endian for version almost guarantee
+		// the first byte is not 0xFF (should always be 0x00).
 		state int msgSize = self->messages[idx].message.size();
-		wait(logFile->append((void*)&msgSize, sizeof(msgSize)));
+		BinaryWriter wr(Unversioned());
+		wr << bigEndian64(self->messages[idx].version.version)
+		   << bigEndian32(self->messages[idx].version.sub)
+		   << bigEndian32(msgSize);
+		Standalone<StringRef> buf = wr.toValue();
+		assert(buf.size() == 16);
+		wait(logFile->append((void*)buf.begin(), buf.size()));
 		wait(logFile->append(self->messages[idx].message.begin(), msgSize));
 	}
 
