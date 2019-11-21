@@ -803,6 +803,9 @@ public:
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
 		ASSERT( !toAddr.isTLS() && host.empty());
 		if (!addressMap.count( toAddr )) {
+			if(FLOW_KNOBS->ENABLE_CONNECT_ERRORS) {
+				throw connection_failed();
+			}
 			return waitForProcessAndConnect( toAddr, this );
 		}
 		auto peerp = getProcessByAddress(toAddr);
