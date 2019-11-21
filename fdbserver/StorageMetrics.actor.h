@@ -229,7 +229,9 @@ struct StorageServerMetrics {
 		if (!notifyMetrics.allZero()) {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
-				if (g_network->isSimulated()) TEST( true );
+				if (g_network->isSimulated()) {
+					TEST(true);
+				}
 				// ShardNotifyMetrics
 				v[i].send( notifyMetrics );
 			}
