@@ -428,7 +428,19 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-				Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
+
+				state Reference<IConnection> _conn;
+				try {
+					choose {
+						when( Reference<IConnection> t = wait( INetworkConnections::net()->connect(self->destination) ) ) { _conn = t; }
+						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {}
+					}
+				} catch( Error &e ) {
+					if(e.code() != error_code_connection_failed) {
+						throw;
+					}
+				}
+
 				if (_conn) {
 					if (FlowTransport::transport().isClient()) {
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
@@ -448,6 +460,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 					if (FlowTransport::transport().isClient()) {
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+						clientReconnectDelay = true;
 					}
 					throw connection_failed();
 				}
