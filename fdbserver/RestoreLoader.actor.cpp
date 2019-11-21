@@ -36,8 +36,8 @@ typedef std::map<Standalone<StringRef>, uint32_t> SerializedMutationPartMap;
 bool isRangeMutation(MutationRef m);
 void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvector_arena,
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
-void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, SerializedMutationListMap* mutationMap,
-                              bool isSampling = false);
+void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+                              SerializedMutationListMap* mutationMap, bool isSampling = false);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self,
@@ -50,10 +50,9 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(
     NotifiedVersion* pProcessedFileOffset, SerializedMutationListMap* mutationMap,
     SerializedMutationPartMap* mutationPartMap, Reference<IBackupContainer> bc, Version version, std::string fileName,
     int64_t readOffset, int64_t readLen, KeyRange restoreRange, Key addPrefix, Key removePrefix, Key mutationLogPrefix);
-ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-                                                             Reference<IBackupContainer> bc, Version version,
-                                                             std::string fileName, int64_t readOffset_input,
-                                                             int64_t readLen_input, KeyRange restoreRange);
+ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, Reference<IBackupContainer> bc, Version version,
+    std::string fileName, int64_t readOffset_input, int64_t readLen_input, KeyRange restoreRange);
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx) {
 	state Reference<RestoreLoaderData> self =
@@ -131,7 +130,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	ASSERT(param.offset % param.blockSize == 0); // Parse file must be at block bondary.
 	ASSERT(self->kvOpsPerLP.find(param) == self->kvOpsPerLP.end());
 	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
-	//state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
+	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
 	self->kvOpsPerLP.insert(std::make_pair(param, VersionedMutationsMap()));
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = self->kvOpsPerLP.find(param);
 
@@ -150,9 +149,8 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		readOffset = j;
 		readLen = std::min<int64_t>(param.blockSize, param.length - j);
 		if (param.isRangeFile) {
-			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, self->bc,
-			                                                               param.version, param.filename, readOffset,
-			                                                               readLen, param.restoreRange));
+			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
+			    kvOpsPerLPIter, self->bc, param.version, param.filename, readOffset, readLen, param.restoreRange));
 		} else {
 			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(
 			    &processedFileOffset, &mutationMap, &mutationPartMap, self->bc, param.version, param.filename,
@@ -438,7 +436,8 @@ bool isRangeMutation(MutationRef m) {
 // we may not get the entire mutation list for the version encoded_list_of_mutations:
 // [mutation1][mutation2]...[mutationk], where
 //	a mutation is encoded as [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][keyContent][valueContent]
-void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, SerializedMutationListMap* pmutationMap, bool isSampling) {
+void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+                              SerializedMutationListMap* pmutationMap, bool isSampling) {
 	VersionedMutationsMap& kvOps = kvOpsIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
@@ -481,10 +480,9 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 }
 
 // Parsing the data blocks in a range file
-ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-                                                             Reference<IBackupContainer> bc, Version version,
-                                                             std::string fileName, int64_t readOffset, int64_t readLen,
-                                                             KeyRange restoreRange) {
+ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, Reference<IBackupContainer> bc, Version version,
+    std::string fileName, int64_t readOffset, int64_t readLen, KeyRange restoreRange) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
