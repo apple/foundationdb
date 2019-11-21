@@ -152,9 +152,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		}
 		bool empty() { return eof && mutations.empty(); }
 
-		// Decodes the block into mutations and save them if >= minVersion.
+		// Decodes the block into mutations and save them if >= minVersion and < maxVersion.
 		// Returns true if new mutations has been saved.
-		bool decodeBlock(const Standalone<StringRef>& buf, int len, Version minVersion) {
+		bool decodeBlock(const Standalone<StringRef>& buf, int len, Version minVersion, Version maxVersion) {
 			StringRef block(buf.begin(), len);
 			StringRefReader reader(block, restore_corrupted_data());
 
@@ -174,6 +174,14 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					MutationRef m;
 					rd >> m;
 					count++;
+					if (msgVersion >= maxVersion) {
+						TraceEvent("FileDecodeEnd")
+						    .detail("MaxV", maxVersion)
+						    .detail("Version", msgVersion)
+						    .detail("File", fd->getFilename());
+						eof = true;
+						break; // skip
+					}
 					if (msgVersion >= minVersion) {
 						mutations.emplace_back(LogMessageVersion(msgVersion, sub), StringRef(message, msgSize),
 						                       buf.arena());
@@ -248,7 +256,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		fp->mutations.erase(fp->mutations.begin());
 		if (fp->mutations.empty()) {
 			// decode one more block
-			wait(decodeToVersion(fp, /*version=*/0));
+			wait(decodeToVersion(fp, /*version=*/0, self->endVersion));
 		}
 
 		if (fp->empty()) {
@@ -281,7 +289,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		for (auto& asyncfile : asyncFiles) {
 			Reference<FileProgress> fp(new FileProgress(asyncfile.get()));
 			progress->fileProgress.push_back(fp);
-			fileDecodes.push_back(decodeToVersion(fp, progress->beginVersion));
+			fileDecodes.push_back(decodeToVersion(fp, progress->beginVersion, progress->endVersion));
 		}
 
 		wait(waitForAll(fileDecodes));
@@ -292,7 +300,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	}
 
 	// Decodes the file until EOF or an mutation >= minVersion and saves these mutations.
-	ACTOR static Future<Void> decodeToVersion(Reference<FileProgress> fileProgress, Version minVersion) {
+	// Skip mutations >= maxVersion.
+	ACTOR static Future<Void> decodeToVersion(Reference<FileProgress> fileProgress, Version minVersion,
+	                                          Version maxVersion) {
 		if (fileProgress->empty()) return Void();
 
 		if (!fileProgress->mutations.empty() && fileProgress->mutations.back().version.version >= minVersion)
@@ -312,7 +322,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					fileProgress->eof = true;
 					return Void();
 				}
-				if (fileProgress->decodeBlock(buf, rLen, minVersion)) break;
+				if (fileProgress->decodeBlock(buf, rLen, minVersion, maxVersion)) break;
 			}
 			return Void();
 		} catch (Error& e) {
@@ -332,8 +342,15 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 // Writes a log file in the old backup format, described in backup-dataFormat.md.
 // This is similar to the LogFileWriter in FileBackupAgent.actor.cpp.
-class LogFileWriter {
+struct LogFileWriter {
+	LogFileWriter() : blockSize(-1) {}
 	LogFileWriter(Reference<IBackupFile> f, int bsize) : file(f), blockSize(bsize) {}
+	LogFileWriter& operator=(const LogFileWriter& rhs) {
+		file = rhs.file;
+		blockSize = rhs.blockSize;
+		blockEnd = rhs.blockEnd;
+		return *this;
+	}
 
 	// Returns the block key, i.e., `Param1`, in the back file. The format is
 	// `hash_value|commitVersion|part`.
@@ -419,7 +436,7 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 	state BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	std::cout << "Using Protocol Version: 0x" << std::hex << currentProtocolVersion.version() << std::dec << "\n";
+	// std::cout << "Using Protocol Version: 0x" << std::hex << currentProtocolVersion.version() << std::dec << "\n";
 
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
@@ -428,14 +445,36 @@ ACTOR Future<Void> test_container(ConvertParams params) {
 
 	wait(progress->openLogFiles(container));
 
+	state int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	state Reference<IBackupFile> outFile = wait(container->writeLogFile(params.begin, params.end, blockSize));
+	state LogFileWriter logFile(outFile, blockSize);
+	std::cout << "Output file: " << outFile->getFileName() << "\n";
+
+	state MutationList list;
+	state Arena arena;
+	state Version version = invalidVersion;
 	while (progress->hasMutations()) {
-		VersionedData data = wait(progress->getNextMutation());
-		// emit a mutation and write to a batch;
+		state VersionedData data = wait(progress->getNextMutation());
+
+		// emit a mutation batch to file when encounter a new version
+		if (list.totalSize() > 0 && version != data.version.version) {
+			wait(LogFileWriter::addMutation(&logFile, version, list));
+			list = MutationList();
+			arena = Arena();
+		}
+
 		BinaryReader rd(data.message, AssumeVersion(currentProtocolVersion));
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";
+		list.push_back_deep(arena, m);
+		version = data.version.version;
 	}
+	if (list.totalSize() > 0) {
+		wait(LogFileWriter::addMutation(&logFile, version, list));
+	}
+
+	wait(outFile->finish());
 
 	return Void();
 }

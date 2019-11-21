@@ -75,6 +75,11 @@ struct LogFile {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
+	// Returns if two log files have the same content by comparing version range and tag ID.
+	bool sameContent(const LogFile& rhs) const {
+		return beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && tagId == rhs.tagId;
+	}
+
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion)
