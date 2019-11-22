@@ -2,6 +2,15 @@
 Release Notes
 #############
 
+6.2.11
+======
+
+Fixes
+-----
+
+* Clients could hang indefinitely on reads if all storage servers holding a keyrange were removed from a cluster since the last time the client read a key in the range. `(PR #2377) <https://github.com/apple/foundationdb/pull/2377>`_.
+* In rare scenarios, status could falsely report no replicas remain of some data. `(PR #2380) <https://github.com/apple/foundationdb/pull/2380>`_.
+
 6.2.10
 ======
 
