@@ -131,7 +131,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	ASSERT(self->kvOpsPerLP.find(param) == self->kvOpsPerLP.end());
 	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
 	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
-	self->kvOpsPerLP.insert(std::make_pair(param, VersionedMutationsMap()));
+	self->kvOpsPerLP.emplace(param, VersionedMutationsMap());
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = self->kvOpsPerLP.find(param);
 
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)

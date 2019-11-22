@@ -315,8 +315,7 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> 
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
-		requests.push_back(
-		    std::make_pair(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier, useRangeFile)));
+		requests.emplace_back(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier, useRangeFile));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::sendMutations, self->loadersInterf, requests));
 
@@ -365,7 +364,7 @@ void dummySampleWorkload(Reference<RestoreMasterData> self) {
 		if (i == 0) {
 			self->rangeToApplier[normalKeys.begin] = applier.first;
 		} else {
-			self->rangeToApplier[Key(keyrangeSplitter[i])] = applier.first;
+			self->rangeToApplier[keyrangeSplitter[i]] = applier.first;
 		}
 		i++;
 	}
