@@ -959,6 +959,81 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	return Void();
 }
 
+ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
+	if (self->ignorePopRequest) {
+		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+
+		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
+			|| to > self->toBePopped[inputTag]) {
+			self->toBePopped[inputTag] = to;
+		}
+		// add the pop to the toBePopped map
+		TraceEvent(SevDebug, "IgnoringPopRequest")
+			.detail("IgnorePopDeadline", self->ignorePopDeadline)
+			.detail("Tag", inputTag.toString())
+			.detail("Version", to);
+		return Void();
+	}
+	state Version upTo = to;
+	int8_t tagLocality = inputTag.locality;
+	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
+		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
+		tagLocality = tagLocalityLogRouter;
+	}
+	state Tag tag(tagLocality, inputTag.id);
+	auto tagData = logData->getTagData(tag);
+	if (!tagData) {
+		tagData = logData->createTagData(tag, upTo, true, true, false);
+	} else if (upTo > tagData->popped) {
+		tagData->popped = upTo;
+		tagData->poppedRecently = true;
+		tagData->requiresPoppedLocationUpdate = true;
+
+		if(tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
+			tagData->unpoppedRecovered = false;
+			logData->unpoppedRecoveredTags--;
+			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
+			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+				logData->recoveryComplete.send(Void());
+			}
+		}
+
+		if (upTo > logData->persistentDataDurableVersion)
+			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
+		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
+	// timeout check for ignorePopRequest
+	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
+
+		TraceEvent("EnableTLogPlayAllIgnoredPops");
+		// use toBePopped and issue all the pops
+		std::map<Tag, Version>::iterator it;
+		vector<Future<Void>> ignoredPops;
+		self->ignorePopRequest = false;
+		self->ignorePopUid = "";
+		self->ignorePopDeadline = 0.0;
+		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+			TraceEvent("PlayIgnoredPop")
+				.detail("Tag", it->first.toString())
+				.detail("Version", it->second);
+			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
+		}
+		self->toBePopped.clear();
+		wait(waitForAll(ignoredPops));
+		TraceEvent("ResetIgnorePopRequest")
+		    .detail("Now", g_network->now())
+		    .detail("IgnorePopRequest", self->ignorePopRequest)
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
+	}
+	wait(tLogPopCore(self, req.tag, req.to, logData));
+	req.reply.send(Void());
+	return Void();
+}
+
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all CPU resources.
 // For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce latencies for more important
 // work (e.g. commits).
@@ -977,6 +1052,26 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state int totalSize = 0;
 
 	state FlowLock::Releaser commitLockReleaser;
+
+	//FIXME: This policy for calculating the cache pop version could end up popping recent data in the remote DC after two consecutive recoveries.
+	// It also does not protect against spilling the cache tag directly, so it is theoretically possible to spill this tag; which is not intended to ever happen.
+	Optional<Version> cachePopVersion;
+	for(auto& it : self->id_data) {
+		if(!it.second->stopped) {
+			if(it.second->version.get() - it.second->unrecoveredBefore > SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT + SERVER_KNOBS->MAX_CACHE_VERSIONS) {
+				cachePopVersion = it.second->version.get() - SERVER_KNOBS->MAX_CACHE_VERSIONS;
+			}
+			break;
+		}
+	}
+
+	if(cachePopVersion.present()) {
+		state std::vector<Future<Void>> cachePopFutures;
+		for(auto& it : self->id_data) {
+			cachePopFutures.push_back(tLogPop(self, TLogPopRequest(cachePopVersion.get(),0,cacheTag), it.second));
+		}
+		wait( waitForAll(cachePopFutures) );
+	}
 
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
@@ -1207,81 +1302,6 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 	}
 	return tagData->versionMessages;
 };
-
-ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
-	if (self->ignorePopRequest) {
-		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
-
-		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
-			|| to > self->toBePopped[inputTag]) {
-			self->toBePopped[inputTag] = to;
-		}
-		// add the pop to the toBePopped map
-		TraceEvent(SevDebug, "IgnoringPopRequest")
-			.detail("IgnorePopDeadline", self->ignorePopDeadline)
-			.detail("Tag", inputTag.toString())
-			.detail("Version", to);
-		return Void();
-	}
-	state Version upTo = to;
-	int8_t tagLocality = inputTag.locality;
-	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
-		tagLocality = tagLocalityLogRouter;
-	}
-	state Tag tag(tagLocality, inputTag.id);
-	auto tagData = logData->getTagData(tag);
-	if (!tagData) {
-		tagData = logData->createTagData(tag, upTo, true, true, false);
-	} else if (upTo > tagData->popped) {
-		tagData->popped = upTo;
-		tagData->poppedRecently = true;
-		tagData->requiresPoppedLocationUpdate = true;
-
-		if(tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
-			tagData->unpoppedRecovered = false;
-			logData->unpoppedRecoveredTags--;
-			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
-			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
-				logData->recoveryComplete.send(Void());
-			}
-		}
-
-		if (upTo > logData->persistentDataDurableVersion)
-			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
-		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
-	}
-	return Void();
-}
-
-ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
-	// timeout check for ignorePopRequest
-	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
-
-		TraceEvent("EnableTLogPlayAllIgnoredPops");
-		// use toBePopped and issue all the pops
-		std::map<Tag, Version>::iterator it;
-		vector<Future<Void>> ignoredPops;
-		self->ignorePopRequest = false;
-		self->ignorePopUid = "";
-		self->ignorePopDeadline = 0.0;
-		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
-			TraceEvent("PlayIgnoredPop")
-				.detail("Tag", it->first.toString())
-				.detail("Version", it->second);
-			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
-		}
-		self->toBePopped.clear();
-		wait(waitForAll(ignoredPops));
-		TraceEvent("ResetIgnorePopRequest")
-		    .detail("Now", g_network->now())
-		    .detail("IgnorePopRequest", self->ignorePopRequest)
-		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
-	}
-	wait(tLogPopCore(self, req.tag, req.to, logData));
-	req.reply.send(Void());
-	return Void();
-}
 
 void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req, BinaryWriter& messages, Version& endVersion ) {
 	ASSERT( !messages.getLength() );

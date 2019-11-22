@@ -60,7 +60,7 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 using std::max;
 using std::min;
@@ -791,7 +791,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
 
 			TraceEvent("ClientStart")
-				.detail("SourceVersion", getHGVersion())
+				.detail("SourceVersion", getSourceVersion())
 				.detail("Version", FDB_VT_VERSION)
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("ClusterFile", connFile->getFilename().c_str())

@@ -43,7 +43,7 @@
 #undef min
 
 extern "C" int g_expect_full_pointermap;
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 const int MACHINE_REBOOT_TIME = 10;
 
@@ -232,7 +232,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("Excluded", process->excluded)
 				.detail("UsingSSL", sslEnabled);
 			TraceEvent("ProgramStart").detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("SourceVersion", getHGVersion())
+				.detail("SourceVersion", getSourceVersion())
 				.detail("Version", FDB_VT_VERSION)
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("DataFolder", *dataFolder)
@@ -1255,6 +1255,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
 		ASSERT( dcCoordinators <= machines );
+		
+		//FIXME: temporarily code to test storage cache
+		//TODO: caching disabled for this merge
+		//if(dc==0) {
+		//	machines++;
+		//}
+
 		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -1277,6 +1284,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				if (processClass == ProcessClass::ResolutionClass)  // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
 			}
+
+			//FIXME: temporarily code to test storage cache
+			//TODO: caching disabled for this merge
+			//if(machine==machines-1 && dc==0) {
+			//	processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+			//	nonVersatileMachines++;
+			//}
 
 			std::vector<IPAddress> ips;
 			for (int i = 0; i < processesPerMachine; i++) {

@@ -105,6 +105,7 @@ struct struct_like_traits<Tag> : std::true_type {
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+static const Tag cacheTag {tagLocalitySpecial, 2};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -548,6 +549,10 @@ inline KeySelectorRef operator + (const KeySelectorRef& s, int off) {
 }
 inline KeySelectorRef operator - (const KeySelectorRef& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset-off);
+}
+inline bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
+	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
+	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
 
 template <class Val>

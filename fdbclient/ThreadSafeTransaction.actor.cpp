@@ -333,9 +333,9 @@ void ThreadSafeTransaction::reset() {
 	onMainThreadVoid( [tr](){ tr->reset(); }, NULL );
 }
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
-ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getHGVersion(), currentProtocolVersion)), transportId(0) {}
+ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion)), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;

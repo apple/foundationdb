@@ -142,8 +142,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
-      <Command>echo const char *hgVersion = "Current version id not currently supported within Windows."; &gt; hgVersion.temp.h &amp;&amp; fc /b hgVersion.temp.h hgVersion.h &gt; nul || copy hgVersion.temp.h hgVersion.h &gt; nul</Command>
-      <Message>Checking HG source version</Message>
+      <Command>echo const char *sourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
+      <Message>Checking source version</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">

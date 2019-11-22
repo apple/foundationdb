@@ -459,7 +459,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				foundSpecial = true;
 			}
 			if(log->isLocal && log->logServers.size() && (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded || log->locality == tag.locality ||
-				tag == txsTag || tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || (tag.locality == tagLocalityUpgraded && log->locality != tagLocalitySatellite))) {
+				tag == txsTag || tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || ((tag.locality == tagLocalityUpgraded || tag == cacheTag) && log->locality != tagLocalitySatellite))) {
 				lastBegin = std::max(lastBegin, log->startVersion);
 				localSets.push_back(log);
 				if(log->locality != tagLocalitySatellite) {
@@ -486,7 +486,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
-					if(tag == txsTag || tag.locality == tagLocalityTxs) {
+					if(tag == txsTag || tag.locality == tagLocalityTxs || tag == cacheTag) {
 						break;
 					}
 					TraceEvent("TLogPeekAllDead", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size());
@@ -502,7 +502,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						thisSpecial = true;
 					}
 					if(log->isLocal && log->logServers.size() && (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded || log->locality == tag.locality ||
-						tag == txsTag || tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || (tag.locality == tagLocalityUpgraded && log->locality != tagLocalitySatellite))) {
+						tag == txsTag || tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || ((tag.locality == tagLocalityUpgraded || tag == cacheTag) && log->locality != tagLocalitySatellite))) {
 						thisBegin = std::max(thisBegin, log->startVersion);
 						localOldSets.push_back(log);
 						if(log->locality != tagLocalitySatellite) {

@@ -183,7 +183,7 @@ extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
@@ -518,7 +518,7 @@ void* parentWatcher(void *arg) {
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
@@ -1672,7 +1672,7 @@ int main(int argc, char* argv[]) {
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
-		    .detail("SourceVersion", getHGVersion())
+		    .detail("SourceVersion", getSourceVersion())
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detail("FileSystem", opts.fileSystemPath)

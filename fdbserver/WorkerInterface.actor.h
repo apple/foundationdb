@@ -397,6 +397,7 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
+	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 
 	std::string roleName;
@@ -466,6 +467,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest re
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> storageCache(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

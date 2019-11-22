@@ -76,6 +76,7 @@ enum class TaskPriority {
 	DataDistribution = 3500,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
+	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
 	Low = 2000,

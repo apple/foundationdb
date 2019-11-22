@@ -63,7 +63,7 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   actorcompiler.h
   error_definitions.h
-  ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h
+  ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.h
   flat_buffers.cpp
   flow.cpp
@@ -78,7 +78,7 @@ set(FLOW_SRCS
   stacktrace.h
   version.cpp)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
