@@ -271,6 +271,23 @@ struct StorageServerMetrics {
 		}
 	}
 
+	// Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
+	// around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
+	void notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
+		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+		int64_t bytesReadPerKSecond =
+		    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		if (bytesReadPerKSecond > 0) {
+			StorageMetrics notifyMetrics;
+			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
+			auto& v = waitMetricsMap[key];
+			for (int i = 0; i < v.size(); i++) {
+				TEST(true); // ShardNotifyMetrics
+				v[i].send(notifyMetrics);
+			}
+		}
+	}
+
 	// Called periodically (~1 sec intervals) to remove older IOs from the averages
 	// Removes old entries from metricsAverageQueue, updates metricsSampleMap accordingly, and notifies
 	//   WaitMetricsRequests through waitMetricsMap.

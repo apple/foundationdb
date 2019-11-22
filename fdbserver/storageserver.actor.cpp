@@ -875,12 +875,11 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		}
 
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-			StorageMetrics metrics;
 			// If the read yields no value, randomly sample the empty read.
-			metrics.bytesReadPerKSecond =
+			int64_t bytesReadPerKSecond =
 			    v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
 			                : SERVER_KNOBS->EMPTY_READ_PENALTY;
-			data->metrics.notify(req.key, metrics);
+			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
 		}
 
 		if( req.debugID.present() )
@@ -1314,18 +1313,16 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 		*pOffset = 0;
 
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-			StorageMetrics metrics;
-			metrics.bytesReadPerKSecond =
+			int64_t bytesReadPerKSecond =
 			    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
-			data->metrics.notify(sel.getKey(), metrics);
+			data->metrics.notifyBytesReadPerKSecond(sel.getKey(), bytesReadPerKSecond);
 		}
 
 		return rep.data[ index ].key;
 	} else {
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-			StorageMetrics metrics;
-			metrics.bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
-			data->metrics.notify(sel.getKey(), metrics);
+			int64_t bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
+			data->metrics.notifyBytesReadPerKSecond(sel.getKey(), bytesReadPerKSecond);
 		}
 
 		// FIXME: If range.begin=="" && !forward, return success?
@@ -1461,10 +1458,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				totalByteSize += r.data[i].expectedSize();
 			}
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-				StorageMetrics m;
-				m.bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-				data->metrics.notify(r.data[0].key, m);
-				data->metrics.notify(r.data[r.data.size() - 1].key, m);
+				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+				data->metrics.notifyBytesReadPerKSecond(r.data[0].key, bytesReadPerKSecond);
+				data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
 			}
 
 			r.penalty = data->getPenalty();
