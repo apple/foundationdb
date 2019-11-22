@@ -803,9 +803,6 @@ public:
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
 		ASSERT( !toAddr.isTLS() && host.empty());
 		if (!addressMap.count( toAddr )) {
-			if(FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 || (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
-				throw connection_failed();
-			}
 			return waitForProcessAndConnect( toAddr, this );
 		}
 		auto peerp = getProcessByAddress(toAddr);
@@ -832,8 +829,11 @@ public:
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
-		if (conn->isPeerGone() && deterministicRandom()->random01()<0.5) {
+		if (conn->isPeerGone()) {
 			conn.clear();
+			if(FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 || (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
+				throw connection_failed();
+			}
 			wait(Never());
 		}
 		conn->opened = true;
