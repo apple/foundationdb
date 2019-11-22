@@ -2338,7 +2338,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Remove the removedMachineInfo machine and any related machine team
-	void removeMachine(DDTeamCollection* self, Reference<TCMachineInfo> removedMachineInfo) {
+	void removeMachine(Reference<TCMachineInfo> removedMachineInfo) {
 		// Find machines that share teams with the removed machine
 		std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
 		for (auto& machineTeam : removedMachineInfo->machineTeams) {
@@ -2412,7 +2412,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return foundMachineTeam;
 	}
 
-	void removeServer(DDTeamCollection* self, UID removedServer) {
+	void removeServer(UID removedServer) {
 		TraceEvent("RemovedStorageServer", distributorId).detail("ServerID", removedServer);
 
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
@@ -2462,6 +2462,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			traceAllInfo();
 		}
 
+		for (int t = 0; t < badTeams.size(); t++) {
+			if ( std::count( badTeams[t]->getServerIDs().begin(), badTeams[t]->getServerIDs().end(), removedServer ) ) {
+				badTeams[t]->tracker.cancel();
+				badTeams[t--] = badTeams.back();
+				badTeams.pop_back();
+			}
+		}
+
 		// Step: Remove machine info related to removedServer
 		// Remove the server from its machine
 		Reference<TCMachineInfo> removedMachineInfo = removedServerInfo->machine;
@@ -2477,7 +2485,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// Note: Remove machine (and machine team) after server teams have been removed, because
 		// we remove a machine team only when the server teams on it have been removed
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
-			removeMachine(self, removedMachineInfo);
+			removeMachine(removedMachineInfo);
 		}
 
 		// If the machine uses removedServer's locality and the machine still has servers, the the machine's
@@ -3460,7 +3468,7 @@ ACTOR Future<Void> storageServerTracker(
 							if (machine->serversOnMachine.size() == 1) {
 								// When server is the last server on the machine,
 								// remove the machine and the related machine team
-								self->removeMachine(self, machine);
+								self->removeMachine(machine);
 								server->machine = Reference<TCMachineInfo>();
 							} else {
 								// we remove the server from the machine, and
@@ -3909,7 +3917,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		loop choose {
 			when( UID removedServer = waitNext( self->removedServers.getFuture() ) ) {
 				TEST(true);  // Storage server removed from database
-				self->removeServer(self, removedServer);
+				self->removeServer(removedServer);
 				serverRemoved.send( Void() );
 
 				self->restartRecruiting.trigger();
