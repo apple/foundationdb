@@ -429,43 +429,40 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 
-				state Reference<IConnection> _conn;
 				try {
 					choose {
-						when( Reference<IConnection> t = wait( INetworkConnections::net()->connect(self->destination) ) ) { _conn = t; }
-						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {}
+						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							if (FlowTransport::transport().isClient()) {
+								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+							}
+							if (self->unsent.empty()) {
+								_conn->close();
+								clientReconnectDelay = false;
+								continue;
+							} else {
+								conn = _conn;
+								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+										.suppressFor(1.0)
+										.detail("PeerAddr", self->destination);
+								self->prependConnectPacket();
+							}
+							reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
+						}
+						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {
+							throw connection_failed();
+						}
 					}
 				} catch( Error &e ) {
 					if(e.code() != error_code_connection_failed) {
 						throw;
 					}
-				}
-
-				if (_conn) {
-					if (FlowTransport::transport().isClient()) {
-						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
-					}
-					if (self->unsent.empty()) {
-						_conn->close();
-						clientReconnectDelay = false;
-						continue;
-					} else {
-						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-								.suppressFor(1.0)
-								.detail("PeerAddr", self->destination);
-						self->prependConnectPacket();
-					}
-				} else {
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 					if (FlowTransport::transport().isClient()) {
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 						clientReconnectDelay = true;
 					}
-					throw connection_failed();
+					throw;
 				}
-
-				reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
 			} else {
 				self->outgoingConnectionIdle = false;
 			}
@@ -527,9 +524,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			}
 
 			if (conn) {
-				if (FlowTransport::transport().isClient() && e.code() != error_code_connection_idle) {
-					clientReconnectDelay = true;
-				}
+				clientReconnectDelay = FlowTransport::transport().isClient() && e.code() != error_code_connection_idle;
 				conn->close();
 				conn = Reference<IConnection>();
 			}
