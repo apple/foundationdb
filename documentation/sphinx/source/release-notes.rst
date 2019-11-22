@@ -8,8 +8,12 @@ Release Notes
 Fixes
 -----
 
+<<<<<<< HEAD
 * Clients could hang indefinitely on reads if all storage servers holding a keyrange were removed from a cluster since the last time the client read a key in the range. `(PR #2377) <https://github.com/apple/foundationdb/pull/2377>`_.
 * In rare scenarios, status could falsely report no replicas remain of some data. `(PR #2380) <https://github.com/apple/foundationdb/pull/2380>`_.
+=======
+* Latency band tracking could fail to configure correctly after a recovery or upon process startup. `(PR #2371) <https://github.com/apple/foundationdb/pull/2371>`_.
+>>>>>>> dd3b30a5b519bee972fd400f63ee1137dd29d2d7
 
 6.2.10
 ======
