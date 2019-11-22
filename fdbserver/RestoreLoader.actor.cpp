@@ -363,14 +363,14 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::string prefix = "||\t";
 	std::stringstream ss;
 	StringRef val = val_input.contents();
-	const int key_suffix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
+	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
 	StringRefReaderMX reader(val, restore_corrupted_data());
 	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); // read key_input!
-	int logRangeMutationFirstLength = key_input.size() - key_suffix_len;
+	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
 
-	ASSERT_WE_THINK(key_input.size() >= key_suffix_len);
+	ASSERT_WE_THINK(key_input.size() >= key_prefix_len);
 
 	if (logRangeMutationFirstLength > 0) {
 		// Strip out the [logRangeMutation.first]; otherwise, the following readerKey.consume will produce wrong value
