@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.11
+======
+
+Fixes
+-----
+
+* Latency band tracking could fail to configure correctly after a recovery or upon process startup. `(PR #2371) <https://github.com/apple/foundationdb/pull/2371>`_.
+
 6.2.10
 ======
 
