@@ -293,6 +293,7 @@ private:
 	void closeInternal() {
 		if(peer) {
 			peer->peerClosed();
+			stopReceive = delay(1.0);
 		}
 		leakedConnectionTracker.cancel();
 		peer.clear();
@@ -828,8 +829,11 @@ public:
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
-		if (conn->isPeerGone() && deterministicRandom()->random01()<0.5) {
+		if (conn->isPeerGone()) {
 			conn.clear();
+			if(FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 || (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
+				throw connection_failed();
+			}
 			wait(Never());
 		}
 		conn->opened = true;
