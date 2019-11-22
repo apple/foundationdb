@@ -119,7 +119,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			return;
 		}
 
-		printf("[CheckDB] KV Number. Prev DB:%d Current DB:%d\n", self->dbKVs.size(), newDbKVs.size());
+		printf("[CheckDB] KV Number. Prev DB:%ld Current DB:%ld\n", self->dbKVs.size(), newDbKVs.size());
 		// compare the KV pairs in the DB
 		printf("------------------Now print out the diff between the prev DB and current DB-------------------\n");
 		if (self->dbKVs.size() >= newDbKVs.size()) {

@@ -51,7 +51,6 @@ ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> 
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> self);
-ACTOR static Future<Void> notifyLoaderAppliersKeyRange(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
@@ -308,6 +307,21 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	return Void();
 }
 
+// Ask loaders to send its buffered mutations to appliers
+ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> self, bool useRangeFile) {
+	TraceEvent("FastRestore")
+	    .detail("SendMutationsFromLoaders", self->batchIndex)
+	    .detail("UseRangeFiles", useRangeFile);
+
+	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
+	for (auto& loader : self->loadersInterf) {
+		requests.emplace_back(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier, useRangeFile));
+	}
+	wait(sendBatchRequests(&RestoreLoaderInterface::sendMutations, self->loadersInterf, requests));
+
+	return Void();
+}
+
 ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, Database cx,
                                                             RestoreRequest request, VersionBatch versionBatch) {
 	ASSERT(!versionBatch.isEmpty());
@@ -315,12 +329,18 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(self->loadersInterf.size() > 0);
 	ASSERT(self->appliersInterf.size() > 0);
 
-	dummySampleWorkload(self);
-	wait(notifyLoaderAppliersKeyRange(self));
+	dummySampleWorkload(self); // TODO: Delete
 
 	// Parse log files and send mutations to appliers before we parse range files
+	// TODO: Allow loading both range and log files in parallel
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, false));
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, true));
+
+	// Loaders should ensure log files' mutations sent to appliers before range files' mutations
+	// TODO: Let applier buffer mutations from log and range files differently so that loaders can send mutations in
+	// parallel
+	wait(sendMutationsFromLoaders(self, false));
+	wait(sendMutationsFromLoaders(self, true));
 
 	wait(notifyApplierToApplyMutations(self));
 
@@ -331,20 +351,22 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 // Produce the key-range for each applier
 void dummySampleWorkload(Reference<RestoreMasterData> self) {
 	int numAppliers = self->appliersInterf.size();
-	std::vector<UID> keyrangeSplitter;
+	std::vector<Key> keyrangeSplitter;
 	// We will use the splitter at [1, numAppliers - 1]. The first splitter is normalKeys.begin
 	int i;
-	for (i = 0; i < numAppliers - 1; i++) {
-		keyrangeSplitter.push_back(deterministicRandom()->randomUniqueID());
+	for (i = 0; i < numAppliers; i++) {
+		keyrangeSplitter.push_back(Key(deterministicRandom()->randomUniqueID().toString()));
 	}
 	std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
 	i = 0;
+	self->rangeToApplier.clear();
 	for (auto& applier : self->appliersInterf) {
 		if (i == 0) {
 			self->rangeToApplier[normalKeys.begin] = applier.first;
 		} else {
-			self->rangeToApplier[StringRef(keyrangeSplitter[i].toString())] = applier.first;
+			self->rangeToApplier[keyrangeSplitter[i]] = applier.first;
 		}
+		i++;
 	}
 	self->logApplierKeyRange();
 }
@@ -463,17 +485,6 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterD
 	wait(sendBatchRequests(&RestoreApplierInterface::applyToDB, self->appliersInterf, requests));
 
 	TraceEvent("FastRestore").detail("Master", self->id()).detail("ApplyToDB", "Completed");
-	return Void();
-}
-
-// Send the map of key-range to applier to each loader
-ACTOR static Future<Void> notifyLoaderAppliersKeyRange(Reference<RestoreMasterData> self) {
-	std::vector<std::pair<UID, RestoreSetApplierKeyRangeVectorRequest>> requests;
-	for (auto& loader : self->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreSetApplierKeyRangeVectorRequest(self->rangeToApplier)));
-	}
-	wait(sendBatchRequests(&RestoreLoaderInterface::setApplierKeyRangeVectorRequest, self->loadersInterf, requests));
-
 	return Void();
 }
 

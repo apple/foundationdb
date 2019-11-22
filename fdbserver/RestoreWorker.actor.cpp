@@ -1,5 +1,5 @@
 /*
- * Restore.actor.cpp
+ * RestoreWorker.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -98,8 +98,9 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
-		DUMPTOKEN(recruited.setApplierKeyRangeVectorRequest);
 		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.loadFile);
+		DUMPTOKEN(recruited.sendMutations);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
