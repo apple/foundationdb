@@ -803,7 +803,7 @@ public:
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
 		ASSERT( !toAddr.isTLS() && host.empty());
 		if (!addressMap.count( toAddr )) {
-			if(FLOW_KNOBS->ENABLE_CONNECT_ERRORS) {
+			if(FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 || (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
 				throw connection_failed();
 			}
 			return waitForProcessAndConnect( toAddr, this );
