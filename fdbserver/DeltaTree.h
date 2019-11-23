@@ -167,12 +167,12 @@ struct DeltaTree {
 
 		Node * rightChild() const {
 			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
-			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + rightChildOffset);
+			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)this + rightChildOffset);
 		}
 
 		Node * leftChild() const {
 			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
-			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + leftChildOffset);
+			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)this + leftChildOffset);
 		}
 
 		int size() const {
@@ -181,8 +181,10 @@ struct DeltaTree {
 	};
 
 	struct {
-		OffsetT nodeBytes;     // Total size of all Nodes including the root
-		uint8_t initialDepth;  // Levels in the tree as of the last rebuild
+		OffsetT numItems;       // Number of items in the tree.
+		OffsetT nodeBytes;      // Total size of all Nodes including the root
+		uint8_t initialHeight;  // Height of tree as originally built
+		uint8_t maxHeight;      // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
 	};
 #pragma pack(pop)
 
@@ -196,6 +198,10 @@ struct DeltaTree {
 
 	int size() const {
 		return sizeof(DeltaTree) + nodeBytes; 
+	}
+
+	inline Node & newNode() {
+		return *(Node *)((uint8_t *)this + size());
 	}
 
 public:
@@ -219,6 +225,40 @@ public:
 		    item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
+		}
+
+		// Add newItem to tree and create a DecodedNode for it, linked to parent via the left or right child link
+		DecodedNode(DeltaTree *tree, const T &newItem, DecodedNode *parent, bool left, Arena &arena)
+		  : parent(parent), raw(&tree->newNode()), left(nullptr), right(nullptr),
+		    prev(left ? parent->prev : &parent->item),
+		    next(left ? &parent->item : parent->next),
+			item(arena, newItem)
+		{
+			raw->leftChildOffset = 0;
+			raw->rightChildOffset = 0;
+			
+			// TODO:  Get subtreeCommon in here somehow.
+			int commonWithPrev = newItem.getCommonPrefixLen(*prev, 0);
+			int commonWithNext = newItem.getCommonPrefixLen(*next, 0);
+
+			bool prefixSourcePrev;
+			int commonPrefix;
+			const T *base;
+			if(commonWithPrev >= commonWithNext) {
+				prefixSourcePrev = true;
+				commonPrefix = commonWithPrev;
+				base = prev;
+			}
+			else {
+				prefixSourcePrev = false;
+				commonPrefix = commonWithNext;
+				base = next;
+			}
+
+			int deltaSize = newItem.writeDelta(raw->delta(), *base, commonPrefix);
+			raw->delta().setPrefixSource(prefixSourcePrev);
+			tree->nodeBytes += sizeof(Node) + deltaSize;
+			++tree->numItems;
 		}
 
 		Node *raw;
@@ -252,11 +292,12 @@ public:
 
 	struct Cursor;
 
-	// A Reader is used to read a Tree by getting cursors into it.
-	// Any node decoded by any cursor is placed in cache for use
-	// by other cursors.
-	struct Reader : FastAllocated<Reader> {
-		Reader(const void *treePtr = nullptr, const T *lowerBound = nullptr, const T *upperBound = nullptr)
+	// A Mirror is an accessor for a DeltaTree which allows insertion and reading.  Both operations are done
+	// using cursors which point to and share nodes in an tree that is built on-demand and mirrors the compressed
+	// structure but with fully reconstituted items (which reference DeltaTree bytes or Arena bytes, based
+	// on the behavior of T::Delta::apply())
+	struct Mirror : FastAllocated<Mirror> {
+		Mirror(const void *treePtr = nullptr, const T *lowerBound = nullptr, const T *upperBound = nullptr)
 			: tree((DeltaTree *)treePtr), lower(lowerBound), upper(upperBound)  {
 
 			// TODO: Remove these copies into arena and require users of Reader to keep prev and next alive during its lifetime
@@ -283,6 +324,58 @@ public:
 		Cursor getCursor() {
 			return Cursor(this);
 		}
+
+		// Insert k into the DeltaTree, updating nodeBytes and initialHeight.
+		// It's up to the caller to know that it will fit in the space available.
+		void insert(const T &k) {
+			int height = 1;
+			DecodedNode *n = root;
+
+			while(n != nullptr) {
+				int cmp = k.compare(n->item);
+
+				if(cmp >= 0) {
+					DecodedNode *right = n->getRight(arena);
+
+					if(right == nullptr) {
+						// Set the right child of the decoded node to a new decoded node that points to a newly
+						// allocated/written raw node in the tree.  DecodedNode() will write the new node
+						// and update nodeBytes
+						n->right = new (arena) DecodedNode(tree, k, n, false, arena);
+						n->raw->rightChildOffset = (uint8_t *)n->right->raw - (uint8_t *)n->raw;
+						//printf("inserted %s at offset %d\n", k.toString().c_str(), n->raw->rightChildOffset);
+
+						// Update max height of the tree if necessary
+						if(height > tree->maxHeight) {
+							tree->maxHeight = height;
+						}
+
+						return;
+					}
+
+					n = right;
+				}
+				else {
+					DecodedNode *left = n->getLeft(arena);
+
+					if(left == nullptr) {
+						// See right side case above for comments
+						n->left = new (arena) DecodedNode(tree, k, n, true, arena);
+						n->raw->leftChildOffset = (uint8_t *)n->left->raw - (uint8_t *)n->raw;
+						//printf("inserted %s at offset %d\n", k.toString().c_str(), n->raw->leftChildOffset);
+
+						if(height > tree->maxHeight) {
+							tree->maxHeight = height;
+						}
+
+						return;
+					}
+
+					n = left;
+				}
+				++height;
+			}
+		}
 	};
 
 	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
@@ -291,10 +384,10 @@ public:
 		Cursor() : reader(nullptr), node(nullptr) {
 		}
 
-		Cursor(Reader *r) : reader(r), node(reader->root) {
+		Cursor(Mirror *r) : reader(r), node(reader->root) {
 		}
 
-		Reader *reader;
+		Mirror *reader;
 		DecodedNode *node;
 
 		bool valid() const {
@@ -414,7 +507,9 @@ public:
 	int build(const T *begin, const T *end, const T *prev, const T *next) {
 		//printf("tree size: %d   node size: %d\n", sizeof(DeltaTree), sizeof(Node));
 		int count = end - begin;
-		initialDepth = (uint8_t)log2(count) + 1;
+		numItems = count;
+		initialHeight = (uint8_t)log2(count) + 1;
+		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
@@ -464,7 +559,7 @@ private:
 		// Serialize left child
 		if(count > 1) {
 			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item, commonWithPrev);
-			root.leftChildOffset = deltaSize;
+			root.leftChildOffset = sizeof(Node) + deltaSize;
 		}
 		else {
 			root.leftChildOffset = 0;
@@ -472,7 +567,7 @@ private:
 
 		// Serialize right child
 		if(count > 2) {
-			root.rightChildOffset = wptr - (uint8_t *)&root.delta();
+			root.rightChildOffset = wptr - (uint8_t *)&root;
 			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next, commonWithNext);
 		}
 		else {

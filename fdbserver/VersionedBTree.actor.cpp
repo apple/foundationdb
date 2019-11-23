@@ -2489,7 +2489,6 @@ struct BTreePage {
 #pragma pack(push,1)
 	struct {
 		uint8_t height;
-		uint16_t itemCount;
 		uint32_t kvBytes;
 	};
 #pragma pack(pop)
@@ -2518,12 +2517,12 @@ struct BTreePage {
 	std::string toString(bool write, BTreePageID id, Version ver, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) const {
 		std::string r;
 		r += format("BTreePage op=%s %s @%" PRId64 " ptr=%p height=%d count=%d kvBytes=%d\n  lowerBound: %s\n  upperBound: %s\n",
-					write ? "write" : "read", ::toString(id).c_str(), ver, this, height, (int)itemCount, (int)kvBytes,
+					write ? "write" : "read", ::toString(id).c_str(), ver, this, height, (int)tree().numItems, (int)kvBytes,
 					lowerBound->toString().c_str(), upperBound->toString().c_str());
 		try {
-			if(itemCount > 0) {
+			if(tree().numItems > 0) {
 				// This doesn't use the cached reader for the page but it is only for debugging purposes
-				BinaryTree::Reader reader(&tree(), lowerBound, upperBound);
+				BinaryTree::Mirror reader(&tree(), lowerBound, upperBound);
 				BinaryTree::Cursor c = reader.getCursor();
 
 				c.moveFirst();
@@ -2564,12 +2563,11 @@ static void makeEmptyRoot(Reference<IPage> page) {
 	BTreePage *btpage = (BTreePage *)page->begin();
 	btpage->height = 1;
 	btpage->kvBytes = 0;
-	btpage->itemCount = 0;
 	btpage->tree().build(nullptr, nullptr, nullptr, nullptr);
 }
 
-BTreePage::BinaryTree::Reader * getReader(Reference<const IPage> page) {
-	return (BTreePage::BinaryTree::Reader *)page->userData;
+BTreePage::BinaryTree::Mirror * getReader(Reference<const IPage> page) {
+	return (BTreePage::BinaryTree::Mirror *)page->userData;
 }
 
 struct BoundaryRefAndPage {
@@ -2665,7 +2663,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 2;
+		static constexpr int FORMAT_VERSION = 3;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -2893,7 +2891,7 @@ public:
 				
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-				BTreePage::ValueTree::Reader reader(&btPage.valueTree(), &dbBegin, &dbEnd);
+				BTreePage::ValueTree::Mirror reader(&btPage.valueTree(), &dbBegin, &dbEnd);
 				auto c = reader.getCursor();
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
@@ -3505,7 +3503,6 @@ private:
 
 				btPage->height = height;
 				btPage->kvBytes = kvBytes;
-				btPage->itemCount = i - start;
 
 				int written = btPage->tree().build(&entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
 				if(written > pageSize) {
@@ -3680,8 +3677,8 @@ private:
 
 		if(!forLazyDelete && page->userData == nullptr) {
 			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(), snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
-			page->userData = new BTreePage::BinaryTree::Reader(&pTreePage->tree(), lowerBound, upperBound);
-			page->userDataDestructor = [](void *ptr) { delete (BTreePage::BinaryTree::Reader *)ptr; };
+			page->userData = new BTreePage::BinaryTree::Mirror(&pTreePage->tree(), lowerBound, upperBound);
+			page->userDataDestructor = [](void *ptr) { delete (BTreePage::BinaryTree::Mirror *)ptr; };
 		}
 
 		if(!forLazyDelete) {
@@ -4283,8 +4280,8 @@ private:
 			}
 
 			// Multiple InternalCursors can share a Page 
-			BTreePage::BinaryTree::Reader & getReader() const {
-				return *(BTreePage::BinaryTree::Reader *)page->userData;
+			BTreePage::BinaryTree::Mirror & getReader() const {
+				return *(BTreePage::BinaryTree::Mirror *)page->userData;
 			}
 
 			bool isLeaf() const {
@@ -5319,11 +5316,19 @@ struct IntIntPair {
 
 	int compare(const IntIntPair &rhs) const {
 		//printf("compare %s to %s\n", toString().c_str(), rhs.toString().c_str());
-		return k - rhs.k;
+		int cmp = k - rhs.k;
+		if(cmp == 0) {
+			cmp = v - rhs.v;
+		}
+		return cmp;
 	}
 
 	bool operator==(const IntIntPair &rhs) const {
 		return k == rhs.k;
+	}
+
+	bool operator<(const IntIntPair &rhs) const {
+		return compare(rhs) < 0;
 	}
 
 	int getCommonPrefixLen(const IntIntPair &other, int skip) const {
@@ -5628,14 +5633,14 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	tree->build(&items[0], &items[items.size()], &prev, &next);
 
-	printf("Count=%d  Size=%d  InitialDepth=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialDepth);
+	printf("Count=%d  Size=%d  InitialHeight=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
 
-	DeltaTree<RedwoodRecordRef>::Reader r(tree, &prev, &next);
+	DeltaTree<RedwoodRecordRef>::Mirror r(tree, &prev, &next);
 	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();
 	DeltaTree<RedwoodRecordRef>::Cursor rev = r.getCursor();
 
-	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Reader rValuesOnly(tree, &prev, &next);
+	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Mirror rValuesOnly(tree, &prev, &next);
 	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly = rValuesOnly.getCursor();
 
 	ASSERT(fwd.moveFirst());
@@ -5699,22 +5704,40 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 	IntIntPair prev = {0, 0};
 	IntIntPair next = {1000, 0};
 
+	state std::function<IntIntPair()> randomPair = []() {
+		return IntIntPair({deterministicRandom()->randomInt(0, 1000), deterministicRandom()->randomInt(0, 1000)});
+	};
+
+	// Build a sorted vector of N items
 	std::vector<IntIntPair> items;
 	for(int i = 0; i < N; ++i) {
-		items.push_back({i*10, i*1000});
+		items.push_back(randomPair());
 		//printf("i=%d %s\n", i, items.back().toString().c_str());
 	}
+	std::sort(items.begin(), items.end());
 
-	DeltaTree<IntIntPair> *tree = (DeltaTree<IntIntPair> *) new uint8_t[10000];
+	// Build tree of items
+	int bufferSize = N * 2 * 20;
+	DeltaTree<IntIntPair> *tree = (DeltaTree<IntIntPair> *) new uint8_t[bufferSize];
+	int builtSize = tree->build(&items[0], &items[items.size()], &prev, &next);
+	ASSERT(builtSize <= bufferSize);
 
-	tree->build(&items[0], &items[items.size()], &prev, &next);
-
-	printf("Count=%d  Size=%d  InitialDepth=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialDepth);
-	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
-
-	DeltaTree<IntIntPair>::Reader r(tree, &prev, &next);
+	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
 	DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
 	DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
+
+	// Insert N more items into the tree and add them to items and sort again
+	for(int i = 0; i < N; ++i) {
+		IntIntPair p = randomPair();
+		items.push_back(p);
+		r.insert(p);
+		ASSERT(tree->size() < bufferSize);		
+		//printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
+	}
+	std::sort(items.begin(), items.end());
+
+	printf("Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight, (int)tree->maxHeight);
+	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
 
 	ASSERT(fwd.moveFirst());
 	ASSERT(rev.moveLast());
@@ -5741,12 +5764,12 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	double start = timer();
 	for(int i = 0; i < 20000000; ++i) {
-		IntIntPair p({deterministicRandom()->randomInt(0, items.size() * 10), 0});
+		IntIntPair &p = items[deterministicRandom()->randomInt(0, items.size())];
 		if(!c.seekLessThanOrEqual(p)) {
 			printf("Not found!  query=%s\n", p.toString().c_str());
 			ASSERT(false);
 		}
-		if(c.get().k != (p.k - (p.k % 10))) {
+		if(c.get() != p) {
 			printf("Found incorrect node!  query=%s  found=%s\n", p.toString().c_str(), c.get().toString().c_str());
 			ASSERT(false);
 		}
