@@ -371,13 +371,14 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::string prefix = "||\t";
 	std::stringstream ss;
 	StringRef val = val_input.contents();
+	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
 	StringRefReaderMX reader(val, restore_corrupted_data());
 	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); // read key_input!
-	int logRangeMutationFirstLength = key_input.size() - 1 - 8 - 4;
+	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
 
-	ASSERT_WE_THINK(key_input.size() >= 1 + 8 + 4);
+	ASSERT_WE_THINK(key_input.size() >= key_prefix_len);
 
 	if (logRangeMutationFirstLength > 0) {
 		// Strip out the [logRangeMutation.first]; otherwise, the following readerKey.consume will produce wrong value
@@ -385,10 +386,10 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	}
 
 	readerKey.consume<uint8_t>(); // uint8_t hashValue = readerKey.consume<uint8_t>()
-	uint64_t commitVersion = readerKey.consumeNetworkUInt64();
+	Version commitVersion = readerKey.consumeNetworkUInt64();
 	uint32_t part = readerKey.consumeNetworkUInt32();
 	// Use commitVersion as id
-	Standalone<StringRef> id = StringRef((uint8_t*)&commitVersion, 8);
+	Standalone<StringRef> id = StringRef((uint8_t*)&commitVersion, sizeof(Version));
 
 	if (mutationMap.find(id) == mutationMap.end()) {
 		mutationMap.insert(std::make_pair(id, val_input));
@@ -451,10 +452,11 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 		StringRefReaderMX vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
-		uint32_t val_length_decoded =
-		    vReader.consume<uint32_t>(); // Parse little endian value, confirmed it is correct!
-		ASSERT(val_length_decoded ==
-		       val.size() - 12); // 12 is the length of [includeVersion:uint64_t][val_length:uint32_t]
+		// TODO(xumengpanda): verify the protocol version is compatible and raise error if needed
+
+		// Parse little endian value, confirmed it is correct!
+		uint32_t val_length_decoded = vReader.consume<uint32_t>();
+		ASSERT(val_length_decoded == val.size() - sizeof(uint64_t) - sizeof(uint32_t));
 
 		while (1) {
 			// stop when reach the end of the string
