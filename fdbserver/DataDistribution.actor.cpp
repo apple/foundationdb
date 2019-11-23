@@ -2535,9 +2535,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// This is ok as long as we do not arbitrarily validate if machine team satisfies replication policy.
 
 		if (server_info[removedServer]->wrongStoreTypeToRemove.get()) {
-			if (self->wrongStoreTypeRemover.isReady()) {
-				self->wrongStoreTypeRemover = removeWrongStoreType(self);
-				self->addActor.send(self->wrongStoreTypeRemover);
+			if (wrongStoreTypeRemover.isReady()) {
+				wrongStoreTypeRemover = removeWrongStoreType(this);
+				addActor.send(wrongStoreTypeRemover);
 			}
 		}
 
