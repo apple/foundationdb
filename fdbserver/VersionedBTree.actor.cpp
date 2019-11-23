@@ -6536,6 +6536,68 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore *kvs, int suffixSize, in
 	return Void();
 }
 
+ACTOR Future<Void> sequentialInsert(IKeyValueStore *kvs, int prefixLen, int valueSize, int recordCountTarget) {
+	state int commitTarget = 5e6;
+
+	state KVSource source({{prefixLen, 1}});
+	state int recordSize = source.prefixLen + sizeof(uint64_t) + valueSize;
+	state int64_t kvBytesTarget = (int64_t)recordCountTarget * recordSize;
+
+	printf("\nstoreType: %d\n", kvs->getType());
+	printf("commitTarget: %d\n", commitTarget);
+	printf("valueSize: %d\n", valueSize);
+	printf("recordSize: %d\n", recordSize);
+	printf("recordCountTarget: %d\n", recordCountTarget);
+	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
+
+	state int64_t kvBytes = 0;
+	state int64_t kvBytesTotal = 0;
+	state int records = 0;
+	state Future<Void> commit = Void();
+	state std::string value = deterministicRandom()->randomAlphaNumeric(1e6);
+
+	wait(kvs->init());
+
+	state double intervalStart = timer();
+	state double start = intervalStart;
+
+	state std::function<void()> stats = [&]() {
+		double elapsed = timer() - start;
+		printf("Cumulative stats: %.2f seconds  %.2f MB keyValue bytes  %d records  %.2f MB/s  %.2f rec/s\r", elapsed, kvBytesTotal / 1e6, records, kvBytesTotal / elapsed / 1e6, records / elapsed);
+		fflush(stdout);
+	};
+
+	state uint64_t c = 0;
+	state Key key = source.getKeyRef(sizeof(uint64_t));
+
+	while(kvBytesTotal < kvBytesTarget) {
+		wait(yield());
+		*(uint64_t *)(key.end() - sizeof(uint64_t)) = bigEndian64(c);
+		KeyValueRef kv(key, source.getValue(valueSize));
+		kvs->set(kv);
+		kvBytes += kv.expectedSize();
+		++records;
+
+		if(kvBytes >= commitTarget) {
+			wait(commit);
+			stats();
+			commit = kvs->commit();
+			kvBytesTotal += kvBytes;
+			if(kvBytesTotal >= kvBytesTarget) {
+				break;
+			}
+			kvBytes = 0;
+		}
+		++c;
+	}
+
+	wait(commit);
+	stats();
+	printf("\n");
+
+	return Void();
+}
+
 Future<Void> closeKVS(IKeyValueStore *kvs) {
 	Future<Void> closed = kvs->onClosed();
 	kvs->close();
@@ -6573,6 +6635,21 @@ TEST_CASE("!/redwood/performance/prefixSizeComparison") {
 	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{16, 100000}})));
 	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{32, 100000}})));
 	wait(doPrefixInsertComparison(suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({{4, 5}, {12, 1000}, {8, 5}, {8, 4}})));
+
+	return Void();
+}
+
+TEST_CASE("!/redwood/performance/sequentialInsert") {
+	state int prefixLen = 30;
+	state int valueSize = 100;
+	state int recordCountTarget = 100e6;
+
+	deleteFile("test.redwood");
+	wait(delay(5));
+	state IKeyValueStore *redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
+	wait(closeKVS(redwood));
+	printf("\n");
 
 	return Void();
 }
