@@ -34,6 +34,9 @@
 #include <cstdint>
 #include <cstdarg>
 
+//#define SevFRMutationInfo SevVerbose
+#define SevFRMutationInfo SevInfo
+
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);

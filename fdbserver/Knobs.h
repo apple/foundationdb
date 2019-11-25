@@ -70,7 +70,8 @@ public:
 	int PARALLEL_GET_MORE_REQUESTS;
 	int MULTI_CURSOR_PRE_FETCH_LIMIT;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
-	int64_t VERSIONS_PER_BATCH;
+	int DESIRED_OUTSTANDING_MESSAGES;
+	double DESIRED_GET_MORE_DELAY;
 	int CONCURRENT_LOG_ROUTER_READS;
 	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
@@ -83,6 +84,7 @@ public:
 	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
 	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
+	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
 
 	// Data distribution queue

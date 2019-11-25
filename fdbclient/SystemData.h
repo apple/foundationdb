@@ -49,6 +49,13 @@ const Value keyServersValue(
 void decodeKeyServersValue( const ValueRef& value,
 	vector<UID>& src, vector<UID>& dest  );
 
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+extern const KeyRangeRef storageCacheKeys;
+extern const KeyRef storageCachePrefix;
+const Key storageCacheKey( const KeyRef& k );
+const Value storageCacheValue( const vector<uint16_t>& serverIndices );
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices );
+
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysFalse;
@@ -56,6 +63,19 @@ const Key serverKeysKey( UID serverID, const KeyRef& keys );
 const Key serverKeysPrefixFor( UID serverID );
 UID serverKeysDecodeServer( const KeyRef& key );
 bool serverHasKey( ValueRef storedValue );
+
+extern const KeyRef cacheKeysPrefix;
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key );
+const Key cacheKeysPrefixFor( uint16_t idx );
+uint16_t cacheKeysDecodeIndex( const KeyRef& key );
+KeyRef cacheKeysDecodeKey( const KeyRef& key );
+
+extern const KeyRef cacheChangeKey;
+extern const KeyRangeRef cacheChangeKeys;
+extern const KeyRef cacheChangePrefix;
+const Key cacheChangeKeyFor( uint16_t idx );
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
 
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
@@ -298,6 +318,7 @@ extern const KeyRangeRef restoreApplierKeys;
 extern const KeyRef restoreApplierTxnValue;
 
 const Key restoreApplierKeyFor(UID const& applierID, Version version);
+std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key);
 const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);

@@ -30,10 +30,10 @@
 class IStoreCursor {
 public:
 	virtual Future<Void> findEqual(KeyRef key) = 0;
-	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) = 0;
-	virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) = 0;
-	virtual Future<Void> next(bool needValue) = 0;
-	virtual Future<Void> prev(bool needValue) = 0;
+	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, int prefetchBytes = 0) = 0;
+	virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchBytes = 0) = 0;
+	virtual Future<Void> next() = 0;
+	virtual Future<Void> prev() = 0;
 
 	virtual bool isValid() = 0;
 	virtual KeyRef getKey() = 0;
@@ -41,8 +41,6 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
-
-	virtual std::string toString() const = 0;
 };
 
 class IVersionedStore : public IClosable {

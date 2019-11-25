@@ -75,25 +75,6 @@ inline bool canReplyWith(Error e) {
 	};
 }
 
-struct StorageServer;
-class ValueOrClearToRef {
-public:
-	static ValueOrClearToRef value(ValueRef const& v) { return ValueOrClearToRef(v, false); }
-	static ValueOrClearToRef clearTo(KeyRef const& k) { return ValueOrClearToRef(k, true); }
-
-	bool isValue() const { return !isClear; };
-	bool isClearTo() const { return isClear; }
-
-	ValueRef const& getValue() const { ASSERT( isValue() ); return item; };
-	KeyRef const&  getEndKey() const { ASSERT(isClearTo()); return item; };
-
-private:
-	ValueOrClearToRef( StringRef item, bool isClear ) : item(item), isClear(isClear) {}
-
-	StringRef item;
-	bool isClear;
-};
-
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient;			// holds FetchKeys() actor
@@ -389,6 +370,8 @@ public:
 
 	KeyRangeMap< Reference<ShardInfo> > shards;
 	uint64_t shardChangeCounter;      // max( shards->changecounter )
+
+	KeyRangeMap <bool> cachedRangeMap; // indicates if a key-range is being cached
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -1085,7 +1068,6 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 	ASSERT( output.size() <= originalLimit );
 }
 
-// readRange reads up to |limit| rows from the given range and version, combining data->storage and data->versionedData.
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
 ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version, KeyRange range, int limit, int* pLimitBytes ) {
@@ -1102,6 +1084,12 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	//state int originalLimit = limit;
 	//state int originalLimitBytes = *pLimitBytes;
 	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
+
+	// Check if the desired key-range intersects the cached key-ranges
+	// TODO Find a more efficient way to do it
+	// TODO Also need this check in single key/value lookup
+	auto cached = data->cachedRangeMap.intersectingRanges(range);
+	result.cached = (cached.begin() != cached.end());
 
 	// FIXME: Review pLimitBytes behavior
 	// if (limit >= 0) we are reading forward, else backward
@@ -1279,10 +1267,10 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	return result;
 }
 
-bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
+//bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
 	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
-	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
-}
+//	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
+//}
 
 ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version version, KeyRange range, int* pOffset)
 // Attempts to find the key indicated by sel in the data at version, within range.
@@ -1774,11 +1762,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	return true;
 }
 
-bool isClearContaining( StorageServer::VersionedData::ViewAtVersion const& view, KeyRef key ) {
-	auto i = view.lastLessOrEqual(key);
-	return i && i->isClearTo() && i->getEndKey() > key;
-}
-
 void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, StorageServer::VersionedData &data ) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
@@ -1808,7 +1791,7 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase( m.param1, m.param2 );
 		ASSERT( m.param2 > m.param1 );
-		ASSERT( !isClearContaining( data.atLatest(), m.param1 ) );
+		ASSERT( !data.isClearContaining( data.atLatest(), m.param1 ) );
 		data.insert( m.param1, ValueOrClearToRef::clearTo(m.param2) );
 		self->watches.triggerRange( m.param1, m.param2 );
 	}
@@ -2463,6 +2446,8 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 			printf("  eager: %s\n", printable( eagerReads->getKeyEnd( mutation.param2 ) ).c_str() );
 	}
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
+	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
+	//mutableData().printTree(version);
 }
 
 struct OrderByVersion {
@@ -2492,8 +2477,8 @@ static const KeyRef persistPrimaryLocality = LiteralStringRef( PERSIST_PREFIX "P
 
 class StorageUpdater {
 public:
-	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false) {}
-	StorageUpdater(Version fromVersion, Version restoredVersion) : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
+	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false), processedCacheStartKey(false) {}
+	StorageUpdater(Version fromVersion, Version restoredVersion) : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
@@ -2505,8 +2490,12 @@ public:
 		}
 
 		if (m.param1.startsWith( systemKeys.end )) {
-			//TraceEvent("PrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
-			applyPrivateData( data, m );
+			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
+				applyPrivateCacheData( data, m);
+			else {
+				//TraceEvent("PrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
+				applyPrivateData( data, m );
+			}
 		} else {
 			// FIXME: enable when debugMutation is active
 			//for(auto m = changes[c].mutations.begin(); m; ++m) {
@@ -2527,6 +2516,9 @@ private:
 	KeyRef startKey;
 	bool nowAssigned;
 	bool processedStartKey;
+
+	KeyRef cacheStartKey;
+	bool processedCacheStartKey;
 
 	void applyPrivateData( StorageServer* data, MutationRef const& m ) {
 		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m.toString());
@@ -2584,6 +2576,37 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog( data->data().getLatestVersion() );
 			data->addMutationToMutationLog( mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2) );
+		} else {
+			ASSERT(false);  // Unknown private mutation
+		}
+	}
+
+	void applyPrivateCacheData( StorageServer* data, MutationRef const& m ) {
+		TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+
+		if (processedCacheStartKey) {
+			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
+			ASSERT((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix));
+			KeyRangeRef keys( cacheStartKey.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ),
+							  m.param1.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ));
+			data->cachedRangeMap.insert(keys, true);
+			//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
+			//fprintf(stderr, "applyPrivateCacheData : begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());
+
+			//Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
+			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
+			if (0) {
+			auto cachedRanges = data->shards.intersectingRanges(keys);
+			for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
+				KeyRangeRef intersectingRange = shard.range() & keys;
+				data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
+			}
+			}
+			processedStartKey = false;
+		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
+			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
+			cacheStartKey = m.param1;
+			processedCacheStartKey = true;
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}

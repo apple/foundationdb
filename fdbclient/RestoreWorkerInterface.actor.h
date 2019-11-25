@@ -47,8 +47,8 @@ struct RestoreRecruitRoleRequest;
 struct RestoreSysInfoRequest;
 struct RestoreLoadFileRequest;
 struct RestoreVersionBatchRequest;
+struct RestoreSendMutationsToAppliersRequest;
 struct RestoreSendMutationVectorVersionedRequest;
-struct RestoreSetApplierKeyRangeVectorRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 
@@ -125,10 +125,10 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
-	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 	RequestStream<RestoreLoadFileRequest> loadFile;
+	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
-	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces; // TODO: Change to collectRestoreRoleInterfaces
+	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreVersionBatchRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
@@ -144,8 +144,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	void initEndpoints() {
 		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		updateRestoreSysInfo.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		setApplierKeyRangeVectorRequest.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
@@ -153,8 +153,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, setApplierKeyRangeVectorRequest,
-		           loadFile, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
+		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 
@@ -342,6 +342,31 @@ struct RestoreLoadFileRequest : TimedRequest {
 	}
 };
 
+struct RestoreSendMutationsToAppliersRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 68827305;
+
+	std::map<Key, UID> rangeToApplier;
+	bool useRangeFile; // Send mutations parsed from range file?
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSendMutationsToAppliersRequest() = default;
+	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeToApplier, useRangeFile, reply);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
+		   << " useRangeFile:" << useRangeFile;
+		return ss.str();
+	}
+};
+
 struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
@@ -360,7 +385,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "fileIndex" << fileIndex << "prevVersion:" << prevVersion << " version:" << version
+		ss << "fileIndex:" << fileIndex << " prevVersion:" << prevVersion << " version:" << version
 		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
@@ -389,29 +414,6 @@ struct RestoreVersionBatchRequest : TimedRequest {
 	std::string toString() {
 		std::stringstream ss;
 		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
-		return ss.str();
-	}
-};
-
-struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 92038306;
-
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSetApplierKeyRangeVectorRequest() = default;
-	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> rangeToApplier)
-	  : rangeToApplier(rangeToApplier) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, reply);
-	}
-
-	std::string toString() {
-		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest rangeToApplierSize:" << rangeToApplier.size();
 		return ss.str();
 	}
 };

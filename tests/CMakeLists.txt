@@ -140,6 +140,8 @@ add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.txt)
 add_fdb_test(TEST_FILES rare/RYWDisable.txt)
 add_fdb_test(TEST_FILES rare/RandomReadWriteTest.txt)
 add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.txt)
+add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.txt)
+
 add_fdb_test(
   TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
              restarting/from_7.0.0/ConfigureTestRestart-2.txt)
@@ -163,10 +165,10 @@ add_fdb_test(
              restarting/from_6.2.0/SnapCycleRestart-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
-             restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
+             restarting/from_5.1.7/DrUpgradeRestart-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
-             restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt IGNORE)
+             restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectness.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.txt)
@@ -199,6 +201,7 @@ add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
 add_fdb_test(TEST_FILES slow/ddbalance.txt)
 add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOpTinyData.txt)
+add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessCycle.txt)
 # Note that status tests are not deterministic.
 add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
 add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
@@ -215,3 +218,4 @@ add_fdb_test(TEST_FILES status/single_process_too_many_config_params.txt)
 
 
 verify_testing()
+create_test_package()

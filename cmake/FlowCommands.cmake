@@ -136,7 +136,6 @@ function(strip_debug_symbols target)
     add_custom_command(OUTPUT "${out_file}.debug"
       COMMAND objcopy --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug" &&
       objcopy --add-gnu-debuglink="${out_file}.debug" ${out_file}
-      DEPENDS "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
     list(APPEND out_files "${out_file}.debug")
   endif()
