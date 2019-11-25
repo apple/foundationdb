@@ -169,7 +169,7 @@ static std::string describe( const int item ) {
 }
 
 // Allows describeList to work on a vector of std::string
-static std::string describe(const std::string s) {
+static std::string describe(const std::string& s) {
 	return s;
 }
 
