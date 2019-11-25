@@ -54,7 +54,7 @@ struct VersionBatch {
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
+	std::map<Key, UID> rangeToApplier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex;
@@ -68,7 +68,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-		batchIndex = 0;
+		batchIndex = 1; // starts with 1 because batchId (NotifiedVersion) in loaders and appliers start with 0
 	}
 
 	~RestoreMasterData() = default;
@@ -128,15 +128,23 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		// Assumption: fileIndex starts at 1. Each loader's initized fileIndex (NotifiedVersion type) starts at 0
 		int fileIndex = 0; // fileIndex must be unique; ideally it continuously increase across verstionBatches for
 		                   // easier progress tracking
+		int versionBatchId = 1;
 		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
 			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
 			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
 			for (auto& logFile : versionBatch->second.logFiles) {
 				logFile.fileIndex = ++fileIndex;
+				TraceEvent("FastRestore")
+				    .detail("VersionBatchId", versionBatchId)
+				    .detail("LogFile", logFile.toString());
 			}
 			for (auto& rangeFile : versionBatch->second.rangeFiles) {
 				rangeFile.fileIndex = ++fileIndex;
+				TraceEvent("FastRestore")
+				    .detail("VersionBatchId", versionBatchId)
+				    .detail("RangeFile", rangeFile.toString());
 			}
+			versionBatchId++;
 		}
 
 		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());

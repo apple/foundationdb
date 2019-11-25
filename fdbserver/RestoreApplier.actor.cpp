@@ -65,11 +65,12 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					actors.add(handleInitVersionBatchRequest(req, self));
+					wait(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
-					exitRole = handleFinishRestoreRequest(req, self);
+					handleFinishRestoreRequest(req, self);
+					exitRole = Void();
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
@@ -115,12 +116,14 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 		state int mIndex = 0;
 		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			// TraceEvent(SevDebug, "FastRestore")
-			//     .detail("ApplierNode", self->id())
-			//     .detail("FileUID", req.fileUID)
-			//     .detail("Version", commitVersion)
-			//     .detail("MutationReceived", mutation.toString());
+			TraceEvent(SevDebug, "FastRestore")
+			    .detail("ApplierNode", self->id())
+			    .detail("FileUID", req.fileIndex)
+			    .detail("Version", commitVersion)
+			    .detail("Index", mIndex)
+			    .detail("MutationReceived", mutation.toString());
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
+			// TODO: What if log file's mutations are delivered out-of-order (behind) the range file's mutations?!
 		}
 		curFilePos.set(req.version);
 	}
@@ -218,9 +221,8 @@ struct DBApplyProgress {
 	}
 
 	bool shouldCommit() {
-		// TODO: Change transactionSize > 0 to transactionSize > opConfig.transactionBatchSizeThreshold to batch
-		// mutations in a txn
-		return (!lastTxnHasError && (startNextVersion || transactionSize > 0 || curItInCurTxn == self->kvOps.end()));
+		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold ||
+		                             curItInCurTxn == self->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -270,6 +272,29 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	}
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	// Sanity check the restoreApplierKeys, which should be empty at this point
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key begin = restoreApplierKeyFor(self->id(), 0);
+			Key end = restoreApplierKeyFor(self->id(), std::numeric_limits<int64_t>::max());
+			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
+			if (txnIds.size() > 0) {
+				TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
+				for (auto& kv : txnIds) {
+					std::pair<UID, Version> applierInfo = decodeRestoreApplierKey(kv.key);
+					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
+					    .detail("Applier", applierInfo.first)
+					    .detail("ResidueTxnID", applierInfo.second);
+				}
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 
 	loop { // Transaction retry loop
 		try {
@@ -299,7 +324,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				TraceEvent("FastRestore_ApplierTxn")
 				    .detail("ApplierApplyToDB", self->id())
 				    .detail("TxnId", progress.curTxnId)
-				    .detail("StartIndexInCurrentTxn", progress.curIndexInCurTxn)
+				    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 				    .detail("CurrentIteratorMutations", progress.curItInCurTxn->second.size())
 				    .detail("Version", progress.curItInCurTxn->first);
 
@@ -315,7 +340,13 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					// TraceEvent(SevDebug, "FastRestore_Debug").detail("ApplierApplyToDB", self->describeNode()).detail("Version", progress.curItInCurTxn->first).detail("Mutation", m.toString());
+					TraceEvent(SevDebug, "FastRestore_Debug")
+					    .detail("ApplierApplyToDB", self->describeNode())
+					    .detail("Version", progress.curItInCurTxn->first)
+					    .detail("Index", progress.curIndexInCurTxn)
+					    .detail("Mutation", m.toString())
+					    .detail("MutationSize", m.expectedSize())
+					    .detail("TxnSize", progress.transactionSize);
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
@@ -332,14 +363,10 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 					progress.transactionSize += m.expectedSize();
 
-					if (progress.transactionSize >= opConfig.transactionBatchSizeThreshold) { // commit per 512B
+					progress.nextMutation(); // Prepare for the next mutation
+					// commit per transactionBatchSizeThreshold bytes; and commit does not cross version boundary
+					if (progress.shouldCommit()) {
 						break; // Got enough mutation in the txn
-					} else {
-						progress.nextMutation();
-						// Mutations in the same transaction come from the same version
-						if (progress.startNextVersion || progress.isDone()) {
-							break;
-						}
 					}
 				}
 			} // !lastTxnHasError
@@ -348,8 +375,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			if (progress.shouldCommit()) {
 				wait(tr->commit());
 			}
-			// Logic for a successful transaction: Update current txn info and uncommitted txn info
-			progress.nextMutation();
+
 			if (progress.isDone()) { // Are all mutations processed?
 				break;
 			}
@@ -359,7 +385,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			    .detail("TxnStatus", "?")
 			    .detail("ApplierApplyToDB", self->id())
 			    .detail("TxnId", progress.curTxnId)
-			    .detail("StartIndexInCurrentTxn", progress.curIndexInCurTxn)
+			    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 			    .detail("Version", progress.curItInCurTxn->first)
 			    .error(e, true);
 			progress.lastTxnHasError = true;
@@ -381,8 +407,9 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// Clear txnIds in [0, progress.curTxnId). We add 100 to curTxnId just to be safe.
 			tr->clear(KeyRangeRef(restoreApplierKeyFor(self->id(), 0),
-			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 1)));
+			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 100)));
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {

@@ -427,7 +427,7 @@ struct MakoWorkload : TestWorkload {
 	ACTOR template<class T>
 	static Future<Void> logLatency(Future<T> f,  ContinuousSample<double>* opLatencies){
 		state double opBegin = now();
-		T value = wait(f);
+		wait(success(f));
 		opLatencies->addSample(now() - opBegin);
 		return Void();
 	}

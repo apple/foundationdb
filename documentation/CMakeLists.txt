@@ -1,3 +1,4 @@
+add_subdirectory(tutorial)
 # build a virtualenv
 set(sphinx_dir ${CMAKE_CURRENT_SOURCE_DIR}/sphinx)
 set(venv_dir ${CMAKE_CURRENT_BINARY_DIR}/venv)

@@ -45,14 +45,15 @@ inline static bool TRACE_SAMPLE() { return false; }
 extern thread_local int g_trace_depth;
 
 enum Severity {
-	SevSample=1,
-	SevDebug=5,
-	SevInfo=10,
-	SevWarn=20,
-	SevWarnAlways=30,
-	SevError=40,
-	SevMaxUsed=SevError,
-	SevMax=1000000
+	SevVerbose = 0,
+	SevSample = 1,
+	SevDebug = 5,
+	SevInfo = 10,
+	SevWarn = 20,
+	SevWarnAlways = 30,
+	SevError = 40,
+	SevMaxUsed = SevError,
+	SevMax = 1000000
 };
 
 class TraceEventFields {

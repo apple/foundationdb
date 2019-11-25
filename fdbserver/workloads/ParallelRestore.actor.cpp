@@ -23,7 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
@@ -45,7 +45,7 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		for (int i = 0; i < num_myWorkers; ++i) {
 			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
 		}
-		printf("RunParallelRestoreWorkerWorkload, wait on reply from %d restore workers\n", myWorkers.size());
+		printf("RunParallelRestoreWorkerWorkload, wait on reply from %ld restore workers\n", myWorkers.size());
 		worker = waitForAll(myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, got all replies from restore workers\n");
 		return Void();

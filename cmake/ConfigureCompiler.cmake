@@ -217,7 +217,13 @@ else()
   else()
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas)
+
+    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
+    add_compile_options(-Wno-attributes)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated
@@ -235,8 +241,13 @@ else()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
+  check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
+  message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if(SUPPORT_DTRACE)
     add_compile_definitions(DTRACE_PROBES)
+  endif()
+  if(HAS_ALIGNED_ALLOC)
+    add_compile_definitions(HAS_ALIGNED_ALLOC)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

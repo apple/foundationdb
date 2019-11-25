@@ -1,5 +1,5 @@
 /*
- * Restore.actor.cpp
+ * RestoreWorker.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -98,8 +98,9 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
-		DUMPTOKEN(recruited.setApplierKeyRangeVectorRequest);
 		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.loadFile);
+		DUMPTOKEN(recruited.sendMutations);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
@@ -183,7 +184,7 @@ void initRestoreWorkerConfig() {
 	opConfig.num_loaders = g_network->isSimulated() ? 3 : opConfig.num_loaders;
 	opConfig.num_appliers = g_network->isSimulated() ? 3 : opConfig.num_appliers;
 	opConfig.transactionBatchSizeThreshold =
-	    g_network->isSimulated() ? 1 : opConfig.transactionBatchSizeThreshold; // Byte
+	    g_network->isSimulated() ? 512 : opConfig.transactionBatchSizeThreshold; // Byte
 	TraceEvent("FastRestore")
 	    .detail("InitOpConfig", "Result")
 	    .detail("NumLoaders", opConfig.num_loaders)

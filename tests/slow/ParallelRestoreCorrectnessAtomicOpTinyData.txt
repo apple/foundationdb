@@ -1,13 +1,18 @@
 testTitle=BackupAndParallelRestoreWithAtomicOp
     testName=AtomicOps
     nodeCount=30000
-;    transactionsPerSecond=2500.0
+; Make ops space only 1 key per group
+;    nodeCount=100
+    transactionsPerSecond=2500.0
 ;    transactionsPerSecond=500.0
-    transactionsPerSecond=100.0
+;    transactionsPerSecond=100.0
 ;    nodeCount=4
 ;    transactionsPerSecond=250.0
     testDuration=30.0
     clearAfterTest=false
+; Specify a type of atomicOp
+;	opType=0
+;	actorsPerClient=1
 
 ; AtomicBackupCorrectness.txt does not mix Cycle and AtomicOps workloads
 ;    testName=Cycle

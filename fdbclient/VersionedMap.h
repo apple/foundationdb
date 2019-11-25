@@ -414,16 +414,19 @@ namespace PTreeImpl {
 		if (p->left(at)) printTree(p->left(at), at, depth+1);
 		for (int i=0;i<depth;i++)
 			printf("  ");
-		printf(":%s\n", describe(p->data).c_str());
+		//printf(":%s\n", describe(p->data.value.first).c_str());
+		printf(":%s\n", describe(p->data.key).c_str());
 		if (p->right(at)) printTree(p->right(at), at, depth+1);
 	}
 
 	template <class T>
 	void printTreeDetails(const Reference<PTree<T>>& p, int depth = 0) {
-		printf("Node %p (depth %d): %s\n", p.getPtr(), depth, describe(p->data).c_str());
+		//printf("Node %p (depth %d): %s\n", p.getPtr(), depth, describe(p->data.value.first).c_str());
+		printf("Node %p (depth %d): %s\n", p.getPtr(), depth, describe(p->data.key).c_str());
 		printf("  Left: %p\n", p->pointer[0].getPtr());
 		printf("  Right: %p\n", p->pointer[1].getPtr());
-		if (p->pointer[2])
+		//if (p->pointer[2])
+		if (p->updated)
 			printf("  Version %lld %s: %p\n", p->lastUpdateVersion, p->replacedPointer ? "Right" : "Left", p->pointer[2].getPtr());
 		for(int i=0; i<3; i++)
 			if (p->pointer[i]) printTreeDetails(p->pointer[i], depth+1);
@@ -462,7 +465,46 @@ namespace PTreeImpl {
 		}
 	}
 
+	//Remove pointers to any child nodes that have been updated at or before the given version
+	//This essentially gets rid of node versions that will never be read (beyond 5s worth of versions)
+	//TODO look into making this per-version compaction. (We could keep track of updated nodes at each version for example)
+	template <class T>
+	void compact(Reference<PTree<T>>& p, Version newOldestVersion){
+		if (!p) {
+			return;
+		}
+		if (p->updated && p->lastUpdateVersion <= newOldestVersion) {
+			/* If the node has been updated, figure out which pointer was repalced. And delete that pointer */
+			auto which = p->replacedPointer;
+			p->pointer[which] = p->pointer[2];
+			p->updated = false;
+			p->pointer[2] = Reference<PTree<T>>();
+			//p->pointer[which] = Reference<PTree<T>>();
+		}
+		Reference<PTree<T>> left = p->left(newOldestVersion);
+		Reference<PTree<T>> right = p->right(newOldestVersion);
+		compact(left, newOldestVersion);
+		compact(right, newOldestVersion);
+	}
+
 }
+
+class ValueOrClearToRef {
+public:
+	static ValueOrClearToRef value(ValueRef const& v) { return ValueOrClearToRef(v, false); }
+	static ValueOrClearToRef clearTo(KeyRef const& k) { return ValueOrClearToRef(k, true); }
+
+	bool isValue() const { return !isClear; };
+	bool isClearTo() const { return isClear; }
+
+	ValueRef const& getValue() const { ASSERT( isValue() ); return item; };
+	KeyRef const&  getEndKey() const { ASSERT(isClearTo()); return item; };
+
+private:
+	ValueOrClearToRef( StringRef item, bool isClear ) : item(item), isClear(isClear) {}
+	StringRef item;
+	bool isClear;
+};
 
 // VersionedMap provides an interface to a partially persistent tree, allowing you to read the values at a particular version,
 // create new versions, modify the current version of the tree, and forget versions prior to a specific version.
@@ -597,6 +639,26 @@ public:
 		erase(key);
 	}
 
+	void printDetail() {
+		PTreeImpl::printTreeDetails(roots.back().second, 0);
+	}
+
+	void printTree(Version at) {
+		PTreeImpl::printTree(roots.back().second, at, 0);
+	}
+
+	void compact(Version newOldestVersion) {
+		ASSERT( newOldestVersion <= latestVersion );
+		//auto newBegin = roots.lower_bound(newOldestVersion);
+		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
+		for(auto root = roots.begin(); root != newBegin; ++root) {
+			if(root->second)
+				PTreeImpl::compact(root->second, newOldestVersion);
+		}
+		//printf("\nPrinting the tree at latest version after compaction.\n");
+		//PTreeImpl::printTreeDetails(roots.back().second(), 0);
+	}
+
 	// for(auto i = vm.at(version).lower_bound(range.begin); i < range.end; ++i)
 	struct iterator{
 		explicit iterator(Tree const& root, Version at) : root(root), at(at) {}
@@ -685,6 +747,11 @@ public:
 
 	ViewAtVersion at( Version v ) const { return ViewAtVersion(getRoot(v), v); }
 	ViewAtVersion atLatest() const { return ViewAtVersion(roots.back().second, latestVersion); }
+
+	bool isClearContaining( ViewAtVersion const& view, KeyRef key ) {
+		auto i = view.lastLessOrEqual(key);
+		return i && i->isClearTo() && i->getEndKey() > key;
+	}
 
 	// TODO: getHistory?
 

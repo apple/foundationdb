@@ -93,7 +93,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {
@@ -105,15 +105,16 @@ struct struct_like_traits<Tag> : std::true_type {
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+static const Tag cacheTag {tagLocalitySpecial, 2};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
-	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
 	// its begining position to allow the caller to rewind if needed.
@@ -123,15 +124,11 @@ struct TagsAndMessage {
 		int32_t messageLength;
 		uint16_t tagCount;
 		uint32_t sub;
-		tags.clear();
 
 		rd->checkpoint();
 		*rd >> messageLength >> sub >> tagCount;
 		if (messageVersionSub) *messageVersionSub = sub;
-		tags.resize(tagCount);
-		for (int i = 0; i < tagCount; i++) {
-			*rd >> tags[i];
-		}
+		tags = VectorRef<Tag>((Tag*)rd->readBytes(tagCount*sizeof(Tag)), tagCount);
 		const int32_t rawLength = messageLength + sizeof(messageLength);
 		rd->rewind();
 		rd->checkpoint();
@@ -552,6 +549,10 @@ inline KeySelectorRef operator + (const KeySelectorRef& s, int off) {
 }
 inline KeySelectorRef operator - (const KeySelectorRef& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset-off);
+}
+inline bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
+	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
+	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
 
 template <class Val>

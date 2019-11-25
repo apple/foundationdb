@@ -267,7 +267,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	ACTOR Future<Void> singleDB( ConfigureDatabaseWorkload *self, Database cx ) {
 		state Transaction tr;
-		state int i;
 		loop {
 			if(g_simulator.speedUpSimulation) {
 				return Void();

@@ -49,7 +49,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
@@ -86,6 +87,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "storage_cache",
                         "router",
                         "coordinator"
                      ]

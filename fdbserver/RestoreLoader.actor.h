@@ -34,7 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -44,6 +44,7 @@
 
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
+	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
 	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
@@ -79,6 +80,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		keyOpsCount.clear();
 		numSampledMutations = 0;
 		processedFileParams.clear();
+		kvOpsPerLP.clear();
 	}
 
 	// Only get the appliers that are responsible for a range

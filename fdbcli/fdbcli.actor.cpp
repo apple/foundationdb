@@ -54,7 +54,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 std::vector<std::string> validOptions;
 
@@ -563,7 +563,7 @@ void initHelp() {
 
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
@@ -2632,7 +2632,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
 			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
+			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
@@ -3511,7 +3511,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Data distribution is turned off.\n");
 						} else if (tokencmp(tokens[1], "disable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
+								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
 								printf("Data distribution is disabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
@@ -3523,7 +3523,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						} else if (tokencmp(tokens[1], "enable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(clearHealthyZone(db, false, true)));
+								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
 								printf("Data distribution is enabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));

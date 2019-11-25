@@ -24,8 +24,6 @@ set(FDBSERVER_SRCS
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
-  IndirectShadowPager.actor.cpp
-  IndirectShadowPager.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
@@ -45,8 +43,6 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
-  MemoryPager.actor.cpp
-  MemoryPager.h
   MoveKeys.actor.cpp
   MoveKeys.actor.h
   networktest.actor.cpp
@@ -76,7 +72,6 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.cpp
   RestoreWorker.actor.h
   RestoreWorker.actor.cpp
-  RestoreWorkerInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h
@@ -85,6 +80,7 @@ set(FDBSERVER_SRCS
   SkipList.cpp
   Status.actor.cpp
   Status.h
+  StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp

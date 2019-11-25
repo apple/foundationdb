@@ -44,6 +44,8 @@ ifeq ($(PLATFORM),Linux)
 
   ifneq '' '$(findstring clang++,$(CXX))'
     CXXFLAGS += -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-unused-command-line-argument -Wno-register -Wno-logical-op-parentheses
+  else
+    CXXFLAGS += -Wno-attributes
   endif
 
   CXXFLAGS += -std=c++17

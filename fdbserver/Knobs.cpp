@@ -67,7 +67,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
 	init( MULTI_CURSOR_PRE_FETCH_LIMIT,                           10 );
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
-	init( VERSIONS_PER_BATCH,                 VERSIONS_PER_SECOND/20 ); if( randomize && BUGGIFY ) VERSIONS_PER_BATCH = std::max<int64_t>(1,VERSIONS_PER_SECOND/1000);
+	init( DESIRED_OUTSTANDING_MESSAGES,                         5000 ); if( randomize && BUGGIFY ) DESIRED_OUTSTANDING_MESSAGES = deterministicRandom()->randomInt(0,100);
+	init( DESIRED_GET_MORE_DELAY,                              0.005 );
 	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
 	init( LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED,               1 ); if( randomize && BUGGIFY ) LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED = 0;
 	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
@@ -80,6 +81,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DISK_QUEUE_MAX_TRUNCATE_BYTES,                       2<<30 ); if ( randomize && BUGGIFY ) DISK_QUEUE_MAX_TRUNCATE_BYTES = 0;
 	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
 	init( TLOG_DEGRADED_DURATION,                                5.0 );
+	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 	init( TXS_POPPED_MAX_DELAY,                                  1.0 ); if ( randomize && BUGGIFY ) TXS_POPPED_MAX_DELAY = deterministicRandom()->random01();
 
@@ -130,8 +132,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
 	bool buggifySmallReadBandwidth = randomize && BUGGIFY;
-	init( SHARD_MAX_BYTES_READ_PER_KSEC,            100LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
-	/* 100*1MB/sec * 1000sec/ksec
+	init( SHARD_MAX_BYTES_READ_PER_KSEC,            8LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
+	/* 8*1MB/sec * 1000sec/ksec
 		Shards with more than this read bandwidth will be considered as a read cache candidate
 	*/
 	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
@@ -327,6 +329,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( ENFORCED_MIN_RECOVERY_DURATION,                       0.085 ); if( shortRecoveryDuration ) ENFORCED_MIN_RECOVERY_DURATION = 0.01;
 	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 	init( ALWAYS_CAUSAL_READ_RISKY,                             false );
+	init( MAX_COMMIT_UPDATES,                                  100000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -456,7 +459,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SPLIT_JITTER_AMOUNT,                                  0.05 ); if( randomize && BUGGIFY ) SPLIT_JITTER_AMOUNT = 0.2;
 	init( IOPS_UNITS_PER_SAMPLE,                                10000 * 1000 / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 100 );
 	init( BANDWIDTH_UNITS_PER_SAMPLE,                           SHARD_MIN_BYTES_PER_KSEC / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 25 );
-	init( BYTES_READ_UNITS_PER_SAMPLE,                           100); // Effectively weight up read on small or non-existing key/values.
+	init( BYTES_READ_UNITS_PER_SAMPLE,                          100000 ); // 100K bytes
+	init( EMPTY_READ_PENALTY,                                    20 ); // 20 bytes
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
