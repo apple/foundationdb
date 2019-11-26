@@ -54,7 +54,7 @@ struct VersionBatch {
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
+	std::map<Key, UID> rangeToApplier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex;

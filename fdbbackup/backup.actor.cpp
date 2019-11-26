@@ -826,7 +826,7 @@ const KeyRef exeFastRestoreAgent = LiteralStringRef("fastrestore_agent"); // mus
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 #ifdef _WIN32
 void parentWatcher(void *parentHandle) {
@@ -842,7 +842,7 @@ void parentWatcher(void *parentHandle) {
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %llx\n", (long long) currentProtocolVersion.version());
 }
 
@@ -3459,7 +3459,7 @@ int main(int argc, char* argv[]) {
 
 		TraceEvent("ProgramStart")
 			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
+			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION )
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))

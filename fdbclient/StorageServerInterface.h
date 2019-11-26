@@ -189,8 +189,9 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
+	bool cached;
 
-	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

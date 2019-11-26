@@ -54,7 +54,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 std::vector<std::string> validOptions;
 
@@ -563,7 +563,7 @@ void initHelp() {
 
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
@@ -2623,7 +2623,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
 			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
+			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
