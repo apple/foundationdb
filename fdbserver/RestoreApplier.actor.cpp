@@ -246,8 +246,8 @@ struct DBApplyProgress {
 };
 
 ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
-	state std::string typeStr = "";
 	// state variables must be defined at the start of actor, otherwise it will not be initialized when the actor is created
+	state std::string typeStr = "";	
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state DBApplyProgress progress(self);
 
