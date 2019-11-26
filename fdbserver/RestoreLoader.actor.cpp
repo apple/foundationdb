@@ -142,9 +142,9 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	state NotifiedVersion processedFileOffset(0);
 	state std::vector<Future<Void>> fileParserFutures;
 
-	state int64_t j;
-	state int64_t readOffset;
-	state int64_t readLen;
+	int64_t j;
+	int64_t readOffset;
+	int64_t readLen;
 	for (j = param.offset; j < param.length; j += param.blockSize) {
 		readOffset = j;
 		readLen = std::min<int64_t>(param.blockSize, param.length - j);
@@ -489,12 +489,12 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
 	Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
-	state Standalone<VectorRef<KeyValueRef>> blockData =
+	Standalone<VectorRef<KeyValueRef>> blockData =
 	    wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
 	TraceEvent("FastRestore").detail("DecodedRangeFile", fileName).detail("DataSize", blockData.contents().size());
 
 	// First and last key are the range for this file
-	state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+	KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
 
 	// If fileRange doesn't intersect restore range then we're done.
 	if (!fileRange.intersects(restoreRange)) {
@@ -519,9 +519,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	}
 
 	// Now data only contains the kv mutation within restoreRange
-	state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
-	state int start = 0;
-	state int end = data.size();
+	VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
+	int start = 0;
+	int end = data.size();
 
 	// Convert KV in data into mutations in kvOps
 	for (int i = start; i < end; ++i) {
@@ -555,7 +555,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
                                                            std::string fileName, int64_t readOffset, int64_t readLen,
                                                            KeyRange restoreRange, Key addPrefix, Key removePrefix,
                                                            Key mutationLogPrefix) {
-	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
+	Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
@@ -569,9 +569,9 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	wait(pProcessedFileOffset->whenAtLeast(readOffset));
 
 	if (pProcessedFileOffset->get() == readOffset) {
-		state int start = 0;
-		state int end = data.size();
-		state int numConcatenated = 0;
+		int start = 0;
+		int end = data.size();
+		int numConcatenated = 0;
 		for (int i = start; i < end; ++i) {
 			// Key k = data[i].key.withPrefix(mutationLogPrefix);
 			// ValueRef v = data[i].value;

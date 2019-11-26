@@ -97,6 +97,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	// Assume: self->processedFileState[req.fileIndex] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curFilePos = self->processedFileState[req.fileIndex];
+	// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+	state Version commitVersion = req.version;
+	state int mIndex = 0;
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
@@ -107,13 +110,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 
 	if (curFilePos.get() == req.prevVersion) {
-		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-		state Version commitVersion = req.version;
+
 		VectorRef<MutationRef> mutations(req.mutations);
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
 		}
-		state int mIndex = 0;
 		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
 			TraceEvent(SevDebug, "FastRestore")
