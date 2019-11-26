@@ -1040,10 +1040,10 @@ struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 		current += sizeof(uint32_t);
 		member.clear();
 		member.resize(length);
-		bool m;
+		uint8_t m;
 		for (uint32_t i = 0; i < length; ++i) {
 			load_helper(m, current, *this);
-			member[i] = m;
+			member[i] = m != 0;
 			current += fb_size<bool>;
 		}
 	}
