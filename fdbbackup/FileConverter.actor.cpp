@@ -357,12 +357,6 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 struct LogFileWriter {
 	LogFileWriter() : blockSize(-1) {}
 	LogFileWriter(Reference<IBackupFile> f, int bsize) : file(f), blockSize(bsize) {}
-	LogFileWriter& operator=(const LogFileWriter& rhs) {
-		file = rhs.file;
-		blockSize = rhs.blockSize;
-		blockEnd = rhs.blockEnd;
-		return *this;
-	}
 
 	// Returns the block key, i.e., `Param1`, in the back file. The format is
 	// `hash_value|commitVersion|part`.
@@ -403,7 +397,7 @@ struct LogFileWriter {
 			self->blockEnd += self->blockSize;
 
 			// write Header
-			wait(self->file->append((uint8_t*)&self->fileVersion, sizeof(self->fileVersion)));
+			wait(self->file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION)));
 		}
 
 		wait(self->file->appendStringRefWithLen(k));
@@ -437,7 +431,6 @@ private:
 	Reference<IBackupFile> file;
 	int blockSize;
 	int64_t blockEnd = 0;
-	const uint32_t fileVersion = 2001;
 };
 
 ACTOR Future<Void> convert(ConvertParams params) {
