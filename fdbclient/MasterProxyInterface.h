@@ -103,8 +103,7 @@ struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
-	Optional<Value> metadataVersion;	
-	// TODO : data structure okay here ?
+	Optional<Value> metadataVersion;
 	Optional<Standalone<VectorRef<KeyRangeRef>>> conflictingKeyRanges;
 
 	template <class Ar>
@@ -120,13 +119,11 @@ struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
-		FLAG_FIRST_IN_BATCH = 0x2,
-		FLAG_REPORT_CONFLICTING_KEYS = 0x4
+		FLAG_FIRST_IN_BATCH = 0x2
 	};
 
 	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
-	bool isReportConflictingKeys()  const { return (flags & FLAG_REPORT_CONFLICTING_KEYS) != 0; }
 	
 	Arena arena;
 	CommitTransactionRef transaction;

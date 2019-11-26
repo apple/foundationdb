@@ -174,9 +174,6 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated."
             defaultFor="23"/>
-    <Option name="transaction_report_conflicting_keys" code="506"
-            description="Report conflicting keys for transactions that are determined as conflicts by resolvers."
-            defaultFor="712"/>
   </Scope>
   
   <Scope name="TransactionOption">

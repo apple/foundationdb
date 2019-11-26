@@ -705,7 +705,9 @@ ACTOR Future<Void> commitBatch(
 	// Determine which transactions actually committed (conservatively) by combining results from the resolvers
 	state vector<uint8_t> committed(trs.size());
 	ASSERT(transactionResolverMap.size() == committed.size());
-	vector<int> nextTr(resolution.size());
+	// For each commitTransactionRef, it is only sent to resolvers specified in transactionResolverMap
+	// Thus, we use this nextTr to track the correct transaction index on each resolver.
+	state vector<int> nextTr(resolution.size());
 	for (int t = 0; t<trs.size(); t++) {
 		uint8_t commit = ConflictBatch::TransactionCommitted;
 		for (int r : transactionResolverMap[t])
@@ -1019,6 +1021,8 @@ ACTOR Future<Void> commitBatch(
 
 	// Send replies to clients
 	double endTime = timer();
+	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
+	std::fill(nextTr.begin(), nextTr.end(), 0);
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
@@ -1029,15 +1033,16 @@ ACTOR Future<Void> commitBatch(
 		}
 		else {
 			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
-			if (trs[t].isReportConflictingKeys()) {
+			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<KeyRangeRef>> conflictingEntries;
 				std::vector<KeyRange> unmergedConflictingKRs;
-				for (int resolverInd = 0; resolverInd < resolution.size(); ++resolverInd){
-					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[t]) {
+				for (int resolverInd : transactionResolverMap[t]) {
+					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
 						unmergedConflictingKRs.emplace_back(kr);
 						// TraceEvent("ConflictingKeyRange").detail("ResolverIndex", resolverInd).detail("TrasactionIndex", t).detail("StartKey", kr.begin.toString()).detail("EndKey", kr.end.toString());
 					}
 				}
+				ASSERT(unmergedConflictingKRs.size());
 				// Sort the keyranges by begin key, then union overlap ranges from left to right
 				std::sort(unmergedConflictingKRs.begin(), unmergedConflictingKRs.end(), [](KeyRange a, KeyRange b){
 					return a.begin < b.begin;
@@ -1056,9 +1061,14 @@ ACTOR Future<Void> commitBatch(
 				}
 				conflictingEntries.push_back_deep(conflictingEntries.arena(), curr);
 				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<KeyRangeRef>>>(conflictingEntries)));
-			} else
+			} else {
 				trs[t].reply.sendError(not_committed());
+			}
 		}
+
+		// Update corresponding transaction index on each resolver
+		for (int resolverInd : transactionResolverMap[t])
+			nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {

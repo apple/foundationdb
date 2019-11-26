@@ -163,7 +163,6 @@ struct CommitTransactionRef {
 	}
 
 	void clear( Arena& arena, KeyRangeRef const& keys ) {
-		// TODO: check do I need to clear flag here
 		mutations.push_back_deep(arena, MutationRef(MutationRef::ClearRange, keys.begin, keys.end));
 		write_conflict_ranges.push_back_deep(arena, keys);
 	}

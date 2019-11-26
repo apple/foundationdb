@@ -2789,8 +2789,6 @@ Future<Void> Transaction::commitMutations() {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
 		if(options.reportConflictingKeys) {
-			// TODO : Is it better to keep it as a flag?
-			tr.flags = tr.flags | CommitTransactionRequest::FLAG_REPORT_CONFLICTING_KEYS;
 			tr.reportConflictingKeys();
 		}
 
