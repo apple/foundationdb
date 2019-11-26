@@ -246,6 +246,9 @@ struct DBApplyProgress {
 
 ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	state std::string typeStr = "";
+	// state variables must be defined at the start of actor, otherwise it will not be initialized when the actor is created
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state DBApplyProgress progress(self);
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
@@ -262,8 +265,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	self->sanityCheckMutationOps();
 
-	state DBApplyProgress progress(self);
-
 	if (progress.isDone()) {
 		TraceEvent("FastRestore_ApplierTxn")
 		    .detail("ApplierApplyToDBFinished", self->id())
@@ -271,7 +272,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		return Void();
 	}
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	// Sanity check the restoreApplierKeys, which should be empty at this point
 	loop {
 		try {
