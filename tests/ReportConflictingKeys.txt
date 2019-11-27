@@ -1,0 +1,11 @@
+testTitle=ReportConflictingKeysTest
+    testName=ReportConflictingKeys
+    testDuration=10.0
+    transactionsPerSecond=100000
+    nodeCount=10000
+    actorsPerClient=16
+    keyPrefix=RCK
+    keyBytes=64
+    readConflictRangeCountPerTx=1
+    writeConflictRangeCountPerTx=1
+    reportConflictingKeys=true
