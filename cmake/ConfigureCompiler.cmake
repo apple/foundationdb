@@ -157,6 +157,7 @@ else()
   if(USE_UBSAN)
     add_compile_options(
       -fsanitize=undefined
+      -fno-sanitize=alignment
       -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=undefined")
