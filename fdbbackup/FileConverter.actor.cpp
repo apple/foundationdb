@@ -67,7 +67,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Version begin, Version end) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.beginVersion <= end && file.endVersion >= begin) {
+		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0) {
 			filtered.push_back(file);
 		}
 	}
