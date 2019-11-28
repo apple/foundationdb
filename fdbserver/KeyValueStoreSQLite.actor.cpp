@@ -435,8 +435,7 @@ Value encodeKVFragment( KeyValueRef kv, uint32_t index) {
 	}
 	// An increment is required if the high bit of the N-byte index value is set, since it is
 	// positive number but SQLite only stores signed values and would interpret it as negative.
-	if(index >> (8 * indexCode - 1))
-		++indexCode;
+	if (indexCode > 0 && index >> (8 * indexCode - 1)) ++indexCode;
 
 	int header_size = sqlite3VarintLen(keyCode) + sizeof(indexCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);
