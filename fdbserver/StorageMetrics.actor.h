@@ -238,6 +238,23 @@ struct StorageServerMetrics {
 		}
 	}
 
+	// Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
+	// around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
+	void notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
+		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+		int64_t bytesReadPerKSecond =
+		    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		if (bytesReadPerKSecond > 0) {
+			StorageMetrics notifyMetrics;
+			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
+			auto& v = waitMetricsMap[key];
+			for (int i = 0; i < v.size(); i++) {
+				TEST(true); // ShardNotifyMetrics
+				v[i].send(notifyMetrics);
+			}
+		}
+	}
+
 	// Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
 	// Should not be called for keys past allKeys.end
 	void notifyBytes( RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::Iterator shard, int64_t bytes ) {
@@ -268,23 +285,6 @@ struct StorageServerMetrics {
 			TEST( v.size() );  // notifyNotReadable() sending errors to intersecting ranges
 			for (int n=0; n<v.size(); n++)
 				v[n].sendError( wrong_shard_server() );
-		}
-	}
-
-	// Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
-	// around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
-	void notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
-		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
-		int64_t bytesReadPerKSecond =
-		    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-		if (bytesReadPerKSecond > 0) {
-			StorageMetrics notifyMetrics;
-			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
-			auto& v = waitMetricsMap[key];
-			for (int i = 0; i < v.size(); i++) {
-				TEST(true); // ShardNotifyMetrics
-				v[i].send(notifyMetrics);
-			}
 		}
 	}
 
