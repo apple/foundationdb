@@ -350,7 +350,7 @@ inline void save( Archive& ar, const Arena& p ) {
 template <class T>
 class Optional : public ComposedIdentifier<T, 0x10> {
 public:
-	Optional() : valid(false) {}
+	Optional() : valid(false) { memset(&value, 0, sizeof(value)); }
 	Optional(const Optional<T>& o) : valid(o.valid) {
 		if (valid) new (&value) T(o.get());
 	}
