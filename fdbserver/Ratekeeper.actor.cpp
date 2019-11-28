@@ -553,10 +553,13 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
 		}
 
-		// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
-		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference/2) / (limits->maxVersionDifference/4);
-		worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
-		limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
+			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			writeToReadLatencyLimit =
+			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
+			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
+			limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		}
 	}
 
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
