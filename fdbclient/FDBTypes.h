@@ -165,6 +165,11 @@ static std::string describe( const int item ) {
 	return format("%d", item);
 }
 
+// Allows describeList to work on a vector of std::string
+static std::string describe(const std::string& s) {
+	return s;
+}
+
 template <class T>
 static std::string describe( Reference<T> const& item ) {
 	return item->toString();
