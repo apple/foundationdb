@@ -54,7 +54,7 @@ ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> se
 ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<RestoreMasterData> self);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
-void dummySampleWorkload(Reference<RestoreMasterData> self);
+void splitKeyRangeForAppliers(Reference<RestoreMasterData> self);
 
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
 	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
@@ -93,7 +93,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 	// Assign a role to each worker
 	state int nodeIndex = 0;
 	state RestoreRole role;
-	std::map<UID, RestoreRecruitRoleRequest> requests;
+	std::vector<std::pair<UID, RestoreRecruitRoleRequest>> requests;
 	for (auto& workerInterf : masterWorker->workerInterfaces) {
 		if (nodeIndex >= 0 && nodeIndex < opConfig.num_appliers) {
 			// [0, numApplier) are appliers
@@ -109,7 +109,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 		    .detail("Role", getRoleStr(role))
 		    .detail("NodeIndex", nodeIndex)
 		    .detail("WorkerNode", workerInterf.first);
-		requests[workerInterf.first] = RestoreRecruitRoleRequest(role, nodeIndex);
+		requests.emplace_back(workerInterf.first, RestoreRecruitRoleRequest(role, nodeIndex));
 		nodeIndex++;
 	}
 
@@ -297,12 +297,21 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		ASSERT_WE_THINK(param.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.prevVersion <= param.endVersion);
 
-		requests.push_back(std::make_pair(loader->first, RestoreLoadFileRequest(param)));
+		requests.emplace_back(loader->first, RestoreLoadFileRequest(param));
 		loader++;
 	}
 
+	state std::vector<RestoreLoadFileReply> replies;
 	// Wait on the batch of load files or log files
-	wait(sendBatchRequests(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests));
+	wait(getBatchReplies(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests, &replies));
+	TraceEvent("FastRestore").detail("SamplingReplies", replies.size());
+	for (auto& reply : replies) {
+		for (int i = 0; i < reply.samples.size(); ++i) {
+			MutationRef mutation = reply.samples[i];
+			self->samples.addMetric(mutation.param1, mutation.totalSize());
+			self->samplesSize += mutation.totalSize();
+		}
+	}
 
 	return Void();
 }
@@ -329,12 +338,12 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(self->loadersInterf.size() > 0);
 	ASSERT(self->appliersInterf.size() > 0);
 
-	dummySampleWorkload(self); // TODO: Delete
-
 	// Parse log files and send mutations to appliers before we parse range files
 	// TODO: Allow loading both range and log files in parallel
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, false));
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, true));
+
+	splitKeyRangeForAppliers(self); 
 
 	// Loaders should ensure log files' mutations sent to appliers before range files' mutations
 	// TODO: Let applier buffer mutations from log and range files differently so that loaders can send mutations in
@@ -347,25 +356,34 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	return Void();
 }
 
-// Placehold for sample workload
-// Produce the key-range for each applier
-void dummySampleWorkload(Reference<RestoreMasterData> self) {
+// Decide which key range should be taken by which applier
+void splitKeyRangeForAppliers(Reference<RestoreMasterData> self) {
 	int numAppliers = self->appliersInterf.size();
+	double slotSize = std::max(self->samplesSize / numAppliers, 1.0);
 	std::vector<Key> keyrangeSplitter;
-	// We will use the splitter at [1, numAppliers - 1]. The first splitter is normalKeys.begin
-	int i;
-	for (i = 0; i < numAppliers; i++) {
-		keyrangeSplitter.push_back(Key(deterministicRandom()->randomUniqueID().toString()));
+	keyrangeSplitter.push_back(normalKeys.begin); // First slot
+	double cumulativeSize = slotSize;
+	while (cumulativeSize < self->samplesSize) {
+		IndexedSet<Key, int64_t>::iterator lowerBound = self->samples.index(cumulativeSize);
+		if (lowerBound == self->samples.end()) {
+			break;
+		}
+		keyrangeSplitter.push_back(*lowerBound);
+		cumulativeSize += slotSize;
+	}
+	if (keyrangeSplitter.size() < numAppliers) {
+		TraceEvent(SevWarnAlways, "FastRestore").detail("NotAllAppliersAreUsed", keyrangeSplitter.size()).detail("NumAppliers", numAppliers);
+	} else if (keyrangeSplitter.size() > numAppliers) {
+		TraceEvent(SevError, "FastRestore").detail("TooManySlotsThanAppliers", keyrangeSplitter.size()).detail("NumAppliers", numAppliers);
 	}
 	std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
-	i = 0;
+	int i = 0;
 	self->rangeToApplier.clear();
 	for (auto& applier : self->appliersInterf) {
-		if (i == 0) {
-			self->rangeToApplier[normalKeys.begin] = applier.first;
-		} else {
-			self->rangeToApplier[keyrangeSplitter[i]] = applier.first;
+		if (i >= keyrangeSplitter.size()) {
+			break; // Not all appliers will be used
 		}
+		self->rangeToApplier[keyrangeSplitter[i]] = applier.first;
 		i++;
 	}
 	self->logApplierKeyRange();

@@ -62,6 +62,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
+	IndexedSet<Key, int64_t> samples; // sample of range and log files
+	double samplesSize; // sum of the metric of all samples 
+
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
 
@@ -73,7 +76,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
-	void resetPerVersionBatch() {}
+	void resetPerVersionBatch() {
+		samplesSize = 0;
+		samples.clear();
+	}
 
 	std::string describeNode() {
 		std::stringstream ss;

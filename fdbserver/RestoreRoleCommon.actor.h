@@ -111,8 +111,8 @@ public:
 	UID nodeID;
 	int nodeIndex;
 
-	std::map<UID, RestoreLoaderInterface> loadersInterf;
-	std::map<UID, RestoreApplierInterface> appliersInterf;
+	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
+	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
 	RestoreApplierInterface masterApplierInterf;
 
 	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch

@@ -293,7 +293,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 // This actor can be combined with sendBatchRequests(...)
 ACTOR template <class Interface, class Request>
 Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                             std::map<UID, Request> requests, std::vector<REPLY_TYPE(Request)>* replies) {
+                             std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies) {
 
 	if (requests.empty()) {
 		return Void();
