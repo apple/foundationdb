@@ -66,6 +66,7 @@ public:
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
 	int BROADCAST_BATCH_SIZE;
+	double TRANSACTION_TIMEOUT_DELAY_INTERVAL;
 
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
@@ -99,6 +100,7 @@ public:
 	int MUTATION_BLOCK_SIZE;
 
 	// Taskbucket
+	double TASKBUCKET_LOGGING_DELAY;
 	int TASKBUCKET_MAX_PRIORITY;
 	double TASKBUCKET_CHECK_TIMEOUT_CHANCE;
 	double TASKBUCKET_TIMEOUT_JITTER_OFFSET;

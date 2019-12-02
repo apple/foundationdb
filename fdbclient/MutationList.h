@@ -32,13 +32,15 @@ struct MutationListRef {
 	// Each blob has a struct Header following by the mutation's param1 and param2 content.
 	// The Header has the mutation's type and the length of param1 and param2
 
-private:
+public:
 	struct Blob {
 		// StringRef data Format: |type|p1len|p2len|p1_content|p2_content|
 		// |type|p1len|p2len| is the header; p1_content has p1len length; p2_content has p2len length
 		StringRef data;
 		Blob* next;
 	};
+	Blob *blob_begin;
+private:
 	struct Header {
 		int type, p1len, p2len;
 		const uint8_t* p1begin() const {
@@ -148,6 +150,8 @@ public:
 			blob_begin->data = StringRef((const uint8_t*)ar.arenaRead(totalBytes), totalBytes); // Zero-copy read when deserializing from an ArenaReader
 		}
 	}
+
+	//FIXME: this is re-implemented on the master proxy to include a yield, any changes to this function should also done there
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
 		serializer(ar, totalBytes);
@@ -180,7 +184,7 @@ private:
 		return b;
 	}
 
-	Blob *blob_begin, *blob_end;
+	Blob *blob_end;
 	int totalBytes;
 };
 typedef Standalone<MutationListRef> MutationList;

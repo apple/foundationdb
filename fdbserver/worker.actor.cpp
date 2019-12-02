@@ -856,6 +856,7 @@ ACTOR Future<Void> workerServer(
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
+	interf.initEndpoints();
 
 	folder = abspath(folder);
 
