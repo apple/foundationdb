@@ -284,6 +284,7 @@ struct TLogData : NonCopyable {
 	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
                                        // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
+	std::vector<TagsAndMessage> tempTagMessages;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
 			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
@@ -890,21 +891,18 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 	int32_t messageLength, rawLength;
 	uint16_t tagCount;
 	uint32_t sub;
-	std::vector<TagsAndMessage> msgs;
+	self->tempTagMessages.clear();
 	while(!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
 		rd.checkpoint();
 		rd >> messageLength >> sub >> tagCount;
-		tagsAndMsg.tags.resize(tagCount);
-		for(int i = 0; i < tagCount; i++) {
-			rd >> tagsAndMsg.tags[i];
-		}
+		tagsAndMsg.tags = VectorRef<Tag>((Tag*)rd.readBytes(tagCount*sizeof(Tag)), tagCount);
 		rawLength = messageLength + sizeof(messageLength);
 		rd.rewind();
 		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
-		msgs.push_back(std::move(tagsAndMsg));
+		self->tempTagMessages.push_back(std::move(tagsAndMsg));
 	}
-	commitMessages(self, logData, version, msgs);
+	commitMessages(self, logData, version, self->tempTagMessages);
 }
 
 Version poppedVersion( Reference<LogData> self, Tag tag) {
@@ -1091,7 +1089,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		wait( delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()) );
 	}
 
-	if( req.tag.locality == tagLocalityLogRouter ) {
+	if( logData->locality != tagLocalitySatellite && req.tag.locality == tagLocalityLogRouter ) {
 		wait( self->concurrentLogRouterReads.take() );
 		state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
 		wait( delay(0.0, TaskPriority::Low) );
@@ -1241,6 +1239,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, st
 	self->queueCommitBegin = commitNumber;
 	logData->queueCommittingVersion = ver;
 
+	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
 	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
@@ -1732,7 +1731,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
-ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted, bool parallelGetMore ) {
+ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
@@ -1746,7 +1745,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( logData->logId, tagAt, endVersion, tags, parallelGetMore );
+						r = logData->logSystem->get()->peek( logData->logId, tagAt, endVersion, tags, true );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -1883,7 +1882,7 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	if(!logData->isPrimary) {
 		std::vector<Tag> tags;
 		tags.push_back(logData->remoteTag);
-		logData->addActor.send( pullAsyncData(self, logData, tags, pulledRecoveryVersions ? logData->recoveredAt + 1 : logData->unrecoveredBefore, Optional<Version>(), true, true) );
+		logData->addActor.send( pullAsyncData(self, logData, tags, pulledRecoveryVersions ? logData->recoveredAt + 1 : logData->unrecoveredBefore, Optional<Version>(), true) );
 	}
 
 	try {
@@ -2247,10 +2246,10 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
-					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true, false) || logData->removed);
+					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) || logData->removed);
 				} else if(!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
-					wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false, true) || logData->removed);
+					wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = req.recoverAt;

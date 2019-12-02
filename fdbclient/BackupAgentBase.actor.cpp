@@ -862,29 +862,33 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					wait(success(foundDRKey) && success(foundBackupKey));
 
 					if(foundDRKey.get().present() && foundBackupKey.get().present()) {
-							printf("WARNING: Found a tag which looks like both a backup and a DR. This tag was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+							printf("WARNING: Found a tag that looks like both a backup and a DR. This tag is %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					} else if(foundDRKey.get().present() && !foundBackupKey.get().present()) {
-							printf("Found a DR which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+							printf("Found a DR that is %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					} else if(!foundDRKey.get().present() && foundBackupKey.get().present()) {
-							printf("Found a Backup which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+							printf("Found a Backup that is %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					} else {
-						printf("WARNING: Found a unknown tag which was %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+						printf("WARNING: Found an unknown tag that is %.4f hours behind.\n", (readVer - currVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					}
 					loggedLogUids.insert(currLogUid);
 				}
 			}
 
-			if( readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS*CLIENT_KNOBS->CORE_VERSIONSPERSECOND && deleteData && (!removingLogUid.present() || minVersionLogUid == removingLogUid.get()) ) {
-				removingLogUid = minVersionLogUid;
-				wait(eraseLogData(tr, minVersionLogUid, destUidValue));
-				wait(tr->commit());
-				printf("\nSuccessfully removed the tag which was %.4f hours behind.\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-			} else if(removingLogUid.present() && minVersionLogUid != removingLogUid.get()) { 
-				printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete_data' to check.\n");
-			} else if( deleteData ) {
-				printf("\nWARNING: Did not delete data because the tag was not at least %.4f hours behind. Change `--min_cleanup_seconds' to adjust this threshold.\n", CLIENT_KNOBS->MIN_CLEANUP_SECONDS/3600.0);
+			if(deleteData) {
+				if(readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS*CLIENT_KNOBS->CORE_VERSIONSPERSECOND && (!removingLogUid.present() || minVersionLogUid == removingLogUid.get())) {
+					removingLogUid = minVersionLogUid;
+					wait(eraseLogData(tr, minVersionLogUid, destUidValue));
+					wait(tr->commit());
+					printf("\nSuccessfully removed the tag that was %.4f hours behind.\n\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+				} else if(removingLogUid.present() && minVersionLogUid != removingLogUid.get()) {
+					printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete_data' to check.\n\n");
+				} else {
+					printf("\nWARNING: Did not delete data because the tag is not at least %.4f hours behind. Change `--min_cleanup_seconds' to adjust this threshold.\n\n", CLIENT_KNOBS->MIN_CLEANUP_SECONDS/3600.0);
+				}
+			} else if(readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS*CLIENT_KNOBS->CORE_VERSIONSPERSECOND) {
+				printf("\nPassing `--delete_data' would delete the tag that is %.4f hours behind.\n\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			} else {
-				printf("\nPassing `--delete_data' would delete the tag which was %.4f hours behind.\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+				printf("\nPassing `--delete_data' would not delete the tag that is %.4f hours behind. Change `--min_cleanup_seconds' to adjust the cleanup threshold.\n\n", (readVer - minVersion)/(3600.0*CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			}
 
 			return Void();

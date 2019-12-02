@@ -905,7 +905,7 @@ void printBackupContainerInfo() {
 
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list) [OPTIONS]\n\n", exeBackup.toString().c_str());
+	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list | cleanup) [OPTIONS]\n\n", exeBackup.toString().c_str());
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 		   "                 FoundationDB cluster. The default is first the value of the\n"
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
@@ -956,6 +956,11 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  --max_cleanup_seconds SECONDS\n"
+	       "                 Specifies the amount of time a backup or DR needs to be stale before cleanup will\n"
+	       "                 remove mutations for it. By default this is set to one hour.\n");
+	printf("  --delete_data\n"
+		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif

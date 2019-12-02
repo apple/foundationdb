@@ -1150,17 +1150,24 @@ public:
 		return false;
 	}
 
-	bool isProxyOrResolver(Optional<Key> processId) {
+	bool isUsedNotMaster(Optional<Key> processId) {
 		ASSERT(masterProcessId.present());
 		if (processId == masterProcessId) return false;
 
 		auto& dbInfo = db.serverInfo->get().read();
+		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (const auto& tlog: tlogset.tLogs) {
+				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+			}
+		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
 		}
+		if (processId == clusterControllerProcessId) return true;
+
 		return false;
 	}
 
@@ -1170,7 +1177,7 @@ public:
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) || pid == masterProcessId.get()) {
 			return false;
 		}
-		return isProxyOrResolver(pid);
+		return isUsedNotMaster(pid);
 	}
 
 	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
@@ -1328,6 +1335,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().read().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
+				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( cachedInfo );
@@ -1472,35 +1480,74 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		return;
 	}
 
-	auto& db = self->db.serverInfo->get().read();
-	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
-	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
+	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	WorkerDetails newRKWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Ratekeeper, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
+		newRKWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	id_used = self->getUsedIds();
+	for(auto& it : id_used) {
+		it.second *= 2;
+	}
+	id_used[newRKWorker.interf.locality.processId()]++;
+	WorkerDetails newDDWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
+		newDDWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	auto bestFitnessForRK = newRKWorker.processClass.machineClassFitness(ProcessClass::Ratekeeper);
+	if(self->db.config.isExcludedServer(newRKWorker.interf.address())) {
+		bestFitnessForRK = std::max(bestFitnessForRK, ProcessClass::ExcludeFit);
+	}
+	auto bestFitnessForDD = newDDWorker.processClass.machineClassFitness(ProcessClass::DataDistributor);
+	if(self->db.config.isExcludedServer(newDDWorker.interf.address())) {
+		bestFitnessForDD = std::max(bestFitnessForDD, ProcessClass::ExcludeFit);
+	}
+	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
+	//.detail("NewRecruitRKProcessId", newRKWorker.interf.locality.processId()).detail("NewRecruiteDDProcessId", newDDWorker.interf.locality.processId());
 
+	Optional<Standalone<StringRef>> currentRKProcessId;
+	Optional<Standalone<StringRef>> currentDDProcessId;
+	
+	auto& db = self->db.serverInfo->get().read();
+	bool ratekeeperHealthy = false;
 	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
 	   (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
+		currentRKProcessId = rkWorker.details.interf.locality.processId();
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::Ratekeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
 			rkFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) || rkFitness > bestFitnessForRK) {
+		if (self->isUsedNotMaster(rkWorker.details.interf.locality.processId()) || bestFitnessForRK < rkFitness
+				|| (rkFitness == bestFitnessForRK && rkWorker.details.interf.locality.processId() == self->masterProcessId && newRKWorker.interf.locality.processId() != self->masterProcessId)) {
 			TraceEvent("CCHaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 			.detail("Excluded", rkWorker.priorityInfo.isExcluded)
 			.detail("Fitness", rkFitness).detail("BestFitness", bestFitnessForRK);
 			self->recruitRatekeeper.set(true);
+		} else {
+			ratekeeperHealthy = true;
 		}
 	}
 
 	if (!self->recruitingDistributor && db.distributor.present() && self->id_worker.count(db.distributor.get().locality.processId())) {
 		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
+		currentDDProcessId = ddWorker.details.interf.locality.processId();
 		if(ddWorker.priorityInfo.isExcluded) {
 			ddFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) || ddFitness > bestFitnessForDD) {
+		if (self->isUsedNotMaster(ddWorker.details.interf.locality.processId()) || bestFitnessForDD < ddFitness
+				|| (ddFitness == bestFitnessForDD && ddWorker.details.interf.locality.processId() == self->masterProcessId && newDDWorker.interf.locality.processId() != self->masterProcessId)
+				|| (ddFitness == bestFitnessForDD && newRKWorker.interf.locality.processId() != newDDWorker.interf.locality.processId() && ratekeeperHealthy && currentRKProcessId.present() && currentDDProcessId == currentRKProcessId
+							&& (newRKWorker.interf.locality.processId() != self->masterProcessId  && newDDWorker.interf.locality.processId() != self->masterProcessId) )) {
 			TraceEvent("CCHaltDD", self->id).detail("DDID", db.distributor.get().id())
 			.detail("Excluded", ddWorker.priorityInfo.isExcluded)
-			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD);
+			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD)
+			.detail("CurrentRateKeeperProcessId", currentRKProcessId.present() ? currentRKProcessId.get() : LiteralStringRef("None"))
+			.detail("CurrentDDProcessId", currentDDProcessId)
+			.detail("MasterProcessID", self->masterProcessId)
+			.detail("NewRKWorkers", newRKWorker.interf.locality.processId())
+			.detail("NewDDWorker", newDDWorker.interf.locality.processId());
 			ddWorker.haltDistributor = brokenPromiseToNever(db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
 		}
 	}

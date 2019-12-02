@@ -110,10 +110,10 @@ enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
-	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 };
 
 struct KeyRangeRef;
@@ -829,7 +829,9 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
-
+	ClusterControllerPriorityInfo()
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
 	template <class Ar>
