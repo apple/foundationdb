@@ -175,8 +175,6 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					MutationRef m;
 					rd >> m;
 					count++;
-					// std::cout << msgVersion << "." << sub << " m = " << m.toString() << " size=" << msgSize << " " <<
-					// fd->getFilename() << "\n";
 					if (msgVersion >= maxVersion) {
 						TraceEvent("FileDecodeEnd")
 						    .detail("MaxV", maxVersion)

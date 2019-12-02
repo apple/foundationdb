@@ -172,7 +172,6 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 		p1len = reader.consume<uint32_t>();
 		p2len = reader.consume<uint32_t>();
 
-		// ASSERT(totalBytes == sizeof(type) + sizeof(p1len) + sizeof(p2len) + p1len + p2len);
 		const uint8_t* key = reader.consume(p1len);
 		const uint8_t* val = reader.consume(p2len);
 
@@ -184,7 +183,7 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 struct VersionedMutations {
 	Version version;
 	std::vector<MutationRef> mutations;
-	Arena arena; // The arena that contains mutation.
+	Arena arena; // The arena that contains the mutations.
 };
 
 /*
@@ -196,7 +195,12 @@ struct VersionedMutations {
  *        VersionedMutations m = wait(progress->getNextBatch());
  *        ...
  *    }
- }
+ *
+ * Internally, the decoding process is done block by block -- each block is
+ * decoded into a list of key/value pairs, which are then decoded into batches
+ * of mutations. Because a version's mutations can be split into many key/value
+ * pairs, the decoding of mutation batch needs to look ahead one more pair. So
+ * at any time this object might have two blocks of data in memory.
  */
 struct DecodeProgress {
 	DecodeProgress() = default;
@@ -212,8 +216,8 @@ struct DecodeProgress {
 
 	// The following are private APIs:
 
-	// PRECONDITION: empty() must return true
-	// Returns the next mutation along with the arena backing it.
+	// PRECONDITION: finished() must return false before calling this function.
+	// Returns the next batch of mutations along with the arena backing it.
 	ACTOR static Future<VersionedMutations> getNextBatchImpl(DecodeProgress* self) {
 		ASSERT(!self->finished());
 
@@ -253,18 +257,17 @@ struct DecodeProgress {
 			Standalone<StringRef> buf = self->combineValues(idx, bufSize);
 			m.mutations = decode_value(buf);
 			m.arena = buf.arena();
-			self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
 		} else {
 			m.mutations = decode_value(arena_kv.second.value);
 			m.arena = arena_kv.first;
-			self->keyValues.erase(self->keyValues.begin());
 		}
+		self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
 
 		return m;
 	}
 
 	// Returns a buffer which stitches first "idx" values into one.
-	// "len" should equal to the summation of these values.
+	// "len" MUST equal the summation of these values.
 	Standalone<StringRef> combineValues(const int idx, const int len) {
 		ASSERT(idx <= keyValues.size() && idx > 1);
 
@@ -321,7 +324,7 @@ struct DecodeProgress {
 		return Void();
 	}
 
-	// Reads a file block and decodes it.
+	// Reads a file block, decodes it into key/value pairs, and stores these pairs.
 	ACTOR static Future<Void> readAndDecodeFile(DecodeProgress* self) {
 		try {
 			state int64_t len = std::min<int64_t>(self->file.blockSize, self->file.fileSize - self->offset);
