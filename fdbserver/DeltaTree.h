@@ -402,6 +402,14 @@ public:
 			return valid() ? node->item : *reader->upperBound();
 		}
 
+		bool operator==(const Cursor &rhs) const {
+			return node == rhs.node;
+		}
+
+		bool operator!=(const Cursor &rhs) const {
+			return node != rhs.node;
+		}
+
 		// Moves the cursor to the node with the greatest key less than or equal to s.  If successful,
 		// returns true, otherwise returns false and the cursor will be at the node with the next key
 		// greater than s.
