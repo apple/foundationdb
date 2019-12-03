@@ -65,10 +65,12 @@ struct ExtStringRef {
 
 	int size() const { return base.size() + extra_zero_bytes; }
 
-	int cmp( ExtStringRef const& rhs ) const {
+	int cmp(ExtStringRef const& rhs) const {
 		int cbl = std::min(base.size(), rhs.base.size());
-		int c = memcmp( base.begin(), rhs.base.begin(), cbl );
-		if (c!=0) return c;
+		if (cbl > 0) {
+			int c = memcmp(base.begin(), rhs.base.begin(), cbl);
+			if (c != 0) return c;
+		}
 
 		for(int i=cbl; i<base.size(); i++)
 			if (base[i]) return 1;

@@ -343,7 +343,9 @@ private:
 			n->nPointers = level+1;
 
 			n->valueLength = value.size();
-			memcpy(n->value(), value.begin(), value.size());
+			if (value.size() > 0) {
+				memcpy(n->value(), value.begin(), value.size());
+			}
 			return n;
 		}
 
