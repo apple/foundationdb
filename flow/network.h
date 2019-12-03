@@ -44,6 +44,7 @@ enum class TaskPriority {
 	Coordination = 8800,
 	FailureMonitor = 8700,
 	ResolutionMetrics = 8700,
+	Worker = 8660,
 	ClusterController = 8650,
 	MasterTLogRejoin = 8646,
 	ProxyStorageRejoin = 8645,

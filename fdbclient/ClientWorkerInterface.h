@@ -39,6 +39,10 @@ struct ClientWorkerInterface {
 	UID id() const { return reboot.getEndpoint().token; }
 	NetworkAddress address() const { return reboot.getEndpoint().getPrimaryAddress(); }
 
+	void initEndpoints() {
+		reboot.getEndpoint( TaskPriority::ReadSocket );
+	}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, reboot, profiler);

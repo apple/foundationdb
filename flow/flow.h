@@ -133,8 +133,8 @@ class Never {};
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
-	ErrorOr() : error(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) {}
+	ErrorOr() : ErrorOr(default_error_or()) {}
+	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
 		if (present()) new (&value) T(o.get());
 	}

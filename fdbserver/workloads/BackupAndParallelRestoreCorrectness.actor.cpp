@@ -219,29 +219,25 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> checkDB(Database cx, std::string when,
 	                                  BackupAndParallelRestoreCorrectnessWorkload* self) {
 
+		state Key keyPrefix = LiteralStringRef("");
+		state Transaction tr(cx);
+		state int retryCount = 0;
+		loop {
+			try {
+				state Version v = wait(tr.getReadVersion());
+				state Standalone<RangeResultRef> data = wait(
+				    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)),
+				                firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
+				// compareDBKVs(data, self);
+				break;
+			} catch (Error& e) {
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CheckDBError").error(e);
+				wait(tr.onError(e));
+			}
+		}
+
 		return Void();
-
-		//    state Key keyPrefix = LiteralStringRef("");
-		//    //              int numPrint = 20; //number of entries in the front and end to print out.
-		//    state Transaction tr(cx);
-		//    state int retryCount = 0;
-		//    loop {
-		//            try {
-		//                    state Version v = wait( tr.getReadVersion() );
-		//                    state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
-		//                    printf("Check DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
-		//                               data.size(), data.contents().toString().c_str());
-		//                    compareDBKVs(data, self);
-		//                    break;
-		//            } catch (Error& e) {
-		//                    retryCount++;
-		//                    TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CheckDBError").error(e);
-		//                    wait(tr.onError(e));
-		//            }
-		//    }
-
-		//    return Void();
-
 	}
 
 	ACTOR static Future<Void> dumpDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {

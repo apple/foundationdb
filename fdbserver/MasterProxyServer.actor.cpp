@@ -268,6 +268,34 @@ struct ProxyCommitData {
 		}
 		return false;
 	}
+	
+	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
+		if(newLatencyBandConfig.present() != latencyBandConfig.present()
+			|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().grvConfig != latencyBandConfig.get().grvConfig))
+		{
+			TraceEvent("LatencyBandGrvUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+			stats.grvLatencyBands.clearBands();
+			if(newLatencyBandConfig.present()) {
+				for(auto band : newLatencyBandConfig.get().grvConfig.bands) {
+					stats.grvLatencyBands.addThreshold(band);
+				}
+			}
+		}
+
+		if(newLatencyBandConfig.present() != latencyBandConfig.present()
+			|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().commitConfig != latencyBandConfig.get().commitConfig))
+		{
+			TraceEvent("LatencyBandCommitUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+			stats.commitLatencyBands.clearBands();
+			if(newLatencyBandConfig.present()) {
+				for(auto band : newLatencyBandConfig.get().commitConfig.bands) {
+					stats.commitLatencyBands.addThreshold(band);
+				}
+			}
+		}
+
+		latencyBandConfig = newLatencyBandConfig;
+	}
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
@@ -462,21 +490,32 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
+ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
                          LogPushData* toCommit, Version commitVersion) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
+	state BinaryWriter valueWriter(Unversioned());
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
 	{
-		if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-			yieldBytes = 0;
-			wait(yield());
+		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
+		valueWriter = BinaryWriter(IncludeVersion());
+		valueWriter << logRangeMutation->second.totalSize();
+
+		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
+		while(blobIter) {
+			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				yieldBytes = 0;
+				wait(yield());
+			}
+			valueWriter.serializeBytes(blobIter->data);
+			yieldBytes += blobIter->data.size();
+			blobIter = blobIter->next;
 		}
 
-		yieldBytes += logRangeMutation->second.expectedSize();
+		Key val = valueWriter.toValue();
 		
 		BinaryWriter wr(Unversioned());
 
@@ -490,8 +529,6 @@ ACTOR Future<Void> adddBackupMutations(ProxyCommitData* self, std::map<Key, Muta
 		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
 		uint32_t* partBuffer = NULL;
-
-		Key val = BinaryWriter::toValue(logRangeMutation->second, IncludeVersion());
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
@@ -897,7 +934,7 @@ ACTOR Future<Void> commitBatch(
 
 	// Serialize and backup the mutations as a single mutation
 	if ((self->vecBackupKeys.size() > 1) && logRangeMutations.size()) {
-		wait( adddBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
+		wait( addBackupMutations(self, &logRangeMutations, &toCommit, commitVersion) );
 	}
 
 	self->stats.mutations += mutationCount;
@@ -1649,6 +1686,8 @@ ACTOR Future<Void> masterProxyServerCore(
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
+	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
+
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
 	// COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an estimate based on experiments and not an accurate one.
 	state int64_t commitBatchesMemoryLimit = std::min(SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT, static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
@@ -1684,33 +1723,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				commitData.logSystem->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
 			}
 
-			Optional<LatencyBandConfig> newLatencyBandConfig = commitData.db->get().latencyBandConfig;
-
-			if(newLatencyBandConfig.present() != commitData.latencyBandConfig.present()
-				|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().grvConfig != commitData.latencyBandConfig.get().grvConfig))
-			{
-				TraceEvent("LatencyBandGrvUpdatingConfig").detail("Present", newLatencyBandConfig.present());
-				commitData.stats.grvLatencyBands.clearBands();
-				if(newLatencyBandConfig.present()) {
-					for(auto band : newLatencyBandConfig.get().grvConfig.bands) {
-						commitData.stats.grvLatencyBands.addThreshold(band);
-					}
-				}
-			}
-
-			if(newLatencyBandConfig.present() != commitData.latencyBandConfig.present()
-				|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().commitConfig != commitData.latencyBandConfig.get().commitConfig))
-			{
-				TraceEvent("LatencyBandCommitUpdatingConfig").detail("Present", newLatencyBandConfig.present());
-				commitData.stats.commitLatencyBands.clearBands();
-				if(newLatencyBandConfig.present()) {
-					for(auto band : newLatencyBandConfig.get().commitConfig.bands) {
-						commitData.stats.commitLatencyBands.addThreshold(band);
-					}
-				}
-			}
-
-			commitData.latencyBandConfig = newLatencyBandConfig;
+			commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
 		}
 		when(wait(onError)) {}
 		when(std::pair<vector<CommitTransactionRequest>, int> batchedRequests = waitNext(batchedCommits.getFuture())) {
