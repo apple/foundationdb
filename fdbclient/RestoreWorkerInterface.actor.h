@@ -216,6 +216,8 @@ struct LoadingParam {
 	Key removePrefix;
 	Key mutationLogPrefix;
 
+	LoadingParam() = default;
+
 	// TODO: Compare all fields for loadingParam
 	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
 	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }

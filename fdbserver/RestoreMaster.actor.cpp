@@ -304,8 +304,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	state std::vector<RestoreLoadFileReply> replies;
 	// Wait on the batch of load files or log files
 	wait(getBatchReplies(&RestoreLoaderInterface::loadFile, self->loadersInterf, requests, &replies));
-	TraceEvent("FastRestore").detail("SamplingReplies", replies.size());
+	TraceEvent("FastRestore").detail("VersionBatch", self->batchIndex).detail("SamplingReplies", replies.size());
 	for (auto& reply : replies) {
+		TraceEvent("FastRestore").detail("VersionBatch", self->batchIndex).detail("SamplingReplies", reply.toString());
 		for (int i = 0; i < reply.samples.size(); ++i) {
 			MutationRef mutation = reply.samples[i];
 			self->samples.addMetric(mutation.param1, mutation.totalSize());
@@ -376,7 +377,7 @@ void splitKeyRangeForAppliers(Reference<RestoreMasterData> self) {
 	} else if (keyrangeSplitter.size() > numAppliers) {
 		TraceEvent(SevError, "FastRestore").detail("TooManySlotsThanAppliers", keyrangeSplitter.size()).detail("NumAppliers", numAppliers);
 	}
-	std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
+	//std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
 	int i = 0;
 	self->rangeToApplier.clear();
 	for (auto& applier : self->appliersInterf) {

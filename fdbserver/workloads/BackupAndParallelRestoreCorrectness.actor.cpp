@@ -219,6 +219,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> checkDB(Database cx, std::string when,
 	                                  BackupAndParallelRestoreCorrectnessWorkload* self) {
 
+		wait(delay(1.0)); // Simply avoid compiler warning
 		return Void();
 
 		//    state Key keyPrefix = LiteralStringRef("");
@@ -496,6 +497,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
+		state ReadYourWritesTransaction tr1(cx);
+		state ReadYourWritesTransaction tr2(cx);
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
+		state int restoreIndex = 0;
+		state bool restoreDone = false;
+
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("PerformRestore", self->performRestore)
@@ -504,7 +511,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
 		    .detail("DifferentialAfter", self->stopDifferentialAfter);
 
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		if (self->allowPauses && BUGGIFY) {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
@@ -614,12 +620,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
-				state int restoreIndex;
+				// state int restoreIndex = 0;
 
 				// Restore each range by calling backupAgent.restore()
 				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
-				state Transaction tr1(cx);
+				// state Transaction tr1(cx);
 				loop {
+					tr1.reset();
 					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
@@ -671,8 +678,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// We should wait on all restore before proceeds
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				state bool restoreDone = false;
-				state ReadYourWritesTransaction tr2(cx);
+				restoreDone = false;
+				// state ReadYourWritesTransaction tr2(cx);
 				state Future<Void> watchForRestoreRequestDone;
 				loop {
 					try {

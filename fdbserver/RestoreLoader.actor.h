@@ -47,8 +47,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
 	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
-	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
+	//   Key is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Key, UID> rangeToApplier;
 
 	// Sampled mutations to be sent back to restore master
 	std::map<LoadingParam, Standalone<VectorRef<MutationRef>>> sampleMutations;
