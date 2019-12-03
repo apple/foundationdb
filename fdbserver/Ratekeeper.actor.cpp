@@ -94,11 +94,12 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
-	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-		verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT)
-	{
+	StorageQueueInfo(UID id, LocalityData locality)
+	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
