@@ -1855,6 +1855,11 @@ namespace fileBackup {
 			}
 
 			Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+
+			// Get the set of key ranges that hold mutations for (beginVersion, endVersion).  They will be queried in parallel below
+			// and there is a limit on how many we want to process in a single BackupLogRangeTask so if that limit is exceeded then
+			// set the addBackupLogRangeTasks boolean in Params and stop, signalling the finish() step to break up the
+			// (beginVersion, endVersion) range into smaller intervals which are then processed by individual BackupLogRangeTasks.
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, destUidValue);
 			if (ranges.size() > CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES) {
 				Params.addBackupLogRangeTasks().set(task, true);
@@ -1866,6 +1871,9 @@ namespace fileBackup {
 			state Reference<IBackupFile> outFile = wait(bc->writeLogFile(beginVersion, endVersion, blockSize));
 			state LogFileWriter logFile(outFile, blockSize);
 
+			// Query all key ranges covering (beginVersion, endVersion) in parallel, writing their results to the results promise stream
+			// as they are received.  Note that this means the records read from the results stream are not likely to be in increasing
+			// Version order.
 			state PromiseStream<RangeResultWithVersion> results;
 			state std::vector<Future<Void>> rc;
 
