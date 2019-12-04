@@ -1603,7 +1603,9 @@ private:
 		void setMetaKey(StringRef key) {
 			ASSERT(key.size() < (smallestPhysicalBlock - sizeof(Header)));
 			metaKeySize = key.size();
-			memcpy(this + 1, key.begin(), key.size());
+			if (key.size() > 0) {
+				memcpy(this + 1, key.begin(), key.size());
+			}
 		}
 
 		int size() const {
