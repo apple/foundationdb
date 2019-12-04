@@ -325,11 +325,10 @@ struct RestoreLoadFileReply : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 34077902;
 
 	LoadingParam param;
-	Standalone<VectorRef<MutationRef>> samples; // sampled mutations
+	MutationsVec samples; // sampled mutations
 
 	RestoreLoadFileReply() = default;
-	explicit RestoreLoadFileReply(LoadingParam param, Standalone<VectorRef<MutationRef>> samples)
-	  : param(param), samples(samples) {}
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples) : param(param), samples(samples) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -397,7 +396,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
-	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
+	MutationsVec mutations; // All mutations are at version
 
 	ReplyPromise<RestoreCommonReply> reply;
 

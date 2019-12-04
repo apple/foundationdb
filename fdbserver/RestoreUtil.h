@@ -26,6 +26,7 @@
 #pragma once
 
 #include "fdbclient/Tuple.h"
+#include "fdbclient/CommitTransaction.h"
 #include "flow/flow.h"
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -36,6 +37,8 @@
 
 //#define SevFRMutationInfo SevVerbose
 #define SevFRMutationInfo SevInfo
+
+typedef Standalone<VectorRef<MutationRef>> MutationsVec;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
