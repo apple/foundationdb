@@ -1207,3 +1207,13 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	ASSERT( a == 1 );
 	return Void();
 }
+
+TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
+	deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), 0);
+	deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	return Void();
+}
