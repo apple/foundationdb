@@ -84,6 +84,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		numSampledMutations = 0;
 		processedFileParams.clear();
 		kvOpsPerLP.clear();
+		sampleMutations.clear();
 	}
 
 	// Only get the appliers that are responsible for a range

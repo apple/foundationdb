@@ -364,12 +364,14 @@ void splitKeyRangeForAppliers(Reference<RestoreMasterData> self) {
 	std::vector<Key> keyrangeSplitter;
 	keyrangeSplitter.push_back(normalKeys.begin); // First slot
 	double cumulativeSize = slotSize;
+	TraceEvent("FastRestore").detail("VersionBatch", self->batchIndex).detail("SamplingSize", self->samplesSize);
 	while (cumulativeSize < self->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = self->samples.index(cumulativeSize);
 		if (lowerBound == self->samples.end()) {
 			break;
 		}
 		keyrangeSplitter.push_back(*lowerBound);
+		TraceEvent("FastRestore").detail("VersionBatch", self->batchIndex).detail("CumulativeSize", cumulativeSize).detail("SlotSize", slotSize);
 		cumulativeSize += slotSize;
 	}
 	if (keyrangeSplitter.size() < numAppliers) {
@@ -490,6 +492,8 @@ ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> se
 		requestsToLoaders.push_back(std::make_pair(loader.first, RestoreVersionBatchRequest(self->batchIndex)));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, requestsToLoaders));
+
+	self->resetPerVersionBatch();
 
 	return Void();
 }
