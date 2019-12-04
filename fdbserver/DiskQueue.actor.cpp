@@ -92,7 +92,9 @@ struct StringBuffer {
 			uint8_t* p = (uint8_t*)(int64_t(b+alignment-1) & ~(alignment-1));  // first multiple of alignment greater than or equal to b
 			ASSERT( p>=b && p+reserved<=e && int64_t(p)%alignment == 0 );
 
-			memcpy(p, str.begin(), str.size());
+			if (str.size() > 0) {
+				memcpy(p, str.begin(), str.size());
+			}
 			ref() = StringRef( p, str.size() );
 		}
 	}

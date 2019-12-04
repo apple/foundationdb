@@ -94,11 +94,12 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
-	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-		verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT)
-	{
+	StorageQueueInfo(UID id, LocalityData locality)
+	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -553,10 +554,13 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
 		}
 
-		// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
-		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference/2) / (limits->maxVersionDifference/4);
-		worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
-		limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
+			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			writeToReadLatencyLimit =
+			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
+			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
+			limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		}
 	}
 
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();

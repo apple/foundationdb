@@ -1391,7 +1391,7 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 }
 
 void setMemoryQuota( size_t limit ) {
-#if defined(USE_ASAN)
+#if defined(USE_SANITIZER)
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
 	return;
 #endif
