@@ -428,31 +428,41 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-				Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
-				if (_conn) {
-					if (FlowTransport::transport().isClient()) {
-						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+
+				try {
+					choose {
+						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							if (FlowTransport::transport().isClient()) {
+								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+							}
+							if (self->unsent.empty()) {
+								_conn->close();
+								clientReconnectDelay = false;
+								continue;
+							} else {
+								conn = _conn;
+								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+										.suppressFor(1.0)
+										.detail("PeerAddr", self->destination);
+								self->prependConnectPacket();
+							}
+							reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
+						}
+						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {
+							throw connection_failed();
+						}
 					}
-					if (self->unsent.empty()) {
-						_conn->close();
-						clientReconnectDelay = false;
-						continue;
-					} else {
-						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-								.suppressFor(1.0)
-								.detail("PeerAddr", self->destination);
-						self->prependConnectPacket();
+				} catch( Error &e ) {
+					if(e.code() != error_code_connection_failed) {
+						throw;
 					}
-				} else {
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 					if (FlowTransport::transport().isClient()) {
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+						clientReconnectDelay = true;
 					}
-					throw connection_failed();
+					throw;
 				}
-
-				reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
 			} else {
 				self->outgoingConnectionIdle = false;
 			}
@@ -497,7 +507,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						.detail("PeerAddr", self->destination);
 			}
 
-			if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+			if(self->destination.isPublic() 
+				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+				&& !FlowTransport::transport().isClient()) 
+			{
 				auto& it = self->transport->closedPeers[self->destination];
 				if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
 					it.first = now();
@@ -511,9 +524,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			}
 
 			if (conn) {
-				if (FlowTransport::transport().isClient() && e.code() != error_code_connection_idle) {
-					clientReconnectDelay = true;
-				}
+				clientReconnectDelay = FlowTransport::transport().isClient() && e.code() != error_code_connection_idle;
 				conn->close();
 				conn = Reference<IConnection>();
 			}
@@ -686,7 +697,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+			TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
 
@@ -740,7 +751,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
 				.suppressFor(1.0)
 				.detail("FromPeer", peerAddress.toString())
 				.detail("Length", (int)packetLen)
@@ -767,7 +778,7 @@ static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const Netw
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 		throw platform_error();
 	}
 	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
@@ -1216,11 +1227,11 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 	}
 
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	}
 	else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
 			.suppressFor(1.0)
 			.detail("ToPeer", destination.getPrimaryAddress())
 			.detail("Length", (int)len)

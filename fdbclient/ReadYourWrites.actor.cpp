@@ -1133,8 +1133,8 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
-	if (now() < endTime) {
-		wait ( delayUntil( endTime ) );
+	while(now() < endTime) {
+		wait( delayUntil( std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL) ) );
 	}
 	if( !resetPromise.isSet() )
 		resetPromise.sendError(transaction_timed_out());

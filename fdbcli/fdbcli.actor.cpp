@@ -1998,10 +1998,14 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 
 ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 	std::vector<AddressExclusion> addresses;
-	if (tokens.size() == 2 && tokens[1] == LiteralStringRef("all"))
-		addresses.push_back( AddressExclusion() );
-	else {
-		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
+	bool failed = false;
+	bool all = false;
+	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
+		if (*t == LiteralStringRef("all")) {
+			all = true;
+		} else if (*t == LiteralStringRef("failed")) {
+			failed = true;
+		} else {
 			auto a = AddressExclusion::parse( *t );
 			if (!a.isValid()) {
 				printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
@@ -2012,8 +2016,13 @@ ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 			addresses.push_back( a );
 		}
 	}
-
-	wait( makeInterruptable(includeServers(db, addresses)) );
+	if (all) {
+		std::vector<AddressExclusion> includeAll;
+		includeAll.push_back(AddressExclusion());
+		wait(makeInterruptable(includeServers(db, includeAll, failed)));
+	} else {
+		wait(makeInterruptable(includeServers(db, addresses, failed)));
+	}
 	return false;
 };
 
