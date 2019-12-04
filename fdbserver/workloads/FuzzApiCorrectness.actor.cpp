@@ -383,8 +383,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		ExceptionContract contract;
 		std::vector<ThreadFuture<Void> > pre_steps;
 
-		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload *wl, const char *func)
-			: id(id_), workload(wl), contract(func, std::bind(&Subclass::augmentTrace, static_cast<Subclass *>(this), ph::_1)) {}
+		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, const char* func)
+		  : id(id_), workload(wl), contract(func, std::bind(&BaseTest::augmentTrace, this, ph::_1)) {}
 
 		static Key makeKey() {
 			double ksrv = deterministicRandom()->random01();
