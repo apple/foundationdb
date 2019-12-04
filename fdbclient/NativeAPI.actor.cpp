@@ -2674,7 +2674,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					return Void();
 				} else {
 					if (ci.conflictingKeyRanges.present()){
-						tr->info.conflictingKeyRanges.push_back_deep(tr->info.conflictingKeyRanges.arena(), ci.conflictingKeyRanges.get());
+						tr->info.conflictingKeyRanges = ci.conflictingKeyRanges.get();
 					}
 
 					if (info.debugID.present())

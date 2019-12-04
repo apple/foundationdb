@@ -144,7 +144,7 @@ struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
-	Standalone<VectorRef<VectorRef<KeyRangeRef>>> conflictingKeyRanges;
+	Optional<Standalone<VectorRef<KeyRangeRef>>> conflictingKeyRanges;
 
 	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };

@@ -23,6 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/libb64/decode.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ReportConflictingKeysWorkload : TestWorkload {
@@ -161,9 +162,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 						ASSERT(root.size() > 0);
 						// Only use the last entry which contains the read_conflict_ranges corresponding to current
 						// conflicts
-						for (const auto& pair : root.back().get_array()) {
+						for (const auto& pair : root) {
 							json_spirit::mObject kr_obj = pair.get_obj();
-							KeyRange kr = KeyRangeRef(kr_obj["begin"].get_str(), kr_obj["end"].get_str());
+							std::string start_key = base64::decoder::from_string(kr_obj["begin"].get_str());
+							std::string end_key = base64::decoder::from_string(kr_obj["end"].get_str());
+							KeyRange kr = KeyRangeRef(start_key, end_key);
 							if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 								    // Read_conflict_range remains same in the resolver.
 								    // Thus, the returned keyrange is either the original read_conflict_range or merged
@@ -175,7 +178,10 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 								TraceEvent(SevError, "TestFailure").detail("Reason", "InvalidKeyRangeReturned");
 							}
 						}
-					}
+					} else {
+                        ++self->invalidReports;
+                        TraceEvent(SevError, "TestFailure").detail("Reason", "FailedToParseJson");
+                    }
 				}
 				++self->retries;
 			}

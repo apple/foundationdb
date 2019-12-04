@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/libb64/encode.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1230,21 +1231,16 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 
 	// Add conflicting keys to special key space
 	if (key == LiteralStringRef("\xff\xff/conflicting_keys/json")){
-		if (!tr.info.conflictingKeyRanges.empty()){
+		if (tr.info.conflictingKeyRanges.present()){
 			json_spirit::mArray root;
-			json_spirit::mArray keyranges;
 			json_spirit::mObject keyrange;
-			for (int i = 0; i < tr.info.conflictingKeyRanges.size(); ++i) {
-				for (const auto & kr : tr.info.conflictingKeyRanges[i]) {
-					keyrange["begin"] = kr.begin.toString();
-					keyrange["end"] = kr.end.toString();
-					keyranges.push_back(keyrange);
-					keyrange.clear();
-				}
-				root.push_back(keyranges);
-				keyranges.clear();
+			for (const auto & kr : tr.info.conflictingKeyRanges.get()) {
+				keyrange["begin"] = base64::encoder::from_string(kr.begin.toString());
+				keyrange["end"] = base64::encoder::from_string(kr.end.toString());
+				root.push_back(keyrange);
+				keyrange.clear();
 			}
-			Optional<Value> output = StringRef(json_spirit::write_string(json_spirit::mValue(root), json_spirit::Output_options::raw_utf8).c_str());
+			Optional<Value> output = StringRef(json_spirit::write_string(json_spirit::mValue(root), json_spirit::Output_options::raw_utf8));
 			return output;
 		} else {
 			return Optional<Value>();
