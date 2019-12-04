@@ -168,11 +168,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 							std::string end_key = base64::decoder::from_string(kr_obj["end"].get_str());
 							KeyRange kr = KeyRangeRef(start_key, end_key);
 							if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
-								    // Read_conflict_range remains same in the resolver.
-								    // Thus, the returned keyrange is either the original read_conflict_range or merged
-								    // by several overlapped ones In either case, it contains at least one original
-								    // read_conflict_range
-								    return kr.contains(rCR);
+								    // Returned KeyRange is an intersection of Read_conflict_range and Write_conflict_range saved in the resolver.
+								    // Thus, it intersects with at least one original read_conflict_range
+								    return kr.intersects(rCR);
 							    })) {
 								++self->invalidReports;
 								TraceEvent(SevError, "TestFailure").detail("Reason", "InvalidKeyRangeReturned");

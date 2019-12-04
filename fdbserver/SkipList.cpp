@@ -772,10 +772,19 @@ private:
 		}
 
 		bool noConflict() { return true; }
-		bool conflict() { 
+		bool conflict(Node* start_node, Node* end_node) { 
 			*result = true;
 			if(conflictingKeyRange != nullptr){
-				conflictingKeyRange->push_back_deep(conflictingKeyRange->arena(), KeyRangeRef(start.value, end.value));
+				StringRef startKey(start.value);
+				StringRef endKey(end.value);
+				if (start_node != nullptr) {
+					startKey = StringRef(start_node->value(), start_node->length());
+				}
+				if (end_node != nullptr) {
+					endKey = StringRef(end_node->value(), end_node->length());
+				}
+				
+				conflictingKeyRange->push_back_deep(conflictingKeyRange->arena(), KeyRangeRef(startKey, endKey));
 			}
 			return true;
 		}
@@ -800,7 +809,7 @@ private:
 					if (start.finger[l]->getMaxVersion(l) <= version)
 						return noConflict();
 					if (l==0)
-						return conflict();
+						return conflict(nullptr, nullptr); // The whole readConflictRange is conflicting with other transactions with higher version number
 				}
 				state = 1;
 			case 1: 
@@ -809,12 +818,12 @@ private:
 					Node *e = end.finger[end.level];
 					while (e->getMaxVersion(end.level) > version) {
 						if (end.finished()) 
-							return conflict();
+							return conflict(e, nullptr);
 						end.nextLevel();
 						Node *f = end.finger[end.level];
 						while (e != f){
 							if (e->getMaxVersion(end.level) > version) 
-								return conflict();
+								return conflict(e, nullptr);
 							e = e->getNext(end.level);
 						}
 					}
@@ -826,7 +835,7 @@ private:
 						Node *p = nextS;
 						while (p != s){
 							if (p->getMaxVersion(start.level) > version) 
-								return conflict();
+								return conflict(p, s);
 							p = p->getNext(start.level);
 						}
 						if (start.finger[start.level]->getMaxVersion(start.level) <= version) 
@@ -836,7 +845,7 @@ private:
 							if (nextS->length() == start.value.size() && !memcmp(nextS->value(), start.value.begin(), start.value.size()))
 								return noConflict();
 							else
-								return conflict();
+								return conflict(nullptr, nextS);
 						}
 						start.nextLevel();
 					}
