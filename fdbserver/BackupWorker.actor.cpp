@@ -27,6 +27,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct VersionedMessage {
@@ -381,12 +382,15 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
+				LogEpoch oldestBackupEpoch = 0;
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
 					self.pop();
+					oldestBackupEpoch = ls->getOldestBackupEpoch();
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)
 				    .detail("HasBackupLocality", hasPseudoLocality)
+				    .detail("OldestBackupEpoch", oldestBackupEpoch)
 				    .detail("Tag", self.tag.toString());
 			}
 			when(wait(done)) {
