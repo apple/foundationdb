@@ -344,7 +344,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, false));
 	wait(loadFilesOnLoaders(self, cx, request, versionBatch, true));
 
-	splitKeyRangeForAppliers(self); 
+	splitKeyRangeForAppliers(self);
 
 	// Loaders should ensure log files' mutations sent to appliers before range files' mutations
 	// TODO: Let applier buffer mutations from log and range files differently so that loaders can send mutations in
@@ -371,15 +371,22 @@ void splitKeyRangeForAppliers(Reference<RestoreMasterData> self) {
 			break;
 		}
 		keyrangeSplitter.push_back(*lowerBound);
-		TraceEvent("FastRestore").detail("VersionBatch", self->batchIndex).detail("CumulativeSize", cumulativeSize).detail("SlotSize", slotSize);
+		TraceEvent("FastRestore")
+		    .detail("VersionBatch", self->batchIndex)
+		    .detail("CumulativeSize", cumulativeSize)
+		    .detail("SlotSize", slotSize);
 		cumulativeSize += slotSize;
 	}
 	if (keyrangeSplitter.size() < numAppliers) {
-		TraceEvent(SevWarnAlways, "FastRestore").detail("NotAllAppliersAreUsed", keyrangeSplitter.size()).detail("NumAppliers", numAppliers);
+		TraceEvent(SevWarnAlways, "FastRestore")
+		    .detail("NotAllAppliersAreUsed", keyrangeSplitter.size())
+		    .detail("NumAppliers", numAppliers);
 	} else if (keyrangeSplitter.size() > numAppliers) {
-		TraceEvent(SevError, "FastRestore").detail("TooManySlotsThanAppliers", keyrangeSplitter.size()).detail("NumAppliers", numAppliers);
+		TraceEvent(SevError, "FastRestore")
+		    .detail("TooManySlotsThanAppliers", keyrangeSplitter.size())
+		    .detail("NumAppliers", numAppliers);
 	}
-	//std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
+	// std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
 	int i = 0;
 	self->rangeToApplier.clear();
 	for (auto& applier : self->appliersInterf) {

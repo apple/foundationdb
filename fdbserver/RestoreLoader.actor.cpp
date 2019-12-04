@@ -135,7 +135,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
 	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
 	self->kvOpsPerLP.emplace(param, VersionedMutationsMap());
-	self->sampleMutations.emplace(param,  Standalone<VectorRef<MutationRef>>());
+	self->sampleMutations.emplace(param, Standalone<VectorRef<MutationRef>>());
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = self->kvOpsPerLP.find(param);
 	state std::map<LoadingParam, Standalone<VectorRef<MutationRef>>>::iterator samplesIter =
 	    self->sampleMutations.find(param);
@@ -223,7 +223,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 	state std::vector<std::pair<UID, RestoreSendMutationVectorVersionedRequest>> requests;
 	state Version prevVersion = startVersion;
 
-
 	TraceEvent("FastRestore_SendMutationToApplier")
 	    .detail("Loader", self->id())
 	    .detail("IsRangeFile", isRangeFile)
@@ -242,7 +241,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 	state std::map<UID, double> applierMutationsSize;
 	state Standalone<VectorRef<MutationRef>> mvector;
 	state Standalone<VectorRef<UID>> nodeIDs;
-	
+
 	splitMutationIndex = 0;
 	kvCount = 0;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();

@@ -105,7 +105,8 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
 		TraceEvent("FastRestore").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
-		req.reply.send(RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
+		req.reply.send(
+		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT(!self->applierInterf.present());
 		self->applierInterf = RestoreApplierInterface();
@@ -118,7 +119,8 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreApplierCore(self->applierInterf.get(), req.nodeIndex, cx));
 		TraceEvent("FastRestore").detail("RecruitedApplierNodeIndex", req.nodeIndex);
-		req.reply.send(RestoreRecruitRoleReply(self->applierInterf.get().id(), RestoreRole::Applier, self->applierInterf.get()));
+		req.reply.send(
+		    RestoreRecruitRoleReply(self->applierInterf.get().id(), RestoreRole::Applier, self->applierInterf.get()));
 	} else {
 		TraceEvent(SevError, "FastRestore")
 		    .detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
