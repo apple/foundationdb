@@ -471,6 +471,7 @@ public:
 	// Fast Restore
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
+	double FASTRESTORE_SAMPLING_RATE;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

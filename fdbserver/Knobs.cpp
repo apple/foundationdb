@@ -531,6 +531,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Fast Restore
 	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
 	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
+	init( FASTRESTORE_SAMPLING_RATE,                         	0.01 ); if( randomize && BUGGIFY ) { FASTRESTORE_SAMPLING_RATE = deterministicRandom()->random01(); } // smallest granularity is 0.01%
+
 	// clang-format on
 
 	if(clientKnobs)

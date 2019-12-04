@@ -478,8 +478,8 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());
 			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
-			// Sampling 1/100 data
-			if (deterministicRandom()->randomInt(0, 100) < 1) {
+			// Sampling (FASTRESTORE_SAMPLING_RATE * 100 %) data
+			if (deterministicRandom()->randomInt(0, 10000) < 10000 * SERVER_KNOBS->FASTRESTORE_SAMPLING_RATE) {
 				samples.push_back_deep(samples.arena(), mutation);
 			}
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
@@ -549,8 +549,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
 		kvOps[version].push_back_deep(kvOps[version].arena(), m);
-		// Sampling: 1 out of 100 data
-		if (deterministicRandom()->randomInt(0, 100) < 1) {
+		// Sampling (FASTRESTORE_SAMPLING_RATE * 100 %) data
+		if (deterministicRandom()->randomInt(0, 10000) < 10000 * SERVER_KNOBS->FASTRESTORE_SAMPLING_RATE) {
 			sampleMutations.push_back_deep(sampleMutations.arena(), m);
 		}
 	}
