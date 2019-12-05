@@ -1092,6 +1092,15 @@ class MiniConflictSet : NonCopyable {
 		}
 	}
 
+	bool orImpl(int begin, int end) {
+		if (begin == end) return false;
+		int beginWord = begin >> bucketShift;
+		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
+
+		return orBits(orValues, beginWord + 1, lastWord, true) || getNthBit(andValues, beginWord) ||
+		       getNthBit(andValues, lastWord) || orBits(values, begin, end, false);
+	}
+
 public:
 	explicit MiniConflictSet( int size ) : debug(size) {
 		static_assert((1<<bucketShift) == sizeof(wordType)*8, "BucketShift incorrect");
@@ -1118,16 +1127,6 @@ public:
 		bool b = debug.any(begin,end);
 		ASSERT( a == b );
 		return b;
-	}
-
-	bool orImpl( int begin, int end ) {
-		if (begin == end) return false;
-		int beginWord = begin>>bucketShift;
-		int lastWord = ((end+bucketMask) >> bucketShift) - 1;
-
-		return orBits( orValues, beginWord+1, lastWord, true ) ||
-			getNthBit( andValues, beginWord ) || getNthBit( andValues, lastWord ) ||
-			orBits( values, begin, end, false );
 	}
 };
 
