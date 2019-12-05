@@ -66,7 +66,7 @@ struct ClusterControllerFullInterface {
 		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterController );
 		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterController );
 		recruitStorage.getEndpoint( TaskPriority::ClusterController );
-		registerWorker.getEndpoint( TaskPriority::ClusterController );
+		registerWorker.getEndpoint( TaskPriority::ClusterControllerWorker );
 		getWorkers.getEndpoint( TaskPriority::ClusterController );
 		registerMaster.getEndpoint( TaskPriority::ClusterController );
 		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
