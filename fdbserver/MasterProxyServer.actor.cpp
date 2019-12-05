@@ -1776,7 +1776,7 @@ ACTOR Future<Void> masterProxyServerCore(
 						if(!data.size()) break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
 
-						Standalone<VectorRef<MutationRef>> mutations;
+						MutationsVec mutations;
 						std::vector<std::pair<MapPair<Key,ServerCacheInfo>,int>> keyInfoData;
 						vector<UID> src, dest;
 						ServerCacheInfo info;

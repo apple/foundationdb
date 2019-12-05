@@ -216,6 +216,8 @@ struct LoadingParam {
 	Key removePrefix;
 	Key mutationLogPrefix;
 
+	LoadingParam() = default;
+
 	// TODO: Compare all fields for loadingParam
 	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
 	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
@@ -319,13 +321,34 @@ struct RestoreSysInfoRequest : TimedRequest {
 	}
 };
 
+struct RestoreLoadFileReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077902;
+
+	LoadingParam param;
+	MutationsVec samples; // sampled mutations
+
+	RestoreLoadFileReply() = default;
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples) : param(param), samples(samples) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, param, samples);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size();
+		return ss.str();
+	}
+};
+
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 26557364;
 
 	LoadingParam param;
 
-	ReplyPromise<RestoreCommonReply> reply;
+	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
 	explicit RestoreLoadFileRequest(LoadingParam param) : param(param) {}
@@ -373,7 +396,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
-	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
+	MutationsVec mutations; // All mutations at the same version parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 

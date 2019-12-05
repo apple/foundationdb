@@ -107,14 +107,12 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 
 	if (curFilePos.get() == req.prevVersion) {
-		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-		state Version commitVersion = req.version;
+		Version commitVersion = req.version;
 		VectorRef<MutationRef> mutations(req.mutations);
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
 		}
-		state int mIndex = 0;
-		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
 			TraceEvent(SevDebug, "FastRestore")
 			    .detail("ApplierNode", self->id())
@@ -161,7 +159,7 @@ struct DBApplyProgress {
 	Reference<RestoreApplierData> self;
 
 	DBApplyProgress() = default;
-	DBApplyProgress(Reference<RestoreApplierData> self)
+	explicit DBApplyProgress(Reference<RestoreApplierData> self)
 	  : self(self), curIndexInCurTxn(0), startIndexInUncommittedTxn(0), curTxnId(0), uncommittedTxnId(0),
 	    lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), transactionSize(0) {
 		curItInCurTxn = self->kvOps.begin();
@@ -245,7 +243,10 @@ struct DBApplyProgress {
 };
 
 ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
+	// state variables must be defined at the start of actor to be initialized in the actor constructor
 	state std::string typeStr = "";
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state DBApplyProgress progress(self);
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
@@ -262,8 +263,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	self->sanityCheckMutationOps();
 
-	state DBApplyProgress progress(self);
-
 	if (progress.isDone()) {
 		TraceEvent("FastRestore_ApplierTxn")
 		    .detail("ApplierApplyToDBFinished", self->id())
@@ -271,7 +270,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		return Void();
 	}
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	// Sanity check the restoreApplierKeys, which should be empty at this point
 	loop {
 		try {
@@ -399,8 +397,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	TraceEvent("FastRestore_ApplierTxn")
 	    .detail("ApplierApplyToDBFinished", self->id())
 	    .detail("CleanupCurTxnIds", progress.curTxnId);
-	// House cleaning
-	self->kvOps.clear();
 	// clean up txn ids
 	loop {
 		try {
@@ -416,6 +412,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			wait(tr->onError(e));
 		}
 	}
+	// House cleaning
+	self->kvOps.clear();
 	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id());
 
 	return Void();

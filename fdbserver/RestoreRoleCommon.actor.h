@@ -52,7 +52,7 @@ struct RestoreMasterData;
 
 struct RestoreSimpleRequest;
 
-typedef std::map<Version, Standalone<VectorRef<MutationRef>>> VersionedMutationsMap;
+using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
@@ -111,8 +111,8 @@ public:
 	UID nodeID;
 	int nodeIndex;
 
-	std::map<UID, RestoreLoaderInterface> loadersInterf;
-	std::map<UID, RestoreApplierInterface> appliersInterf;
+	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
+	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
 	RestoreApplierInterface masterApplierInterf;
 
 	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
