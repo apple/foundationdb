@@ -1035,7 +1035,7 @@ class MiniConflictSet : NonCopyable {
 	std::vector<wordType> andValues;
 	MiniConflictSet2 debug;		// SOMEDAY: Test on big ranges, eliminate this
 
-	uint64_t bitMask(unsigned int bit){ // computes results for bit%word
+	wordType bitMask(unsigned int bit) { // computes results for bit%word
 		return (((wordType)1) << (bit & bucketMask));
 	}
 	void setNthBit(std::vector<wordType>& v, const unsigned int bit){
