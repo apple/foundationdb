@@ -1052,7 +1052,7 @@ class MiniConflictSet : NonCopyable {
 	}
 	wordType highBits(int b){ // bits (b&bucketMask) and higher are 1
 		#pragma warning(disable: 4146)
-		return -(wordType(1) << b);
+		return -(wordType(1) << (b & bucketMask));
 		#pragma warning(default: 4146)
 	}
 	wordType lowBits(int b){ // bits lower than b are 1
