@@ -2,4 +2,5 @@ testTitle=UnitTests
 testName=UnitTests
 startDelay=0
 useDB=false
-testsMatching=/flow/DeterministicRandom/
+maxTestCases=1
+testsMatching=/
