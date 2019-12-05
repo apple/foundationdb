@@ -38,7 +38,8 @@
 //#define SevFRMutationInfo SevVerbose
 #define SevFRMutationInfo SevInfo
 
-typedef Standalone<VectorRef<MutationRef>> MutationsVec;
+//typedef Standalone<VectorRef<MutationRef>> MutationsVec;
+using MutationsVec = Standalone<VectorRef<MutationRef>>;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);

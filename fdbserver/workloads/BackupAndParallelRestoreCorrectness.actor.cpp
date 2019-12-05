@@ -615,11 +615,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
-				// state int restoreIndex = 0;
 
 				// Restore each range by calling backupAgent.restore()
 				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
-				// state Transaction tr1(cx);
 				loop {
 					tr1.reset();
 					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

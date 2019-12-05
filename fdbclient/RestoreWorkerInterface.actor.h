@@ -337,7 +337,7 @@ struct RestoreLoadFileReply : TimedRequest {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "LoadingParam:" << param.toString() << "samples.size:" << samples.size();
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size();
 		return ss.str();
 	}
 };
@@ -396,7 +396,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
-	MutationsVec mutations; // All mutations are at version
+	MutationsVec mutations; // All mutations at the same version parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 
