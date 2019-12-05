@@ -1036,7 +1036,7 @@ class MiniConflictSet : NonCopyable {
 	MiniConflictSet2 debug;		// SOMEDAY: Test on big ranges, eliminate this
 
 	uint64_t bitMask(unsigned int bit){ // computes results for bit%word
-		return (((wordType)1) << ( bit & bucketMask )); // '&' unnecesary?
+		return (((wordType)1) << (bit & bucketMask));
 	}
 	void setNthBit(std::vector<wordType>& v, const unsigned int bit){
 		v[bit>>bucketShift] |= bitMask(bit);
@@ -1055,8 +1055,8 @@ class MiniConflictSet : NonCopyable {
 		return -(wordType(1) << (b & bucketMask));
 		#pragma warning(default: 4146)
 	}
-	wordType lowBits(int b){ // bits lower than b are 1
-		return (wordType(1)<<b)-1;
+	wordType lowBits(int b) { // bits lower than (b&bucketMask) are 1
+		return (wordType(1) << (b & bucketMask)) - 1;
 	}
 	wordType lowBits2(int b) {
 		return (b&bucketMask) ? lowBits(b) : -1;
