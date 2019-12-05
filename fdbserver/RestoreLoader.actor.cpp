@@ -252,10 +252,9 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			applierMutationsSize[applierID] = 0.0;
 		}
 		state Version commitVersion = kvOp->first;
-		int mIndex = 0;
-		MutationRef kvm;
-		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-			kvm = kvOp->second[mIndex];
+
+		for (int mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
+			MutationRef kvm = kvOp->second[mIndex];
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
@@ -478,8 +477,8 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());
 			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
-			// Sampling (FASTRESTORE_SAMPLING_PERCENT * 100 %) data
-			if (deterministicRandom()->randomInt(0, 10000) < 10000 * SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
+			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
+			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 				samples.push_back_deep(samples.arena(), mutation);
 			}
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
@@ -549,8 +548,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
 		kvOps[version].push_back_deep(kvOps[version].arena(), m);
-		// Sampling (FASTRESTORE_SAMPLING_PERCENT * 100 %) data
-		if (deterministicRandom()->randomInt(0, 10000) < 10000 * SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
+		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
+		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 			sampleMutations.push_back_deep(sampleMutations.arena(), m);
 		}
 	}

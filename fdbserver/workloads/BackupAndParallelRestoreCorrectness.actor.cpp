@@ -672,7 +672,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// We should wait on all restore before proceeds
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
 				restoreDone = false;
-				// state ReadYourWritesTransaction tr2(cx);
 				state Future<Void> watchForRestoreRequestDone;
 				loop {
 					try {

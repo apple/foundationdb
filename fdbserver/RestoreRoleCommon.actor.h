@@ -52,7 +52,6 @@ struct RestoreMasterData;
 
 struct RestoreSimpleRequest;
 
-//typedef std::map<Version, MutationsVec> VersionedMutationsMap;
 using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);

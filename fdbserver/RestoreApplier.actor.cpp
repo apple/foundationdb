@@ -108,12 +108,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVec
 
 	if (curFilePos.get() == req.prevVersion) {
 		Version commitVersion = req.version;
-		int mIndex = 0;
 		VectorRef<MutationRef> mutations(req.mutations);
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
 		}
-		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
 			TraceEvent(SevDebug, "FastRestore")
 			    .detail("ApplierNode", self->id())
