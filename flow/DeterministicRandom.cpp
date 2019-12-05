@@ -49,7 +49,7 @@ int DeterministicRandom::randomInt(int min, int maxPlusOne) {
 	}
 	uint64_t v = (gen64() % range);
 	int i;
-	if (min < 0 && (-static_cast<unsigned int>(min + 1)) > v)
+	if (min < 0 && (-static_cast<unsigned int>(min + 1)) >= v)
 		i = -static_cast<int>(-static_cast<unsigned int>(min + 1) - v) - 1;
 	else
 		i = v + min;
