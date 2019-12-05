@@ -68,7 +68,7 @@ int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
 	}
 	uint64_t v = (gen64() % range);
 	int64_t i;
-	if (min < 0 && (-static_cast<uint64_t>(min + 1)) > v)
+	if (min < 0 && (-static_cast<uint64_t>(min + 1)) >= v)
 		i = -static_cast<int64_t>(-static_cast<uint64_t>(min + 1) - v) - 1;
 	else
 		i = v + min;
