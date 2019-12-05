@@ -49,8 +49,8 @@ int DeterministicRandom::randomInt(int min, int maxPlusOne) {
 	}
 	uint64_t v = (gen64() % range);
 	int i;
-	if (min < 0 && (-static_cast<unsigned int>(min)) > v)
-		i = -static_cast<int>(-static_cast<unsigned int>(min) - v);
+	if (min < 0 && (-static_cast<unsigned int>(min + 1)) > v)
+		i = -static_cast<int>(-static_cast<unsigned int>(min + 1) - v) - 1;
 	else
 		i = v + min;
 	if (randLog && useRandLog) fprintf(randLog, "Rint %d\n", i);
@@ -68,8 +68,8 @@ int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
 	}
 	uint64_t v = (gen64() % range);
 	int64_t i;
-	if (min < 0 && (-static_cast<uint64_t>(min)) > v)
-		i = -static_cast<int64_t>(-static_cast<uint64_t>(min) - v);
+	if (min < 0 && (-static_cast<uint64_t>(min + 1)) > v)
+		i = -static_cast<int64_t>(-static_cast<uint64_t>(min + 1) - v) - 1;
 	else
 		i = v + min;
 	if (randLog && useRandLog) fprintf(randLog, "Rint64 %" PRId64 "\n", i);
