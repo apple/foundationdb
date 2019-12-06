@@ -22,6 +22,7 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
