@@ -293,8 +293,6 @@ public:
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
 	// Backup Worker
-	double BACKUP_FAILURE_TIME;
-	double WAIT_FOR_BACKUP_JOIN_DELAY;
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 
 	//Cluster Controller

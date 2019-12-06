@@ -356,8 +356,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 
 	// Backup Worker
 	init( BACKUP_TIMEOUT,                                        0.4 );
-	init( BACKUP_FAILURE_TIME,                                   1.0 );
-	init( WAIT_FOR_BACKUP_JOIN_DELAY,                            1.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
