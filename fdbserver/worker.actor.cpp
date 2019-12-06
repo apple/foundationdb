@@ -427,6 +427,7 @@ ACTOR Future<Void> registrationClient(
 					
 					std::map<std::string, std::string> details;
 					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
+					TraceEvent(SevDebug,"StartedCacheRole").detail("Id", interf.id());
 
 					//DUMPTOKEN(recruited.getVersion);
 					DUMPTOKEN(recruited.getValue);

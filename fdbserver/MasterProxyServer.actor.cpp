@@ -661,6 +661,7 @@ ACTOR Future<Void> commitBatch(
 	bool initialState = isMyFirstBatch;
 	state bool firstStateMutations = isMyFirstBatch;
 	state vector< std::pair<Future<LogSystemDiskQueueAdapter::CommitMessage>, Future<Void>> > storeCommits;
+	auto storageCaches = self->db->get().storageCaches;
 	for (int versionIndex = 0; versionIndex < resolution[0].stateMutations.size(); versionIndex++) {
 		// self->logAdapter->setNextVersion( ??? );  << Ideally we would be telling the log adapter that the pushes in this commit will be in the version at which these state mutations were committed by another proxy, but at present we don't have that information here.  So the disk queue may be unnecessarily conservative about popping.
 
@@ -669,7 +670,8 @@ ACTOR Future<Void> commitBatch(
 			for (int resolver = 0; resolver < resolution.size(); resolver++)
 				committed = committed && resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed)
-				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, nullptr, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : nullptr, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
+				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, nullptr, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : nullptr, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped,
+										&storageCaches);
 			
 			if( resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() && firstStateMutations ) {
 				ASSERT(committed);
@@ -745,11 +747,13 @@ ACTOR Future<Void> commitBatch(
 	// This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes to storage servers' responsibilities)
 	int t;
 	state int commitCount = 0;
+	auto storageCaches = self->db->get().storageCaches;
 	for (t = 0; t < trs.size() && !forceRecovery; t++)
 	{
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			commitCount++;
-			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped);
+			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, &self->cacheInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache, &self->tag_popped,
+						&storageCaches);
 		}
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
@@ -1599,6 +1603,19 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
+// comparator function to check if a cache server wioth given index exists
+class storageCachesComparator {
+	uint16_t serverIndex;
+
+public:
+	storageCachesComparator(uint16_t index): serverIndex(index) {}
+
+	bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
+	{
+		return (value.first == serverIndex);
+	}
+};
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -1767,6 +1784,8 @@ ACTOR Future<Void> masterProxyServerCore(
 						std::vector<std::pair<MapPair<Key,ServerCacheInfo>,int>> keyInfoData;
 						vector<UID> src, dest;
 						ServerCacheInfo info;
+						auto storageCaches = commitData.db->get().storageCaches;
+						//auto storageCaches = commitData.db->get().client.storageCaches;
 						for(auto &kv : data) {
 							if( kv.key.startsWith(keyServersPrefix) ) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
@@ -1790,6 +1809,31 @@ ACTOR Future<Void> masterProxyServerCore(
 									uniquify(info.tags);
 									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
 								}
+							} else if (kv.key.startsWith(storageCachePrefix)) { // we also need to include the storageCache servers into keyInfo
+								KeyRef k = kv.key.removePrefix(storageCachePrefix);
+								if(k != allKeys.end) {
+									vector <uint16_t> serverIndices;
+									decodeStorageCacheValue(kv.value, serverIndices);
+									//serverIndex = cacheKeysDecodeIndex(k);
+									//Find the StorageServerInterface corresponding to the serverIndex
+									for (const auto& id : serverIndices) {
+										TraceEvent(SevDebug, "FindingUIDForServerIdx", commitData.dbgid).
+											detail("Key", kv.key.toString()).
+											detail("ServerIdx", id).
+											detail("StorageCachesSize", storageCaches.size());
+										auto it = find_if(storageCaches.begin(), storageCaches.end(), storageCachesComparator(id));
+										if (it != storageCaches.end()) {
+											TraceEvent(SevDebug, "FoundUIDForServerIdx", commitData.dbgid).detail("Key", kv.key.toString()).detail("serverIdx", id);
+											auto storageInfo = getStorageInfo(it->second.id(), &commitData.storageCache, commitData.txnStateStore);
+											ASSERT(storageInfo->tag != invalidTag);
+										// TODO verify. the storageCache server tag should not be included in this info
+										//info.tags.push_back( storageInfo->tag );
+											info.src_info.push_back( storageInfo );
+										} else {
+										}
+									}
+									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
+								}
 							} else {
 								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
 							}
@@ -1800,7 +1844,8 @@ ACTOR Future<Void> masterProxyServerCore(
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, nullptr, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyInfo, &commitData.cacheInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : nullptr, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, &commitData.tag_popped, true );
+						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, nullptr, &confChanges, Reference<ILogSystem>(), pp//mitData.vecBackupKeys, &commitData.keyInfo, &commitData.cacheInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : nullptr,
+											   commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, &commitData.tag_popped, &storageCaches, true );
 					}
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();

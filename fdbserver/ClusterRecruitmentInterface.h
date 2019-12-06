@@ -41,6 +41,7 @@ struct ClusterControllerFullInterface {
 	RequestStream< struct RecruitFromConfigurationRequest > recruitFromConfiguration;
 	RequestStream< struct RecruitRemoteFromConfigurationRequest > recruitRemoteFromConfiguration;
 	RequestStream< struct RecruitStorageRequest > recruitStorage;
+	RequestStream< struct RecruitCacheRequest > recruitCache;
 	RequestStream< struct RegisterWorkerRequest > registerWorker;
 	RequestStream< struct GetWorkersRequest > getWorkers;
 	RequestStream< struct RegisterMasterRequest > registerMaster;
@@ -55,6 +56,7 @@ struct ClusterControllerFullInterface {
 				recruitFromConfiguration.getFuture().isReady() ||
 				recruitRemoteFromConfiguration.getFuture().isReady() ||
 				recruitStorage.getFuture().isReady() ||
+				recruitCache.getFuture().isReady() ||
 				registerWorker.getFuture().isReady() || 
 				getWorkers.getFuture().isReady() || 
 				registerMaster.getFuture().isReady() ||
@@ -66,6 +68,7 @@ struct ClusterControllerFullInterface {
 		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterController );
 		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterController );
 		recruitStorage.getEndpoint( TaskPriority::ClusterController );
+		recruitCache.getEndpoint( TaskPriority::ClusterController );
 		registerWorker.getEndpoint( TaskPriority::ClusterController );
 		getWorkers.getEndpoint( TaskPriority::ClusterController );
 		registerMaster.getEndpoint( TaskPriority::ClusterController );
@@ -78,7 +81,7 @@ struct ClusterControllerFullInterface {
 			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
-		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
+		           recruitCache, registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 
@@ -89,6 +92,7 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 	vector<WorkerInterface> storageServers;
+	//vector<WorkerInterface> cacheServers; // TODO do we need this? is it for seed servers?
 	vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 	bool satelliteFallback;
@@ -97,7 +101,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
+		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, cacheServers, oldLogRouters, dcId, satelliteFallback);
 	}
 };
 
@@ -168,6 +172,31 @@ struct RecruitStorageRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, reply);
+	}
+};
+
+struct RecruitCacheReply {
+	constexpr static FileIdentifier file_identifier = 15877090;
+	WorkerInterface worker;
+	ProcessClass processClass;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, worker, processClass);
+	}
+};
+
+struct RecruitCacheRequest {
+	constexpr static FileIdentifier file_identifier = 905930;
+	//std::vector<Optional<Standalone<StringRef>>> excludeMachines;	//< Don't recruit any of these machines
+	//std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
+	//std::vector<Optional<Standalone<StringRef>>> includeDCs;
+	//bool criticalRecruitment;							//< True if machine classes are to be ignored
+	ReplyPromise< RecruitCacheReply > reply;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, reply);
 	}
 };
 

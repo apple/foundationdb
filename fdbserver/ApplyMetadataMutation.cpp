@@ -42,12 +42,26 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 	return storageInfo;
 }
 
+// comparator function to check if a cache server wioth given index exists
+class cacheServersComparator {
+	uint16_t serverIndex;
+
+public:
+	cacheServersComparator(uint16_t index): serverIndex(index) {}
+
+	bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
+	{
+		return (value.first == serverIndex);
+	}
+};
+
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
 void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem, Version popVersion,
 	KeyRangeMap<std::set<Key> >* vecBackupKeys, KeyRangeMap<ServerCacheInfo>* keyInfo, KeyRangeMap<bool>* cacheInfo, std::map<Key, applyMutationsData>* uid_applyMutationsData, RequestStream<CommitTransactionRequest> commit,
-							Database cx, NotifiedVersion* commitVersion, std::map<UID, Reference<StorageInfo>>* storageCache, std::map<Tag, Version>* tag_popped, bool initialCommit ) {
+							Database cx, NotifiedVersion* commitVersion, std::map<UID, Reference<StorageInfo>>* storageCache, std::map<Tag, Version>* tag_popped,
+							std::vector<std::pair<uint16_t,StorageServerInterface>>* cacheServers, bool initialCommit) {
 	//std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 	for (auto const& m : mutations) {
@@ -135,20 +149,41 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				if(cacheInfo) {
 					KeyRef k = m.param1.removePrefix(storageCachePrefix);
 
-						// Create a private mutation for storage servers
-						// This is done to make the storage servers aware of the cached key-ranges
-						if(toCommit)
-						{
-							MutationRef privatized = m;
-							privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-							TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
-							cachedRangeInfo[k] = privatized;
-						}
+					// Create a private mutation for storage servers
+					// This is done to make the storage servers aware of the cached key-ranges
+					if(toCommit)
+					{
+						MutationRef privatized = m;
+						privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+						TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
+						cachedRangeInfo[k] = privatized;
+					}
 					if(k != allKeys.end) {
 						KeyRef end = cacheInfo->rangeContaining(k).end();
+						KeyRangeRef insertRange(k,end);
 						vector<uint16_t> serverIndices;
 						decodeStorageCacheValue(m.param2, serverIndices);
 						cacheInfo->insert(KeyRangeRef(k,end),serverIndices.size() > 0);
+
+						// we also need to include the storageCache servers into keyInfo
+						//ASSERT(storageCache);
+						ServerCacheInfo info;
+						info.src_info.reserve(serverIndices.size());
+						//Find the StorageServerInterface corresponding to the serverIndex
+						for (const auto& id : serverIndices) {
+							TraceEvent(SevDebug, "FindingUIDForServerIdx", dbgid).
+								detail("Mutation", m.toString()).
+								detail("ServerIdx", id).
+								detail("CacheServersSize", cacheServers->size());
+							auto it = find_if(cacheServers->begin(), cacheServers->end(), cacheServersComparator(id));
+							if (it != cacheServers->end()) {
+								TraceEvent(SevDebug, "FoundUIDForServerIdx", dbgid).detail("Mutation", m.toString()).detail("serverIdx", id);
+								auto storageInfo = getStorageInfo(it->second.id(), storageCache, txnStateStore);
+								ASSERT(storageInfo->tag != invalidTag);
+								info.src_info.push_back( storageInfo );
+							}
+						}
+						keyInfo->insert(insertRange,info);
 					}
 				}
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
