@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"testing"
@@ -116,5 +117,14 @@ func BenchmarkTuplePacking(b *testing.B) {
 				_ = tuple.Pack()
 			}
 		})
+	}
+}
+
+func TestTupleString(t *testing.T) {
+	printed := fmt.Sprint(Tuple{[]byte("hello"), "world", 42, 0x99})
+	expected := "\\x01hello\\x00\\x02world\\x00\\x15*\\x15\\x99"
+
+	if printed != expected {
+		t.Fatalf("printed tuple result differs, expected %v, got %v", expected, printed)
 	}
 }
