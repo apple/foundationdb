@@ -157,6 +157,7 @@ else()
   if(USE_UBSAN)
     add_compile_options(
       -fsanitize=undefined
+      # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
       -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
@@ -175,12 +176,15 @@ else()
       add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
-  # Instruction sets we require to be supported by the CPU
-  add_compile_options(
-    -maes
-    -mmmx
-    -mavx
-    -msse4.2)
+  # # Instruction sets we require to be supported by the CPU
+  # TODO(atn34) Re-enable once https://github.com/apple/foundationdb/issues/1434 is resolved
+  # Some of the following instructions have alignment requirements, so it seems
+  # prudent to disable them until we properly align memory.
+  # add_compile_options(
+  #   -maes
+  #   -mmmx
+  #   -mavx
+  #   -msse4.2)
 
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
