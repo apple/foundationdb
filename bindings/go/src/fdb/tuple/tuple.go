@@ -66,6 +66,12 @@ type TupleElement interface{}
 // packing T (modulo type normalization to []byte, uint64, and int64).
 type Tuple []TupleElement
 
+// String implements the fmt.Stringer interface and return the tuple
+// as a human readable byte string provided by fdb.Printable.
+func (t Tuple) String() string {
+	return fdb.Printable(t.Pack())
+}
+
 // UUID wraps a basic byte array as a UUID. We do not provide any special
 // methods for accessing or generating the UUID, but as Go does not provide
 // a built-in UUID type, this simple wrapper allows for other libraries
