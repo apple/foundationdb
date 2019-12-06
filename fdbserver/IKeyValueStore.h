@@ -51,18 +51,18 @@ public:
 	// The total size of the returned value (less the last entry) will be less than byteLimit
 	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) = 0;
 
-	// Returns the amount of free and total space for this store, in bytes
+	// To debug MEMORY_RADIXTREE type ONLY
+	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
+	// key size is less than 12 bytes
 	virtual std::tuple<size_t, size_t, size_t> getSize() { return std::make_tuple(0, 0, 0); }
 
-	//Returns how many key & value pairs have been inserted and how many nodes have been created
+	// Returns the amount of free and total space for this store, in bytes
 	virtual StorageBytes getStorageBytes() = 0;
 
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
 
-	// For debug, print out detailed node info
-	virtual void printData() {}
 	/*
 	Concurrency contract
 		Causal consistency:

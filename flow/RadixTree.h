@@ -295,7 +295,8 @@ public:
 	iterator find(const StringRef& key);
 	iterator begin();
     iterator end();
-    // modifications
+	iterator previous(iterator i);
+	// modifications
 	std::pair<iterator, bool> insert(const StringRef& key, const StringRef& val, bool replaceExisting = true);
 	int insert(const std::vector<std::pair<KeyValueMapPair, uint64_t>>& pairs, bool replaceExisting = true) {
 		// dummy method interface(to keep every interface same as IndexedSet )
@@ -309,7 +310,6 @@ public:
 	iterator upper_bound(const StringRef& key);
 	// access
 	uint64_t sumTo(iterator to);
-	iterator previous (iterator i);
 
 private:
     size_type m_size;
@@ -563,7 +563,7 @@ const radix_tree::iterator& radix_tree::iterator::operator--() {
 }
 
 /*
- * reconstruct the key, using @param arena to allocate memory
+ * reconstruct the key
  */
 StringRef radix_tree::iterator::getKey(uint8_t* content, int len) const {
 	if (m_pointee == NULL) return StringRef();
