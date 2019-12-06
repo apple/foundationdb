@@ -19,8 +19,11 @@
  */
 
 #include "fdbclient/SystemData.h"
+#include "Arena.h"
+#include "FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
+#include "serialize.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -56,6 +59,29 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 		src.clear();
 		dest.clear();
 	}
+}
+
+// "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
+// This will be added by the cache server on initialization and removed by DD
+// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
+//                versions. For now caches simply cache everything so the ids
+//                are not yet meaningful.
+const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/storageCacheServer/"),
+                                         LiteralStringRef("\xff/storageCacheServer0"));
+const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
+const KeyRef storageCacheServersEnd = storageCacheServerKeys.end;
+
+const Key storageCacheServerKey(UID id) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageCacheServersPrefix);
+	wr << id;
+	return wr.toValue();
+}
+
+const Value storageCacheServerValue(const StorageServerInterface& ssi) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ssi;
+	return wr.toValue();
 }
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
