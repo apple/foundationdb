@@ -35,6 +35,8 @@ package subspace
 import (
 	"bytes"
 	"errors"
+	"fmt"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
@@ -42,6 +44,8 @@ import (
 // Subspace represents a well-defined region of keyspace in a FoundationDB
 // database.
 type Subspace interface {
+	fmt.Stringer
+
 	// Sub returns a new Subspace whose prefix extends this Subspace with the
 	// encoding of the provided element(s). If any of the elements are not a
 	// valid tuple.TupleElement, Sub will panic.
@@ -103,6 +107,12 @@ func FromBytes(b []byte) Subspace {
 	s := make([]byte, len(b))
 	copy(s, b)
 	return subspace{s}
+}
+
+// String implements the fmt.Stringer interface and return the subspace
+// as a human readable byte string provided by fdb.Printable.
+func (s subspace) String() string {
+	return fdb.Printable(s.b)
 }
 
 func (s subspace) Sub(el ...tuple.TupleElement) Subspace {
