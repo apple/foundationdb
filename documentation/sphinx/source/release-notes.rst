@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.12
+======
+
+Fixes
+-----
+
+* The ``--traceclock`` parameter to fdbserver incorrectly had no effect. `(PR #2420) <https://github.com/apple/foundationdb/pull/2420>`_.
+
 6.2.11
 ======
 
