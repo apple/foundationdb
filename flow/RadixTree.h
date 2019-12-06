@@ -239,7 +239,7 @@ public:
 		const iterator& operator--();
 		bool operator != (const iterator &lhs) const;
         bool operator == (const iterator &lhs) const;
-		StringRef getKey(uint8_t* content, int len) const;
+		StringRef getKey(uint8_t* content) const;
 		StringRef getValue() const {
 			ASSERT(m_pointee->m_is_leaf);
 			return ((leafNode*)m_pointee)->getValue();
@@ -565,7 +565,7 @@ const radix_tree::iterator& radix_tree::iterator::operator--() {
 /*
  * reconstruct the key
  */
-StringRef radix_tree::iterator::getKey(uint8_t* content, int len) const {
+StringRef radix_tree::iterator::getKey(uint8_t* content) const {
 	if (m_pointee == NULL) return StringRef();
 
 	ASSERT(m_pointee->m_is_leaf);

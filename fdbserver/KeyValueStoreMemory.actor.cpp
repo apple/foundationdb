@@ -218,7 +218,7 @@ public:
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
 			while (it != data.end() && rowLimit && byteLimit >= 0) {
-				StringRef tempKey = it.getKey(reserved_buffer, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+				StringRef tempKey = it.getKey(reserved_buffer);
 				if (tempKey >= keys.end) break;
 
 				byteLimit -= sizeof(KeyValueRef) + tempKey.size() + it.getValue().size();
@@ -230,7 +230,7 @@ public:
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
 			while (it != data.end() && rowLimit && byteLimit >= 0) {
-				StringRef tempKey = it.getKey(reserved_buffer, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+				StringRef tempKey = it.getKey(reserved_buffer);
 				if (tempKey < keys.begin) break;
 
 				byteLimit -= sizeof(KeyValueRef) + tempKey.size() + it.getValue().size();
@@ -596,7 +596,7 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for (auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			StringRef tempKey = kv.getKey(reserved_buffer, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+			StringRef tempKey = kv.getKey(reserved_buffer);
 			log_op(OpSnapshotItem, tempKey, kv.getValue());
 			snapshotSize += tempKey.size() + kv.getValue().size() + OP_DISK_OVERHEAD;
 			++count;
@@ -669,7 +669,7 @@ private:
 
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
-				StringRef tempKey = next.getKey(self->reserved_buffer, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+				StringRef tempKey = next.getKey(self->reserved_buffer);
 				self->log_op(OpSnapshotItem, tempKey, next.getValue());
 				nextKey = tempKey;
 				nextKeyAfter = true;
