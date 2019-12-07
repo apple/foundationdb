@@ -402,7 +402,7 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 	RestoreSendMutationVectorVersionedRequest() = default;
 	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
-	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
+	                                                   bool isRangeFile, MutationsVec mutations)
 	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
 	    mutations(mutations) {}
 

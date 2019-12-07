@@ -237,8 +237,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 	// applierMutationsSize is buffered mutation vector size for each applier
 	state std::map<UID, MutationsVec> applierMutationsBuffer;
 	state std::map<UID, double> applierMutationsSize;
-	state MutationsVec mvector;
-	state Standalone<VectorRef<UID>> nodeIDs;
 
 	splitMutationIndex = 0;
 	kvCount = 0;
@@ -257,10 +255,12 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			MutationRef kvm = kvOp->second[mIndex];
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
+				MutationsVec mvector;
+				Standalone<VectorRef<UID>> nodeIDs;
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-				mvector.pop_front(mvector.size());
-				nodeIDs.pop_front(nodeIDs.size());
+				// mvector.pop_front(mvector.size());
+				// nodeIDs.pop_front(nodeIDs.size());
 				// WARNING: The splitMutation() may have bugs
 				splitMutation(self, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
@@ -295,8 +295,8 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			requests.push_back(std::make_pair(
 			    applierID, RestoreSendMutationVectorVersionedRequest(fileIndex, prevVersion, commitVersion, isRangeFile,
 			                                                         applierMutationsBuffer[applierID])));
-			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-			applierMutationsSize[applierID] = 0;
+			//applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
+			//applierMutationsSize[applierID] = 0;
 		}
 		TraceEvent(SevDebug, "FastRestore_Debug")
 		    .detail("Loader", self->id())
@@ -305,6 +305,12 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		    .detail("FileIndex", fileIndex);
 		ASSERT(prevVersion < commitVersion);
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
+		// Clear buffers
+		for (auto& applierID : applierIDs) {
+			applierMutationsBuffer[applierID] = MutationsVec();
+			applierMutationsSize[applierID] = 0;
+		}
+
 		requests.clear();
 		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
