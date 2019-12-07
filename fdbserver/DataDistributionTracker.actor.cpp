@@ -57,7 +57,8 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 }
 
 ReadBandwidthStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC)
+	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * metrics.bytes *
+	                                      SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS)
 		return ReadBandwidthStatusHigh;
 	else
 		return ReadBandwidthStatusNormal;
@@ -101,6 +102,9 @@ struct DataDistributionTracker {
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
+
+	// Read hot detection
+	PromiseStream<KeyRange> readHotShard;
 
 	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
 		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ), systemSizeEstimate(0),
@@ -211,15 +215,15 @@ ACTOR Future<Void> trackShardBytes(
 					readBandwidthStatus = newReadBandwidthStatus;
 				}
 				if (newReadBandwidthStatus == ReadBandwidthStatusNormal) {
-					TEST(true);
-					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
+					                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 					                                 (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 					bounds.min.bytesReadPerKSecond = 0;
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
 				} else if (newReadBandwidthStatus == ReadBandwidthStatusHigh) {
-					TEST(true);
 					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
+					                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 					                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
 				} else {
@@ -286,6 +290,19 @@ ACTOR Future<Void> trackShardBytes(
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled)
 			self->output.sendError(e);		// Propagate failure to dataDistributionTracker
+		throw e;
+	}
+}
+
+ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
+	try {
+		loop {
+			// Use the current known size to check for (and start) splits and merges.
+			KeyRange keys = waitNext(self->readHotShard.getFuture());
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled)
+			self->output.sendError(e); // Propagate failure to dataDistributionTracker
 		throw e;
 	}
 }

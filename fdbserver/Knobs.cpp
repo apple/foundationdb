@@ -131,10 +131,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
 	bool buggifySmallReadBandwidth = randomize && BUGGIFY;
-	init( SHARD_MAX_BYTES_READ_PER_KSEC,            8LL*1000000*1000 ); if( buggifySmallReadBandwidth ) SHARD_MAX_BYTES_READ_PER_KSEC = 100LL*1000*1000;
-	/* 8*1MB/sec * 1000sec/ksec
-		Shards with more than this read bandwidth will be considered as a read cache candidate
-	*/
+	init( SHARD_MAX_READ_DENSITY_RATIO,                           2.0); // The bytesRead/byteSize radio. Will be declared as read hot when larger than this. 2.0 was chosen to avoid reporting table scan as read hot.
 	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
 	bool buggifySmallBandwidthSplit = randomize && BUGGIFY;
 	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 10LL*1000*1000;
