@@ -46,16 +46,17 @@ Backup Steps
 In response to the snapshot request from the user, FoundationDB will run a user specified ``snapshot create binary`` on all processes which has persistent data in it, binary should call filesystem/disk system specific snapshot create API and gather some additional data for the restore.
 
 Before using the ``snapshot`` command the following setup needs to be done
-     * Write a program that will snapshot the local disk store when invoked by the ``fdbserver`` with the following arguments:
-           * UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
-           * Version - version string of the FoundationDB binary
-           * Path - path of the FoundationDB disk store to be snapshotted
-           * Role - tlog/storage/coordinator, identifies the role of the node on which the snapshot is being invoked
-     * Install ``snapshot create binary`` on the FoundationDB instance in a secure path that can be invoked by the ``fdbserver``
-     * Set a new config parameter ``whitelist_binpath`` for ``fdbserver`` section, whose value is the absolute ``snapshot create binary`` path. Running any ``snapshot`` command will validate that it is in the ``whitelist_binpath``. This is a security mechanism to stop running a random/unsecure command on the cluster by a client using ``snapshot`` command
-     * ``snapshot create program`` should capture any additional data needed to restore the cluster, additional data could be stored as tags in cloud environments or it could be stored in an additional file/directory in the data repository and then snapshotted. The section below describes a recommended specification of the list of things that can be gathered by the binary:
 
-``snapshot`` is a synchronous command and when it returns successfully backup is considered complete. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For eg: if disk snapshot takes 1 second, time to finish backup should be less than < 10 seconds, this is a general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can issue the next backup by issuing another ``snapshot``.
+* Write a program that will snapshot the local disk store when invoked by the ``fdbserver`` with the following arguments:
+  * UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
+  * Version - version string of the FoundationDB binary
+  * Path - path of the FoundationDB disk store to be snapshotted
+  * Role - tlog/storage/coordinator, identifies the role of the node on which the snapshot is being invoked
+* Install ``snapshot create binary`` on the FoundationDB instance in a secure path that can be invoked by the ``fdbserver``
+* Set a new config parameter ``whitelist_binpath`` for ``fdbserver`` section, whose value is the absolute ``snapshot create binary`` path. Running any ``snapshot`` command will validate that it is in the ``whitelist_binpath``. This is a security mechanism to stop running a random/unsecure command on the cluster by a client using ``snapshot`` command
+* ``snapshot create program`` should capture any additional data needed to restore the cluster, additional data could be stored as tags in cloud environments or it could be stored in an additional file/directory in the data repository and then snapshotted. The section below describes a recommended specification of the list of things that can be gathered by the binary:
+
+``snapshot`` is a synchronous command and when it returns successfully backup is considered complete. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For eg: if disk snapshot takes 1 second, time to finish backup should be less than < 10 seconds, this is a general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can retry by issuing another ``snapshot`` command.
 
 
 Backup Specification
@@ -92,13 +93,14 @@ Restore Steps
 ==============
 
 Restore is the process of building up the cluster from the snapshotted disk images. There is no option to specify a restore version because there is no support for continuous backup. Here is the list of steps for the restore process:
-    * Identify the snapshot disk images associated with the backup to be restored with the help of UID or creation time
-    * Group disk images of a backup by IP address and/or locality information
-    * Bring up a new cluster similar to the source cluster with FoundationDB services stopped and either attach the snapshot disk images or copy the snapshot disk images to the cluster in the following manner:
 
-        * Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images
-    * Compute the new fdb.cluster file based on where the new coordinators disk stores are placed and push it to the all the instances in the new cluster
-    * Start the FoundationDB service on all the instances
-    * NOTE: if one process share two roles which has persistent data then they will have a shared disk and there will be two snapshots of the disk once for each role. In that case, snapshot disk image needs to be cleaned, If a snapshot image had files that belongs to other roles than they need to be deleted.
+* Identify the snapshot disk images associated with the backup to be restored with the help of UID or creation time
+* Group disk images of a backup by IP address and/or locality information
+* Bring up a new cluster similar to the source cluster with FoundationDB services stopped and either attach the snapshot disk images or copy the snapshot disk images to the cluster in the following manner:
+
+  * Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images
+* Compute the new fdb.cluster file based on where the new coordinators disk stores are placed and push it to the all the instances in the new cluster
+* Start the FoundationDB service on all the instances
+* NOTE: if one process share two roles which has persistent data then they will have a shared disk and there will be two snapshots of the disk once for each role. In that case, snapshot disk image needs to be cleaned, If a snapshot image had files that belongs to other roles than they need to be deleted.
 
 Cluster will start and get to healthy state indicating the completion of restore. Applications can optionally do any additional validations and use the cluster.
