@@ -230,7 +230,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
 	if (kvOps.find(endVersion) == kvOps.end()) {
-		kvOps[endVersion] = VectorRef<MutationRef>(); // Empty mutation vector will be handled by applier
+		kvOps[endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
 	}
 
 	// applierMutationsBuffer is the mutation vector to be sent to each applier
@@ -248,7 +248,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		applierMutationsBuffer.clear();
 		applierMutationsSize.clear();
 		for (auto& applierID : applierIDs) {
-			applierMutationsBuffer[applierID] = MutationsVec(VectorRef<MutationRef>());
+			applierMutationsBuffer[applierID] = MutationsVec();
 			applierMutationsSize[applierID] = 0.0;
 		}
 		state Version commitVersion = kvOp->first;
@@ -450,7 +450,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 		StringRefReaderMX kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
-		kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 
 		StringRefReaderMX vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
@@ -541,7 +541,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		              data[i].value); // ASSUME: all operation in range file is set.
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
-		kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
+		kvOps.insert(std::make_pair(version, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());

@@ -492,7 +492,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
-		state ReadYourWritesTransaction tr1(cx);
 		state ReadYourWritesTransaction tr2(cx);
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		state int restoreIndex = 0;
@@ -619,6 +618,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Restore each range by calling backupAgent.restore()
 				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
 				loop {
+					state ReadYourWritesTransaction tr1(cx);
 					tr1.reset();
 					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
