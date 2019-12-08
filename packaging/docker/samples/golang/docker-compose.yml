@@ -1,0 +1,64 @@
+# docker-compose.yaml
+#
+# This source file is part of the FoundationDB open source project
+#
+# Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+version: '3'
+services:
+  # Specify three fdbserver processes.
+  fdb-coordinator:
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    ports:
+      - 4500:4500/tcp
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+
+  fdb-server-1:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+
+  fdb-server-2:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+
+  # Bring up the application so that it depends on the cluster.
+  app:
+    depends_on:
+      - fdb-coordinator
+      - fdb-server-1
+      - fdb-server-2
+    build:
+      context: app
+      args:
+        FDB_VERSION: ${FDB_VERSION}
+    ports:
+      - 8080:8080/tcp
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_API_VERSION: ${FDB_API_VERSION}
