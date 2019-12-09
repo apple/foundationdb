@@ -709,9 +709,24 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].interf);
 
-		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
-		for(int i = 0; i < oldLogRouters.size(); i++) {
-			result.oldLogRouters.push_back(oldLogRouters[i].interf);
+		if(req.maxOldLogRouters > 0) {
+			auto oldLogRouters = tlogs;
+			
+			if(oldLogRouters.size() == 1) {
+				result.oldLogRouters.push_back(oldLogRouters[0].interf);
+			} else {
+				bool foundCC = false;
+				for(int i = 0; i < oldLogRouters.size() - 1; i++) {
+					if(oldLogRouters[i].interf.locality.processId() != clusterControllerProcessId) {
+						result.oldLogRouters.push_back(oldLogRouters[i].interf);
+					} else {
+						foundCC = true;
+					}
+				}
+				if(foundCC) {
+					result.oldLogRouters.push_back(oldLogRouters.back().interf);
+				}
+			}
 		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
@@ -793,6 +808,26 @@ public:
 				result.tLogs.push_back(tlogs[i].interf);
 			}
 
+			if(req.maxOldLogRouters > 0) {
+				auto oldLogRouters = tlogs;
+				
+				if(oldLogRouters.size() == 1) {
+					result.oldLogRouters.push_back(oldLogRouters[0].interf);
+				} else {
+					bool foundCC = false;
+					for(int i = 0; i < oldLogRouters.size() - 1; i++) {
+						if(oldLogRouters[i].interf.locality.processId() != clusterControllerProcessId) {
+							result.oldLogRouters.push_back(oldLogRouters[i].interf);
+						} else {
+							foundCC = true;
+						}
+					}
+					if(foundCC) {
+						result.oldLogRouters.push_back(oldLogRouters.back().interf);
+					}
+				}
+			}
+
 			if(req.recruitSeedServers) {
 				auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy );
 				for(int i = 0; i < primaryStorageServers.size(); i++)
@@ -827,11 +862,6 @@ public:
 							result.resolvers.push_back(resolvers[i].interf);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
-
-						auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, used );
-						for(int i = 0; i < oldLogRouters.size(); i++) {
-							result.oldLogRouters.push_back(oldLogRouters[i].interf);
-						}
 						break;
 					} else {
 						if(fitness < bestFitness) {
