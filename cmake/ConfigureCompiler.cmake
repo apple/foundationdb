@@ -3,6 +3,7 @@ set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
+set(USE_UBSAN OFF CACHE BOOL "Compile with undefined behavior sanitizer")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 set(USE_LD "DEFAULT" CACHE STRING "The linker to use for building: can be LD (system default, default choice), BFD, GOLD, or LLD")
 set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
@@ -146,10 +147,20 @@ else()
   if(USE_ASAN)
     add_compile_options(
       -fsanitize=address
-      -DUSE_ASAN)
+      -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=address")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
     set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
+  endif()
+
+  if(USE_UBSAN)
+    add_compile_options(
+      -fsanitize=undefined
+      -fno-sanitize=alignment
+      -DUSE_SANITIZER)
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=undefined")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=undefined ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
   if(PORTABLE_BINARY)

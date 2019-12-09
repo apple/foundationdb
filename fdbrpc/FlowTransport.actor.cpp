@@ -818,7 +818,9 @@ ACTOR static Future<Void> connectionReader(
 					const int unproc_len = unprocessed_end - unprocessed_begin;
 					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
 					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
-					memcpy( newBuffer, unprocessed_begin, unproc_len );
+					if (unproc_len > 0) {
+						memcpy(newBuffer, unprocessed_begin, unproc_len);
+					}
 					arena = newArena;
 					unprocessed_begin = newBuffer;
 					unprocessed_end = newBuffer + unproc_len;
