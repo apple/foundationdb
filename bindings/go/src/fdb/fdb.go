@@ -236,7 +236,7 @@ func StartNetwork() error {
 const DefaultClusterFile string = ""
 
 // OpenDefault returns a database handle to the FoundationDB cluster identified
-// by the DefaultClusterFile on the current machine. 
+// by the DefaultClusterFile on the current machine.
 //
 // A single client can use this function multiple times to connect to different
 // clusters simultaneously, with each invocation requiring its own cluster file.
