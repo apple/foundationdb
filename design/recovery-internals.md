@@ -4,10 +4,28 @@ FDB uses recovery to handle various failures, such as hardware and network failu
 
 This document explains at the high level how the recovery works in a single cluster. The audience of this document includes both FDB developers who want to have a basic understanding of the recovery process and database administrators who need to understand why a cluster fails to recover. This document does not discuss the complexity introduced to the recovery process by the multi-region configuration.
 
+## Background
+
+## `SeverDBInfo` data structure
+
+This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration.  It also has a vector of all storage server's interfaces. The definition of the data structure is in `SeverDBInfo.h`. The data structure is not available to the client. 
+
+Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propogate the new `ServerDBInfo` to all workers in the cluster.
+
+## When will recovery happen?
+Failures of roles in the transaction system and coordinators (?) can cause recovery. Transactoin system's roles include cluster controller, master, transaction logs (tLog), proxies, and resolvers.
+
+[comment]: <> Can someone help define all situation that can trigger recovery?
+
+Network partition or failures can make CC unable to reach some roles, treating those roles as dead and causing reocvery.
+
+Not every type of failure can trigger recovery. For example, storage server (SS) failure will not cause recovery. Data distributor, which is a role that is independent from the transaction system, will recruit a new storage server or simply move the failed server's data to other servers.
+
 
 ## Overview
 
-Recovery is triggered on the cluster controller (CC). Coordinators choose a CC through leader election. If the current elected CC does not respond, a new CC will be elected by coordinators. If the majority of coordinators cannot be reached, CC will not be selected, recovery will get stuck.
+Cluster controller (CC) decides if recovery should be triggered. In case the current running CC crashes or cannot be reached by a majority of coordinators, coordinators will start leader election to select a CC among the stateless process -- the processes which do not have a file behind it, such as the processes that run master. In the rare situation when the majority of coordinators cannot be reached, say a majority of coordinators' machines crash, CC cannot be selected successfully and the recovery will get stuck.
+
 
 Recovery has 9 phases, which are defined as the 9 states in the source code: READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, ACCEPTING_COMMITS = 6, ALL_LOGS_RECRUITED = 7, STORAGE_RECOVERED = 8, FULLY_RECOVERED = 9.
 
@@ -19,37 +37,41 @@ Recovery tracks the information of each recovery phase in “MasterRecoveryState
 
 ## Phase 1: READING_CSTATE
 
-This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as tLogs and tLogs’ configuration, logRouterTags, txsTags) that exist before the recovery. The coordinated state can have multiple generations of tLogs. 
+This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as transaction logs (tLog) and tLogs’ configuration, logRouterTags (the number of log router tags), txsTags, old generation's tLogs, and recovery count) that exist before the recovery. The coordinated state can have multiple generations of tLogs. 
 
 The transaction system states before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation increases for each recovery.
 
 
 ## Phase 2: LOCKING_CSTATE
 
-This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than 1 master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes. 
+This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes. 
 
 
 FDB lets the current alive tLogs to use the master’s interface to register each tLog’s interface to master. Master simply waits on receiving the TLogRejoinRequest streams: for each tLog’s interface received, the master compares the interface id with the tLog id read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
-The logic of collecting tLogs’ interfaces is implemented in trackRejoins() function.
-The logic of locking the tLogs is implemented in epochEnd() function in TagPartitionedLogSystems.actor.cpp.
+The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
+The logic of locking the tLogs is implemented in `epochEnd()` function in TagPartitionedLogSystems.actor.cpp.
 
 
 Once we lock the cstate, we bump the recoveryCount and write the cstate to kill the other recovery attempts. This makes the other attempts know they are died and do not recruit more tLogs. If we do not do this, there will be many recovery attempts which recruit tLogs and can make system out of memory. This operation is the reason why every recovery bumps the recoveryCount (epoch) by 2 instead of 1.
 
 
 *How does each tLog know the current master’s interface?*
-Master interface is stored in ServerDBInfo. Once the CC recruits the master, it updates the ServerDBInfo with the master’s interface. CC will send the updated serverDBInfo, which has the master’s interface, to all processes. tLog processes (i,e., tLog workers) monitor the serverDBInfo in an actor. when the serverDBInfo changes, it will register itself to the new master. The logic for a tLog worker to monitor serverDBInfo change is implemented in monitorServerDBInfo() actor.
+
+Master interface is stored in `serverDBInfo`. Once the CC recruits the master, it updates the `serverDBInfo` with the master’s interface. CC will send the updated `serverDBInfo`, which has the master’s interface, to all processes. tLog processes (i,e., tLog workers) monitor the `serverDBInfo` in an actor. when the `serverDBInfo` changes, it will register itself to the new master. The logic for a tLog worker to monitor `serverDBInfo` change is implemented in `monitorServerDBInfo()` actor.
 
 
 *How does each role, such as tLog and data distributor (DD), register its interface to master and CC?*
-tLog monitors ServerDBInfo change and sends its interface to the new master;
-DD and RateKeeper rejoin themselves to CC because they are no longer a part of the recovery process;
-SS does not rejoin. It waits for the tLogs to be ready and commit their interfaces into database with a special transaction.
+
+* tLog monitors `serverDBInfo` change and sends its interface to the new master; 
+
+* Data distributor (DD) and ratekeeper rejoin themselves to CC because they are no longer a part of the recovery process;
+
+* Storage server (SS) does not rejoin. It waits for the tLogs to be ready and commit their interfaces into database with a special transaction.
 
 
 ## Phase 3: RECRUITING
 
-Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in trackRejoins(). 
+Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`. 
 
 
 Once the master gets enough tLogs, it calculates the knownCommittedVersion, which is the maximum durable version from the still-alive tLogs in the previous generation. The master will use the recruited tLogs to create a new TagPartitionedLogSystem for the new generation.
@@ -64,7 +86,7 @@ Situation 2: A tLog may die after it reports alive to the master in the RECRUITI
 
 Then, the master will reconstruct the transaction state store (txnStateStore) by peeking the txnStateTag in oldLogSystem. 
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk by the oldLogSystem.
-Once we get the txnStateStore, we know the configuration of the txn system, such as the number of proxies. The master then can ask the CC to recruit roles for the new generation in the recruitEverything() function. Those recruited roles includes seed SS, proxies and tLogs. Once all roles are recruited, the master starts a new epoch in newEpoch(). 
+Once we get the txnStateStore, we know the configuration of the txn system, such as the number of proxies. The master then can ask the CC to recruit roles for the new generation in the `recruitEverything()` function. Those recruited roles includes seed SS, proxies and tLogs. Once all roles are recruited, the master starts a new epoch in `newEpoch()`. 
 
 
 At this point, we have recovered the txnStateStore and recruited new proxies and tLogs and copied data from old tLogs to new tLogs. We have a working transaction system in the new generation now.
@@ -90,10 +112,10 @@ We can use the trace event “MasterRecoveredConfig”, which dumps the informat
 Not every FDB role participates in the recovery phases 1-3. This phase tells the other roles about the recovery information and triggers the recovery of those roles when necessary. 
 
 
-Storage servers (SSes) are not involved in the recovery phase 1 -3. To notify SSes about the recovery, the master commits a recovery transaction, the first transaction in the new generation, which contains the txnStateStore information. Once storage servers receive the recovery transaction, it will compare its latest data version and the recovery version, and roll-back its data whose version is newer than the recovery version. Note that storage servers may have newer data than the recovery version because they pre-fetch mutations from tLogs before the mutations are durable to reduce the read-your-write latency. 
+Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify SSes about the recovery, the master commits a recovery transaction, the first transaction in the new generation, which contains the txnStateStore information. Once storage servers receive the recovery transaction, it will compare its latest data version and the recovery version, and roll-back its data whose version is newer than the recovery version. Note that storage servers may have newer data than the recovery version because they pre-fetch mutations from tLogs before the mutations are durable to reduce the read-your-write latency. 
 
 
-Proxies haven’t recovered the transaction system states and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (txnState) interfaces in sendIntialCommitToResolvers() function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
+Proxies haven’t recovered the transaction system states and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (`txnState `) interfaces in `sendIntialCommitToResolvers()` function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
 
 
 The resolvers haven’t known the recovery version either. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (resolve) interface.
@@ -110,7 +132,7 @@ Coordinators stores the transaction systems’ information. The master needs to 
 Once the cstate is written, the master sets the cstateUpdated promise and move to the ACCEPTING_COMMITS phase.
 
 
-The cstate update is done in trackTlogRecovery() actor.
+The cstate update is done in `trackTlogRecovery()` actor.
 The actor keeps running until the recovery finishes the FULLY_RECOVERED phase. 
 The actor needs to update the cstates at the following phases:
 ALL_LOGS_RECRUITED, STORAGE_RECOVERED, and FULLY_RECOVERED. 
@@ -127,14 +149,14 @@ The transaction system starts to accept new transactions.
 
 ## Phase 7: ALL_LOGS_RECRUITED
 
-The master marks the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the configured expected tLogs. This is done in the trackTlogRecovery() actor.
+The master marks the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the configured expected tLogs. This is done in the `trackTlogRecovery()` actor.
 
 
 ## Phase 8: STORAGE_RECOVERED
 
 Storage servers need old tLogs in previous generations to recover storage servers’ state. For example, a storage server may be offline for a long time, lagging behind in pulling mutations assigned to it. We have to keep the old tLogs who have those mutations until no storage server needs them. 
 
-When all tLogs are no longer needed and deleted, the master move to the STORAGE_RECOVERED phase. This is done by checking if oldTLogData is empty in the trackTlogRecovery() actor.
+When all tLogs are no longer needed and deleted, the master move to the STORAGE_RECOVERED phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
 
 
 ## Phase 9: FULLY_RECOVERED
