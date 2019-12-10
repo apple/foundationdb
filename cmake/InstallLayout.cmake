@@ -79,6 +79,20 @@ function(install_symlink)
   endif()
 endfunction()
 
+function(install_package_symlink)
+  if (NOT WIN32)
+    set(options "")
+    set(one_value_options LOCATION SOURCE)
+    set(multi_value_options TARGETS)
+    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    foreach(component IN LISTS SYM_TARGETS)
+      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component})
+    endforeach()
+  endif()
+endfunction()
+
 # 'map' from (destination, package) to path
 # format vars like install_destination_for_${destination}_${package}
 set(install_destination_for_bin_tgz "bin")

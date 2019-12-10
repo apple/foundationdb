@@ -30,6 +30,14 @@ if(NOT OPEN_FOR_IDE)
     LINK_DIR bin
     FILE_NAME fdbbackup
     LINK_NAME fdbdr)
+  install_package_symlink(
+    LOCATION packages/bin
+    SOURCE fdbbackup
+    TARGETS fdbdr dr_agent backup_agent fdbrestore)
+  install_package_symlink(
+    LOCATION bin
+    SOURCE fdbbackup
+    TARGETS fdbdr dr_agent backup_agent fdbrestore)
 endif()
 
 if (GPERFTOOLS_FOUND)
