@@ -447,7 +447,7 @@
 
 ..  |option-set-log-transaction| replace::
 
-    Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output.
+    Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.
 
 .. |future-blurb1| replace::
     Many FoundationDB API functions return "future" objects. A brief overview of futures is included in the :doc:`class scheduling tutorial <class-scheduling>`. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.
