@@ -58,6 +58,9 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 	}
 }
 
+const ValueRef conflictingKeysTrue = LiteralStringRef("1");
+const ValueRef conflictingKeysFalse = LiteralStringRef("0");
+
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
 const KeyRef storageCachePrefix = storageCacheKeys.begin;

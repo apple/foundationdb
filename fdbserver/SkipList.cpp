@@ -123,7 +123,7 @@ struct ReadConflictRange {
 	StringRef begin, end;
 	Version version;
 	int transaction;
-	Standalone<VectorRef<KeyRangeRef>> * conflictingKeyRange;
+	Standalone< VectorRef< KeyRangeRef > >* conflictingKeyRange;
 	ReadConflictRange( StringRef begin, StringRef end, Version version, int transaction, Standalone<VectorRef<KeyRangeRef>> * cKR = nullptr )
 		: begin(begin), end(end), version(version), transaction(transaction), conflictingKeyRange(cKR)
 	{
@@ -760,7 +760,7 @@ private:
 		Version version;
 		bool *result;
 		int state;
-		Standalone<VectorRef<KeyRangeRef>>* conflictingKeyRange;
+		Standalone<VectorRef<KeyRangeRef>>* conflictingKeyRange; // null if report_conflicting_keys is not enabled.
 
 		void init( const ReadConflictRange& r, Node* header, bool* tCS, Standalone<VectorRef<KeyRangeRef>>* cKR) {
 			this->start.init( r.begin, header );
@@ -783,7 +783,6 @@ private:
 				if (end_node != nullptr) {
 					endKey = StringRef(end_node->value(), end_node->length());
 				}
-				
 				conflictingKeyRange->push_back_deep(conflictingKeyRange->arena(), KeyRangeRef(startKey, endKey));
 			}
 			return true;
@@ -809,7 +808,7 @@ private:
 					if (start.finger[l]->getMaxVersion(l) <= version)
 						return noConflict();
 					if (l==0)
-						return conflict(nullptr, nullptr); // The whole readConflictRange is conflicting with other transactions with higher version number
+						return conflict(nullptr, nullptr); // The whole read_conflict_range is conflicting with other transactions with higher version number
 				}
 				state = 1;
 			case 1: 
@@ -1039,10 +1038,12 @@ public:
 		for(int i=begin; i<end; i++)
 			values[i] = true;
 	}
-	bool any( int begin, int end ) {
+	bool any( int begin, int end, int* conflictingIndex = nullptr ) {
 		for(int i=begin; i<end; i++)
-			if (values[i])
+			if (values[i]) {
+				if (conflictingIndex != nullptr) *conflictingIndex = i;
 				return true;
+			}
 		return false;
 	}
 };
@@ -1133,9 +1134,9 @@ public:
 		setBits(orValues, beginWord, lastWord+1, true);
 	}
 
-	bool any(int begin, int end) {
+	bool any(int begin, int end, int* conflictingIndex = nullptr) {
 		bool a = orImpl(begin,end);
-		bool b = debug.any(begin,end);
+		bool b = debug.any(begin,end, conflictingIndex);
 		ASSERT( a == b );
 		return b;
 	}
@@ -1164,8 +1165,14 @@ void ConflictBatch::checkIntraBatchConflicts() {
 		for(int i=0; i<tr.readRanges.size(); i++){
 			int startPointIndex = tr.readRanges[i].first;
 			int endPointIndex = tr.readRanges[i].second;
-			if ( mcs.any(startPointIndex , endPointIndex ) ) {
+			int conflictingIndex;
+			if ( mcs.any( startPointIndex , endPointIndex, tr.reportConflictingKeys ? &conflictingIndex : nullptr ) ) {
 				if (tr.reportConflictingKeys){
+					// The MiniConflictSet is difficult to change, use MiniConflictSet2 to hack here. (Future: use MiniConflictSet)
+					if (points[conflictingIndex].begin)
+						startPointIndex = conflictingIndex;
+					else
+						endPointIndex = conflictingIndex;
 					(*conflictingKeyRangeMap)[t].push_back_deep((*conflictingKeyRangeMap)[t].arena(), KeyRangeRef(points[startPointIndex].key, points[endPointIndex].key));
 				}
 				conflict = true;

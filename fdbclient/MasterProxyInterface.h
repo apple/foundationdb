@@ -137,10 +137,7 @@ struct CommitTransactionRequest : TimedRequest {
 	void serialize(Ar& ar) { 
 		serializer(ar, transaction, reply, arena, flags, debugID);
 	}
-
-	void reportConflictingKeys(){
-		transaction.report_conflicting_keys = true;
-	}
+	
 };
 
 static inline int getBytes( CommitTransactionRequest const& r ) {

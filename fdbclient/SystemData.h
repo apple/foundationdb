@@ -64,6 +64,8 @@ const Key serverKeysPrefixFor( UID serverID );
 UID serverKeysDecodeServer( const KeyRef& key );
 bool serverHasKey( ValueRef storedValue );
 
+extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
+
 extern const KeyRef cacheKeysPrefix;
 
 const Key cacheKeysKey( uint16_t idx, const KeyRef& key );

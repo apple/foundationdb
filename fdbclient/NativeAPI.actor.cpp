@@ -2613,7 +2613,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				proxy_memory_limit_exceeded(),
 				commit_unknown_result()});
 	}
-	
+
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -2673,8 +2673,15 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					}
 					return Void();
 				} else {
+					// clear previous conflicting KeyRanges
+					tr->info.conflictingKeyRanges.reset();
 					if (ci.conflictingKeyRanges.present()){
-						tr->info.conflictingKeyRanges = ci.conflictingKeyRanges.get();
+						Standalone<VectorRef<KeyValueRef>> conflictingKeyRanges;
+						for (auto const & kr : ci.conflictingKeyRanges.get()) {
+							conflictingKeyRanges.push_back_deep(conflictingKeyRanges.arena(), KeyValueRef(kr.begin, conflictingKeysTrue));
+							conflictingKeyRanges.push_back_deep(conflictingKeyRanges.arena(), KeyValueRef(kr.end, conflictingKeysFalse));
+						}
+						tr->info.conflictingKeyRanges = conflictingKeyRanges;
 					}
 
 					if (info.debugID.present())
@@ -2789,7 +2796,7 @@ Future<Void> Transaction::commitMutations() {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
 		if(options.reportConflictingKeys) {
-			tr.reportConflictingKeys();
+			tr.transaction.report_conflicting_keys = true;
 		}
 
 		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );

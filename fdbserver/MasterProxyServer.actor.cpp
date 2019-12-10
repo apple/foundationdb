@@ -1039,11 +1039,11 @@ ACTOR Future<Void> commitBatch(
 				for (int resolverInd : transactionResolverMap[t]) {
 					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
 						unmergedConflictingKRs.emplace_back(kr);
-						// TraceEvent("ConflictingKeyRange").detail("ResolverIndex", resolverInd).detail("TrasactionIndex", t).detail("StartKey", kr.begin.toString()).detail("EndKey", kr.end.toString());
 					}
 				}
+				// At least one keyRange should be returned
 				ASSERT(unmergedConflictingKRs.size());
-				// Sort the keyranges by begin key, then union overlap ranges from left to right
+				// Sort the keyranges by begin key, then union overlapping ranges from left to right
 				std::sort(unmergedConflictingKRs.begin(), unmergedConflictingKRs.end(), [](KeyRange a, KeyRange b){
 					return a.begin < b.begin;
 				});
@@ -1066,7 +1066,7 @@ ACTOR Future<Void> commitBatch(
 			}
 		}
 
-		// Update corresponding transaction index on each resolver
+		// Update corresponding transaction indices on each resolver
 		for (int resolverInd : transactionResolverMap[t])
 			nextTr[resolverInd]++;
 

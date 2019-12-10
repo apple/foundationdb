@@ -132,7 +132,7 @@ ACTOR Future<Void> resolveBatch(
 		
 		vector<int> commitList;
 		vector<int> tooOldList;
-		std::map<int, Standalone<VectorRef<KeyRangeRef>> > conflictingKeyRangeMap;
+		std::map< int, Standalone< VectorRef< KeyRangeRef > > > conflictingKeyRangeMap;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;

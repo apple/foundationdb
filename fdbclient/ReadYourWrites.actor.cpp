@@ -23,7 +23,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/libb64/encode.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1190,6 +1189,43 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 	}
 }
 
+ACTOR Future<Standalone<RangeResultRef>> getConflictingKeys(
+	VectorRef<KeyValueRef> conflictingKeys,
+	ReadYourWritesTransaction* ryw,
+	KeySelector begin, 
+	KeySelector end, 
+	GetRangeLimits limits,
+	bool snapshot,
+	bool reverse
+	) {
+		// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters it provides.
+		// It is kind of difficult to take care of each corner cases of what getRange does
+		// Thus, we use a hack way here to achieve it.
+		// We create an empty RYWTransaction and write all conflicting key/values to it.
+		// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange
+		state ReadYourWritesTransaction hackTr(ryw->getDatabase());
+		// One issue here is that, although the write itself is local. getRange will look through the database.
+		// To make sure there is no keys other than conflictings keys are read,
+		// We write it under system key prefix "\xff/conflicting_keys/", which should always be empty in the database.
+		// Thus, only the local written keys are under this prefix and will be looked through.
+		// One pain point is that it adds latency overhead here
+		state const KeyRef conflictingKeysPrefix = LiteralStringRef("\xff/conflicting_keys/");
+		hackTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		for (const KeyValueRef kv : conflictingKeys) {
+			hackTr.set(kv.key.withPrefix(conflictingKeysPrefix), kv.value);
+		}
+		state KeySelector conflictingKeysBegin = KeySelectorRef(begin.getKey().withPrefix(conflictingKeysPrefix), begin.orEqual, begin.offset);
+		state KeySelector conflictingKeysEnd = KeySelectorRef(end.getKey().withPrefix(conflictingKeysPrefix), end.orEqual, end.offset);
+		Standalone<RangeResultRef> resultWithKeyPrefix = wait(hackTr.getRange(conflictingKeysBegin, conflictingKeysEnd, limits, snapshot, reverse));
+		// Remove the prefix we added before and then return the result
+		Standalone<RangeResultRef> result;
+		for (const KeyValueRef kv : resultWithKeyPrefix) {
+			result.push_back_deep(result.arena(), KeyValueRef(kv.key.removePrefix(conflictingKeysPrefix), kv.value));
+		}
+		hackTr.reset();
+		return result;
+	}
+
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
 	
@@ -1227,24 +1263,6 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 			return e;
 		}
 		return Optional<Value>();
-	}
-
-	// Add conflicting keys to special key space
-	if (key == LiteralStringRef("\xff\xff/conflicting_keys/json")){
-		if (tr.info.conflictingKeyRanges.present()){
-			json_spirit::mArray root;
-			json_spirit::mObject keyrange;
-			for (const auto & kr : tr.info.conflictingKeyRanges.get()) {
-				keyrange["begin"] = base64::encoder::from_string(kr.begin.toString());
-				keyrange["end"] = base64::encoder::from_string(kr.end.toString());
-				root.push_back(keyrange);
-				keyrange.clear();
-			}
-			Optional<Value> output = StringRef(json_spirit::write_string(json_spirit::mValue(root), json_spirit::Output_options::raw_utf8));
-			return output;
-		} else {
-			return Optional<Value>();
-		}
 	}
 
 	if(checkUsedDuringCommit()) {
@@ -1298,6 +1316,33 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 	
+	// Use special key prefix "\xff\xff/conflicting_keys/<some_key>",
+	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
+	// The returned key value pairs are interpretted as :
+	// <key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+	// <key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+	// Due to the implementation of resolver, currently, 
+	// we can only give key ranges that contain at least one key is conflicting.
+	Key conflictingKeysPreifx = LiteralStringRef("\xff\xff/conflicting_keys/");
+	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
+		// Remove the special key prefix "\xff\xff/conflicting_keys/"
+		Key beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
+		Key endConflictingKey = end.getKey().removePrefix(conflictingKeysPreifx);
+
+		// Check if the conflicting key range to be read is valid
+		KeyRef maxKey = getMaxReadKey();
+		if(beginConflictingKey > maxKey || endConflictingKey > maxKey)
+			return key_outside_legal_range();
+		
+		begin.setKey(beginConflictingKey);
+		end.setKey(endConflictingKey);
+		if (tr.info.conflictingKeyRanges.present()) {
+			return getConflictingKeys(tr.info.conflictingKeyRanges.get(), this, begin, end, limits, snapshot, reverse);
+		} else {
+			return Standalone<RangeResultRef>();
+		}
+	}
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

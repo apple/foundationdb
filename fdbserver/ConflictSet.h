@@ -54,7 +54,7 @@ private:
 	std::vector< std::pair<StringRef,StringRef> > combinedWriteConflictRanges;
 	std::vector< struct ReadConflictRange > combinedReadConflictRanges;
 	bool* transactionConflictStatus;
-	std::map< int, Standalone<VectorRef<KeyRangeRef>> >* conflictingKeyRangeMap;
+	std::map< int, Standalone< VectorRef< KeyRangeRef > > >* conflictingKeyRangeMap;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();
