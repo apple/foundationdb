@@ -100,7 +100,9 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
 .. function:: open( cluster_file=nil ) -> Database
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
 .. global:: FDB.options
 

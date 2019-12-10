@@ -111,7 +111,9 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
 .. function:: open( cluster_file=None, event_model=None )
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
 
