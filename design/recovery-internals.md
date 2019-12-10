@@ -6,25 +6,48 @@ This document explains at the high level how the recovery works in a single clus
 
 ## Background
 
-## `SeverDBInfo` data structure
+## `ServerDBInfo` data structure
 
-This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration.  It also has a vector of all storage server's interfaces. The definition of the data structure is in `SeverDBInfo.h`. The data structure is not available to the client. 
+This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of proxies, is  available to the client. 
 
 Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propogate the new `ServerDBInfo` to all workers in the cluster.
 
 ## When will recovery happen?
-Failures of roles in the transaction system and coordinators (?) can cause recovery. Transactoin system's roles include cluster controller, master, transaction logs (tLog), proxies, and resolvers.
+Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, proxy, transaction logs (tLog), resolvers, and log router. 
 
-[comment]: <> Can someone help define all situation that can trigger recovery?
+Network partition or failures can make CC unable to reach some roles, treating those roles as dead and causing recovery. If CC cannot connect to a majority of coordinators, it will be treated as dead by coordinators and recovery will happen. 
 
-Network partition or failures can make CC unable to reach some roles, treating those roles as dead and causing reocvery.
+Better master exists event can trigger recoveries. Better master exists event is the cluster changes such that there is a better location for some already recruited processes (say master role).
+
+Configuration change, such as change of storage server type and excluding processes, can also trigger recovery.
 
 Not every type of failure can trigger recovery. For example, storage server (SS) failure will not cause recovery. Data distributor, which is a role that is independent from the transaction system, will recruit a new storage server or simply move the failed server's data to other servers.
 
+Failure of coordinators does not cause recovery. If more than a majority of coordinators fails, FDB will become unavailable. When the failed coordinators are replaced and rebooted, a recovery will happen.
+
+## How to detect CC failure?
+
+CC sends heart beat to all coordinators periodically. A CC will kill itself in the following conditions: 
+
+*  The CC cannot  receive acknowledgement from a majority of coordinators due to network failure or death of coordinators; or
+
+*  A majority of coordinators reply that there exist another CC. 
+
+Once coordinators think there is no CC in a cluster, they will start leader election process to select a new CC.
+
+## When will multiple CCs exist in a transient time period?
+
+Although only one CC can succeed in recovery, which is guaranteed by Paxos algorithm, there exist scenarios when multiple CCs can exist in a  transient time period. 
+
+Scenario 1: A majority of CCs reboot at the same time and the current running CC is still alive. When those CCs reboot, they may likely choose a different process as CC. The new CC will start to recruit a new master and kicks off the recovery. The old CC will know the existance of the new CC when it sends heart-beat to coordinators periodically (in sub-seconds). The old CC will kill itself, once it was told by a majority of coordinators about the existance of the new CC. Old roles (say master) will commit suicide as well after the old CC dies. This prevents the cluster to have two sets of transaction systems. In summary, the cluster may have both the old CC and new CC alive in sub-seconds before the old CC confirms the existance of the new CC.
+
+Scenario 2: Network partition makes the current running CC unable to connect to a majority of coordinators. Before the CC detects it, the coordinators can elect a new CC and recovery will happen. Typically, the old CC can quickly realize it cannot connect to a majority of coordinators and kill itself. In the rare situation when the old CC does not die within a short time period *and* the network partition is resolved before the old CC dies, the new CC can recruit a new master, which leads to two masters in the cluster. Only one master can succeed the recovery because only one master can lock the cstate (see Phase 2: LOCKING_CSTATE).
+
+(The management of the CC's liveness is tricky to be implemented correctly. After four major revisions of the code, this functionality *should* be bug-free certified by Evan. ;))
 
 ## Overview
 
-Cluster controller (CC) decides if recovery should be triggered. In case the current running CC crashes or cannot be reached by a majority of coordinators, coordinators will start leader election to select a CC among the stateless process -- the processes which do not have a file behind it, such as the processes that run master. In the rare situation when the majority of coordinators cannot be reached, say a majority of coordinators' machines crash, CC cannot be selected successfully and the recovery will get stuck.
+Cluster controller (CC) decides if recovery should be triggered. In case the current running CC crashes or cannot be reached by a majority of coordinators, coordinators will start leader election to select a CC. Stateless processes, which do not have a file behind it such as the processes that run master, are favored to run CC. In the rare situation when the majority of coordinators cannot be reached, say a majority of coordinators' machines crash, CC cannot be selected successfully and the recovery will get stuck.
 
 
 Recovery has 9 phases, which are defined as the 9 states in the source code: READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, ACCEPTING_COMMITS = 6, ALL_LOGS_RECRUITED = 7, STORAGE_RECOVERED = 8, FULLY_RECOVERED = 9.
@@ -32,27 +55,27 @@ Recovery has 9 phases, which are defined as the 9 states in the source code: REA
 The recovery process is like a state machine, changing from one state to the next state. 
 We will describe in the rest of this document what each phase does to drive the recovery to the next state.
 
-Recovery tracks the information of each recovery phase in “MasterRecoveryState” trace event. By checking the message, we can find which phase the recovery is stuck at.
+Recovery tracks the information of each recovery phase in `MasterRecoveryState` trace event. By checking the message, we can find which phase the recovery is stuck at. The status used in the `MasterRecoveryState` trace event is defined as `RecoveryStatus` structure in `RecoveryState.h`. The status, instead of the name of the 9 phases, is typically used in diagnosing production issues.
 
 
 ## Phase 1: READING_CSTATE
 
-This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as transaction logs (tLog) and tLogs’ configuration, logRouterTags (the number of log router tags), txsTags, old generation's tLogs, and recovery count) that exist before the recovery. The coordinated state can have multiple generations of tLogs. 
+This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as transaction logs (tLog) and tLogs’ configuration, logRouterTags (the number of log router tags), txsTags, old generations' tLogs, and recovery count) that exist before the recovery. The coordinated state can have multiple generations of tLogs. 
 
-The transaction system states before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation increases for each recovery.
+The transaction system state before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation increases for each recovery.
 
 
 ## Phase 2: LOCKING_CSTATE
 
 This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes. 
 
-
-FDB lets the current alive tLogs to use the master’s interface to register each tLog’s interface to master. Master simply waits on receiving the TLogRejoinRequest streams: for each tLog’s interface received, the master compares the interface id with the tLog id read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
+Recall that `ServerDBInfo` has master's interface and is propogated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
+Master simply waits on receiving the TLogRejoinRequest streams: for each tLog’s interface received, the master compares the interface id with the tLog id read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
 The logic of locking the tLogs is implemented in `epochEnd()` function in TagPartitionedLogSystems.actor.cpp.
 
 
-Once we lock the cstate, we bump the recoveryCount and write the cstate to kill the other recovery attempts. This makes the other attempts know they are died and do not recruit more tLogs. If we do not do this, there will be many recovery attempts which recruit tLogs and can make system out of memory. This operation is the reason why every recovery bumps the recoveryCount (epoch) by 2 instead of 1.
+Once we lock the cstate, we bump the recoveryCount and write the cstate to signal to the other recovery attempts that they should not recruit more tLogs. If we do not do this, there could be many recovery attempts that recruit tLogs and cause the system to run out of memory. This operation is the reason why every recovery bumps the recoveryCount (epoch) by 2 instead of 1.
 
 
 *How does each tLog know the current master’s interface?*
@@ -78,30 +101,34 @@ Once the master gets enough tLogs, it calculates the knownCommittedVersion, whic
 
 
 Two situations may invalidate the calculated knownCommittedVersion:
-Situation 1: Too many tLogs in the previous generation permanently died, say due to hardware failure. The master can choose to force recovery, which can cause data loss. To avoid force recovery, database administrators can bring up those died tLogs, for example by copying their files onto new hardware. 
+
+* Situation 1: Too many tLogs in the previous generation permanently died, say due to hardware failure. If force recovery is allowed by system administrator, the master can choose to force recovery, which can cause data loss; otherwise, to unblock the recovery, system administrator has to bring up those died tLogs, for example by copying their files onto new hardware.
 
 
-Situation 2: A tLog may die after it reports alive to the master in the RECRUITING phase. This may cause the knownCommittedVersion calculated by the master in this phase no longer valid in the next phases. When this happens, the master can detect it and will terminate the current recovery and start a new recovery. 
+* Situation 2: A tLog may die after it reports alive to the master in the RECRUITING phase. This may cause the knownCommittedVersion calculated by the master in this phase to no longer be valid in the next phases. When this happens, the master will detect it, terminate the current recovery, and start a new recovery. 
 
 
-Then, the master will reconstruct the transaction state store (txnStateStore) by peeking the txnStateTag in oldLogSystem. 
-Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk by the oldLogSystem.
-Once we get the txnStateStore, we know the configuration of the txn system, such as the number of proxies. The master then can ask the CC to recruit roles for the new generation in the `recruitEverything()` function. Those recruited roles includes seed SS, proxies and tLogs. Once all roles are recruited, the master starts a new epoch in `newEpoch()`. 
+Once we have a knownCommittedVersion, the master will reconstruct the transaction state store (txnStateStore) by peeking the txnStateTag in oldLogSystem. 
+Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
+Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of proxies. The master then can ask the CC to recruit roles for the new generation in the `recruitEverything()` function. Those recruited roles includes proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the master starts a new epoch in `newEpoch()`.  
 
 
-At this point, we have recovered the txnStateStore and recruited new proxies and tLogs and copied data from old tLogs to new tLogs. We have a working transaction system in the new generation now.
+At this point, we have recovered the txnStateStore, recruited new proxies and tLogs, and copied data from old tLogs to new tLogs. We have a working transaction system in the new generation now.
 
 
-**Where can the recovery get stuck in this phase?**
+### Where can the recovery get stuck in this phase?
+
+Recovery can get stuck at the following two steps:
+
+**Reading the txnStateStore step.**
+Recovery typically won’t get stuck at reading the txnStateStore step because once the master can lock tLogs, it should always be able to read the txnStateStore for the tLogs.
 
 
-**Reading the txnStateStore step**. Recovery typically won’t get stuck at reading the txnStateStore step because once the master can lock tLogs, it should always be able to read the txnStateStore for the tLogs.
+However, reading the txnStateStore can be slow because it needs to read from disk (through openDiskQueueAdapter() function) and the txnStateStore size increases as the cluster size increases. Recovery can take a long time if reading the txnStateStore is slow. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags. 
 
 
-However, reading the txnStateStore can be slow because it needs to read from disk (through openDiskQueueAdapter() function) and the txnStateStore increases as the cluster size increases. Recovery can take a much longer time because of the slowness of reading the txnStateStore. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags. 
-
-
-**Recruiting roles step**. There are cases the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, a cluster with replica_factor equal to three may have only three tLog and one of them died during the recovery, the cluster will not succeed in recruiting 3 tLogs and will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of the stuck situation, the master will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration but it is only temporary. 
+**Recruiting roles step.**
+There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the master will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
 
 We can use the trace event “MasterRecoveredConfig”, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase. 
@@ -112,24 +139,26 @@ We can use the trace event “MasterRecoveredConfig”, which dumps the informat
 Not every FDB role participates in the recovery phases 1-3. This phase tells the other roles about the recovery information and triggers the recovery of those roles when necessary. 
 
 
-Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify SSes about the recovery, the master commits a recovery transaction, the first transaction in the new generation, which contains the txnStateStore information. Once storage servers receive the recovery transaction, it will compare its latest data version and the recovery version, and roll-back its data whose version is newer than the recovery version. Note that storage servers may have newer data than the recovery version because they pre-fetch mutations from tLogs before the mutations are durable to reduce the read-your-write latency. 
+Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify SSes about the recovery, the master commits a recovery transaction, the first transaction in the new generation, which contains the txnStateStore information. Once storage servers receive the recovery transaction, it will compare its latest data version and the recovery version, and rollback to the recovery version if its data version is newer. Note that storage servers may have newer data than the recovery version because they pre-fetch mutations from tLogs before the mutations are durable to reduce the latency to read newly written data.
 
 
-Proxies haven’t recovered the transaction system states and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (`txnState `) interfaces in `sendIntialCommitToResolvers()` function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
+Proxies haven’t recovered the transaction system state and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (`txnState `) interfaces in `sendIntialCommitToResolvers()` function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
 
 
 The resolvers haven’t known the recovery version either. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (resolve) interface.
 
 
-At the end of this phase, every role should be aware of the recovery and start recovering its states.
+At the end of this phase, every role should be aware of the recovery and start recovering their states.
 
 
 ## Phase 5: WRITING_CSTATE
 
-Coordinators stores the transaction systems’ information. The master needs to write the new tLogs into coordinators’ states to achieve consensus and fault tolerance. Only when the coordinators’ state is updated with the new transaction system’s configuration, will the cluster controller tell clients about the new transaction system (such as the new proxies).
+Coordinators store the transaction systems’ information. The master needs to write the new tLogs into coordinators’ states to achieve consensus and fault tolerance. Only when the coordinators’ states are updated with the new transaction system’s configuration will the cluster controller tell clients about the new transaction system (such as the new proxies). 
+
+The master only needs to write the new tLogs to a quorum of coordinators for a running cluster. The only time the master has to write all coordinators is when creating a brand new database.
 
 
-Once the cstate is written, the master sets the cstateUpdated promise and move to the ACCEPTING_COMMITS phase.
+Once the cstate is written, the master sets the cstateUpdated promise and moves to the ACCEPTING_COMMITS phase.
 
 
 The cstate update is done in `trackTlogRecovery()` actor.
@@ -149,16 +178,16 @@ The transaction system starts to accept new transactions.
 
 ## Phase 7: ALL_LOGS_RECRUITED
 
-The master marks the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the configured expected tLogs. This is done in the `trackTlogRecovery()` actor.
+The master sets the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the expected tLogs based on the cluster configuration. This is done in the `trackTlogRecovery()` actor.
 
 
 ## Phase 8: STORAGE_RECOVERED
 
 Storage servers need old tLogs in previous generations to recover storage servers’ state. For example, a storage server may be offline for a long time, lagging behind in pulling mutations assigned to it. We have to keep the old tLogs who have those mutations until no storage server needs them. 
 
-When all tLogs are no longer needed and deleted, the master move to the STORAGE_RECOVERED phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
+When all tLogs are no longer needed and deleted, the master moves to the STORAGE_RECOVERED phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
 
 
 ## Phase 9: FULLY_RECOVERED
 
-When the master has all new tLogs and removed all old tLogs -- both STORAGE_RECOVERED and ALL_LOGS_RECRUITED have been satisfied -- the master will mark the recovery state as FULLY_RECOVERED. 
+When the master has all new tLogs and has removed all old tLogs -- both STORAGE_RECOVERED and ALL_LOGS_RECRUITED have been satisfied -- the master will mark the recovery state as FULLY_RECOVERED. 
