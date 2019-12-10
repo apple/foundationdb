@@ -883,7 +883,7 @@ Transaction options
 
 .. method:: Transaction.options.set_debug_transaction_identifier(identifier)
 
-    |option-set--debug-transaction-identifier|
+    |option-set-debug-transaction-identifier|
 
 .. method:: Transaction.options.set_log_transaction()
 

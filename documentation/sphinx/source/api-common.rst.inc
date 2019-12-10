@@ -441,7 +441,7 @@
 
     Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling |transaction-logging-max-field-length-database-option|.
 
-..  |option-set--debug-transaction-identifier| replace::
+..  |option-set-debug-transaction-identifier| replace::
 
     Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
 
