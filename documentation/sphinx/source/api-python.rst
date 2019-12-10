@@ -638,6 +638,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
     |atomic-xor|
 
+.. method:: Transaction.compare_and_clear(key, param)
+
+    |atomic-compare-and-clear|
+
 .. method:: Transaction.max(key, param)
 
     |atomic-max1|
