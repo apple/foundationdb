@@ -917,6 +917,14 @@ public:
 							result.resolvers.push_back(resolvers[i].interf);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
+
+						const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+						auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
+						                                                   req.configuration, id_used);
+						std::transform(backupWorkers.begin(), backupWorkers.end(),
+						               std::back_inserter(result.backupWorkers),
+						               [](const WorkerDetails& w) { return w.interf; });
+
 						break;
 					} else {
 						if(fitness < bestFitness) {

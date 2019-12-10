@@ -326,9 +326,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			for (int i = 1; i < lsConf.oldTLogs.size(); i++ ) {
 				logSystem->oldLogData.emplace_back(lsConf.oldTLogs[i]);
-				//TraceEvent("BWFromOldLSConf")
-				//    .detail("Epoch", logSystem->oldLogData.back().epoch)
-				//    .detail("Version", logSystem->oldLogData.back().epochEnd);
 			}
 		}
 		logSystem->logSystemType = lsConf.logSystemType;
@@ -2142,14 +2139,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->txsTags = configuration.tLogVersion >= TLogVersion::V4 ? recr.tLogs.size() : 0;
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
+		logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
 		if(configuration.usableRegions > 1) {
-			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,recr.tLogs.size()));
 			logSystem->expectedLogSets++;
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
 			logSystem->addPseudoLocality(tagLocalityBackup);
 			TraceEvent("AddPseudoLocality", logSystem->getDebugID())
 			    .detail("Locality1", "LogRouterMapped")
 			    .detail("Locality2", "Backup");
+		} else {
+			// Single region uses log router tag for backup workers.
+			logSystem->addPseudoLocality(tagLocalityBackup);
+			TraceEvent("AddPseudoLocality", logSystem->getDebugID()).detail("Locality", "Backup");
 		}
 
 		logSystem->tLogs.emplace_back(new LogSet());
@@ -2208,9 +2209,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->oldLogData[0].epoch = oldLogSystem->epoch;
 		}
 		logSystem->oldLogData.insert(logSystem->oldLogData.end(), oldLogSystem->oldLogData.begin(), oldLogSystem->oldLogData.end());
-		//for (const auto& old : logSystem->oldLogData) {
-		//	TraceEvent("BWEndVersion").detail("Epoch", old.epoch).detail("Version", old.epochEnd);
-		//}
 
 		logSystem->tLogs[0]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;
