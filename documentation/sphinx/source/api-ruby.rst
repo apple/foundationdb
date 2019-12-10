@@ -589,6 +589,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
     |atomic-and|
 
+.. method:: Transaction.compare_and_clear(key, param) -> nil
+
+    |atomic-compare-and-clear|
+
 .. method:: Transaction.bit_or(key, param) -> nil
 
     |atomic-or|
