@@ -912,6 +912,8 @@ All future objects are a subclass of the :class:`Future` type.
 
     Calls the specified callback function, passing itself as a single argument, when the future object is ready. If the future object is ready at the time :meth:`on_ready()` is called, the call may occur immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the callback is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
 
+    .. note:: This function guarantees the callback will be executed **at most once**.
+
 .. warning:: |fdb-careful-with-callbacks-blurb|
 
 .. method:: Future.cancel()
