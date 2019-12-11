@@ -202,7 +202,7 @@ will automatically find it and build with TLS support.
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
 
-## Makefile
+## Makefile (Deprecated - all users should transition to using cmake)
 
 #### MacOS
 
