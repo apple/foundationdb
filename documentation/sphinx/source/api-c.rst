@@ -393,6 +393,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Creates a new database connected the specified cluster. The caller assumes ownership of the :type:`FDBDatabase` object and must destroy it with :func:`fdb_database_destroy()`.
 
+   |fdb-open-blurb2|
+
    ``cluster_file_path``
       A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
 
