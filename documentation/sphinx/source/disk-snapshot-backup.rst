@@ -2,10 +2,10 @@
 .. _disk-snapshot-backups:
 
 #################################
-Disk Snapshot Backup and Restore
+Disk snapshot backup and Restore
 #################################
 
-This document covers disk snapshot based backup and restoration of a FoundationDB database. This tool leverages disk level snapshots and gets a point-in-time consistent copy of the database. The disk snapshot backup can be used to provide additional level of protection in case of hardware or software failures, test and development purposes or for compliance reasons.
+This document covers disk snapshot based backup and restoration of a FoundationDB database. This tool leverages disk level snapshots and gets a point-in-time consistent copy of the database. The disk snapshot backup can be used to provide an additional level of protection in case of hardware or software failures, test and development purposes or for compliance reasons.
 
 .. _disk-snapshot-backup-introduction:
 
@@ -14,20 +14,21 @@ Introduction
 
 FoundationDB's disk snapshot backup tool makes a consistent, point-in-time backup of FoundationDB database without downtime by taking crash consistent snapshot of all the disk stores that have persistent data.
 
-The prerequisite of this feature is to have crash consistent snapshot support on the filesystem (or the disks) in which FoundationDB is running on.
+The prerequisite of this feature is to have crash consistent snapshot support on the filesystem (or the disks) on which FoundationDB is running.
 
-Disk snapshot backup tool orchestrates the snapshotting of all the disk images and ensures that they are restorable in a point-in-time consistent basis.
+The disk snapshot backup tool orchestrates the snapshotting of all the disk images and ensures that they are restorable to a consistent point in time.
 
-Restore is achieved by copying or attaching the disk snapshot images to FoundationDB compute instances. Restore behaves as if the cluster was powered down and restarted.
+Restore is achieved by copying or attaching the disk snapshot images to FoundationDB compute instances. Restore behaves as if the cluster were powered down and restarted.
 
 Backup vs Disk snapshot backup
 ==============================
+Backup feature already exists in FoundationDB and is detailed here :ref:`backups`, any use of fdbbackup will refer to this feature.
 
-Both these tools provide a point-in-time consistent backup of FoundationDB database, they operate at different levels and there are differences in terms of performance, features and external dependency.
+Both fdbbackup and Disk snapshot backup tools provide a point-in-time consistent backup of FoundationDB database, but, they operate at different levels and there are differences in terms of performance, features and external dependency.
 
-Backup/fdbbackup operates at the key-value level, backup will involve copying of all the key-values from the source cluster and the restore will involve applying all the key-values to the destination database. Performance will depend on the amount of data and the throughput with which the data can be read and written. This approach is agnostic to external dependency, there is no requirement for any snapshotting feature from disk system. Additionally, it has an option for continuous backup that enables a restorable point-in-time very close to now. This feature already exists in FoundationDB and is detailed here :ref:`backups`.
+fdbbackup operates at the key-value level. Backup involves copying of all the key-value pairs from the source cluster and restore involves applying all the key-value pairs to the destination database. Performance depends on the amount of data and the throughput with which the data can be read and written. This approach has no external dependency, there is no requirement for any snapshotting feature from the disk system. Additionally, it has an option for continuous backup with the flexibility to pick a restore point.
 
-Disk snapshot backup and restore are generally high performant because it deals at disk level and data is not read or written through FoundationDB stack. In environments where disk snapshot and restore are highly performant this approach can be very fast. Feature is strictly dependent on crash consistent snapshot feature from disk system. Frequent backups could be done as a substitute to continuous backup if the backups are performant.
+Disk snapshot backup and restore are generally high performance because it operates at disk level and data is not read or written through the FoundationDB stack. In environments where disk snapshot and restore are highly performant this approach can be very fast. Frequent backups can be done as a substitute to continuous backup if the backups are performant.
 
 Limitations
 ===========
@@ -36,31 +37,52 @@ Limitations
 * Feature is not supported on Windows operating system
 * Data encryption is dependent on the disk system
 * Backup and restore involves tooling which are deployment and environment specific to be developed by operators
+* ``snapshot`` command is a hidden command in the current release and will be unhidden in a future patch release.
 
-Backup Steps
-=============
+Disk snapshot backup steps
+==========================
 
 ``snapshot``
-    This command line tool is used to create the snapshot. It takes a full path to a ``snapshot create binary`` and reports the status, optionally, can take additional arguments to be passed down to the ``snapshot create binary``. It returns a unique identifier which can be used to identify all the disk snapshots of a backup. Even in case of failures unique identifier is returned to identify and clear any partially create disk snapshots.
+    This command line tool is used to create the snapshot. It takes a full path to a ``snapshot create binary`` and reports the status. Optionally, it can take additional arguments to be passed down to the ``snapshot create binary``. It returns a unique identifier which can be used to identify all the disk snapshots of a backup. Even in case of failures the unique identifier is returned to identify and clear any partially create disk snapshots.
 
-In response to the snapshot request from the user, FoundationDB will run a user specified ``snapshot create binary`` on all processes which has persistent data in it, binary should call filesystem/disk system specific snapshot create API and gather some additional data for the restore.
+In response to the snapshot request from the user, FoundationDB will run the user specified ``snapshot create binary`` on all processes which have persistent data, binary should call filesystem/disk system specific snapshot create API.
 
 Before using the ``snapshot`` command the following setup needs to be done
 
 * Write a program that will snapshot the local disk store when invoked by the ``fdbserver`` with the following arguments:
-  * UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
-  * Version - version string of the FoundationDB binary
-  * Path - path of the FoundationDB disk store to be snapshotted
-  * Role - tlog/storage/coordinator, identifies the role of the node on which the snapshot is being invoked
+
+  - UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
+  - Version - version string of the FoundationDB binary
+  - Path - path of the FoundationDB ``datadir`` to be snapshotted, ``datadir`` specified in :ref:`foundationdb-conf-fdbserver`
+  - Role - tlog/storage/coordinator, identifies the role of the node on which the snapshot is being invoked
+
 * Install ``snapshot create binary`` on the FoundationDB instance in a secure path that can be invoked by the ``fdbserver``
-* Set a new config parameter ``whitelist_binpath`` for ``fdbserver`` section, whose value is the absolute ``snapshot create binary`` path. Running any ``snapshot`` command will validate that it is in the ``whitelist_binpath``. This is a security mechanism to stop running a random/unsecure command on the cluster by a client using ``snapshot`` command
-* ``snapshot create program`` should capture any additional data needed to restore the cluster, additional data could be stored as tags in cloud environments or it could be stored in an additional file/directory in the data repository and then snapshotted. The section below describes a recommended specification of the list of things that can be gathered by the binary:
+* Set a new config parameter ``whitelist_binpath`` in :ref:`foundationdb-conf-fdbserver`, whose value is the ``snapshot create binary`` absolute path. Running any ``snapshot`` command will validate that it is in the ``whitelist_binpath``. This is a security mechanism to stop running a random/insecure command on the cluster by a client using the ``snapshot`` command. Example configuration entry will look like::
 
-``snapshot`` is a synchronous command and when it returns successfully backup is considered complete. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For eg: if disk snapshot takes 1 second, time to finish backup should be less than < 10 seconds, this is a general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can retry by issuing another ``snapshot`` command.
+    whitelist_binpath = "/bin/snap_create.sh"
+
+* ``snapshot create program`` should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the ``datadir`` and then snapshotted. The section :ref:`disk-snapshot-backup-specification` describes the recommended specification of the list of things that can be gathered by the binary.
+* Program should return a non-zero status for any failures and zero for success
+* If the ``snapshot create binary`` process takes longer than 5 minutes to return a status then it will be killed and ``snapshot`` command will fail. Timeout of 5 minutes is configurable and can be set with ``SNAP_CREATE_MAX_TIMEOUT`` config parameter in :ref:`foundationdb-conf-fdbserver`. Since the default value is large enough, there should not be a need to modify this configuration.
+
+``snapshot`` is a synchronous command and when it returns successfully backup is considered complete and restorable. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For example, if disk snapshot takes 1 second, time to finish backup should be less than < 10 seconds, this is general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can retry by issuing another ``snapshot`` command.
+
+Example ``snapshot`` command usage::
+
+    fdbcli> snapshot /bin/snap_create.sh --key1 value1 --key2 value2
+    Snapshot command succeeded with UID c50263df28be44ebb596f5c2a849adbb
+
+will invoke the ``snapshot create binary`` on all the roles with the following arguments::
+
+    --key1 value1 --key2 value2 --path /mnt/circus/data/4502 --version 6.2.6 --role tlog --uid c50263df28be44ebb596f5c2a849adbb
 
 
-Backup Specification
---------------------
+.. _disk-snapshot-backup-specification:
+
+Disk snapshot backup specification
+----------------------------------
+
+Details the list of artifacts the ``snapshot create binary`` should gather to aid the restore.
 
 ================================  ========================================================   ========================================================
 Field Name                        Description                                                Source of information
@@ -82,15 +104,15 @@ Field Name                        Description                                   
 ``Name for the snapshot file``    Recommended name for the disk snapshot                     cluster-name:ip-addr:port:UID
 ================================  ========================================================   ========================================================
 
-``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for eg: Cluster Controller or Master or MasterProxy). Since these processes are completely stateless, there is no need for any state information from them. But, if there are specialized configuration knobs used for one of these stateless processes then they need to be backed up and restored externally.
+``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. If there are specialized configuration knobs used for one of these stateless processes then they need to be copied and restored externally.
 
 Management of disk snapshots
 ----------------------------
 
-Deleting unused disk snapshots or disk snapshots that are part of failed backups have to deleted by the operator externally.
+Unused disk snapshots or disk snapshots that are part of failed backups have to deleted by the operator externally.
 
-Restore Steps
-==============
+Disk snapshot restore steps
+===========================
 
 Restore is the process of building up the cluster from the snapshotted disk images. There is no option to specify a restore version because there is no support for continuous backup. Here is the list of steps for the restore process:
 
@@ -101,6 +123,150 @@ Restore is the process of building up the cluster from the snapshotted disk imag
   * Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images
 * Compute the new fdb.cluster file based on where the new coordinators disk stores are placed and push it to the all the instances in the new cluster
 * Start the FoundationDB service on all the instances
-* NOTE: if one process share two roles which has persistent data then they will have a shared disk and there will be two snapshots of the disk once for each role. In that case, snapshot disk image needs to be cleaned, If a snapshot image had files that belongs to other roles than they need to be deleted.
+* NOTE: Process can have multiple roles with persistent data which share the same ``datadir``. ``snapshot create binary`` will create multiple snapshots, one per role. In such case, snapshot disk images needs to go through additional processing before restore, if a snapshot image of a role has files that belongs to other roles then they need to be deleted.
 
 Cluster will start and get to healthy state indicating the completion of restore. Applications can optionally do any additional validations and use the cluster.
+
+Example backup and restore steps 
+================================
+
+Here are the backup and restore steps on a over simplified setup with a single node cluster and ``cp`` command to create snapshots and restore. This is purely for illustration, real world backup and restore scripts needs to follow all the steps detailed above.
+
+
+* Create a single node cluster by following the steps here :ref:`building-cluster`
+
+* Check the status of the cluster and write few sample keys::
+  
+    fdbcli> status
+
+    Using cluster file `/mnt/source/fdb.cluster'.
+
+    Configuration:
+      Redundancy mode        - single
+      Storage engine         - ssd-2
+      Coordinators           - 1
+
+    Cluster:
+      FoundationDB processes - 1
+      Zones                  - 1
+      Machines               - 1
+      Memory availability    - 30.6 GB per process on machine with least available
+      Fault Tolerance        - 0 machines
+      Server time            - 12/11/19 04:02:57
+
+    Data:
+      Replication health     - Healthy
+      Moving data            - 0.000 GB
+      Sum of key-value sizes - 0 MB
+      Disk space used        - 210 MB
+
+    Operating space:
+      Storage server         - 72.6 GB free on most full server
+      Log server             - 72.6 GB free on most full server
+
+    Workload:
+      Read rate              - 9 Hz
+      Write rate             - 0 Hz
+      Transactions started   - 5 Hz
+      Transactions committed - 0 Hz
+      Conflict rate          - 0 Hz
+
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
+
+    Client time: 12/11/19 04:02:57
+
+    fdbcli> writemode on
+    fdbcli> set key1 value1
+    Committed (76339236)
+    fdbcli> set key2 value2
+    Committed (80235963)
+
+* Write a ``snap create binary`` which copies the ``datadir`` to a user passed destination directory location::
+
+   #!/bin/sh
+   UID=""
+   PATH=""
+   ROLE=""
+   DESTDIR=""
+   PARSE_ARGS $@ // not detailed here
+
+   mkdir -p $DESTDIR/$UID/$ROLE || exit "snapshot failed for $@"
+   cp $PATH/ $DESTDIR/$UID/$ROLE/* || exit "snapshot failed for $@"
+
+* Install the ``snap create binary`` as ``/bin/snap_create.sh``, add the entry for ``whitelist_binpath`` in :ref:`foundationdb-conf-fdbserver`, stop and start the foundationdb service for the configuration change to take effect
+* Issue ``snapshot`` command as follows::
+
+    fdbcli> snapshot /bin/snap_create.sh --destdir /mnt/backup
+    Snapshot command succeeded with UID 69a5e0576621892f85f55b4ebfeb4312
+
+* ``snapshot create binary`` gets invoked once for each role namely tlog, storage and coordinator in this process with the following arguments::
+
+    --path /mnt/source/datadir --version 6.2.6 --role storage --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
+    --path /mnt/source/datadir --version 6.2.6 --role tlog --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
+    --path /mnt/source/datadir --version 6.2.6 --role coord --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
+
+* Snapshot is successful and all the snapshot images are in ``destdir`` specified by the user in the command line argument to ``snaphsot`` command, here is a sample directory listing of one of the coordinator backup directory::
+
+    $ ls /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/
+    coordination-0.fdq                                     log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite-wal  processId
+    coordination-1.fdq                                     logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-0.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite
+    log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite  logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-1.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite-wal
+
+* To restore the coordinator backup image, setup a restore ``datadir`` and copy all the coordinator related files to it::
+
+    $ cp /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/coord* /mnt/restore/datadir/
+
+* Repeat the above steps to restore storage and tlog backup images
+* Prepare the ``fdb.cluster`` for the restore with new coordinator IP address, example::
+
+    znC1NC5b:iYHJLq7z@10.2.80.40:4500 -> znC1NC5b:iYHJLq7z@10.2.80.41:4500
+* ``foundationdb.conf`` can be exact same copy as the source cluster for this example
+* Once all the backup images are restored, start a new fdbserver with the ``datadir`` pointing to ``/mnt/restore/datadir`` and the new ``fdb.cluster``.
+* Verify the cluster is healthy and check the sample keys that we added are still there::
+
+    fdb> status
+
+    Using cluster file `/mnt/restore/fdb.cluster'.
+
+    Configuration:
+      Redundancy mode        - single
+      Storage engine         - ssd-2
+      Coordinators           - 1
+
+    Cluster:
+      FoundationDB processes - 1
+      Zones                  - 1
+      Machines               - 1
+      Memory availability    - 30.5 GB per process on machine with least available
+      Fault Tolerance        - 0 machines
+      Server time            - 12/11/19 09:04:53
+
+    Data:
+      Replication health     - Healthy
+      Moving data            - 0.000 GB
+      Sum of key-value sizes - 0 MB
+      Disk space used        - 210 MB
+
+    Operating space:
+      Storage server         - 72.5 GB free on most full server
+      Log server             - 72.5 GB free on most full server
+
+    Workload:
+      Read rate              - 7 Hz
+      Write rate             - 0 Hz
+      Transactions started   - 3 Hz
+      Transactions committed - 0 Hz
+      Conflict rate          - 0 Hz
+
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
+
+    Client time: 12/11/19 09:04:53
+
+    fdb> get key1
+    `key1' is `value1'
+    fdb> get key2
+    `key2' is `value2'
