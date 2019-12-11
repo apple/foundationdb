@@ -30,11 +30,11 @@ if(NOT OPEN_FOR_IDE)
     LINK_DIR bin
     FILE_NAME fdbbackup
     LINK_NAME fdbdr)
-  install_package_symlink(
+  symlink_files(
     LOCATION packages/bin
     SOURCE fdbbackup
     TARGETS fdbdr dr_agent backup_agent fdbrestore)
-  install_package_symlink(
+  symlink_files(
     LOCATION bin
     SOURCE fdbbackup
     TARGETS fdbdr dr_agent backup_agent fdbrestore)
