@@ -170,5 +170,5 @@ Note: You may be able to speed up the data population by increasing the number o
 
 Run
 ---
-Run a mixed workload with the total of 8 threads for 60 seconds, keeping the throughput limitted at 1000 TPS.
+Run a mixed workload with a total of 8 threads for 60 seconds, keeping the throughput limited to 1000 TPS.
 ``mako --cluster /etc/foundationdb/fdb.cluster --mode run --rows 1000000 --procs 2 --threads 8 --transaction "g8ui" --seconds 60 --tps 1000``
