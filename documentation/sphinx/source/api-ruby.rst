@@ -823,7 +823,7 @@ Transaction options
 
     |option-set-transaction-logging-max-field-length-blurb|
 
-.. method:: Transaction.options.set_debug_transaction_identifier(identifier) -> nil
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string) -> nil
 
     |option-set-debug-transaction-identifier|
 

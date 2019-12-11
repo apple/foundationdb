@@ -443,7 +443,7 @@
 
 ..  |option-set-debug-transaction-identifier| replace::
 
-    Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
+    Sets a client provided string identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
 
 ..  |option-set-log-transaction| replace::
 
