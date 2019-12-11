@@ -34,7 +34,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self);
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx);
@@ -54,7 +54,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
-				when(RestoreSendMutationVectorVersionedRequest req =
+				when(RestoreSendVersionedMutationsRequest req =
 				         waitNext(applierInterf.sendMutationVector.getFuture())) {
 					requestTypeStr = "sendMutationVector";
 					actors.add(handleSendMutationVectorRequest(req, self));
@@ -92,7 +92,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // No race condition as long as we do not wait or yield when operate the shared data.
 // Multiple such actors can run on different fileIDs, because mutations in different files belong to different versions;
 // Only one actor can process mutations from the same file
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
 	// Assume: self->processedFileState[req.fileIndex] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
