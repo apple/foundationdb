@@ -70,6 +70,8 @@ add_fdb_test(TEST_FILES RedwoodCorrectness.txt IGNORE)
 add_fdb_test(TEST_FILES RedwoodPerfTests.txt IGNORE)
 if (NOT USE_UBSAN) # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
   add_fdb_test(TEST_FILES SimpleExternalTest.txt)
+else()
+  add_fdb_test(TEST_FILES SimpleExternalTest.txt IGNORE)
 endif()
 add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
 add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
