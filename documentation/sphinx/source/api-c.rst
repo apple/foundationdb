@@ -277,6 +277,8 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    Causes the :type:`FDBCallback` function to be invoked as ``callback(future, callback_parameter)`` when the given Future is ready. If the Future is already ready, the call may occur in the current thread before this function returns (but this behavior is not guaranteed). Alternatively, the call may be delayed indefinitely and take place on the thread on which :func:`fdb_run_network()` was invoked, and the callback is responsible for any necessary thread synchronization (and/or for posting work back to your application event loop, thread pool, etc. if your application's architecture calls for that).
 
+   .. note:: This function guarantees the callback will be executed **at most once**.
+
    .. warning:: Never call :func:`fdb_future_block_until_ready()` from a callback passed to this function. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
 
 .. type:: FDBCallback
