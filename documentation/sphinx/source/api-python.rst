@@ -881,6 +881,14 @@ Transaction options
 
     |option-set-transaction-logging-max-field-length-blurb|
 
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string)
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction()
+
+    |option-set-log-transaction|
+
 .. _api-python-future:
 
 Future objects
