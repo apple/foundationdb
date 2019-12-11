@@ -162,7 +162,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		for (auto& versionBatch : *versionBatches) {
 			Version prevVersion = 0;
 			for (auto& logFile : versionBatch.second.logFiles) {
-				TraceEvent("FastRestore_Debug")
+				TraceEvent("FastRestore")
 				    .detail("PrevVersion", prevVersion)
 				    .detail("LogFile", logFile.toString());
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
@@ -174,7 +174,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			prevVersion = 0;
 			for (auto& rangeFile : versionBatch.second.rangeFiles) {
-				TraceEvent("FastRestore_Debug")
+				TraceEvent("FastRestore")
 				    .detail("PrevVersion", prevVersion)
 				    .detail("RangeFile", rangeFile.toString());
 				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
@@ -186,6 +186,22 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				fIndexSet.insert(rangeFile.fileIndex);
 			}
 		}
+	}
+
+	// Return true if pass the sanity check
+	bool sanityCheckApplierKeyRange() {
+		bool ret = true;
+		// An applier should only appear once in rangeToApplier
+		std::map<UID, Key> applierToRange;
+		 for (auto& applier : rangeToApplier) {
+			 if (applierToRange.find(applier.second) == applierToRange.end()) {
+				 applierToRange[applier.second] = applier.first;
+			 } else {
+				 TraceEvent(SevError, "FastRestore").detail("SanityCheckApplierKeyRange", applierToRange.size()).detail("ApplierID", applier.second).detail("Key1",  applierToRange[applier.second]).detail("Key2", applier.first);
+				 ret = false;
+			 }
+		 }
+		 return ret;
 	}
 
 	void logApplierKeyRange() {

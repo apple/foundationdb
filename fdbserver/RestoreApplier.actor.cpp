@@ -108,13 +108,13 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	if (curFilePos.get() == req.prevVersion) {
 		Version commitVersion = req.version;
-		VectorRef<MutationRef> mutations(req.mutations);
+		MutationsVec mutations(req.mutations);
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
-			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+			self->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 		}
 		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			TraceEvent(SevDebug, "FastRestore")
+			TraceEvent(SevFRMutationInfo, "FastRestore")
 			    .detail("ApplierNode", self->id())
 			    .detail("FileUID", req.fileIndex)
 			    .detail("Version", commitVersion)
@@ -338,7 +338,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					TraceEvent(SevDebug, "FastRestore_Debug")
+					TraceEvent(SevFRMutationInfo, "FastRestore")
 					    .detail("ApplierApplyToDB", self->describeNode())
 					    .detail("Version", progress.curItInCurTxn->first)
 					    .detail("Index", progress.curIndexInCurTxn)

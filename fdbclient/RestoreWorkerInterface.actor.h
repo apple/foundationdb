@@ -397,8 +397,8 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(int fileIndex, Version prevVersion, Version version,
-	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
+	explicit RestoreSendVersionedMutationsRequest(int fileIndex, Version prevVersion, Version version, bool isRangeFile,
+	                                              MutationsVec mutations)
 	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
 	    mutations(mutations) {}
 
@@ -453,17 +453,12 @@ struct RestoreRequest {
 	bool lockDB;
 	UID randomUid;
 
-	int testData;
 	std::vector<int> restoreRequests;
 	// Key restoreTag;
 
 	ReplyPromise<struct RestoreCommonReply> reply;
 
-	RestoreRequest() : testData(0) {}
-	explicit RestoreRequest(int testData) : testData(testData) {}
-	explicit RestoreRequest(int testData, std::vector<int>& restoreRequests)
-	  : testData(testData), restoreRequests(restoreRequests) {}
-
+	RestoreRequest() = default;
 	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, bool waitForComplete,
 	                        Version targetVersion, bool verbose, const KeyRange& range, const Key& addPrefix,
 	                        const Key& removePrefix, bool lockDB, const UID& randomUid)
@@ -474,7 +469,7 @@ struct RestoreRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix,
-		           lockDB, randomUid, testData, restoreRequests, reply);
+		           lockDB, randomUid, restoreRequests, reply);
 	}
 
 	std::string toString() const {
