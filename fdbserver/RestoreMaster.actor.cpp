@@ -278,15 +278,11 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 
 		param.url = request.url;
 		param.isRangeFile = file.isRange;
-		param.version = file.version;
 		param.filename = file.fileName;
 		param.offset = 0;
 		param.length = file.fileSize; // We load file by file, instead of data block by data block for now
 		param.blockSize = file.blockSize;
 		param.restoreRange = request.range;
-		param.addPrefix = request.addPrefix;
-		param.removePrefix = request.removePrefix;
-		param.mutationLogPrefix = mutationLogPrefix;
 
 		prevVersion = param.endVersion;
 

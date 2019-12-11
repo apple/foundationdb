@@ -48,7 +48,7 @@ struct RestoreSysInfoRequest;
 struct RestoreLoadFileRequest;
 struct RestoreVersionBatchRequest;
 struct RestoreSendMutationsToAppliersRequest;
-struct RestoreSendMutationVectorVersionedRequest;
+struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 
@@ -162,7 +162,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	constexpr static FileIdentifier file_identifier = 54253048;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
-	RequestStream<RestoreSendMutationVectorVersionedRequest> sendMutationVector;
+	RequestStream<RestoreSendVersionedMutationsRequest> sendMutationVector;
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
@@ -204,17 +204,13 @@ struct LoadingParam {
 	bool isRangeFile;
 	Key url;
 	Version prevVersion;
-	Version endVersion;
+	Version endVersion; // range file's mutations are all at the endVersion
 	int fileIndex;
-	Version version;
 	std::string filename;
 	int64_t offset;
 	int64_t length;
 	int64_t blockSize;
 	KeyRange restoreRange;
-	Key addPrefix;
-	Key removePrefix;
-	Key mutationLogPrefix;
 
 	LoadingParam() = default;
 
@@ -227,16 +223,16 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, version, filename, offset, length,
-		           blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, filename, offset, length, blockSize,
+		           restoreRange);
 	}
 
 	std::string toString() {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " fileIndex:" << fileIndex << " endVersion:" << endVersion << " version:" << version
-		    << " filename:" << filename << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString();
+		    << " endVersion:" << endVersion << " fileIndex:" << fileIndex << " filename:" << filename
+		    << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
+		    << " restoreRange:" << restoreRange.toString();
 		return str.str();
 	}
 };
@@ -390,7 +386,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	}
 };
 
-struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
+struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
@@ -400,9 +396,9 @@ struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
 
 	ReplyPromise<RestoreCommonReply> reply;
 
-	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
-	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
+	RestoreSendVersionedMutationsRequest() = default;
+	explicit RestoreSendVersionedMutationsRequest(int fileIndex, Version prevVersion, Version version, bool isRangeFile,
+	                                              VectorRef<MutationRef> mutations)
 	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
 	    mutations(mutations) {}
 
