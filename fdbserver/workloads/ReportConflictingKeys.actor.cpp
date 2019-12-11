@@ -31,8 +31,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	double testDuration, transactionsPerSecond, addReadConflictRangeProb, addWriteConflictRangeProb;
 	Key keyPrefix;
 
-	int nodeCount, actorCount, keyBytes, valueBytes, readConflictRangeCount, writeConflictRangeCount;
+	int nodeCountPerPrefix, actorCount, keyBytes, valueBytes, readConflictRangeCount, writeConflictRangeCount;
 	bool reportConflictingKeys, skipCorrectnessCheck;
+	uint64_t keyPrefixBytes, prefixCount;
 
 	PerfIntCounter invalidReports, commits, conflicts, retries, xacts;
 
@@ -42,12 +43,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
 		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(
 		    getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("ReportConflictingKeysWorkload"))
 		        .toString());
 		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
-		ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
+		
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
 		// modeled by geometric distribution: (1 - prob) / prob = mean
@@ -56,6 +56,16 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// If true, store key ranges conflicting with other txs
 		reportConflictingKeys = getOption(options, LiteralStringRef("reportConflictingKeys"), false);
 		skipCorrectnessCheck = getOption(options, LiteralStringRef("skipCorrectnessCheck"), false);
+		// used for generating keyPrefix
+		keyPrefixBytes = getOption(options, LiteralStringRef("keyPrefixBytes"), 0);
+		if (keyPrefixBytes) {
+			prefixCount = 255*std::round(std::exp2(8*(keyPrefixBytes-1)));
+			ASSERT(keyPrefixBytes + 16 <= keyBytes);
+		}
+		else {
+			ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
+		}
+		nodeCountPerPrefix = getOption(options, LiteralStringRef("nodeCountPerPrefix"), 100);
 	}
 
 	std::string description() override { return "ReportConflictingKeysWorkload"; }
@@ -92,34 +102,51 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	// Copied from tester.actor.cpp, added parameter to determine the key's length
-	Key keyForIndex(int n) {
-		double p = (double)n / nodeCount;
-		int paddingLen = keyBytes - 16 - keyPrefix.size();
+	Key keyForIndex(int prefixIdx, int n) {
+		double p = (double)n / nodeCountPerPrefix;
+		int paddingLen = keyBytes - 16 - keyPrefixBytes;
 		// left padding by zero
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(keyPrefix);
+		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix( prefixIdx >= 0 ? keyPrefixForIndex( prefixIdx) : keyPrefix);
+	}
+
+	Key keyPrefixForIndex(uint64_t n) {
+		Key prefix = makeString(keyPrefixBytes);
+		uint8_t * head = mutateString(prefix);
+		memset(head, 0, keyPrefixBytes);
+		int offset = keyPrefixBytes - 1;
+		while (n) {
+			*(head + offset) = static_cast<uint8_t>(n % 256);
+			n /= 256;
+			offset -= 1;
+		}
+		return prefix;
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>& readConflictRanges) {
-		int startIdx, endIdx;
+		int startIdx, endIdx, startPrefixIdx, endPrefixIdx;
 		Key startKey, endKey;
 		while (deterministicRandom()->random01() < addReadConflictRangeProb) {
-			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount);
-			startKey = keyForIndex(startIdx);
-			endKey = keyForIndex(endIdx);
+			startPrefixIdx = keyPrefixBytes ? deterministicRandom()->randomInt(0, prefixCount) : -1;
+			endPrefixIdx = keyPrefixBytes ? deterministicRandom()->randomInt(startPrefixIdx, prefixCount) : -1;
+			startIdx = deterministicRandom()->randomInt(0, nodeCountPerPrefix);
+			endIdx = deterministicRandom()->randomInt(startPrefixIdx < endPrefixIdx ? 0 : startIdx, nodeCountPerPrefix);
+			startKey = keyForIndex(startPrefixIdx, startIdx);
+			endKey = keyForIndex(endPrefixIdx, endIdx);
 			tr->addReadConflictRange(KeyRangeRef(startKey, endKey));
 			readConflictRanges.push_back(KeyRangeRef(startKey, endKey));
 		}
 	}
 
 	void addRandomWriteConflictRange(ReadYourWritesTransaction* tr) {
-		int startIdx, endIdx;
+		int startIdx, endIdx, startPrefixIdx, endPrefixIdx;
 		Key startKey, endKey;
 		while (deterministicRandom()->random01() < addWriteConflictRangeProb) {
-			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount);
-			startKey = keyForIndex(startIdx);
-			endKey = keyForIndex(endIdx);
+			startPrefixIdx = keyPrefixBytes ? deterministicRandom()->randomInt(0, prefixCount) : -1;
+			endPrefixIdx = keyPrefixBytes ? deterministicRandom()->randomInt(startPrefixIdx, prefixCount) : -1;
+			startIdx = deterministicRandom()->randomInt(0, nodeCountPerPrefix);
+			endIdx = deterministicRandom()->randomInt(startPrefixIdx < endPrefixIdx ? 0 : startIdx, nodeCountPerPrefix);
+			startKey = keyForIndex(startPrefixIdx, startIdx);
+			endKey = keyForIndex(endPrefixIdx, endIdx);
 			tr->addWriteConflictRange(KeyRangeRef(startKey, endKey));
 		}
 	}
